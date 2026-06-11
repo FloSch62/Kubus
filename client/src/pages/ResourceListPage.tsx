@@ -8,11 +8,11 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { useParams, useSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubedeck/shared';
-import { useApiResourcesForContexts, useCreateResource, useDryRunResource, useFilteredList, useResourceMetrics, type ClusterRow } from '../api/queries.js';
+import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDryRunResource, useFilteredList, useResourceMetrics, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
-import { buildColumns, makeMetricsLookup } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup } from '../components/columns.js';
 import type { ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { useDetailStore } from '../state/detail.js';
 import { RowActions } from '../components/RowActions.js';
@@ -96,9 +96,22 @@ export function ResourceListPage() {
     setSearchParams(next);
   };
 
+  // CRD printer columns: taken from the first selected cluster that serves
+  // this GVR — multi-cluster CRD definition drift is not reconciled.
+  const isCustomKind = !!kindInfo?.custom;
+  const crdCtx = useMemo(
+    () => selected.find((c) => (apiResources?.byContext[c] ?? []).some((r) => r.group === group && r.version === version && r.plural === plural)),
+    [selected, apiResources, group, version, plural],
+  );
+  const { data: printerCols } = useCrdColumns(crdCtx, group, version, plural, isCustomKind);
+
   const columns = useMemo(() => {
     const ids = columnsForKind(kind, namespaced);
     const cols = buildColumns(ids, { multiCluster: selected.length > 1, metrics: makeMetricsLookup(kind, podMetrics) });
+    if (isCustomKind && printerCols?.length) {
+      const ageIdx = cols.findIndex((c) => c.field === 'age');
+      cols.splice(ageIdx === -1 ? cols.length : ageIdx, 0, ...buildCrdColumns(printerCols));
+    }
     cols.push({
       field: '_actions',
       headerName: '',
@@ -108,7 +121,8 @@ export function ResourceListPage() {
       renderCell: (p) => <RowActions target={{ ctx: p.row.ctx, group, version, plural, kind, obj: p.row.obj }} />,
     });
     return cols;
-  }, [kind, namespaced, selected.length, podMetrics, group, version, plural]);
+  }, [kind, namespaced, selected.length, podMetrics, group, version, plural, isCustomKind, printerCols]);
+  const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
 
   const supportsGvr = (r: ResourceKindInfo) => r.group === group && r.version === version && r.plural === plural;
   const discoveryMissing = useMemo(() => {
@@ -208,6 +222,7 @@ export function ResourceListPage() {
         }}
         checkboxSelection={kind === 'Pod'}
         onSelectionChange={kind === 'Pod' ? setSelectedRows : undefined}
+        hiddenFields={hiddenFields}
         toolbar={
           <>
             <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>

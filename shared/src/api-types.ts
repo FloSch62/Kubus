@@ -212,6 +212,72 @@ export interface TriggerCronJobRequest {
   name: string;
 }
 
+export interface RerunJobRequest {
+  namespace: string;
+  name: string;
+}
+
+export interface RolloutUndoRequest {
+  kind: 'Deployment' | 'StatefulSet';
+  namespace: string;
+  name: string;
+  /** Omitted: roll back to the latest non-current revision. */
+  toRevision?: number;
+}
+
+export interface RolloutPauseRequest {
+  namespace: string;
+  name: string;
+  paused: boolean;
+}
+
+/** One entry of a workload's rollout history (ReplicaSet / ControllerRevision). */
+export interface RolloutRevision {
+  revision: number;
+  /** Name of the backing ReplicaSet / ControllerRevision. */
+  name: string;
+  createdAt?: string;
+  images: string[];
+  changeCause?: string;
+  current: boolean;
+  replicas?: number;
+}
+
+export interface DebugPodRequest {
+  namespace: string;
+  pod: string;
+  /** Debug container image; defaults to busybox. */
+  image?: string;
+  /** Container whose process namespace the debug container targets. */
+  target?: string;
+}
+
+export interface DebugPodResponse {
+  containerName: string;
+}
+
+export interface StopDebugRequest {
+  namespace: string;
+  pod: string;
+  container: string;
+}
+
+export interface HelmRollbackResult {
+  newRevision: number;
+  applied: string[];
+  pruned: string[];
+  failed: Array<{ resource: string; error: string }>;
+}
+
+/** A CRD additionalPrinterColumns entry (apiextensions.k8s.io/v1). */
+export interface PrinterColumn {
+  name: string;
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'date';
+  jsonPath: string;
+  priority?: number;
+  description?: string;
+}
+
 // ---- Detail views ----
 
 export interface PodEnvVar {

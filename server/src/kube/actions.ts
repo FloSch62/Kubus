@@ -125,6 +125,45 @@ export async function triggerCronJob(handle: ClusterHandle, namespace: string, n
   return { jobName };
 }
 
+/**
+ * Clone a (typically finished) Job and submit it under a new name, stripping
+ * the runtime fields the Job controller stamps onto it. Jobs with
+ * spec.manualSelector keep their selector and labels — the user owns those.
+ */
+export async function rerunJob(handle: ClusterHandle, namespace: string, name: string): Promise<{ jobName: string }> {
+  const src = await handle.batch.readNamespacedJob({ name, namespace });
+  if (!src.spec) throw new HttpProblem(422, 'job has no spec');
+  const jobName = `${name}-rerun-${Math.floor(Date.now() / 1000)}`.slice(0, 63);
+  const spec = JSON.parse(JSON.stringify(src.spec)) as typeof src.spec;
+  const labels = { ...(src.metadata?.labels ?? {}) };
+  const annotations = { ...(src.metadata?.annotations ?? {}) };
+  delete annotations['kubectl.kubernetes.io/last-applied-configuration'];
+  delete annotations['batch.kubernetes.io/job-tracking'];
+  if (!spec.manualSelector) {
+    delete spec.selector;
+    const controllerLabels = ['controller-uid', 'batch.kubernetes.io/controller-uid', 'job-name', 'batch.kubernetes.io/job-name'];
+    for (const key of controllerLabels) {
+      delete labels[key];
+      if (spec.template.metadata?.labels) delete spec.template.metadata.labels[key];
+    }
+  }
+  await handle.batch.createNamespacedJob({
+    namespace,
+    body: {
+      apiVersion: 'batch/v1',
+      kind: 'Job',
+      metadata: {
+        name: jobName,
+        namespace,
+        labels: Object.keys(labels).length ? labels : undefined,
+        annotations: { ...annotations, 'kubedeck.io/rerun-of': name },
+      },
+      spec,
+    },
+  });
+  return { jobName };
+}
+
 export interface DrainProgress {
   evicted: number;
   total: number;

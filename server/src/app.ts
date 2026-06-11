@@ -16,9 +16,11 @@ import { registerHelmRoutes } from './routes/helm.js';
 import { registerPortForwardRoutes } from './routes/portforward.js';
 import { registerGraphRoutes } from './routes/graph.js';
 import { registerSearchRoutes } from './routes/search.js';
+import { registerFileRoutes } from './routes/files.js';
 import { registerWatchSocket } from './ws/watch-socket.js';
 import { registerLogsSocket } from './ws/logs-socket.js';
 import { registerExecSocket } from './ws/exec-socket.js';
+import { registerNodeShellSocket } from './ws/node-shell-socket.js';
 
 export interface AppContext {
   config: ServerConfig;
@@ -82,9 +84,11 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerPortForwardRoutes(app, ctx);
   registerGraphRoutes(app, ctx);
   registerSearchRoutes(app, ctx);
+  registerFileRoutes(app, ctx);
   registerWatchSocket(app, ctx);
   registerLogsSocket(app, ctx);
   registerExecSocket(app, ctx);
+  registerNodeShellSocket(app, ctx);
 
   // Serve the built client in production (same-origin, no CORS needed).
   const clientDist = path.resolve(__dirname, '../../client/dist');

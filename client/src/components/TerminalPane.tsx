@@ -5,9 +5,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { ExecServerControl } from '@kubedeck/shared';
 import { wsUrl } from '../api/http.js';
-import type { TerminalTab } from '../state/dock.js';
+import type { NodeShellTab, TerminalTab } from '../state/dock.js';
 
-export function TerminalPane({ tab, active }: { tab: TerminalTab; active: boolean }) {
+export function TerminalPane({ tab, active }: { tab: TerminalTab | NodeShellTab; active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const theme = useTheme();
@@ -29,14 +29,16 @@ export function TerminalPane({ tab, active }: { tab: TerminalTab; active: boolea
     fit.fit();
 
     const ws = new WebSocket(
-      wsUrl('/ws/exec', {
-        ctx: tab.ctx,
-        namespace: tab.namespace,
-        pod: tab.pod,
-        container: tab.container,
-        cols: term.cols,
-        rows: term.rows,
-      }),
+      tab.kind === 'node-shell'
+        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows })
+        : wsUrl('/ws/exec', {
+            ctx: tab.ctx,
+            namespace: tab.namespace,
+            pod: tab.pod,
+            container: tab.container,
+            cols: term.cols,
+            rows: term.rows,
+          }),
     );
     ws.binaryType = 'arraybuffer';
 

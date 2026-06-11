@@ -50,6 +50,28 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return body as T;
 }
 
+/** Authenticated fetch returning the raw Response (for blob/stream downloads). */
+export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as ApiErrorBody;
+      if (body?.message) message = body.message;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res;
+}
+
 export function wsUrl(path: string, params: Record<string, string | number | boolean | undefined>): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = new URL(`${proto}//${window.location.host}${path}`);

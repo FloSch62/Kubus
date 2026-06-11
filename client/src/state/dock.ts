@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useDetailStore } from './detail.js';
 
 export interface TerminalTab {
   kind: 'terminal';
@@ -8,6 +9,14 @@ export interface TerminalTab {
   namespace: string;
   pod: string;
   container: string;
+}
+
+export interface NodeShellTab {
+  kind: 'node-shell';
+  id: string;
+  title: string;
+  ctx: string;
+  node: string;
 }
 
 export interface LogsTab {
@@ -24,7 +33,7 @@ export interface LogsTab {
   previous?: boolean;
 }
 
-export type DockTab = TerminalTab | LogsTab;
+export type DockTab = TerminalTab | NodeShellTab | LogsTab;
 
 interface DockState {
   tabs: DockTab[];
@@ -51,7 +60,12 @@ export const useDockStore = create<DockState>((set) => ({
   open: false,
   height: 320,
   maximized: false,
-  addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id, open: true })),
+  addTab: (tab) => {
+    // The detail drawer is modal and would cover the dock — close it so the
+    // freshly opened terminal/log tab is actually visible.
+    useDetailStore.getState().close();
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id, open: true }));
+  },
   closeTab: (id) =>
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);

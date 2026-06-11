@@ -124,6 +124,45 @@ export function podContainerNames(pod: KubeObject): string[] {
   return [...(spec?.containers ?? []), ...(spec?.initContainers ?? [])].map((c) => c.name);
 }
 
+export interface DebugContainerInfo {
+  name: string;
+  image?: string;
+  target?: string;
+  /** 'running' | 'waiting' | 'terminated' | 'unknown' */
+  state: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+/** Ephemeral (debug) containers of a pod, joined with their live status. */
+export function podDebugContainers(pod: KubeObject): DebugContainerInfo[] {
+  const spec = pod.spec as { ephemeralContainers?: Array<{ name: string; image?: string; targetContainerName?: string }> } | undefined;
+  const status = pod.status as {
+    ephemeralContainerStatuses?: Array<{
+      name: string;
+      state?: { running?: { startedAt?: string }; waiting?: { reason?: string }; terminated?: { startedAt?: string; finishedAt?: string; reason?: string } };
+    }>;
+  } | undefined;
+  const statusByName = new Map((status?.ephemeralContainerStatuses ?? []).map((s) => [s.name, s]));
+  return (spec?.ephemeralContainers ?? []).map((c) => {
+    const st = statusByName.get(c.name)?.state;
+    const state = st?.running ? 'running' : st?.terminated ? 'terminated' : st?.waiting ? (st.waiting.reason ?? 'waiting') : 'unknown';
+    return {
+      name: c.name,
+      image: c.image,
+      target: c.targetContainerName,
+      state,
+      startedAt: st?.running?.startedAt ?? st?.terminated?.startedAt,
+      finishedAt: st?.terminated?.finishedAt,
+    };
+  });
+}
+
+/** True when the pod has at least one live debug (ephemeral) container. */
+export function hasRunningDebugContainer(pod: KubeObject): boolean {
+  return podDebugContainers(pod).some((c) => c.state === 'running');
+}
+
 const QUANTITY_BINARY: Record<string, number> = { Ki: 2 ** 10, Mi: 2 ** 20, Gi: 2 ** 30, Ti: 2 ** 40, Pi: 2 ** 50, Ei: 2 ** 60 };
 const QUANTITY_DECIMAL: Record<string, number> = { n: 1e-9, u: 1e-6, m: 1e-3, '': 1, k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18 };
 

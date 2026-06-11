@@ -1,8 +1,10 @@
 import { nanoid } from 'nanoid';
 import type { FastifyInstance } from 'fastify';
-import { groupFromPath, type CordonRequest, type DrainRequest, type RolloutRestartRequest, type ScaleRequest, type SetImageRequest, type SuspendCronJobRequest, type TriggerCronJobRequest } from '@kubedeck/shared';
+import { groupFromPath, type CordonRequest, type DebugPodRequest, type DrainRequest, type RerunJobRequest, type RolloutPauseRequest, type RolloutRestartRequest, type RolloutUndoRequest, type ScaleRequest, type SetImageRequest, type StopDebugRequest, type SuspendCronJobRequest, type TriggerCronJobRequest } from '@kubedeck/shared';
 import type { AppContext } from '../app.js';
-import { drainNode, rolloutRestart, scaleResource, setCordon, setCronJobSuspend, setImage, triggerCronJob, type DrainProgress } from '../kube/actions.js';
+import { drainNode, rerunJob, rolloutRestart, scaleResource, setCordon, setCronJobSuspend, setImage, triggerCronJob, type DrainProgress } from '../kube/actions.js';
+import { addDebugContainer, stopDebugContainer } from '../kube/debug.js';
+import { rolloutUndo, setRolloutPaused } from '../kube/rollout.js';
 import { sendError } from '../util/errors.js';
 import { broadcastWatchMessage } from '../ws/watch-socket.js';
 
@@ -51,6 +53,38 @@ export function registerActionRoutes(app: FastifyInstance, ctx: AppContext): voi
     }
   });
 
+  app.post<{ Params: { ctx: string }; Body: RolloutUndoRequest }>('/api/contexts/:ctx/actions/rollout-undo', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      await rolloutUndo(handle, req.body.kind, req.body.namespace, req.body.name, req.body.toRevision);
+      return { ok: true };
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.post<{ Params: { ctx: string }; Body: RolloutPauseRequest }>('/api/contexts/:ctx/actions/rollout-pause', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      await setRolloutPaused(handle, req.body.namespace, req.body.name, req.body.paused);
+      return { ok: true };
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.post<{ Params: { ctx: string }; Body: RerunJobRequest }>('/api/contexts/:ctx/actions/rerun-job', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await rerunJob(handle, req.body.namespace, req.body.name);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
   app.post<{ Params: { ctx: string }; Body: SuspendCronJobRequest }>('/api/contexts/:ctx/actions/suspend-cronjob', async (req, reply) => {
     try {
       const handle = ctx.clusters.get(req.params.ctx);
@@ -66,6 +100,27 @@ export function registerActionRoutes(app: FastifyInstance, ctx: AppContext): voi
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       await setImage(handle, req.body);
+      return { ok: true };
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.post<{ Params: { ctx: string }; Body: DebugPodRequest }>('/api/contexts/:ctx/actions/debug-pod', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await addDebugContainer(handle, req.body);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.post<{ Params: { ctx: string }; Body: StopDebugRequest }>('/api/contexts/:ctx/actions/stop-debug', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      await stopDebugContainer(handle, req.body);
       return { ok: true };
     } catch (err) {
       sendError(reply, err);

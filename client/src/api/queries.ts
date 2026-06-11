@@ -29,6 +29,15 @@ import type {
   SetImageRequest,
   SuspendCronJobRequest,
   TriggerCronJobRequest,
+  RerunJobRequest,
+  RolloutUndoRequest,
+  RolloutPauseRequest,
+  RolloutRevision,
+  DebugPodRequest,
+  DebugPodResponse,
+  StopDebugRequest,
+  HelmRollbackResult,
+  PrinterColumn,
 } from '@kubedeck/shared';
 import { groupToPath } from '@kubedeck/shared';
 import { apiFetch } from './http.js';
@@ -436,6 +445,52 @@ export function useSuspendCronJob() {
 export function useSetImage() {
   return useMutation({ mutationFn: actionMutation<SetImageRequest>('set-image') });
 }
+export function useRerunJob() {
+  return useMutation({ mutationFn: actionMutation<RerunJobRequest, { jobName: string }>('rerun-job') });
+}
+export function useRolloutUndo() {
+  return useMutation({ mutationFn: actionMutation<RolloutUndoRequest>('rollout-undo') });
+}
+export function useRolloutPause() {
+  return useMutation({ mutationFn: actionMutation<RolloutPauseRequest>('rollout-pause') });
+}
+export function useDebugPod() {
+  return useMutation({ mutationFn: actionMutation<DebugPodRequest, DebugPodResponse>('debug-pod') });
+}
+export function useStopDebug() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: actionMutation<StopDebugRequest>('stop-debug'),
+    // The idle loop notices the stop file within ~1s — refetch after that so
+    // the pod object actually shows the container as terminated.
+    onSuccess: () => {
+      setTimeout(() => void qc.invalidateQueries({ queryKey: ['resource'] }), 1500);
+    },
+  });
+}
+
+export function useRolloutHistory(sel: { ctx: string; kind: string; namespace?: string; name: string } | undefined) {
+  return useQuery({
+    queryKey: ['rollout-history', sel],
+    queryFn: () => {
+      const params = new URLSearchParams({ kind: sel!.kind, namespace: sel!.namespace ?? '', name: sel!.name });
+      return apiFetch<RolloutRevision[]>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/detail/rollout-history?${params}`);
+    },
+    enabled: !!sel && (sel.kind === 'Deployment' || sel.kind === 'StatefulSet'),
+    refetchInterval: 15_000,
+  });
+}
+
+/** CRD additionalPrinterColumns for a custom resource kind (cached server-side too). */
+export function useCrdColumns(ctx: string | undefined, group: string, version: string, plural: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['crd-columns', ctx, group, version, plural],
+    queryFn: () =>
+      apiFetch<PrinterColumn[]>(`/api/contexts/${encodeURIComponent(ctx!)}/printer-columns/${groupToPath(group)}/${version}/${plural}`),
+    enabled: enabled && !!ctx,
+    staleTime: 5 * 60_000,
+  });
+}
 
 // ---- Metrics / overview ----
 
@@ -583,6 +638,23 @@ export function useHelmUninstall() {
     mutationFn: ({ ctx, ns, name }: { ctx: string; ns: string; name: string }) =>
       apiFetch<{ deleted: string[]; failed: Array<{ resource: string; error: string }> }>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-releases'] }),
+  });
+}
+
+export function useHelmRollback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx, ns, name, revision }: { ctx: string; ns: string; name: string; revision: number }) =>
+      apiFetch<HelmRollbackResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/rollback`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision }),
+      }),
+    onSuccess: (_r, { ctx, ns, name }) => {
+      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
+      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
+      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
+    },
   });
 }
 

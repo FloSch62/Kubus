@@ -5,6 +5,7 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  IconButton,
   ListItemIcon,
   ListItemText,
   Menu,
@@ -14,6 +15,8 @@ import {
 } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CircleIcon from '@mui/icons-material/Circle';
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
+import ShieldIcon from '@mui/icons-material/Shield';
 import { useConnectContext, useContexts } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 
@@ -30,6 +33,8 @@ export function ClusterSwitcher() {
   const selected = useClustersStore((s) => s.selected);
   const toggleContext = useClustersStore((s) => s.toggleContext);
   const setSelected = useClustersStore((s) => s.setSelected);
+  const contextSettings = useClustersStore((s) => s.contextSettings);
+  const setContextSetting = useClustersStore((s) => s.setContextSetting);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   // Reconnect persisted selections on startup; drop ones gone from kubeconfig.
@@ -56,39 +61,55 @@ export function ClusterSwitcher() {
     connect.mutate({ ctx: name, connect: !isSelected });
   };
 
-  const label =
-    selected.length === 0 ? 'Select clusters' : selected.length === 1 ? selected[0] : `${selected.length} clusters`;
+  const only = selected.length === 1 ? selected[0] : undefined;
+  const label = selected.length === 0 ? 'Select clusters' : (only ?? `${selected.length} clusters`);
+  const onlyProtected = only ? !!contextSettings[only]?.protected : false;
 
   return (
     <>
       <Button variant="outlined" color="inherit" endIcon={<KeyboardArrowDownIcon />} onClick={(e) => setAnchor(e.currentTarget)}>
         {selected.length > 0 && <CircleIcon color="success" sx={{ fontSize: 10, mr: 1 }} />}
         {label}
+        {onlyProtected && <ShieldIcon sx={{ fontSize: 14, ml: 0.75, opacity: 0.7 }} />}
       </Button>
-      <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} slotProps={{ paper: { sx: { minWidth: 320 } } }}>
-        {(contexts ?? []).map((c) => (
-          <MenuItem key={c.name} onClick={() => handleToggle(c.name)} dense>
-            <Checkbox checked={selected.includes(c.name)} size="small" sx={{ p: 0.5, mr: 1 }} />
-            <ListItemIcon sx={{ minWidth: 28 }}>
-              {connect.isPending && connect.variables?.ctx === c.name ? (
-                <CircularProgress size={12} />
-              ) : (
-                <Tooltip title={c.healthMessage ?? c.health}>
-                  <CircleIcon color={HEALTH_COLOR[c.health] ?? 'disabled'} sx={{ fontSize: 12 }} />
-                </Tooltip>
-              )}
-            </ListItemIcon>
-            <ListItemText
-              primary={c.name}
-              secondary={
-                <Typography component="span" variant="caption" color="text.secondary">
-                  {c.server ?? c.cluster}
-                  {c.kubernetesVersion ? ` · ${c.kubernetesVersion}` : ''}
-                </Typography>
-              }
-            />
-          </MenuItem>
-        ))}
+      <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} slotProps={{ paper: { sx: { minWidth: 340 } } }}>
+        {(contexts ?? []).map((c) => {
+          const isProtected = !!contextSettings[c.name]?.protected;
+          return (
+            <MenuItem key={c.name} onClick={() => handleToggle(c.name)} dense>
+              <Checkbox checked={selected.includes(c.name)} size="small" sx={{ p: 0.5, mr: 1 }} />
+              <ListItemIcon sx={{ minWidth: 28 }}>
+                {connect.isPending && connect.variables?.ctx === c.name ? (
+                  <CircularProgress size={12} />
+                ) : (
+                  <Tooltip title={c.healthMessage ?? c.health}>
+                    <CircleIcon color={HEALTH_COLOR[c.health] ?? 'disabled'} sx={{ fontSize: 12 }} />
+                  </Tooltip>
+                )}
+              </ListItemIcon>
+              <ListItemText
+                primary={c.name}
+                secondary={
+                  <Typography component="span" variant="caption" color="text.secondary">
+                    {c.server ?? c.cluster}
+                    {c.kubernetesVersion ? ` · ${c.kubernetesVersion}` : ''}
+                  </Typography>
+                }
+              />
+              <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setContextSetting(c.name, { protected: !isProtected });
+                  }}
+                >
+                  {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 16 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 16 }} />}
+                </IconButton>
+              </Tooltip>
+            </MenuItem>
+          );
+        })}
         {(contexts ?? []).length === 0 && (
           <Box sx={{ px: 2, py: 1.5, maxWidth: 320 }}>
             <Typography variant="body2" color="text.secondary">

@@ -27,19 +27,25 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import CableIcon from '@mui/icons-material/Cable';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import ReplayIcon from '@mui/icons-material/Replay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import LayersIcon from '@mui/icons-material/Layers';
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
 import type { KubeObject, LogTargetKind } from '@kubedeck/shared';
 import {
   resolveLogTargetPods,
   useCordon,
+  useDebugPod,
   useDeleteResource,
   useDrain,
+  useRerunJob,
   useResourceList,
+  useRolloutPause,
   useRolloutRestart,
   useScale,
   useSetImage,
@@ -49,7 +55,9 @@ import {
 } from '../api/queries.js';
 import { watchClient } from '../api/ws/watch-client.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
+import { useIsProtected } from '../state/clusters.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { FileCopyDialog } from './FileCopyDialog.js';
 import { podContainerNames } from '../kube-display.js';
 
 export interface RowActionTarget {
@@ -69,7 +77,7 @@ function isLogTargetKind(kind: string): kind is LogTargetKind {
 
 export function RowActions({ target }: { target: RowActionTarget }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | null>(null);
+  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'files' | null>(null);
   const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
 
@@ -77,12 +85,15 @@ export function RowActions({ target }: { target: RowActionTarget }) {
   const restart = useRolloutRestart();
   const cordon = useCordon();
   const trigger = useTriggerCronJob();
+  const rerun = useRerunJob();
+  const rolloutPause = useRolloutPause();
   const suspendCj = useSuspendCronJob();
   const addTab = useDockStore((s) => s.addTab);
 
   const { kind, obj, ctx } = target;
   const name = obj.metadata.name;
   const namespace = obj.metadata.namespace;
+  const isProtected = useIsProtected(ctx);
   const close = () => setAnchor(null);
 
   const ok = (text: string) => setToast({ severity: 'success', text });
@@ -94,10 +105,13 @@ export function RowActions({ target }: { target: RowActionTarget }) {
   const isPod = kind === 'Pod';
   const isNode = kind === 'Node';
   const isCronJob = kind === 'CronJob';
+  const isJob = kind === 'Job';
   const canForward = isPod || kind === 'Service';
   const canViewLogs = isLogTargetKind(kind);
   const unschedulable = isNode && !!(obj.spec as { unschedulable?: boolean })?.unschedulable;
   const cjSuspended = isCronJob && !!(obj.spec as { suspend?: boolean })?.suspend;
+  const isDeployment = kind === 'Deployment';
+  const rolloutPaused = isDeployment && !!(obj.spec as { paused?: boolean })?.paused;
 
   const openLogs = async () => {
     if (!isLogTargetKind(kind)) return;
@@ -170,6 +184,32 @@ export function RowActions({ target }: { target: RowActionTarget }) {
             <ListItemText>Shell</ListItemText>
           </MenuItem>
         )}
+        {isPod && (
+          <MenuItem
+            onClick={() => {
+              setDialog('files');
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <FolderOpenOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Files…</ListItemText>
+          </MenuItem>
+        )}
+        {isPod && (
+          <MenuItem
+            onClick={() => {
+              setDialog('debug');
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <BugReportOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Debug container…</ListItemText>
+          </MenuItem>
+        )}
         {canForward && (
           <MenuItem
             onClick={() => {
@@ -212,6 +252,20 @@ export function RowActions({ target }: { target: RowActionTarget }) {
             <ListItemText>Rollout restart</ListItemText>
           </MenuItem>
         )}
+        {isDeployment && (
+          <MenuItem
+            onClick={() => {
+              rolloutPause.mutate(
+                { ctx, body: { namespace: namespace ?? '', name, paused: !rolloutPaused } },
+                { onSuccess: () => ok(`${rolloutPaused ? 'Resumed' : 'Paused'} rollout of ${name}`), onError: fail },
+              );
+              close();
+            }}
+          >
+            <ListItemIcon>{rolloutPaused ? <PlayCircleOutlineIcon fontSize="small" /> : <PauseCircleOutlineIcon fontSize="small" />}</ListItemIcon>
+            <ListItemText>{rolloutPaused ? 'Resume rollout' : 'Pause rollout'}</ListItemText>
+          </MenuItem>
+        )}
         {isReplicaSet && (
           <MenuItem
             onClick={() => {
@@ -236,6 +290,19 @@ export function RowActions({ target }: { target: RowActionTarget }) {
               <LayersIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Set image…</ListItemText>
+          </MenuItem>
+        )}
+        {isJob && (
+          <MenuItem
+            onClick={() => {
+              rerun.mutate({ ctx, body: { namespace: namespace ?? '', name } }, { onSuccess: (r) => ok(`Created job ${r.jobName}`), onError: fail });
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <ReplayIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Re-run</ListItemText>
           </MenuItem>
         )}
         {isCronJob && (
@@ -284,6 +351,19 @@ export function RowActions({ target }: { target: RowActionTarget }) {
         {isNode && (
           <MenuItem
             onClick={() => {
+              setDialog('node-shell');
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <TerminalIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Node shell…</ListItemText>
+          </MenuItem>
+        )}
+        {isNode && (
+          <MenuItem
+            onClick={() => {
               setDialog('drain');
               close();
             }}
@@ -320,6 +400,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
         confirmLabel="Delete"
         danger
         busy={del.isPending}
+        confirmText={isProtected ? name : undefined}
         onClose={() => setDialog(null)}
         onConfirm={() =>
           del.mutate(
@@ -353,6 +434,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
         confirmLabel="Restart"
         danger
         busy={restart.isPending}
+        confirmText={isProtected ? name : undefined}
         onClose={() => setDialog(null)}
         onConfirm={() =>
           restart.mutate(
@@ -370,7 +452,27 @@ export function RowActions({ target }: { target: RowActionTarget }) {
           )
         }
       />
+      <ConfirmDialog
+        open={dialog === 'node-shell'}
+        title={`Node shell — ${name}`}
+        message={
+          <>
+            This starts a <b>privileged pod</b> on <b>{name}</b> (host PID/network/IPC) and opens a root shell on the node via nsenter.
+            The pod is deleted when the terminal closes.
+          </>
+        }
+        confirmLabel="Open shell"
+        danger
+        confirmText={isProtected ? name : undefined}
+        onClose={() => setDialog(null)}
+        onConfirm={() => {
+          setDialog(null);
+          addTab({ kind: 'node-shell', id: dockTabId(), title: `node: ${name}`, ctx, node: name });
+        }}
+      />
       {dialog === 'scale' && <ScaleDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
+      {dialog === 'debug' && <DebugDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
+      {dialog === 'files' && <FileCopyDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} />}
       {dialog === 'set-image' && <SetImageDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'forward' && <PortForwardDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'drain' && <DrainDialog target={target} onClose={() => setDialog(null)} />}
@@ -394,6 +496,11 @@ function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTa
   const scale = useScale();
   const current = (target.obj.spec as { replicas?: number })?.replicas ?? 0;
   const [replicas, setReplicas] = useState(current);
+  const isProtected = useIsProtected(target.ctx);
+  const [typed, setTyped] = useState('');
+  // Scaling a protected cluster's workload to zero is effectively an outage — require typed confirmation.
+  const needsConfirm = isProtected && replicas === 0 && current > 0;
+  const confirmBlocked = needsConfirm && typed !== target.obj.metadata.name;
   const { data: hpas } = useResourceList({
     ctx: target.ctx,
     group: 'autoscaling',
@@ -429,12 +536,20 @@ function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           onChange={(e) => setReplicas(Math.max(0, Number(e.target.value)))}
           slotProps={{ htmlInput: { min: 0 } }}
         />
+        {needsConfirm && (
+          <>
+            <Typography variant="body2" sx={{ mt: 2, mb: 1 }}>
+              This cluster is protected and you are scaling to <b>0</b>. Type <b>{target.obj.metadata.name}</b> to confirm.
+            </Typography>
+            <TextField fullWidth size="small" placeholder={target.obj.metadata.name} value={typed} onChange={(e) => setTyped(e.target.value)} />
+          </>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={scale.isPending}
+          disabled={scale.isPending || confirmBlocked}
           onClick={() =>
             scale.mutate(
               {
@@ -540,6 +655,65 @@ function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActio
   );
 }
 
+function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
+  const debug = useDebugPod();
+  const addTab = useDockStore((s) => s.addTab);
+  const containers = podContainerNames(target.obj);
+  const [image, setImage] = useState('busybox:1.36');
+  const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
+  const name = target.obj.metadata.name;
+  return (
+    <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Debug container — {name}</DialogTitle>
+      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+        <Typography variant="body2" color="text.secondary">
+          Attaches an ephemeral debug container to the running pod (like <code>kubectl debug</code>) and opens a shell into it. The
+          container stays in the pod spec until the pod is recreated.
+        </Typography>
+        <TextField autoFocus fullWidth label="Image" value={image} onChange={(e) => setImage(e.target.value)} />
+        <FormControl size="small" fullWidth>
+          <InputLabel id="debug-target">Target container (shared process namespace)</InputLabel>
+          <Select labelId="debug-target" label="Target container (shared process namespace)" value={targetContainer} onChange={(e) => setTargetContainer(e.target.value)}>
+            <MenuItem value="">None</MenuItem>
+            {containers.map((c) => (
+              <MenuItem key={c} value={c}>
+                {c}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={debug.isPending}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          disabled={debug.isPending || !image.trim()}
+          onClick={() =>
+            debug.mutate(
+              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined } },
+              {
+                onSuccess: ({ containerName }) => {
+                  onClose();
+                  addTab({ kind: 'terminal', id: dockTabId(), title: `debug: ${name}`, ctx: target.ctx, namespace: target.obj.metadata.namespace ?? '', pod: name, container: containerName });
+                  onDone(`Debug container ${containerName} attached`);
+                },
+                onError: (e) => {
+                  onClose();
+                  onError(e);
+                },
+              },
+            )
+          }
+        >
+          {debug.isPending ? 'Starting…' : 'Start'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function PortForwardDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
   const start = useStartPortForward();
   const isPod = target.kind === 'Pod';
@@ -596,6 +770,8 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
   const drain = useDrain();
   const [drainId, setDrainId] = useState<string>();
   const [progress, setProgress] = useState<{ evicted: number; total: number; current?: string; done?: boolean; error?: string }>();
+  const isProtected = useIsProtected(target.ctx);
+  const [typed, setTyped] = useState('');
 
   useEffect(() => {
     if (!drainId) return;
@@ -614,9 +790,19 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
       <DialogTitle>Drain node {name}</DialogTitle>
       <DialogContent>
         {!drainId && (
-          <Typography variant="body2">
-            This cordons <b>{name}</b> and evicts all non-DaemonSet pods. Pods managed by controllers will be rescheduled elsewhere.
-          </Typography>
+          <>
+            <Typography variant="body2">
+              This cordons <b>{name}</b> and evicts all non-DaemonSet pods. Pods managed by controllers will be rescheduled elsewhere.
+            </Typography>
+            {isProtected && (
+              <>
+                <Typography variant="body2" sx={{ mt: 2, mb: 1 }}>
+                  This cluster is protected. Type <b>{name}</b> to confirm.
+                </Typography>
+                <TextField autoFocus fullWidth size="small" placeholder={name} value={typed} onChange={(e) => setTyped(e.target.value)} />
+              </>
+            )}
+          </>
         )}
         {drainId && (
           <>
@@ -643,7 +829,7 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
           <Button
             variant="contained"
             color="error"
-            disabled={drain.isPending}
+            disabled={drain.isPending || (isProtected && typed !== name)}
             onClick={() =>
               drain.mutate(
                 { ctx: target.ctx, body: { node: name } },

@@ -1,12 +1,16 @@
 import { useState } from 'react';
-import { Box, Chip, CircularProgress, FormControlLabel, Link, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import { Alert, Box, Button, Chip, CircularProgress, FormControlLabel, Link, Snackbar, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import TerminalIcon from '@mui/icons-material/Terminal';
+import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { KubeObject, PodEnvVar } from '@kubedeck/shared';
 import { gvkForKind } from '@kubedeck/shared';
 import { GenericDetail, KeyValueChips } from './GenericDetail.js';
 import { StatusChip } from '../StatusChip.js';
-import { podSummary } from '../../kube-display.js';
-import { usePodEnv } from '../../api/queries.js';
+import { AgeCell } from '../AgeCell.js';
+import { podDebugContainers, podSummary } from '../../kube-display.js';
+import { usePodEnv, useStopDebug } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
+import { useDockStore, dockTabId } from '../../state/dock.js';
 
 interface ContainerSpec {
   name: string;
@@ -107,10 +111,95 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           </TableBody>
         </Table>
       </Box>
+      <DebugContainersSection obj={obj} ctx={ctx} />
       {namespace && <EnvSection ctx={ctx} namespace={namespace} pod={obj.metadata.name} onOpenRef={openRelated} />}
       <VolumesSection spec={spec} onOpenRef={openRelated} />
       <SchedulingSection spec={spec} />
       <GenericDetail obj={obj} ctx={ctx} />
+    </Box>
+  );
+}
+
+function DebugContainersSection({ obj, ctx }: { obj: KubeObject; ctx: string }) {
+  const debugContainers = podDebugContainers(obj);
+  const stop = useStopDebug();
+  const addTab = useDockStore((s) => s.addTab);
+  const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
+  if (!debugContainers.length) return null;
+  const namespace = obj.metadata.namespace ?? '';
+  const pod = obj.metadata.name;
+  return (
+    <Box sx={{ px: 2, pt: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Debug containers
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        Ephemeral containers cannot be removed from the pod; stopped ones stay listed until the pod is recreated.
+      </Typography>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Name</TableCell>
+            <TableCell>Image</TableCell>
+            <TableCell>Target</TableCell>
+            <TableCell>State</TableCell>
+            <TableCell>Started</TableCell>
+            <TableCell align="right" />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {debugContainers.map((c) => (
+            <TableRow key={c.name}>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{c.name}</TableCell>
+              <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.image}>
+                {c.image}
+              </TableCell>
+              <TableCell>{c.target ?? ''}</TableCell>
+              <TableCell>
+                <StatusChip status={c.state === 'running' ? 'Running' : c.state === 'terminated' ? 'Completed' : c.state} />
+              </TableCell>
+              <TableCell>{c.startedAt ? <AgeCell timestamp={c.startedAt} /> : ''}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                {c.state === 'running' && (
+                  <>
+                    <Button
+                      size="small"
+                      startIcon={<TerminalIcon />}
+                      onClick={() =>
+                        addTab({ kind: 'terminal', id: dockTabId(), title: `debug: ${pod}`, ctx, namespace, pod, container: c.name })
+                      }
+                    >
+                      Shell
+                    </Button>
+                    <Button
+                      size="small"
+                      color="warning"
+                      startIcon={<StopCircleOutlinedIcon />}
+                      disabled={stop.isPending}
+                      onClick={() =>
+                        stop.mutate(
+                          { ctx, body: { namespace, pod, container: c.name } },
+                          {
+                            onSuccess: () => setToast({ severity: 'success', text: `Stopping ${c.name} — it exits within a second` }),
+                            onError: (e) => setToast({ severity: 'error', text: e instanceof Error ? e.message : String(e) }),
+                          },
+                        )
+                      }
+                    >
+                      Stop
+                    </Button>
+                  </>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={toast?.severity} variant="filled" onClose={() => setToast(null)}>
+          {toast?.text}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

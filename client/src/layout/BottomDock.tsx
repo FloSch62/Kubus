@@ -64,7 +64,7 @@ export function BottomDock() {
               sx={{ minHeight: 32, py: 0, textTransform: 'none' }}
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  {tab.kind === 'terminal' ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}
+                  {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}
                   {tab.title}
                   <IconButton
                     component="span"
@@ -96,7 +96,7 @@ export function BottomDock() {
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {tabs.map((tab) => (
           <Box key={tab.id} sx={{ position: 'absolute', inset: 0, display: tab.id === activeId ? 'block' : 'none' }}>
-            {tab.kind === 'terminal' ? <TerminalPane tab={tab} active={tab.id === activeId} /> : <LogViewer tab={tab} />}
+            {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalPane tab={tab} active={tab.id === activeId} /> : <LogViewer tab={tab} />}
           </Box>
         ))}
       </Box>

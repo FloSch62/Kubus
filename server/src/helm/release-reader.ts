@@ -25,7 +25,7 @@ export interface HelmReleasePayload {
   manifest?: string;
 }
 
-interface ReleaseSecret {
+export interface ReleaseSecret {
   metadata: { name: string; namespace?: string; resourceVersion?: string; labels?: Record<string, string> };
   data?: { release?: string };
 }
@@ -53,6 +53,19 @@ export function decodeReleaseSecret(secret: ReleaseSecret): HelmReleasePayload {
   }
   decodeCache.set(cacheKey, payload);
   return payload;
+}
+
+/**
+ * Inverse of decodeReleaseSecret, minus the outer base64: returns
+ * base64(gzip(JSON)) for use in a secret's stringData — the API server
+ * applies the final base64 when storing it in data.
+ */
+export function encodeReleasePayload(payload: HelmReleasePayload): string {
+  return zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf8')).toString('base64');
+}
+
+export async function listReleaseSecretsRaw(handle: ClusterHandle, namespace?: string, releaseName?: string): Promise<ReleaseSecret[]> {
+  return listReleaseSecrets(handle, namespace, releaseName);
 }
 
 async function listReleaseSecrets(handle: ClusterHandle, namespace?: string, releaseName?: string): Promise<ReleaseSecret[]> {

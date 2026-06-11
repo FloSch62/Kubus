@@ -1,22 +1,27 @@
 import { useMemo, useState } from 'react';
 import { Alert, Box, Breadcrumbs, Button, Chip, Link, Snackbar, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, Typography } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import UndoIcon from '@mui/icons-material/Undo';
 import { useNavigate, useParams } from 'react-router';
 import yaml from 'js-yaml';
-import { useHelmHistory, useHelmRelease, useHelmUninstall } from '../api/queries.js';
+import { useHelmHistory, useHelmRelease, useHelmRollback, useHelmUninstall } from '../api/queries.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { useIsProtected } from '../state/clusters.js';
 
 export function HelmReleaseDetailPage() {
   const { ctx, ns, name } = useParams<{ ctx: string; ns: string; name: string }>();
+  const isProtected = useIsProtected(ctx ?? '');
   const { data: release, isLoading, error } = useHelmRelease(ctx, ns, name);
   const { data: history } = useHelmHistory(ctx, ns, name);
   const uninstall = useHelmUninstall();
+  const rollback = useHelmRollback();
   const navigate = useNavigate();
   const [tab, setTab] = useState('values');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rollbackTo, setRollbackTo] = useState<number | null>(null);
   const [toast, setToast] = useState<string>();
 
   const valuesYaml = useMemo(() => (release ? yaml.dump(release.values ?? {}, { noRefs: true }) : ''), [release]);
@@ -66,10 +71,11 @@ export function HelmReleaseDetailPage() {
                     <TableCell>App version</TableCell>
                     <TableCell>Updated</TableCell>
                     <TableCell>Description</TableCell>
+                    <TableCell align="right" />
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {(history ?? []).map((h) => (
+                  {(history ?? []).map((h, idx) => (
                     <TableRow key={h.revision}>
                       <TableCell>{h.revision}</TableCell>
                       <TableCell>
@@ -81,6 +87,13 @@ export function HelmReleaseDetailPage() {
                       <TableCell>{h.appVersion ?? ''}</TableCell>
                       <TableCell>{h.updated ? <AgeCell timestamp={h.updated} /> : ''}</TableCell>
                       <TableCell>{h.description ?? ''}</TableCell>
+                      <TableCell align="right">
+                        {idx > 0 && (
+                          <Button size="small" startIcon={<UndoIcon />} onClick={() => setRollbackTo(h.revision)}>
+                            Roll back
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -101,6 +114,7 @@ export function HelmReleaseDetailPage() {
         danger
         confirmLabel="Uninstall"
         busy={uninstall.isPending}
+        confirmText={isProtected ? name : undefined}
         message={
           <>
             This deletes every resource in the release manifest and removes the release records. <b>Helm hooks are not executed.</b>
@@ -119,6 +133,36 @@ export function HelmReleaseDetailPage() {
               onError: (e) => {
                 setConfirmOpen(false);
                 setToast(`Uninstall failed: ${e.message}`);
+              },
+            },
+          )
+        }
+      />
+      <ConfirmDialog
+        open={rollbackTo !== null}
+        title={`Roll back ${name}`}
+        danger
+        confirmLabel="Roll back"
+        busy={rollback.isPending}
+        confirmText={isProtected ? name : undefined}
+        message={
+          <>
+            Roll back <b>{ns}/{name}</b> to revision <b>{rollbackTo}</b>? This re-applies that revision's manifest as a new revision and
+            prunes resources added since. <b>Helm hooks are not executed.</b>
+          </>
+        }
+        onClose={() => setRollbackTo(null)}
+        onConfirm={() =>
+          rollback.mutate(
+            { ctx: ctx!, ns: ns!, name: name!, revision: rollbackTo! },
+            {
+              onSuccess: (r) => {
+                setRollbackTo(null);
+                setToast(`Rolled back to revision ${rollbackTo} (new revision ${r.newRevision}, ${r.applied.length} applied${r.pruned.length ? `, ${r.pruned.length} pruned` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''})`);
+              },
+              onError: (e) => {
+                setRollbackTo(null);
+                setToast(`Rollback failed: ${e.message}`);
               },
             },
           )

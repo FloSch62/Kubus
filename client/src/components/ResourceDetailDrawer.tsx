@@ -11,6 +11,7 @@ import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
+import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { MetricsChart } from './MetricsChart.js';
 import { RowActions } from './RowActions.js';
@@ -50,6 +51,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
 
   const yamlText = useMemo(() => (obj ? yaml.dump(obj, { noRefs: true, lineWidth: 140 }) : ''), [obj]);
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
+  const hasRolloutHistory = sel?.kind === 'Deployment' || sel?.kind === 'StatefulSet';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
 
   const handleApply = async (text: string) => {
@@ -110,6 +112,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
             <Tab value="yaml" label="YAML" sx={{ minHeight: 36 }} />
             <Tab value="events" label="Events" sx={{ minHeight: 36 }} />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
+            {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
           </Tabs>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {tab === 'overview' && obj && <OverviewForKind kind={sel.kind} obj={obj} ctx={sel.ctx} />}
@@ -150,6 +153,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
             {tab === 'events' && <EventsList events={events?.items ?? []} />}
             {tab === 'metrics' && hasMetrics && (
               <MetricsChart ctx={sel.ctx} kind={sel.kind === 'Pod' ? 'pod' : 'node'} name={sel.name} namespace={sel.namespace} />
+            )}
+            {tab === 'history' && hasRolloutHistory && obj && (
+              <RolloutHistory ctx={sel.ctx} kind={sel.kind as 'Deployment' | 'StatefulSet'} obj={obj} />
             )}
           </Box>
         </Box>

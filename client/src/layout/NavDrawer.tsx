@@ -17,6 +17,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import SpaceDashboardOutlinedIcon from '@mui/icons-material/SpaceDashboardOutlined';
+import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
@@ -205,6 +206,7 @@ export function NavDrawer() {
       </Box>
       <List dense disablePadding sx={{ pb: 4 }}>
         <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
+        <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
         <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} />
         <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
         <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />

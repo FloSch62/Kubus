@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Box,
   Chip,
   Dialog,
@@ -9,6 +10,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  Snackbar,
   TextField,
   Tooltip,
   Typography,
@@ -16,12 +18,16 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import KeyboardCommandKeyIcon from '@mui/icons-material/KeyboardCommandKey';
 import type { FavoriteItem, ResourceRef, SearchResult } from '@kubedeck/shared';
 import { groupToPath } from '@kubedeck/shared';
 import { useNavigate } from 'react-router';
 import { useGlobalSearch } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
+import { useDockStore } from '../state/dock.js';
+import { actionsForRef, usePaletteRunner, type PaletteAction } from '../actions/resource-actions.js';
 
 function pathForRef(ref: ResourceRef): string {
   return `/r/${groupToPath(ref.group)}/${ref.version}/${ref.plural}`;
@@ -42,37 +48,114 @@ function favoriteFromResult(result: SearchResult): FavoriteItem {
   };
 }
 
+interface StaticCommand {
+  id: string;
+  title: string;
+  subtitle?: string;
+  run: (deps: { navigate: (path: string) => void; toggleTheme: () => void; toggleDock: () => void }) => void;
+}
+
+const STATIC_COMMANDS: StaticCommand[] = [
+  { id: 'cmd:theme', title: 'Toggle dark / light mode', run: (d) => d.toggleTheme() },
+  { id: 'cmd:dock', title: 'Toggle terminal dock', run: (d) => d.toggleDock() },
+  { id: 'cmd:overview', title: 'Go to Overview', run: (d) => d.navigate('/') },
+  { id: 'cmd:events', title: 'Go to Events', run: (d) => d.navigate('/events') },
+  { id: 'cmd:topology', title: 'Go to Topology', run: (d) => d.navigate('/topology') },
+  { id: 'cmd:helm', title: 'Go to Helm Releases', run: (d) => d.navigate('/helm') },
+  { id: 'cmd:forwards', title: 'Go to Port Forwards', run: (d) => d.navigate('/forwards') },
+  { id: 'cmd:diff', title: 'Go to Diff', run: (d) => d.navigate('/diff') },
+];
+
+type Row =
+  | { type: 'result'; result: SearchResult }
+  | { type: 'command'; command: StaticCommand }
+  | { type: 'action'; action: PaletteAction };
+
 export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const selected = useClustersStore((s) => s.selected);
+  const toggleTheme = useClustersStore((s) => s.toggleTheme);
+  const dock = useDockStore();
   const [query, setQuery] = useState('');
-  const { data: results, isFetching } = useGlobalSearch(selected, query);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [stage, setStage] = useState<{ ref: ResourceRef; title: string } | null>(null);
+  const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
+  const commandMode = query.startsWith('>');
+  const searchQuery = stage || commandMode ? '' : query;
+  const { data: results, isFetching } = useGlobalSearch(selected, searchQuery);
   const favorites = useNavigationStore((s) => s.favorites);
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
   const isFavorite = useNavigationStore((s) => s.isFavorite);
   const navigate = useNavigate();
+  const runAction = usePaletteRunner();
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
-    if (open) setQuery('');
+    if (open) {
+      setQuery('');
+      setStage(null);
+      setActiveIndex(0);
+    }
   }, [open]);
 
-  const visible = useMemo(() => {
-    if (query.trim().length > 1) return results ?? [];
-    return favorites.map<SearchResult>((f) => ({
-      id: f.id,
-      kind: f.ref ? 'resource' : 'page',
-      title: f.title,
-      subtitle: f.subtitle,
-      score: 1,
-      ref: f.ref,
-      path: f.path,
+  const rows = useMemo<Row[]>(() => {
+    if (stage) {
+      const f = query.trim().toLowerCase();
+      return actionsForRef(stage.ref.kind)
+        .filter((a) => !f || a.title.toLowerCase().includes(f))
+        .map((action) => ({ type: 'action', action }));
+    }
+    if (commandMode) {
+      const f = query.slice(1).trim().toLowerCase();
+      return STATIC_COMMANDS.filter((c) => !f || c.title.toLowerCase().includes(f)).map((command) => ({ type: 'command', command }));
+    }
+    if (query.trim().length > 1) return (results ?? []).map((result) => ({ type: 'result', result }));
+    return favorites.map<Row>((f) => ({
+      type: 'result',
+      result: { id: f.id, kind: f.ref ? 'resource' : 'page', title: f.title, subtitle: f.subtitle, score: 1, ref: f.ref, path: f.path },
     }));
-  }, [query, results, favorites]);
+  }, [stage, commandMode, query, results, favorites]);
 
-  const activate = (item: SearchResult) => {
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, stage]);
+
+  const closeAll = () => {
+    setStage(null);
+    onClose();
+  };
+
+  const enterStage = (result: SearchResult) => {
+    if (!result.ref) return;
+    setStage({ ref: result.ref, title: result.title });
+    setQuery('');
+  };
+
+  const activate = (row: Row) => {
+    if (row.type === 'command') {
+      row.command.run({ navigate, toggleTheme, toggleDock: () => dock.setOpen(!dock.open) });
+      closeAll();
+      return;
+    }
+    if (row.type === 'action') {
+      if (!stage) return;
+      if (row.action.kind === 'detail') {
+        navigate(detailPathForRef(stage.ref));
+        closeAll();
+        return;
+      }
+      const { action } = row;
+      const { ref } = stage;
+      closeAll();
+      runAction(action, ref)
+        .then((text) => setToast({ severity: 'success', text }))
+        .catch((err: unknown) => setToast({ severity: 'error', text: err instanceof Error ? err.message : String(err) }));
+      return;
+    }
+    const item = row.result;
     const path = item.ref ? detailPathForRef(item.ref) : item.path ?? '/';
     navigate(path);
-    onClose();
+    closeAll();
   };
 
   const toggleFavorite = (item: SearchResult) => {
@@ -80,61 +163,151 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     else addFavorite(favoriteFromResult(item));
   };
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, rows.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const row = rows[activeIndex];
+      if (row) activate(row);
+    } else if ((e.key === 'Tab' || e.key === 'ArrowRight') && !stage) {
+      const row = rows[activeIndex];
+      if (row?.type === 'result' && row.result.ref) {
+        e.preventDefault();
+        enterStage(row.result);
+      }
+    } else if (e.key === 'Escape' && stage) {
+      e.preventDefault();
+      e.stopPropagation();
+      setStage(null);
+      setQuery('');
+    } else if (e.key === 'Backspace' && stage && query === '') {
+      e.preventDefault();
+      setStage(null);
+    }
+  };
+
+  // Keep the active row in view while navigating with the keyboard.
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-idx="${activeIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
+
+  const hint = stage
+    ? `Actions — ${stage.title}`
+    : commandMode
+      ? 'Commands'
+      : query.trim().length > 1
+        ? isFetching
+          ? 'Searching…'
+          : `${rows.length} results — Tab for actions, > for commands`
+        : favorites.length
+          ? 'Favorites — type to search, > for commands'
+          : 'Type to search, > for commands';
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogContent sx={{ p: 1.25 }}>
-        <TextField
-          autoFocus
-          fullWidth
-          placeholder="Search resources, pages, kinds…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && visible[0]) {
-              e.preventDefault();
-              activate(visible[0]);
-            }
-          }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, py: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            {query.trim().length > 1 ? (isFetching ? 'Searching…' : `${visible.length} results`) : favorites.length ? 'Favorites' : 'Type at least 2 characters'}
-          </Typography>
-          {selected.length > 0 && <Chip size="small" label={`${selected.length} cluster${selected.length === 1 ? '' : 's'}`} variant="outlined" />}
-        </Box>
-        <List dense disablePadding sx={{ maxHeight: 440, overflow: 'auto' }}>
-          {visible.map((item) => (
-            <ListItemButton key={item.id} onClick={() => activate(item)} sx={{ borderRadius: 1 }}>
-              <ListItemText
-                primary={item.title}
-                secondary={item.subtitle}
-                slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }}
-              />
-              <Chip size="small" label={item.kind} variant="outlined" sx={{ mr: 0.5 }} />
-              <Tooltip title={isFavorite(item.id) ? 'Remove favorite' : 'Add favorite'}>
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFavorite(item);
-                  }}
+    <>
+      <Dialog open={open} onClose={closeAll} maxWidth="sm" fullWidth>
+        <DialogContent sx={{ p: 1.25 }}>
+          <TextField
+            autoFocus
+            fullWidth
+            placeholder={stage ? 'Filter actions…' : 'Search resources, pages, kinds… (> for commands)'}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    {stage ? (
+                      <Chip size="small" icon={<KeyboardCommandKeyIcon sx={{ fontSize: 13 }} />} label={stage.title} onDelete={() => setStage(null)} />
+                    ) : (
+                      <SearchIcon fontSize="small" />
+                    )}
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, py: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {hint}
+            </Typography>
+            {selected.length > 0 && <Chip size="small" label={`${selected.length} cluster${selected.length === 1 ? '' : 's'}`} variant="outlined" />}
+          </Box>
+          <List ref={listRef} dense disablePadding sx={{ maxHeight: 440, overflow: 'auto' }}>
+            {rows.map((row, idx) => {
+              const key = row.type === 'result' ? row.result.id : row.type === 'command' ? row.command.id : row.action.id;
+              return (
+                <ListItemButton
+                  key={key}
+                  data-idx={idx}
+                  selected={idx === activeIndex}
+                  onClick={() => activate(row)}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  sx={{ borderRadius: 1 }}
                 >
-                  {isFavorite(item.id) ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-            </ListItemButton>
-          ))}
-        </List>
-      </DialogContent>
-    </Dialog>
+                  {row.type === 'result' && (
+                    <>
+                      <ListItemText
+                        primary={row.result.title}
+                        secondary={row.result.subtitle}
+                        slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }}
+                      />
+                      <Chip size="small" label={row.result.kind} variant="outlined" sx={{ mr: 0.5 }} />
+                      {row.result.ref && (
+                        <Tooltip title="Actions (Tab)">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              enterStage(row.result);
+                            }}
+                          >
+                            <ChevronRightIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      <Tooltip title={isFavorite(row.result.id) ? 'Remove favorite' : 'Add favorite'}>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFavorite(row.result);
+                          }}
+                        >
+                          {isFavorite(row.result.id) ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+                        </IconButton>
+                      </Tooltip>
+                    </>
+                  )}
+                  {row.type === 'command' && <ListItemText primary={row.command.title} secondary={row.command.subtitle} />}
+                  {row.type === 'action' && (
+                    <ListItemText
+                      primary={row.action.title}
+                      slotProps={{ primary: { sx: row.action.danger ? { color: 'error.main' } : undefined } }}
+                    />
+                  )}
+                </ListItemButton>
+              );
+            })}
+            {rows.length === 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 2 }}>
+                No matches.
+              </Typography>
+            )}
+          </List>
+        </DialogContent>
+      </Dialog>
+      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={toast?.severity} variant="filled" onClose={() => setToast(null)}>
+          {toast?.text}
+        </Alert>
+      </Snackbar>
+    </>
   );
 }

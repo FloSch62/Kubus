@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Box, Chip, InputAdornment, Stack, TextField, Typography } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import { DataGrid, type GridColDef, type GridRowParams } from '@mui/x-data-grid';
+import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 
 interface Props {
@@ -21,6 +21,8 @@ interface Props {
   /** Enable checkbox selection; returns selected rows. */
   onSelectionChange?: (rows: ClusterRow[]) => void;
   checkboxSelection?: boolean;
+  /** Column fields hidden by default (user can re-enable via the column menu). */
+  hiddenFields?: string[];
 }
 
 export function ResourceTable({
@@ -38,9 +40,16 @@ export function ResourceTable({
   toolbar,
   checkboxSelection,
   onSelectionChange,
+  hiddenFields,
 }: Props) {
   const [localFilter, setLocalFilter] = useState('');
   const activeFilter = filter ?? localFilter;
+
+  const hiddenKey = (hiddenFields ?? []).join(',');
+  const [visibility, setVisibility] = useState<GridColumnVisibilityModel>({});
+  useEffect(() => {
+    setVisibility(Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []));
+  }, [hiddenKey]);
 
   const filtered = useMemo(() => {
     if (!activeFilter) return rows;
@@ -118,6 +127,8 @@ export function ResourceTable({
         }
         disableRowSelectionOnClick={!!checkboxSelection}
         onRowClick={onRowClick ? (params: GridRowParams<ClusterRow>) => onRowClick(params.row) : undefined}
+        columnVisibilityModel={visibility}
+        onColumnVisibilityModelChange={setVisibility}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
         sx={{
           border: 0,

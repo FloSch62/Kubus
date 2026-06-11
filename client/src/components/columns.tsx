@@ -1,10 +1,12 @@
 import type { GridColDef } from '@mui/x-data-grid';
-import type { KubeObject, MetricsSnapshot } from '@kubedeck/shared';
+import { Tooltip } from '@mui/material';
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubedeck/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell } from './AgeCell.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './Sparkline.js';
-import { dataKeyCount, eventFields, ingressHosts, jobStatus, nodeRoles, nodeStatus, podSummary, servicePorts, workloadReady } from '../kube-display.js';
+import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeRoles, nodeStatus, podSummary, servicePorts, workloadReady } from '../kube-display.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number } | undefined;
 
@@ -63,7 +65,16 @@ const COLUMN_DEFS: Record<string, (opts: { metrics?: MetricsLookup }) => Col> = 
     headerName: 'Status',
     width: 150,
     valueGetter: (_v, row) => podSummary(obj(row)).status,
-    renderCell: (params) => <StatusChip status={podSummary(obj(params.row)).status} />,
+    renderCell: (params) => (
+      <>
+        <StatusChip status={podSummary(obj(params.row)).status} />
+        {hasRunningDebugContainer(obj(params.row)) && (
+          <Tooltip title="A debug container is running in this pod">
+            <BugReportOutlinedIcon color="warning" sx={{ fontSize: 15, ml: 0.5, verticalAlign: 'middle' }} />
+          </Tooltip>
+        )}
+      </>
+    ),
   }),
   restarts: () => ({
     field: 'restarts',
@@ -341,6 +352,39 @@ const COLUMN_DEFS: Record<string, (opts: { metrics?: MetricsLookup }) => Col> = 
     valueGetter: (_v, row) => ((obj(row).status as { currentReplicas?: number })?.currentReplicas ?? 0).toString(),
   }),
 };
+
+/**
+ * Columns from a CRD's additionalPrinterColumns. Values come from evaluating
+ * the column's jsonPath against the live object; non-scalar results are
+ * stringified and truncated. Fields are prefixed to avoid clashing with
+ * preset column ids.
+ */
+export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
+  return cols.map((c, i): Col => {
+    const numeric = c.type === 'integer' || c.type === 'number';
+    const value = (row: ClusterRow): unknown => evalPrinterColumnPath(row.obj, c.jsonPath);
+    return {
+      field: `crd_${i}_${c.name}`,
+      headerName: c.name,
+      description: c.description,
+      width: c.type === 'date' ? 95 : numeric ? 90 : 140,
+      type: numeric ? 'number' : undefined,
+      valueGetter: (_v, row) => {
+        const v = value(row);
+        if (v === undefined) return numeric ? null : '';
+        if (numeric) return typeof v === 'number' ? v : Number(v);
+        if (typeof v === 'object') return JSON.stringify(v).slice(0, 200);
+        return String(v);
+      },
+      renderCell: c.type === 'date' ? (params) => <AgeCell timestamp={(value(params.row) as string | undefined) || undefined} /> : undefined,
+    };
+  });
+}
+
+/** Default-hidden fields for CRD columns marked priority > 0. */
+export function crdHiddenFields(cols: PrinterColumn[]): string[] {
+  return cols.flatMap((c, i) => ((c.priority ?? 0) > 0 ? [`crd_${i}_${c.name}`] : []));
+}
 
 /** Lookup helper bridging pod/node metrics snapshots into the column defs. */
 export function makeMetricsLookup(kind: string, metrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {

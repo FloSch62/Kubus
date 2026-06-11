@@ -3,6 +3,7 @@ import yaml from 'js-yaml';
 import { ApiException, type KubernetesObject } from '@kubernetes/client-node';
 import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunResponse, type ResourceKindInfo, type ValidationFinding } from '@kubedeck/shared';
 import type { AppContext } from '../app.js';
+import { getPrinterColumns } from '../kube/printer-columns.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { maybeRedact } from '../kube/redact.js';
 import { HttpProblem, sendError } from '../util/errors.js';
@@ -97,6 +98,16 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
         continue: list.metadata?.continue,
       };
       return response;
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: GvrParams }>('/api/contexts/:ctx/printer-columns/:group/:version/:plural', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await getPrinterColumns(handle, groupFromPath(req.params.group), req.params.version, req.params.plural);
     } catch (err) {
       sendError(reply, err);
       return reply;

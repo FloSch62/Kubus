@@ -4,6 +4,7 @@ import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, 
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { podContainers } from '../kube/actions.js';
+import { getRolloutHistory } from '../kube/rollout.js';
 import { resolvePodEnv } from '../kube/pod-env.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem, sendError } from '../util/errors.js';
@@ -103,6 +104,22 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
       return reply;
     }
   });
+
+  app.get<{ Params: { ctx: string }; Querystring: { kind?: string; namespace?: string; name?: string } }>(
+    '/api/contexts/:ctx/detail/rollout-history',
+    async (req, reply) => {
+      try {
+        const { kind, namespace, name } = req.query;
+        if (!kind || !namespace || !name) throw new HttpProblem(422, 'kind, namespace and name are required');
+        if (kind !== 'Deployment' && kind !== 'StatefulSet') throw new HttpProblem(422, 'kind must be Deployment or StatefulSet');
+        const handle = ctx.clusters.get(req.params.ctx);
+        return await getRolloutHistory(handle, kind, namespace, name);
+      } catch (err) {
+        sendError(reply, err);
+        return reply;
+      }
+    },
+  );
 
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string; name?: string } }>(
     '/api/contexts/:ctx/detail/secret-tls',
