@@ -1,6 +1,6 @@
 # ⎈ Kubedeck
 
-**A free, open-source Kubernetes GUI** — a self-hosted alternative to [Aptakube](https://aptakube.com/), built with React, Material-UI and Node.js.
+**A free, open-source Kubernetes GUI** 
 
 Connect to all your clusters at once, browse and edit every resource (CRDs included), stream aggregated logs, open shells into containers, forward ports, watch metrics, and inspect Helm releases — all from one polished web UI that runs entirely on your machine.
 
