@@ -21,7 +21,15 @@ export function OverviewPage() {
   if (selected.length === 0) {
     return (
       <EmptyState
-        icon={<HubOutlinedIcon />}
+        icon={
+          <Box
+            component="img"
+            src="/kubedeck.svg"
+            alt=""
+            aria-hidden
+            sx={{ width: 48, height: 54, objectFit: 'contain' }}
+          />
+        }
         title="Welcome to Kubedeck"
         subtitle="Select one or more clusters in the top bar to get started."
       />

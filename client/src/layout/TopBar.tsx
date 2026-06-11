@@ -17,21 +17,18 @@ export function TopBar() {
       <Toolbar variant="dense" sx={{ gap: 1.5, minHeight: 52 }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 1.5 }}>
           <Box
+            component="img"
+            src="/kubedeck.svg"
+            alt=""
+            aria-hidden
             sx={{
-              width: 28,
-              height: 28,
-              borderRadius: 2,
-              display: 'grid',
-              placeItems: 'center',
-              color: '#fff',
-              fontSize: 18,
-              lineHeight: 1,
-              background: 'linear-gradient(135deg, #6d8dfa 0%, #3b5bdb 100%)',
+              width: 30,
+              height: 34,
+              display: 'block',
+              objectFit: 'contain',
             }}
-          >
-            ⎈
-          </Box>
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: -0.4 }}>
+          />
+          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 0 }}>
             Kubedeck
           </Typography>
         </Stack>
