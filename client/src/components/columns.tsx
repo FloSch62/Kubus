@@ -343,10 +343,10 @@ const COLUMN_DEFS: Record<string, (opts: { metrics?: MetricsLookup }) => Col> = 
 };
 
 /** Lookup helper bridging pod/node metrics snapshots into the column defs. */
-export function makeMetricsLookup(kind: string, podMetrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {
-  if (!podMetrics || (kind !== 'Pod' && kind !== 'Node')) return undefined;
+export function makeMetricsLookup(kind: string, metrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {
+  if (!metrics || (kind !== 'Pod' && kind !== 'Node')) return undefined;
   return (ctx, namespace, name) => {
-    const snap = podMetrics.get(ctx);
+    const snap = metrics.get(ctx);
     if (!snap?.available) return undefined;
     const entry = snap.items.find((i) => i.name === name && (kind === 'Node' || i.namespace === namespace));
     return entry ? { cpuMilli: entry.cpuMilli, memBytes: entry.memBytes } : undefined;

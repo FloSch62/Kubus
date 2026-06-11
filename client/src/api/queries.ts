@@ -258,14 +258,15 @@ export function useNodeMetrics(ctx: string) {
   });
 }
 
-export function usePodMetrics(contexts: string[]) {
+/** Per-context usage snapshots for the Pod or Node list views. */
+export function useResourceMetrics(contexts: string[], kind: 'pods' | 'nodes') {
   return useQuery({
-    queryKey: ['metrics-pods', contexts],
+    queryKey: ['metrics-snapshot', kind, contexts],
     queryFn: async () => {
       const result = new Map<string, MetricsSnapshot>();
       await Promise.all(
         contexts.map(async (ctx) => {
-          const snap = await apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/pods`).catch(() => ({ available: false, items: [] }) as MetricsSnapshot);
+          const snap = await apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/${kind}`).catch(() => ({ available: false, items: [] }) as MetricsSnapshot);
           result.set(ctx, snap);
         }),
       );

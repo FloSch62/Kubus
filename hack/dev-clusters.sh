@@ -7,6 +7,13 @@ for tool in kind kubectl helm; do
   command -v "$tool" >/dev/null || { echo "missing: $tool"; exit 1; }
 done
 
+# Low inotify limits make kube-proxy/metrics-server crashloop with
+# "too many open files" (https://kind.sigs.k8s.io/docs/user/known-issues/).
+if [ "$(sysctl -n fs.inotify.max_user_instances)" -lt 512 ]; then
+  echo "WARNING: fs.inotify.max_user_instances < 512 — kind pods may crashloop."
+  echo "  Fix: sudo sysctl fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288"
+fi
+
 kind get clusters | grep -q '^kubedeck-a$' || kind create cluster --name kubedeck-a
 kind get clusters | grep -q '^kubedeck-b$' || kind create cluster --name kubedeck-b
 

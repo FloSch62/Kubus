@@ -5,7 +5,7 @@ import SubjectIcon from '@mui/icons-material/Subject';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import { useParams, useSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, type ResourceKindInfo } from '@kubedeck/shared';
-import { useApiResources, useCreateResource, useFilteredList, usePodMetrics, type ClusterRow } from '../api/queries.js';
+import { useApiResources, useCreateResource, useFilteredList, useResourceMetrics, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
@@ -32,7 +32,8 @@ export function ResourceListPage() {
 
   const list = useFilteredList(group, version, plural, namespaced);
   const isPodOrNode = kind === 'Pod' || kind === 'Node';
-  const { data: podMetrics } = usePodMetrics(isPodOrNode ? selected : []);
+  const { data: podMetrics } = useResourceMetrics(isPodOrNode ? selected : [], kind === 'Node' ? 'nodes' : 'pods');
+  const metricsUnavailable = isPodOrNode ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false) : [];
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
@@ -86,6 +87,11 @@ export function ResourceListPage() {
             {ctx}: {s.message ?? 'watch error'}
           </Alert>
         ))}
+        {metricsUnavailable.length > 0 && (
+          <Alert severity="info" sx={{ mt: 0.5 }}>
+            CPU/Memory unavailable — metrics-server is not reachable in {metricsUnavailable.join(', ')}.
+          </Alert>
+        )}
       </Box>
       <ResourceTable
         rows={list.rows}
