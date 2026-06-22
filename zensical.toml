@@ -70,8 +70,8 @@ nav = [
 # ----------------------------------------------------------------------------
 [project.theme]
 language = "en"
-logo = "assets/logo.svg"
-favicon = "assets/logo.svg"
+logo = "assets/kubus.svg"
+favicon = "assets/kubus.svg"
 
 features = [
   "announce.dismiss",

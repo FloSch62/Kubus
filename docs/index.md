@@ -7,7 +7,7 @@ hide:
 
 <div class="kubus-hero" markdown>
 
-# ![](assets/logo.svg){ .kubus-hero-logo } Kubus
+# ![](assets/kubus.svg){ .kubus-hero-logo } Kubus
 
 <p class="tagline">
 A free, open-source Kubernetes GUI. Connect to all your clusters at once — browse
