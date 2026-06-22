@@ -1,7 +1,7 @@
 import { Writable } from 'node:stream';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
-import type { LogServerMessage } from '@kubedeck/shared';
+import type { LogServerMessage } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { podContainers } from '../kube/actions.js';
 

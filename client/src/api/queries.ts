@@ -42,8 +42,8 @@ import type {
   SetKubeconfigRequest,
   KubeconfigImportRequest,
   KubeconfigImportResponse,
-} from '@kubedeck/shared';
-import { groupToPath } from '@kubedeck/shared';
+} from '@kubus/shared';
+import { groupToPath } from '@kubus/shared';
 import { apiFetch } from './http.js';
 import { watchClient } from './ws/watch-client.js';
 import { useClustersStore } from '../state/clusters.js';

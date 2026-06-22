@@ -1,5 +1,5 @@
 import { Box, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
-import type { KubeObject, TlsCertInfo } from '@kubedeck/shared';
+import type { KubeObject, TlsCertInfo } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
 import { useSecretTls } from '../../api/queries.js';
 

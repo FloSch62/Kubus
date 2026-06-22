@@ -16,16 +16,16 @@ ws.on('message', async (data) => {
     await fetch(`http://127.0.0.1:3199/api/contexts/${ctx}/resources`, {
       method: 'POST',
       headers,
-      body: 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kubedeck-watch-test\n  namespace: default\ndata:\n  a: b',
+      body: 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kubus-watch-test\n  namespace: default\ndata:\n  a: b',
     });
   }
   if (msg.op === 'events') {
     for (const ev of msg.events) {
-      if (ev.object.metadata.name !== 'kubedeck-watch-test') continue;
+      if (ev.object.metadata.name !== 'kubus-watch-test') continue;
       seen.push(ev.type);
       console.log(`✓ delta: ${ev.type} ${ev.object.metadata.name}`);
       if (ev.type === 'ADDED') {
-        await fetch(`http://127.0.0.1:3199/api/contexts/${ctx}/resources/core/v1/configmaps/kubedeck-watch-test?namespace=default`, { method: 'DELETE', headers });
+        await fetch(`http://127.0.0.1:3199/api/contexts/${ctx}/resources/core/v1/configmaps/kubus-watch-test?namespace=default`, { method: 'DELETE', headers });
       }
       if (ev.type === 'DELETED') {
         console.log('WATCH DELTA TEST PASSED');

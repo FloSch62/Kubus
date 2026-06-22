@@ -3,7 +3,7 @@ import { Autocomplete, Box, FormControlLabel, Grid, Stack, Switch, TextField, Ty
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useQuery } from '@tanstack/react-query';
 import yaml from 'js-yaml';
-import { groupToPath, type KubeObject, type ListResponse, type ResourceKindInfo } from '@kubedeck/shared';
+import { groupToPath, type KubeObject, type ListResponse, type ResourceKindInfo } from '@kubus/shared';
 import { apiFetch } from '../api/http.js';
 import { resourceUrl, useApiResources, useContexts, useNamespaces } from '../api/queries.js';
 import { DiffViewer } from '../components/DiffViewer.js';

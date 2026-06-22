@@ -25,11 +25,11 @@ jobs:
             ~/.cache/electron-builder
           key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
-      # build first: @kubedeck/shared (and /server for electron) resolve types
+      # build first: @kubus/shared (and /server for electron) resolve types
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm typecheck
       # Unpacked desktop build so a broken electron-builder config fails PRs.
-      - run: pnpm --filter @kubedeck/electron exec electron-builder --dir --linux
+      - run: pnpm --filter @kubus/electron exec electron-builder --dir --linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

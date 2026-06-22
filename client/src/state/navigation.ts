@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { FavoriteItem, SavedView } from '@kubedeck/shared';
+import type { FavoriteItem, SavedView } from '@kubus/shared';
 
 interface NavigationState {
   favorites: FavoriteItem[];
@@ -29,6 +29,6 @@ export const useNavigationStore = create<NavigationState>()(
         })),
       removeSavedView: (id) => set((s) => ({ savedViews: s.savedViews.filter((v) => v.id !== id) })),
     }),
-    { name: 'kubedeck-navigation' },
+    { name: 'kubus-navigation' },
   ),
 );

@@ -1,17 +1,17 @@
 {
-  "name": "@kubedeck/electron",
+  "name": "@kubus/electron",
   "version": "0.1.2",
   "private": true,
-  "description": "Kubedeck desktop app",
+  "description": "Kubus desktop app",
   "license": "MIT",
-  "homepage": "https://github.com/FloSch62/kubedeck",
+  "homepage": "https://github.com/FloSch62/Kubus",
   "author": {
     "name": "Florian Schwarz",
     "email": "schwarz.flori.88@gmail.com"
   },
   "type": "module",
   "main": "dist/main.js",
-  "desktopName": "kubedeck.desktop",
+  "desktopName": "kubus.desktop",
   "scripts": {
     "build": "node scripts/render-icon.mjs && node esbuild.config.mjs && tsc --noEmit",
     "typecheck": "tsc --noEmit",
@@ -20,7 +20,7 @@
     "dist": "electron-builder"
   },
   "devDependencies": {
-    "@kubedeck/server": "workspace:*",
+    "@kubus/server": "workspace:*",
     "@types/node": "^22.15.0",
     "electron": "^38.2.0",
     "electron-builder": "^26.0.12",

@@ -1,5 +1,5 @@
 import { Box, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, KeyValueChips } from './GenericDetail.js';
 import { PodMiniList } from './PodMiniList.js';
 import { useResourceList } from '../../api/queries.js';

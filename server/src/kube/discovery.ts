@@ -1,4 +1,4 @@
-import type { ResourceKindInfo } from '@kubedeck/shared';
+import type { ResourceKindInfo } from '@kubus/shared';
 import type { RawClient } from './raw-client.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;

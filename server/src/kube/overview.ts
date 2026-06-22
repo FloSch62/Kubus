@@ -1,4 +1,4 @@
-import type { ClusterOverview, KubeObject } from '@kubedeck/shared';
+import type { ClusterOverview, KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 
 const RECENT_MS = 60 * 60 * 1000; // 1h window for restarts/events

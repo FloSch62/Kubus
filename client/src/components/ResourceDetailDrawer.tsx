@@ -3,7 +3,7 @@ import { Box, Drawer, FormControlLabel, IconButton, Stack, Switch, Tab, Tabs, Ty
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import yaml from 'js-yaml';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { YamlEditor } from './YamlEditor.js';
 import { GenericDetail } from './detail/GenericDetail.js';

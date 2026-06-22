@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { groupFromPath, watchClientMessageSchema, type WatchServerMessage } from '@kubedeck/shared';
+import { groupFromPath, watchClientMessageSchema, type WatchServerMessage } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { isSecretGVR, redactSecretData } from '../kube/redact.js';
 

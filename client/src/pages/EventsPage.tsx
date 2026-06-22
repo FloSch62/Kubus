@@ -3,7 +3,7 @@ import { Alert, Box, Chip, FormControl, FormControlLabel, InputAdornment, InputL
 import SearchIcon from '@mui/icons-material/Search';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
-import { gvkForKind, type KubeObject } from '@kubedeck/shared';
+import { gvkForKind, type KubeObject } from '@kubus/shared';
 import { useApiResourcesForContexts, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useDetailStore } from '../state/detail.js';

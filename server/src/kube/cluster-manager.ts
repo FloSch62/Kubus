@@ -17,7 +17,7 @@ import {
   type ApiConstructor,
   type ApiType,
 } from '@kubernetes/client-node';
-import type { ContextInfo } from '@kubedeck/shared';
+import type { ContextInfo } from '@kubus/shared';
 import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';

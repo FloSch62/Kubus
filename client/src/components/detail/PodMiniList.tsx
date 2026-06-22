@@ -1,5 +1,5 @@
 import { Box, CircularProgress, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import { StatusChip } from '../StatusChip.js';
 import { podSummary } from '../../kube-display.js';
 import { useDetailStore } from '../../state/detail.js';

@@ -36,7 +36,7 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
-import type { KubeObject, LogTargetKind } from '@kubedeck/shared';
+import type { KubeObject, LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,

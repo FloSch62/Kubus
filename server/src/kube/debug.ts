@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { DebugPodRequest, DebugPodResponse, StopDebugRequest } from '@kubedeck/shared';
+import type { DebugPodRequest, DebugPodResponse, StopDebugRequest } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { runCommand } from './file-copy.js';
@@ -14,7 +14,7 @@ export const DEFAULT_DEBUG_IMAGE = 'busybox:1.36';
  * sleep could never be stopped from the UI. The trap makes TERM work and the
  * stop-file is the fallback; the counter keeps the 1-hour TTL.
  */
-const STOP_FILE = '/tmp/.kubedeck-stop';
+const STOP_FILE = '/tmp/.kubus-stop';
 const DEBUG_IDLE_COMMAND = ['sh', '-c', `trap "exit 0" TERM INT; i=0; while [ ! -e ${STOP_FILE} ] && [ "$i" -lt 3600 ]; do sleep 1; i=$((i+1)); done`];
 
 /**

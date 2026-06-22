@@ -49,14 +49,14 @@ function parseArgs(argv: string[]): Map<string, string> {
 
 export function loadConfig(): ServerConfig {
   const args = parseArgs(process.argv.slice(2));
-  const dev = process.env.NODE_ENV !== 'production' && process.env.KUBEDECK_DEV === '1';
+  const dev = process.env.NODE_ENV !== 'production' && process.env.KUBUS_DEV === '1';
   // In dev the Vite client can't learn a random token at startup, so use a
   // well-known one; the server still only listens on 127.0.0.1.
   const devToken = dev ? 'dev' : undefined;
   return resolveConfig({
     port: Number(args.get('port') ?? process.env.PORT ?? 3001),
     devToken,
-    openBrowser: !dev && args.get('no-open') !== 'true' && process.env.KUBEDECK_NO_OPEN !== '1',
+    openBrowser: !dev && args.get('no-open') !== 'true' && process.env.KUBUS_NO_OPEN !== '1',
     kubeconfigOverride: args.get('kubeconfig') ?? undefined,
   });
 }

@@ -24,13 +24,13 @@ export function OverviewPage() {
         icon={
           <Box
             component="img"
-            src="/kubedeck.svg"
+            src="/kubus.svg"
             alt=""
             aria-hidden
             sx={{ width: 48, height: 54, objectFit: 'contain' }}
           />
         }
-        title="Welcome to Kubedeck"
+        title="Welcome to Kubus"
         subtitle="Select one or more clusters in the top bar to get started."
       />
     );

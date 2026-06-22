@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Box, Button, Stack } from '@mui/material';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
-import type { ResourceDryRunResponse } from '@kubedeck/shared';
+import type { ResourceDryRunResponse } from '@kubus/shared';
 import { useUiPrefsStore } from '../state/prefs.js';
 
 interface Props {

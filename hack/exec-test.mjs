@@ -22,10 +22,10 @@ ws.on('message', (data, isBinary) => {
     process.stdout.write(`[bin] ${JSON.stringify(data.toString().slice(0, 100))}\n`);
     if (!sent) {
       sent = true;
-      setTimeout(() => ws.send(Buffer.from('echo kubedeck-$((20+22))\r')), 200);
+      setTimeout(() => ws.send(Buffer.from('echo kubus-$((20+22))\r')), 200);
     }
-    if (output.includes('kubedeck-42')) {
-      console.log('✓ EXEC OK: echoed kubedeck-42');
+    if (output.includes('kubus-42')) {
+      console.log('✓ EXEC OK: echoed kubus-42');
       ws.send(JSON.stringify({ op: 'resize', cols: 120, rows: 40 }));
       setTimeout(() => ws.send(Buffer.from('exit\r')), 200);
     }
@@ -35,7 +35,7 @@ ws.on('message', (data, isBinary) => {
 });
 ws.on('close', (code, reason) => {
   console.log('[close]', code, reason.toString());
-  process.exit(output.includes('kubedeck-42') ? 0 : 1);
+  process.exit(output.includes('kubus-42') ? 0 : 1);
 });
 ws.on('error', (err) => console.log('[error]', err.message));
 setTimeout(() => {

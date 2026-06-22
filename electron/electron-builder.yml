@@ -1,6 +1,6 @@
-appId: io.github.flosch62.kubedeck
-productName: Kubedeck
-executableName: kubedeck
+appId: io.github.flosch62.kubus
+productName: Kubus
+executableName: kubus
 directories:
   output: release
   buildResources: build
@@ -14,7 +14,7 @@ extraResources:
   - from: build/icons/256x256.png
     to: icon.png
 icon: build/icon.png
-artifactName: kubedeck-${version}-${os}-${arch}.${ext}
+artifactName: kubus-${version}-${os}-${arch}.${ext}
 npmRebuild: false
 afterPack: scripts/after-pack.cjs
 win:
@@ -41,7 +41,7 @@ linux:
   icon: build/icons
   desktop:
     entry:
-      StartupWMClass: Kubedeck
+      StartupWMClass: Kubus
   target:
     - target: AppImage
       arch: [x64]
@@ -50,5 +50,5 @@ linux:
 publish:
   provider: github
   owner: FloSch62
-  repo: kubedeck
+  repo: Kubus
   releaseType: release

@@ -45,7 +45,7 @@ export const useClustersStore = create<ClustersState>()(
           contextSettings: { ...s.contextSettings, [ctx]: { ...s.contextSettings[ctx], ...patch } },
         })),
     }),
-    { name: 'kubedeck-clusters' },
+    { name: 'kubus-clusters' },
   ),
 );
 

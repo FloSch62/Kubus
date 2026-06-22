@@ -26,6 +26,6 @@ export const useLogPrefsStore = create<LogPrefsState>()(
       setTsMode: (tsMode) => set({ tsMode }),
       setHighlight: (highlight) => set({ highlight }),
     }),
-    { name: 'kubedeck-log-prefs' },
+    { name: 'kubus-log-prefs' },
   ),
 );

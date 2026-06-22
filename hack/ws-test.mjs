@@ -73,10 +73,10 @@ async function testExec(pod, namespace, container) {
         output += data.toString();
         if (!sent && output.length > 0) {
           sent = true;
-          ws.send(Buffer.from('echo kubedeck-$((20+22))\n'));
+          ws.send(Buffer.from('echo kubus-$((20+22))\n'));
         }
-        if (output.includes('kubedeck-42')) {
-          console.log('✓ exec: interactive shell echoed kubedeck-42');
+        if (output.includes('kubus-42')) {
+          console.log('✓ exec: interactive shell echoed kubus-42');
           ws.send(JSON.stringify({ op: 'resize', cols: 120, rows: 40 }));
           setTimeout(() => {
             ws.send(Buffer.from('exit\n'));

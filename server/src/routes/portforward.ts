@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { PortForwardRequest } from '@kubedeck/shared';
+import type { PortForwardRequest } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { sendError } from '../util/errors.js';
 

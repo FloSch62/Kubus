@@ -1,4 +1,4 @@
-# ⎈ Kubedeck
+# ⎈ Kubus
 
 **A free, open-source Kubernetes GUI** 
 
@@ -30,7 +30,7 @@ Connect to all your clusters at once, browse and edit every resource (CRDs inclu
 
 ## Security model
 
-Kubedeck is a *local* tool:
+Kubus is a *local* tool:
 
 - The server binds to `127.0.0.1` only and talks directly to your cluster API servers using your existing kubeconfig — no data leaves your machine.
 - Every request requires a random per-run bearer token (the browser receives it via the launch URL), protecting against DNS-rebinding/CSRF on localhost.
@@ -40,9 +40,9 @@ Kubedeck is a *local* tool:
 
 ### Desktop app
 
-Download the installer for your platform from the [releases page](https://github.com/FloSch62/kubedeck/releases): Windows (`.exe`), macOS (universal `.dmg`), Linux (`.AppImage`/`.deb`).
+Download the installer for your platform from the [releases page](https://github.com/FloSch62/Kubus/releases): Windows (`.exe`), macOS (universal `.dmg`), Linux (`.AppImage`/`.deb`).
 
-> **macOS note:** builds are not code-signed yet. On first launch, right-click the app and choose *Open* (or run `xattr -dr com.apple.quarantine /Applications/Kubedeck.app`).
+> **macOS note:** builds are not code-signed yet. On first launch, right-click the app and choose *Open* (or run `xattr -dr com.apple.quarantine /Applications/Kubus.app`).
 
 ### From source
 
@@ -110,7 +110,7 @@ git push origin v0.1.0
 - Helm uninstall and rollback apply/delete manifest resources and write release records but do **not** run Helm hooks.
 - Port forwards live as long as the server process.
 - WebSocket port-forward requires a reasonably recent API server (kubectl's SPDY fallback is not implemented).
-- Node shells start a privileged pod in a dedicated `kubedeck-debug` namespace (PodSecurity: privileged) pinned to the node; it is removed when the terminal closes. Ephemeral debug containers require Kubernetes ≥ 1.23.
+- Node shells start a privileged pod in a dedicated `kubus-debug` namespace (PodSecurity: privileged) pinned to the node; it is removed when the terminal closes. Ephemeral debug containers require Kubernetes ≥ 1.23.
 - "Protected cluster" confirmation is enforced in this browser's UI only — it is a guard against slips, not a server-side permission boundary (use RBAC for that).
 
 ## License

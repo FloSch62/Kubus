@@ -31,7 +31,7 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { NavLink, useLocation } from 'react-router';
-import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type ResourceKindInfo, type SavedView } from '@kubedeck/shared';
+import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';

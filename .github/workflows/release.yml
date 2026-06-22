@@ -47,7 +47,7 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
       - run: pnpm -r build
       - name: Package
-        run: pnpm --filter @kubedeck/electron exec electron-builder --publish never
+        run: pnpm --filter @kubus/electron exec electron-builder --publish never
         env:
           # No signing certs: skip keychain discovery so mac builds stay unsigned.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -69,7 +69,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kubedeck-${{ matrix.os }}
+          name: kubus-${{ matrix.os }}
           if-no-files-found: error
           path: |
             electron/release/*.exe
@@ -107,7 +107,7 @@ jobs:
 
           while IFS= read -r asset_name; do
             case "$asset_name" in
-              kubedeck-*-mac-x64.*|kubedeck-*-mac-arm64.*|kubedeck-*.blockmap|latest*.yml)
+              kubus-*-mac-x64.*|kubus-*-mac-arm64.*|kubus-*.blockmap|latest*.yml)
                 gh release delete-asset "$RELEASE_TAG" "$asset_name" --yes
                 ;;
             esac

@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from '@kubedeck/shared';
+import type { ApiErrorBody } from '@kubus/shared';
 
 let token = '';
 
@@ -7,11 +7,11 @@ export function initAuthToken(): void {
   const url = new URL(window.location.href);
   const fromUrl = url.searchParams.get('token');
   if (fromUrl) {
-    sessionStorage.setItem('kubedeck-token', fromUrl);
+    sessionStorage.setItem('kubus-token', fromUrl);
     url.searchParams.delete('token');
     window.history.replaceState({}, '', url.toString());
   }
-  token = sessionStorage.getItem('kubedeck-token') ?? (import.meta.env.DEV ? 'dev' : '');
+  token = sessionStorage.getItem('kubus-token') ?? (import.meta.env.DEV ? 'dev' : '');
 }
 
 export function authToken(): string {

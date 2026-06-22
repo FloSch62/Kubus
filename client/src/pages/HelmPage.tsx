@@ -4,7 +4,7 @@ import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import { useNavigate } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
-import type { HelmReleaseSummary } from '@kubedeck/shared';
+import type { HelmReleaseSummary } from '@kubus/shared';
 import { useHelmReleases } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { StatusChip } from '../components/StatusChip.js';

@@ -1,11 +1,11 @@
 import { nanoid } from 'nanoid';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { waitForContainerRunning } from './pod-wait.js';
 
-export const DEBUG_NAMESPACE = 'kubedeck-debug';
-const NODE_SHELL_LABEL = 'kubedeck.io/node-shell';
+export const DEBUG_NAMESPACE = 'kubus-debug';
+const NODE_SHELL_LABEL = 'kubus.io/node-shell';
 const NODE_SHELL_IMAGE = 'docker.io/library/busybox:1.36';
 
 /**
@@ -28,7 +28,7 @@ async function ensureDebugNamespace(handle: ClusterHandle): Promise<void> {
       metadata: {
         name: DEBUG_NAMESPACE,
         labels: {
-          'app.kubernetes.io/managed-by': 'kubedeck',
+          'app.kubernetes.io/managed-by': 'kubus',
           'pod-security.kubernetes.io/enforce': 'privileged',
           'pod-security.kubernetes.io/audit': 'privileged',
           'pod-security.kubernetes.io/warn': 'privileged',
@@ -62,7 +62,7 @@ async function gcNodeShellPods(handle: ClusterHandle): Promise<void> {
 export async function createNodeShellPod(handle: ClusterHandle, node: string): Promise<{ namespace: string; pod: string; container: string }> {
   await ensureDebugNamespace(handle);
   void gcNodeShellPods(handle);
-  const name = `kd-node-shell-${nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`;
+  const name = `kubus-node-shell-${nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`;
   await handle.raw.json(resourcePath('', 'v1', 'pods', { namespace: DEBUG_NAMESPACE }), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -72,8 +72,8 @@ export async function createNodeShellPod(handle: ClusterHandle, node: string): P
       metadata: {
         name,
         namespace: DEBUG_NAMESPACE,
-        labels: { [NODE_SHELL_LABEL]: 'true', 'app.kubernetes.io/managed-by': 'kubedeck' },
-        annotations: { 'kubedeck.io/node': node },
+        labels: { [NODE_SHELL_LABEL]: 'true', 'app.kubernetes.io/managed-by': 'kubus' },
+        annotations: { 'kubus.io/node': node },
       },
       spec: {
         nodeName: node,

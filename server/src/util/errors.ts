@@ -1,6 +1,6 @@
 import { ApiException } from '@kubernetes/client-node';
 import type { FastifyReply } from 'fastify';
-import type { ApiErrorBody } from '@kubedeck/shared';
+import type { ApiErrorBody } from '@kubus/shared';
 
 export class HttpProblem extends Error {
   constructor(

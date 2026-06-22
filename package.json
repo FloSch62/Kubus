@@ -1,5 +1,5 @@
 {
-  "name": "kubedeck",
+  "name": "kubus",
   "version": "0.1.2",
   "private": true,
   "description": "Free, open-source Kubernetes GUI — multi-cluster browsing, logs, exec, port-forward, metrics, Helm",
@@ -11,8 +11,8 @@
     "dev": "pnpm -r --parallel --stream dev",
     "build": "pnpm -r build",
     "start": "node server/dist/index.js",
-    "electron": "pnpm build && pnpm --filter @kubedeck/electron start",
-    "dist": "pnpm build && pnpm --filter @kubedeck/electron dist",
+    "electron": "pnpm build && pnpm --filter @kubus/electron start",
+    "dist": "pnpm build && pnpm --filter @kubus/electron dist",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
   },

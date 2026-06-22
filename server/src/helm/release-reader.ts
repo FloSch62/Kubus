@@ -1,5 +1,5 @@
 import zlib from 'node:zlib';
-import type { HelmReleaseDetail, HelmReleaseSummary, HelmRevision, KubeObject } from '@kubedeck/shared';
+import type { HelmReleaseDetail, HelmReleaseSummary, HelmRevision, KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';

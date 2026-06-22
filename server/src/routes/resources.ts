@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import yaml from 'js-yaml';
 import { ApiException, type KubernetesObject } from '@kubernetes/client-node';
-import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunResponse, type ResourceKindInfo, type ValidationFinding } from '@kubedeck/shared';
+import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunResponse, type ResourceKindInfo, type ValidationFinding } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { getPrinterColumns } from '../kube/printer-columns.js';
 import { resourcePath } from '../kube/raw-client.js';
@@ -186,7 +186,7 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
       if (kind.namespaced && !manifest.metadata?.namespace) {
         findings.push({ severity: 'warning', field: 'metadata.namespace', message: 'No namespace set; dry-run used default namespace.' });
       }
-      const query = new URLSearchParams({ dryRun: 'All', fieldManager: 'kubedeck', fieldValidation: 'Strict' });
+      const query = new URLSearchParams({ dryRun: 'All', fieldManager: 'kubus', fieldValidation: 'Strict' });
       const path = resourcePath(kind.group, kind.version, kind.plural, {
         namespace,
         name,

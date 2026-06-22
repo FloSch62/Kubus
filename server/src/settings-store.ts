@@ -17,7 +17,7 @@ export class SettingsStore {
 
   constructor(private log: FastifyBaseLogger) {
     const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-    this.filePath = path.join(configHome, 'kubedeck', 'settings.json');
+    this.filePath = path.join(configHome, 'kubus', 'settings.json');
   }
 
   load(): PersistedSettings {

@@ -11,7 +11,7 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react';
-import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@kubedeck/shared';
+import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@kubus/shared';
 import { useTopologyGraphs, type TopologyFocus } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
 

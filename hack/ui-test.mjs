@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
 
 const [, , token, ctx = 'kind-c9s-demo'] = process.argv;
 const base = 'http://127.0.0.1:3199';
-const shots = '/tmp/kubedeck-shots';
+const shots = '/tmp/kubus-shots';
 import { mkdirSync } from 'node:fs';
 mkdirSync(shots, { recursive: true });
 

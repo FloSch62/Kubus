@@ -1,4 +1,4 @@
-import type { PrinterColumn } from '@kubedeck/shared';
+import type { PrinterColumn } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 
 interface CrdVersion {

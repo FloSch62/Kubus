@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { KubeObject, RolloutRestartRequest, SetImageRequest } from '@kubedeck/shared';
+import type { KubeObject, RolloutRestartRequest, SetImageRequest } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { HttpProblem } from '../util/errors.js';
@@ -156,7 +156,7 @@ export async function rerunJob(handle: ClusterHandle, namespace: string, name: s
         name: jobName,
         namespace,
         labels: Object.keys(labels).length ? labels : undefined,
-        annotations: { ...annotations, 'kubedeck.io/rerun-of': name },
+        annotations: { ...annotations, 'kubus.io/rerun-of': name },
       },
       spec,
     },

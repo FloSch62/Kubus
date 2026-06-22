@@ -19,7 +19,7 @@ import {
   Typography,
 } from '@mui/material';
 import yaml from 'js-yaml';
-import type { KubeconfigImportResponse } from '@kubedeck/shared';
+import type { KubeconfigImportResponse } from '@kubus/shared';
 import { useImportKubeconfig } from '../../api/queries.js';
 import { ApiError } from '../../api/http.js';
 

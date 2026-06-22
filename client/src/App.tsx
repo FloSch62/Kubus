@@ -9,7 +9,7 @@ export default function App() {
   const theme = useMemo(() => buildTheme(mode), [mode]);
   useEffect(() => {
     // Keep the desktop app's native window controls in sync with the theme.
-    window.kubedeckDesktop?.setTitleBarOverlay(titleBarColors(mode));
+    window.kubusDesktop?.setTitleBarOverlay(titleBarColors(mode));
   }, [mode]);
   return (
     <ThemeProvider theme={theme}>

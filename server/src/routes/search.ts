@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { BUILTIN_NAV_GROUPS, groupToPath, type KubeObject, type ResourceKindInfo, type ResourceRef, type SearchResult } from '@kubedeck/shared';
+import { BUILTIN_NAV_GROUPS, groupToPath, type KubeObject, type ResourceKindInfo, type ResourceRef, type SearchResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';

@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { HttpProblem } from '../util/errors.js';

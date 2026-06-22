@@ -3,7 +3,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
-import type { PortForwardInfo } from '@kubedeck/shared';
+import type { PortForwardInfo } from '@kubus/shared';
 import { usePortForwards, useStopPortForward } from '../api/queries.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EmptyState } from '../components/EmptyState.js';

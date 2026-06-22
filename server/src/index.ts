@@ -11,7 +11,7 @@ try {
   process.exit(1);
 }
 
-server.app.log.info(`Kubedeck ready at ${server.url}`);
+server.app.log.info(`Kubus ready at ${server.url}`);
 
 if (config.openBrowser) {
   const { default: open } = await import('open');

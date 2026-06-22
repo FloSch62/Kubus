@@ -1,7 +1,7 @@
 import yaml from 'js-yaml';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubernetesObject } from '@kubernetes/client-node';
-import type { HelmRollbackResult } from '@kubedeck/shared';
+import type { HelmRollbackResult } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';
@@ -54,7 +54,7 @@ async function pathForDoc(handle: ClusterHandle, obj: KubernetesObject): Promise
   return resourcePath(group, version, info.plural, {
     namespace: info.namespaced ? obj.metadata?.namespace : undefined,
     name: obj.metadata?.name,
-    query: new URLSearchParams({ fieldManager: 'kubedeck', force: 'true' }),
+    query: new URLSearchParams({ fieldManager: 'kubus', force: 'true' }),
   });
 }
 

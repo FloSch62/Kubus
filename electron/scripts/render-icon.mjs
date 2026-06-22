@@ -6,7 +6,7 @@ import sharp from 'sharp';
 // Render the app icons from the client SVG: icon.png (1024px) feeds the
 // mac .icns / win .ico generation, icons/<size> the Linux hicolor set.
 const root = path.dirname(fileURLToPath(import.meta.url));
-const svg = path.resolve(root, '../../client/public/kubedeck.svg');
+const svg = path.resolve(root, '../../client/public/kubus.svg');
 const main = path.resolve(root, '../build/icon.png');
 const sizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 

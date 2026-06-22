@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { KubeConfig } from '@kubernetes/client-node';
-import type { KubeconfigImportResponse, KubeconfigSettings } from '@kubedeck/shared';
+import type { KubeconfigImportResponse, KubeconfigSettings } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { mergeKubeconfig, writeKubeconfig } from '../kube/kubeconfig-file.js';

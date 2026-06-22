@@ -11,16 +11,16 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron';
 import fixPath from 'fix-path';
-import { startServer, type RunningServer } from '@kubedeck/server';
+import { startServer, type RunningServer } from '@kubus/server';
 
 // GUI apps on macOS/Linux don't inherit the shell PATH; kubeconfig exec
 // plugins (aws, gke-gcloud-auth-plugin, kubelogin, ...) need it.
 fixPath();
 
 // Without this the Linux WM_CLASS becomes the package.json name
-// ("@kubedeck/electron") and never matches the .desktop StartupWMClass,
+// ("@kubus/electron") and never matches the .desktop StartupWMClass,
 // leaving the window without taskbar/dock icon.
-app.setName('Kubedeck');
+app.setName('Kubus');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isMac = process.platform === 'darwin';
@@ -99,7 +99,7 @@ function createWindow(url: string): void {
     y: state.y,
     minWidth: 800,
     minHeight: 500,
-    title: 'Kubedeck',
+    title: 'Kubus',
     show: false,
     icon: windowIcon(),
     // Frameless look on every platform: the client's TopBar is the titlebar
@@ -129,7 +129,7 @@ function createWindow(url: string): void {
   void mainWindow.loadURL(url);
 }
 
-ipcMain.on('kubedeck:set-titlebar-overlay', (event, options: unknown) => {
+ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
   if (isMac || !mainWindow || event.sender !== mainWindow.webContents) return;
   const { color, symbolColor } = (options ?? {}) as { color?: unknown; symbolColor?: unknown };
   if (typeof color !== 'string' || typeof symbolColor !== 'string') return;
@@ -161,7 +161,7 @@ if (!app.requestSingleInstanceLock()) {
           : path.resolve(__dirname, '../../client/dist'),
       });
     } catch (err) {
-      console.error('failed to start kubedeck server', err);
+      console.error('failed to start kubus server', err);
       app.quit();
       return;
     }

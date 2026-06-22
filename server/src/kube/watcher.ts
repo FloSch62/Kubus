@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { FastifyBaseLogger } from 'fastify';
-import type { KubeObject, WatchEventType, WatchStatusState } from '@kubedeck/shared';
+import type { KubeObject, WatchEventType, WatchStatusState } from '@kubus/shared';
 import { RawClient, resourcePath } from './raw-client.js';
 
 export interface WatcherDelta {

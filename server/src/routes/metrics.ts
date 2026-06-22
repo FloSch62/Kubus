@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { MetricsHistoryResponse, MetricsSnapshot } from '@kubedeck/shared';
+import type { MetricsHistoryResponse, MetricsSnapshot } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { computeOverview } from '../kube/overview.js';
 import { cpuToMilli, memToBytes } from '../kube/quantity.js';

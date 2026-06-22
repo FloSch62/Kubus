@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Spin up two kind clusters with metrics-server, a sample Helm release and
-# intentionally broken workloads for exercising every Kubedeck feature.
+# intentionally broken workloads for exercising every Kubus feature.
 set -euo pipefail
 
 for tool in kind kubectl helm; do
@@ -14,10 +14,10 @@ if [ "$(sysctl -n fs.inotify.max_user_instances)" -lt 512 ]; then
   echo "  Fix: sudo sysctl fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288"
 fi
 
-kind get clusters | grep -q '^kubedeck-a$' || kind create cluster --name kubedeck-a
-kind get clusters | grep -q '^kubedeck-b$' || kind create cluster --name kubedeck-b
+kind get clusters | grep -q '^kubus-a$' || kind create cluster --name kubus-a
+kind get clusters | grep -q '^kubus-b$' || kind create cluster --name kubus-b
 
-CTX_A=kind-kubedeck-a
+CTX_A=kind-kubus-a
 
 # metrics-server (kind needs insecure kubelet TLS)
 kubectl --context "$CTX_A" apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
@@ -32,4 +32,4 @@ helm --kube-context "$CTX_A" upgrade --install podinfo oci://ghcr.io/stefanproda
 kubectl --context "$CTX_A" apply -f "$(dirname "$0")/sample-apps/"
 
 echo
-echo "Done. Contexts: kind-kubedeck-a (full demo), kind-kubedeck-b (empty)."
+echo "Done. Contexts: kind-kubus-a (full demo), kind-kubus-b (empty)."

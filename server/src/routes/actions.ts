@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { FastifyInstance } from 'fastify';
-import { groupFromPath, type CordonRequest, type DebugPodRequest, type DrainRequest, type RerunJobRequest, type RolloutPauseRequest, type RolloutRestartRequest, type RolloutUndoRequest, type ScaleRequest, type SetImageRequest, type StopDebugRequest, type SuspendCronJobRequest, type TriggerCronJobRequest } from '@kubedeck/shared';
+import { groupFromPath, type CordonRequest, type DebugPodRequest, type DrainRequest, type RerunJobRequest, type RolloutPauseRequest, type RolloutRestartRequest, type RolloutUndoRequest, type ScaleRequest, type SetImageRequest, type StopDebugRequest, type SuspendCronJobRequest, type TriggerCronJobRequest } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { drainNode, rerunJob, rolloutRestart, scaleResource, setCordon, setCronJobSuspend, setImage, triggerCronJob, type DrainProgress } from '../kube/actions.js';
 import { addDebugContainer, stopDebugContainer } from '../kube/debug.js';

@@ -17,7 +17,7 @@ import {
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import { apiFetchRaw } from '../api/http.js';
 import { podContainerNames } from '../kube-display.js';
 

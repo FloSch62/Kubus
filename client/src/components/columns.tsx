@@ -1,7 +1,7 @@
 import type { GridColDef } from '@mui/x-data-grid';
 import { Tooltip } from '@mui/material';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
-import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubedeck/shared';
+import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell } from './AgeCell.js';
 import { StatusChip } from './StatusChip.js';

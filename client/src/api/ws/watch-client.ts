@@ -1,4 +1,4 @@
-import type { KubeObject, WatchEventType, WatchServerMessage, WatchStatusState, WatchSubMessage } from '@kubedeck/shared';
+import type { KubeObject, WatchEventType, WatchServerMessage, WatchStatusState, WatchSubMessage } from '@kubus/shared';
 import { wsUrl } from '../http.js';
 
 export interface WatchHandlers {

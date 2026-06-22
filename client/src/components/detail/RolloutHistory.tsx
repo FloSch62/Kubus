@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Chip, Snackbar, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import UndoIcon from '@mui/icons-material/Undo';
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 import { useRolloutHistory, useRolloutUndo } from '../../api/queries.js';
 import { useIsProtected } from '../../state/clusters.js';
 import { AgeCell } from '../AgeCell.js';

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { KubeObject, ResourceRef } from '@kubedeck/shared';
+import type { KubeObject, ResourceRef } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,

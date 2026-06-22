@@ -57,7 +57,7 @@ export function TopBar() {
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 1.5 }}>
             <Box
               component="img"
-              src="/kubedeck.svg"
+              src="/kubus.svg"
               alt=""
               aria-hidden
               sx={{
@@ -68,7 +68,7 @@ export function TopBar() {
               }}
             />
             <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 0 }}>
-              Kubedeck
+              Kubus
             </Typography>
           </Stack>
           <ClusterSwitcher />

@@ -1,6 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, SecretTlsResponse, TlsCertInfo } from '@kubedeck/shared';
+import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, SecretTlsResponse, TlsCertInfo } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { podContainers } from '../kube/actions.js';

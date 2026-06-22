@@ -109,7 +109,7 @@ export function writeKubeconfig(targetPath: string, content: string): string | n
     } catch {
       /* keep default */
     }
-    backupPath = `${targetPath}.kubedeck.bak`;
+    backupPath = `${targetPath}.kubus.bak`;
     fs.copyFileSync(targetPath, backupPath);
   } else {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });

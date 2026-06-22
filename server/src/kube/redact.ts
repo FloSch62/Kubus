@@ -1,4 +1,4 @@
-import type { KubeObject } from '@kubedeck/shared';
+import type { KubeObject } from '@kubus/shared';
 
 export const REDACTED = '••••••••';
 

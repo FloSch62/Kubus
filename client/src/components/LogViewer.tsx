@@ -11,7 +11,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import type { LogServerMessage } from '@kubedeck/shared';
+import type { LogServerMessage } from '@kubus/shared';
 import { wsUrl } from '../api/http.js';
 import { useDockStore, type LogsTab } from '../state/dock.js';
 import { useLogPrefsStore, type TsMode } from '../state/log-prefs.js';

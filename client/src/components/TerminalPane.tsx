@@ -3,7 +3,7 @@ import { Box, useTheme } from '@mui/material';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import type { ExecServerControl } from '@kubedeck/shared';
+import type { ExecServerControl } from '@kubus/shared';
 import { wsUrl } from '../api/http.js';
 import type { NodeShellTab, TerminalTab } from '../state/dock.js';
 import { useUiPrefsStore } from '../state/prefs.js';

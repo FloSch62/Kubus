@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { GraphEdge, GraphNode, GraphNodeStatus, KubeObject, RelationshipGraph, ResourceKindInfo, ResourceRef } from '@kubedeck/shared';
+import type { GraphEdge, GraphNode, GraphNodeStatus, KubeObject, RelationshipGraph, ResourceKindInfo, ResourceRef } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';

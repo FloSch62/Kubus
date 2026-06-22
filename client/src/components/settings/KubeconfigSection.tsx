@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Box, Button, Chip, CircularProgress, Stack, TextField, Typography } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import type { KubeconfigSource } from '@kubedeck/shared';
+import type { KubeconfigSource } from '@kubus/shared';
 import { useKubeconfigSettings, useSetKubeconfig } from '../../api/queries.js';
 import { AddClusterDialog } from './AddClusterDialog.js';
 
@@ -68,7 +68,7 @@ export function KubeconfigSection() {
           placeholder="~/.kube/other-config"
           value={pathInput}
           onChange={(e) => setPathInput(e.target.value)}
-          helperText="Point kubedeck at a different kubeconfig file; persists across restarts"
+          helperText="Point kubus at a different kubeconfig file; persists across restarts"
         />
         <Button variant="contained" disabled={!dirty || !pathInput.trim() || setKubeconfig.isPending} onClick={() => apply(pathInput.trim())}>
           Apply

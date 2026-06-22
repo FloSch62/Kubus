@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import type { WebSocket } from 'ws';
-import { execClientControlSchema, type ExecServerControl } from '@kubedeck/shared';
+import { execClientControlSchema, type ExecServerControl } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 
 export interface ExecBridgeOptions {

@@ -1,4 +1,4 @@
-import type { KubeObject, PodEnvResponse, PodEnvVar } from '@kubedeck/shared';
+import type { KubeObject, PodEnvResponse, PodEnvVar } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { REDACTED } from './redact.js';

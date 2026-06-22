@@ -33,7 +33,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       protectByDefault: false,
       set: (patch) => set(patch),
     }),
-    { name: 'kubedeck-prefs' },
+    { name: 'kubus-prefs' },
   ),
 );
 

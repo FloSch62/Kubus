@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { nanoid } from 'nanoid';
 import type { FastifyBaseLogger } from 'fastify';
-import type { PortForwardInfo, PortForwardRequest } from '@kubedeck/shared';
+import type { PortForwardInfo, PortForwardRequest } from '@kubus/shared';
 import type { ClusterManager } from './cluster-manager.js';
 import { HttpProblem } from '../util/errors.js';
 

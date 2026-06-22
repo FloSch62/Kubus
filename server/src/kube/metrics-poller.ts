@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { Metrics } from '@kubernetes/client-node';
-import type { MetricsSample, MetricsSnapshotEntry } from '@kubedeck/shared';
+import type { MetricsSample, MetricsSnapshotEntry } from '@kubus/shared';
 import { cpuToMilli, memToBytes } from './quantity.js';
 
 const POLL_MS = 20_000;
