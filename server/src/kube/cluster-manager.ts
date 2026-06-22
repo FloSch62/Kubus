@@ -22,7 +22,20 @@ import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
+import { applyEnvProxy } from './connection.js';
+import { patchCluster, writeKubeconfig } from './kubeconfig-file.js';
 import { HttpProblem } from '../util/errors.js';
+import type { ClusterAuthType } from '@kubus/shared';
+
+function authTypeOf(user: ReturnType<KubeConfig['getUser']>): ClusterAuthType {
+  if (!user) return 'none';
+  if (user.exec) return 'exec';
+  if (user.authProvider) return 'auth-provider';
+  if (user.certData || user.certFile) return 'client-cert';
+  if (user.token) return 'token';
+  if (user.username) return 'basic';
+  return 'none';
+}
 
 /** Everything the server holds for one connected kubeconfig context. */
 export class ClusterHandle {
@@ -123,6 +136,8 @@ export class ClusterManager extends EventEmitter {
   private kc = new KubeConfig();
   private handles = new Map<string, ClusterHandle>();
   private fsWatchers: fs.FSWatcher[] = [];
+  /** Cluster names whose proxy-url was injected from env vars (not the kubeconfig). */
+  private envProxyClusters = new Set<string>();
 
   constructor(
     private log: FastifyBaseLogger,
@@ -143,6 +158,8 @@ export class ClusterManager extends EventEmitter {
     } catch (err) {
       this.log.warn({ err: String(err) }, 'failed to load kubeconfig');
     }
+    // Bridge standard proxy env vars (client-node only reads kubeconfig proxy-url).
+    this.envProxyClusters = applyEnvProxy(this.kc);
   }
 
   private kubeconfigPaths(): string[] {
@@ -210,6 +227,7 @@ export class ClusterManager extends EventEmitter {
     return this.kc.getContexts().map((c) => {
       const handle = this.handles.get(c.name);
       const cluster = this.kc.getCluster(c.cluster);
+      const user = this.kc.getUser(c.user);
       return {
         name: c.name,
         cluster: c.cluster,
@@ -221,8 +239,78 @@ export class ClusterManager extends EventEmitter {
         healthMessage: handle?.healthMessage,
         active: !!handle,
         kubernetesVersion: handle?.kubernetesVersion,
+        proxyUrl: cluster?.proxyUrl,
+        proxyFromEnv: this.envProxyClusters.has(c.cluster) || undefined,
+        tlsServerName: cluster?.tlsServerName,
+        skipTlsVerify: cluster?.skipTLSVerify || undefined,
+        caPresent: !!(cluster?.caData || cluster?.caFile) || undefined,
+        authType: authTypeOf(user),
       };
     });
+  }
+
+  /** Decoded CA certificate PEM for a context's cluster, or null if none. */
+  getClusterCa(contextName: string): string | null {
+    const ctxObj = this.kc.getContexts().find((c) => c.name === contextName);
+    if (!ctxObj) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    const cluster = this.kc.getCluster(ctxObj.cluster);
+    if (!cluster) return null;
+    if (cluster.caData) return Buffer.from(cluster.caData, 'base64').toString('utf8');
+    if (cluster.caFile) {
+      try {
+        return fs.readFileSync(cluster.caFile, 'utf8');
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /** One-shot connectivity probe without persisting a handle (for "Test connection"). */
+  async test(contextName: string): Promise<{ health: 'connected' | 'error'; healthMessage?: string; kubernetesVersion?: string }> {
+    if (!this.kc.getContexts().some((c) => c.name === contextName)) {
+      throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    }
+    const kc = new KubeConfig();
+    kc.loadFromString(this.kc.exportConfig());
+    kc.setCurrentContext(contextName);
+    try {
+      const info = await kc.makeApiClient(VersionApi).getCode();
+      return { health: 'connected', kubernetesVersion: info.gitVersion };
+    } catch (err) {
+      return { health: 'error', healthMessage: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Full edit of a context's cluster + user, persisted into the kubeconfig file
+   * that defines it (atomic write + backup), then reload so the change takes
+   * effect on the next connect.
+   */
+  editCluster(contextName: string, patch: Parameters<typeof patchCluster>[2]): void {
+    const ctxObj = this.kc.getContexts().find((c) => c.name === contextName);
+    if (!ctxObj) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    const file = this.findClusterFile(ctxObj.cluster);
+    if (!file) throw new HttpProblem(400, `could not find a kubeconfig file defining cluster "${ctxObj.cluster}"`, 'BadRequest');
+    const patched = patchCluster(fs.readFileSync(file, 'utf8'), contextName, patch);
+    writeKubeconfig(file, patched);
+    // Drop any active handle so it reconnects with the new settings.
+    this.disconnect(contextName);
+    this.reload();
+  }
+
+  /** Locate the kubeconfig file (among the watched paths) that defines a cluster. */
+  private findClusterFile(clusterName: string): string | null {
+    for (const p of this.kubeconfigPaths()) {
+      try {
+        const kc = new KubeConfig();
+        kc.loadFromFile(p);
+        if (kc.getClusters().some((c) => c.name === clusterName)) return p;
+      } catch {
+        // unreadable / invalid file — skip
+      }
+    }
+    return null;
   }
 
   /** Get an active handle or throw 400/404. */

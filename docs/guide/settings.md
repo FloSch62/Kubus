@@ -15,13 +15,21 @@ in your browser/app profile — there's no server-side config file to manage.
 
 ## Kubeconfig
 
-Manage the kubeconfig entries Kubus knows about. The contexts here feed the
-[cluster switcher](clusters.md).
+Shows which kubeconfig file(s) Kubus is reading and where that choice came from
+(`--kubeconfig` flag, `$KUBECONFIG`, a saved override, or the default). Point Kubus at a
+different file with **Override path**.
 
 ## Clusters
 
-Mark clusters as **protected**, or set **protect by default** so every cluster is guarded
-until you say otherwise. See [Production guard](production-guard.md).
+The home for managing the clusters in your kubeconfig:
+
+- **Add cluster** — paste or fill in a new cluster.
+- **Edit** (:material-pencil:) — change a cluster's API server, credentials, TLS, and
+  proxy settings. See [Adding & editing clusters](clusters.md#adding-editing-clusters) and
+  [Reaching clusters behind a proxy or bastion](clusters.md#reaching-clusters-behind-a-proxy-or-bastion).
+- **Protect** (:material-shield:) — mark a cluster as protected, or set **protect by
+  default** so every cluster is guarded until you say otherwise. See
+  [Production guard](production-guard.md).
 
 ## Appearance
 

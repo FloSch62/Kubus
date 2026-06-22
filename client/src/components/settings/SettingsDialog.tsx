@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -10,6 +12,7 @@ import {
   FormControlLabel,
   IconButton,
   InputLabel,
+  Link,
   List,
   ListItem,
   ListItemText,
@@ -28,7 +31,12 @@ import {
 } from '@mui/material';
 import ShieldIcon from '@mui/icons-material/Shield';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
-import { useContexts } from '../../api/queries.js';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import AddIcon from '@mui/icons-material/Add';
+import type { ContextInfo } from '@kubus/shared';
+import { useContexts, useKubeconfigSettings } from '../../api/queries.js';
+import { AddClusterDialog } from './AddClusterDialog.js';
+import { EditClusterDialog } from './EditClusterDialog.js';
 import { useClustersStore } from '../../state/clusters.js';
 import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
 import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type TableDensity } from '../../state/prefs.js';
@@ -45,12 +53,71 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** Connection errors that usually mean the API server isn't directly reachable. */
+function looksLikeNetworkError(msg?: string): boolean {
+  if (!msg) return false;
+  return /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|timed?\s*out|socket hang up|network|getaddrinfo|tunneling socket|certificate|self.?signed/i.test(
+    msg,
+  );
+}
+
+function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isProtected: boolean; onToggleProtected: () => void }) {
+  const [editOpen, setEditOpen] = useState(false);
+  const networkHint = c.health === 'error' && looksLikeNetworkError(c.healthMessage);
+
+  return (
+    <Box sx={{ borderBottom: 1, borderColor: 'divider', py: 0.25 }}>
+      <ListItem
+        disableGutters
+        secondaryAction={
+          <Stack direction="row" spacing={0.5}>
+            <Tooltip title="Edit cluster (server, credentials, proxy, certificate)">
+              <IconButton size="small" onClick={() => setEditOpen(true)}>
+                <EditOutlinedIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
+              <IconButton size="small" onClick={onToggleProtected}>
+                {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 18 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 18 }} />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        }
+      >
+        <ListItemText
+          primary={
+            <Stack direction="row" spacing={0.75} alignItems="center" component="span">
+              <span>{c.name}</span>
+              {c.proxyUrl && <Chip size="small" label={c.proxyFromEnv ? 'env proxy' : 'proxy'} sx={{ height: 18, fontSize: 10 }} />}
+              {c.skipTlsVerify && <Chip size="small" color="warning" variant="outlined" label="insecure" sx={{ height: 18, fontSize: 10 }} />}
+            </Stack>
+          }
+          secondary={`${c.server ?? c.cluster}${c.kubernetesVersion ? ` · ${c.kubernetesVersion}` : ''}`}
+          slotProps={{ secondary: { sx: { fontSize: 12 } } }}
+        />
+      </ListItem>
+      {networkHint && (
+        <Alert severity="warning" sx={{ py: 0, mb: 0.5 }}>
+          Can&apos;t reach the API server. Only reachable through a bastion or proxy?{' '}
+          <Link component="button" type="button" onClick={() => setEditOpen(true)} sx={{ verticalAlign: 'baseline' }}>
+            Set up a proxy
+          </Link>
+          .
+        </Alert>
+      )}
+      {editOpen && <EditClusterDialog context={c} onClose={() => setEditOpen(false)} />}
+    </Box>
+  );
+}
+
 function ClustersSection() {
   const { data: contexts } = useContexts();
+  const { data: kubeconfig } = useKubeconfigSettings();
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const setContextSetting = useClustersStore((s) => s.setContextSetting);
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
   const setPrefs = useUiPrefsStore((s) => s.set);
+  const [addOpen, setAddOpen] = useState(false);
 
   return (
     <Stack spacing={2}>
@@ -65,37 +132,33 @@ function ClustersSection() {
           </Box>
         }
       />
-      <Section title="Clusters">
+      <Box>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+          <Typography variant="subtitle2">Clusters</Typography>
+          <Button size="small" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
+            Add cluster
+          </Button>
+        </Stack>
         <List dense disablePadding>
           {(contexts ?? []).map((c) => {
             const isProtected = contextSettings[c.name]?.protected ?? protectByDefault;
             return (
-              <ListItem
+              <ClusterRow
                 key={c.name}
-                disableGutters
-                secondaryAction={
-                  <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
-                    <IconButton size="small" onClick={() => setContextSetting(c.name, { protected: !isProtected })}>
-                      {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 18 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 18 }} />}
-                    </IconButton>
-                  </Tooltip>
-                }
-              >
-                <ListItemText
-                  primary={c.name}
-                  secondary={`${c.server ?? c.cluster}${c.kubernetesVersion ? ` · ${c.kubernetesVersion}` : ''}`}
-                  slotProps={{ secondary: { sx: { fontSize: 12 } } }}
-                />
-              </ListItem>
+                c={c}
+                isProtected={isProtected}
+                onToggleProtected={() => setContextSetting(c.name, { protected: !isProtected })}
+              />
             );
           })}
           {(contexts ?? []).length === 0 && (
             <Typography variant="body2" color="text.secondary">
-              No contexts found in kubeconfig.
+              No clusters yet. Use <strong>Add cluster</strong> to paste or enter one.
             </Typography>
           )}
         </List>
-      </Section>
+      </Box>
+      {addOpen && <AddClusterDialog primaryPath={kubeconfig?.primaryPath ?? null} onClose={() => setAddOpen(false)} />}
     </Stack>
   );
 }

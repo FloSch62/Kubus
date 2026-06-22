@@ -1,9 +1,72 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { TestConnectionResponse } from '@kubus/shared';
 import type { AppContext } from '../app.js';
-import { sendError } from '../util/errors.js';
+import { HttpProblem, sendError } from '../util/errors.js';
+
+const nullableString = z.string().nullable().or(z.literal(''));
+const editClusterSchema = z.object({
+  server: z.string().trim().regex(/^https?:\/\//i, 'API server URL must start with http:// or https://'),
+  skipTlsVerify: z.boolean(),
+  caPem: nullableString,
+  proxyUrl: z
+    .string()
+    .trim()
+    .regex(/^(socks5?|socks5h|https?):\/\//i, 'proxy URL must start with socks5://, socks5h://, http:// or https://')
+    .nullable()
+    .or(z.literal('')),
+  tlsServerName: nullableString,
+  auth: z.discriminatedUnion('method', [
+    z.object({ method: z.literal('keep') }),
+    z.object({ method: z.literal('token'), token: z.string().min(1, 'token is required') }),
+    z.object({
+      method: z.literal('client-cert'),
+      clientCertPem: z.string().min(1, 'client certificate is required'),
+      clientKeyPem: z.string().min(1, 'client key is required'),
+    }),
+  ]),
+});
 
 export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/api/contexts', async () => ctx.clusters.listContexts());
+
+  app.post<{ Params: { ctx: string } }>('/api/contexts/:ctx/test', async (req, reply): Promise<TestConnectionResponse | undefined> => {
+    try {
+      return await ctx.clusters.test(req.params.ctx);
+    } catch (err) {
+      sendError(reply, err);
+      return undefined;
+    }
+  });
+
+  app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/ca', async (req, reply): Promise<{ pem: string | null } | undefined> => {
+    try {
+      return { pem: ctx.clusters.getClusterCa(req.params.ctx) };
+    } catch (err) {
+      sendError(reply, err);
+      return undefined;
+    }
+  });
+
+  app.put<{ Params: { ctx: string } }>('/api/contexts/:ctx/cluster', async (req, reply) => {
+    try {
+      const parsed = editClusterSchema.safeParse(req.body);
+      if (!parsed.success) throw new HttpProblem(400, parsed.error.issues[0]?.message ?? 'invalid body', 'BadRequest');
+      const d = parsed.data;
+      ctx.clusters.editCluster(req.params.ctx, {
+        server: d.server,
+        skipTlsVerify: d.skipTlsVerify,
+        caPem: d.caPem || null,
+        proxyUrl: d.proxyUrl || null,
+        tlsServerName: d.tlsServerName || null,
+        auth: d.auth,
+      });
+      return ctx.clusters.listContexts();
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
 
   app.post<{ Params: { ctx: string } }>('/api/contexts/:ctx/connect', async (req, reply) => {
     try {

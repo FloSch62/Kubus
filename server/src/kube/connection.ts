@@ -1,0 +1,55 @@
+import type { KubeConfig } from '@kubernetes/client-node';
+
+/**
+ * Standard proxy env vars are honored by kubectl-adjacent tooling but NOT by
+ * @kubernetes/client-node (it only reads `proxy-url` from the kubeconfig). We
+ * bridge that gap: for clusters that don't already declare a proxy, resolve one
+ * from the environment so users behind a SOCKS/HTTP proxy get zero-config
+ * connectivity. `proxy-url` in the kubeconfig always wins.
+ */
+
+function isNoProxy(host: string): boolean {
+  const raw = process.env.NO_PROXY ?? process.env.no_proxy;
+  if (!raw) return false;
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (entry === '*') return true;
+    const pattern = entry.startsWith('.') ? entry.slice(1) : entry;
+    if (host === pattern || host.endsWith(`.${pattern}`)) return true;
+  }
+  return false;
+}
+
+/** Resolve a proxy URL for a server URL from env vars, honoring NO_PROXY. */
+export function envProxyForServer(server: string): string | undefined {
+  let host: string;
+  try {
+    host = new URL(server).hostname;
+  } catch {
+    return undefined;
+  }
+  if (isNoProxy(host)) return undefined;
+  const env = process.env;
+  const pick = (name: string) => env[name] || env[name.toLowerCase()] || undefined;
+  // Scheme-specific var first, then ALL_PROXY which applies to any scheme.
+  const schemeProxy = server.startsWith('https') ? pick('HTTPS_PROXY') : pick('HTTP_PROXY');
+  return schemeProxy ?? pick('ALL_PROXY');
+}
+
+/**
+ * Inject env-derived proxies onto clusters lacking an explicit `proxy-url`.
+ * Mutates `kc.clusters` in place; the new field is preserved by exportConfig()
+ * so per-context handle clones inherit it. Returns the set of cluster names that
+ * received an env proxy (so the UI can distinguish env vs kubeconfig proxies).
+ */
+export function applyEnvProxy(kc: KubeConfig): Set<string> {
+  const fromEnv = new Set<string>();
+  if (!kc.clusters?.length) return fromEnv;
+  kc.clusters = kc.clusters.map((c) => {
+    if (c.proxyUrl) return c;
+    const proxyUrl = envProxyForServer(c.server);
+    if (!proxyUrl) return c;
+    fromEnv.add(c.name);
+    return { ...c, proxyUrl };
+  });
+  return fromEnv;
+}

@@ -96,6 +96,72 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   return { merged: yaml.dump(existing, { lineWidth: -1 }), added, skipped, conflicts };
 }
 
+export interface ClusterEditPatch {
+  server: string;
+  skipTlsVerify: boolean;
+  caPem: string | null;
+  proxyUrl: string | null;
+  tlsServerName: string | null;
+  auth: { method: 'keep' } | { method: 'token'; token: string } | { method: 'client-cert'; clientCertPem: string; clientKeyPem: string };
+}
+
+/**
+ * Edit an existing context's cluster + user in place: update server/TLS/proxy
+ * and optionally CA and credentials. Untouched fields (and the user's auth when
+ * `auth.method === 'keep'`, e.g. exec/auth-provider plugins) are preserved, as
+ * is the file's overall structure. Returns the new YAML.
+ */
+export function patchCluster(existingYaml: string, contextName: string, patch: ClusterEditPatch): string {
+  const doc = (yaml.load(existingYaml) ?? {}) as KubeconfigDoc;
+  const ctxEntry = asEntries(doc.contexts).find((e) => e.name === contextName);
+  if (!ctxEntry) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+  const ctxBody = (ctxEntry.context ?? {}) as { cluster?: string; user?: string };
+
+  const clusterEntry = asEntries(doc.clusters).find((e) => e.name === ctxBody.cluster);
+  if (!clusterEntry) throw new HttpProblem(404, `cluster "${ctxBody.cluster}" not found in kubeconfig`, 'NotFound');
+  const cluster = (clusterEntry.cluster && typeof clusterEntry.cluster === 'object' ? clusterEntry.cluster : (clusterEntry.cluster = {})) as Record<
+    string,
+    unknown
+  >;
+  const setString = (obj: Record<string, unknown>, key: string, value: string | null) => {
+    if (value === null || value.trim() === '') delete obj[key];
+    else obj[key] = value.trim();
+  };
+
+  cluster.server = patch.server.trim();
+  setString(cluster, 'proxy-url', patch.proxyUrl);
+  setString(cluster, 'tls-server-name', patch.tlsServerName);
+  if (patch.skipTlsVerify) {
+    cluster['insecure-skip-tls-verify'] = true;
+    delete cluster['certificate-authority'];
+    delete cluster['certificate-authority-data'];
+  } else {
+    delete cluster['insecure-skip-tls-verify'];
+    if (patch.caPem && patch.caPem.trim()) {
+      cluster['certificate-authority-data'] = Buffer.from(`${patch.caPem.trim()}\n`).toString('base64');
+      delete cluster['certificate-authority'];
+    }
+  }
+
+  if (patch.auth.method !== 'keep') {
+    const userEntry = asEntries(doc.users).find((e) => e.name === ctxBody.user);
+    if (!userEntry) throw new HttpProblem(400, `user "${ctxBody.user}" is not in this file, so credentials can't be edited here`, 'BadRequest');
+    const user = (userEntry.user && typeof userEntry.user === 'object' ? userEntry.user : (userEntry.user = {})) as Record<string, unknown>;
+    // Switching auth method makes the chosen credentials authoritative.
+    for (const k of ['token', 'client-certificate', 'client-certificate-data', 'client-key', 'client-key-data', 'exec', 'auth-provider', 'username', 'password']) {
+      delete user[k];
+    }
+    if (patch.auth.method === 'token') {
+      user.token = patch.auth.token.trim();
+    } else {
+      user['client-certificate-data'] = Buffer.from(`${patch.auth.clientCertPem.trim()}\n`).toString('base64');
+      user['client-key-data'] = Buffer.from(`${patch.auth.clientKeyPem.trim()}\n`).toString('base64');
+    }
+  }
+
+  return yaml.dump(doc, { lineWidth: -1 });
+}
+
 /**
  * Write the merged kubeconfig: rolling backup of the previous file, then an
  * atomic tmp+rename write. Returns the backup path (null if nothing existed).
