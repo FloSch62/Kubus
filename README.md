@@ -4,6 +4,8 @@
 
 Connect to all your clusters at once, browse and edit every resource (CRDs included), stream aggregated logs, open shells into containers, forward ports, watch metrics, and inspect Helm releases — all from one polished web UI that runs entirely on your machine.
 
+📖 **[Read the documentation →](https://flosch62.github.io/Kubus/)** — install guides, a full feature tour with screenshots, and reference.
+
 ![Overview dashboard — cluster health at a glance](docs/screenshot-overview.png)
 
 ![Pods list with live status](docs/screenshot-pods.png)

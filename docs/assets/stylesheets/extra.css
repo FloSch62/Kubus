@@ -1,0 +1,83 @@
+/* Kubus brand tweaks on top of the Material/Zensical theme */
+
+:root {
+  --md-primary-fg-color:        #0d9488; /* teal 600 */
+  --md-primary-fg-color--light: #14b8a6;
+  --md-primary-fg-color--dark:  #0f766e;
+  --md-accent-fg-color:         #06b6d4; /* cyan 500 */
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #14b8a6;
+  --md-accent-fg-color:         #22d3ee;
+  --md-hue: 210;
+}
+
+/* Screenshots: subtle frame so they read as UI captures, not page chrome */
+.md-typeset img.shadow,
+.md-typeset figure img {
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+[data-md-color-scheme="slate"] .md-typeset img.shadow,
+[data-md-color-scheme="slate"] .md-typeset figure img {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.md-typeset figure figcaption {
+  margin-top: 0.4rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.78rem;
+}
+
+/* Hero block on the landing page */
+.kubus-hero {
+  text-align: center;
+  padding: 1.2rem 0 0.4rem;
+}
+.kubus-hero h1 {
+  font-weight: 800;
+  font-size: 2.6rem;
+  margin: 0.2rem 0 0.4rem;
+  letter-spacing: -0.02em;
+}
+
+/* Use the app logo in place of the old helm-wheel glyph in the hero title */
+.kubus-hero h1 .kubus-hero-logo {
+  height: 1.15em;
+  width: auto;
+  vertical-align: -0.18em;
+  margin-right: 0.2em;
+}
+.kubus-hero p.tagline {
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+  max-width: 42rem;
+  margin: 0 auto 1.2rem;
+}
+
+/* Feature grid (uses Material's grid cards) */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > ol > li {
+  border-radius: 0.6rem;
+  border-color: var(--md-default-fg-color--lighter);
+  transition: border-color 125ms ease, box-shadow 125ms ease;
+}
+
+/* The default card border is nearly invisible in light mode — darken it. */
+[data-md-color-scheme="default"] .md-typeset .grid.cards > ul > li,
+[data-md-color-scheme="default"] .md-typeset .grid.cards > ol > li {
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > ol > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 6px 18px rgba(0, 0, 0, 0.07);
+}
+
+/* Keyboard keys a touch tighter */
+.md-typeset kbd {
+  font-size: 0.85em;
+}

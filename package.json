@@ -14,7 +14,9 @@
     "electron": "pnpm build && pnpm --filter @kubus/electron start",
     "dist": "pnpm build && pnpm --filter @kubus/electron dist",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "serve-docs": "uvx --native-tls zensical serve --open",
+    "build-docs": "uvx --native-tls zensical build --clean"
   },
   "devDependencies": {
     "playwright-core": "^1.60.0",
