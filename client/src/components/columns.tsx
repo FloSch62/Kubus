@@ -580,6 +580,7 @@ function isDaemonSetPod(pod: KubeObject): boolean {
 }
 
 interface ContainerWithRequests {
+  restartPolicy?: string;
   resources?: { requests?: Record<string, string> };
 }
 
@@ -593,14 +594,22 @@ function podRequestTotals(pod: KubeObject): { cpuMilli: number; memoryBytes: num
     | undefined;
   const containers = spec?.containers ?? [];
   const initContainers = spec?.initContainers ?? [];
+  const restartableInitContainers = initContainers.filter(isRestartableInitContainer);
+  const regularInitContainers = initContainers.filter((c) => !isRestartableInitContainer(c));
   const appCpu = containers.reduce((sum, c) => sum + parseCpuRequest(c), 0);
   const appMemory = containers.reduce((sum, c) => sum + parseMemoryRequest(c), 0);
-  const initCpu = initContainers.reduce((max, c) => Math.max(max, parseCpuRequest(c)), 0);
-  const initMemory = initContainers.reduce((max, c) => Math.max(max, parseMemoryRequest(c)), 0);
+  const sidecarCpu = restartableInitContainers.reduce((sum, c) => sum + parseCpuRequest(c), 0);
+  const sidecarMemory = restartableInitContainers.reduce((sum, c) => sum + parseMemoryRequest(c), 0);
+  const initCpu = regularInitContainers.reduce((max, c) => Math.max(max, parseCpuRequest(c)), 0);
+  const initMemory = regularInitContainers.reduce((max, c) => Math.max(max, parseMemoryRequest(c)), 0);
   return {
-    cpuMilli: Math.max(appCpu, initCpu) + Math.round(parseQuantity(spec?.overhead?.cpu) * 1000),
-    memoryBytes: Math.max(appMemory, initMemory) + Math.round(parseQuantity(spec?.overhead?.memory)),
+    cpuMilli: sidecarCpu + Math.max(appCpu, initCpu) + Math.round(parseQuantity(spec?.overhead?.cpu) * 1000),
+    memoryBytes: sidecarMemory + Math.max(appMemory, initMemory) + Math.round(parseQuantity(spec?.overhead?.memory)),
   };
+}
+
+function isRestartableInitContainer(container: ContainerWithRequests): boolean {
+  return container.restartPolicy === 'Always';
 }
 
 function parseCpuRequest(container: ContainerWithRequests): number {

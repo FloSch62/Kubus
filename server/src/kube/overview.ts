@@ -28,14 +28,16 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       eventsWatcher.watcher.ready(),
       nodesWatcher.watcher.ready(),
       namespacesWatcher.watcher.ready(),
-      pvsWatcher.watcher.ready(),
-      crdsWatcher.watcher.ready(),
+    ]);
+    const [persistentVolumesResult, crdsResult] = await Promise.all([
+      optionalItems(pvsWatcher.watcher),
+      optionalItems(crdsWatcher.watcher),
     ]);
     const pods = podsWatcher.watcher.items();
     const deployments = deploysWatcher.watcher.items();
     const events = eventsWatcher.watcher.items();
-    const persistentVolumes = pvsWatcher.watcher.items();
-    const crds = crdsWatcher.watcher.items();
+    const persistentVolumes = persistentVolumesResult.items;
+    const crds = crdsResult.items;
 
     const overview: ClusterOverview = {
       counts: {
@@ -46,8 +48,10 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
         deployments: deployments.length,
         persistentVolumes: persistentVolumes.length,
         persistentVolumesBound: persistentVolumes.filter((pv) => (pv.status as { phase?: string } | undefined)?.phase === 'Bound').length,
+        persistentVolumesUnavailable: persistentVolumesResult.unavailable,
         crds: crds.length,
         crdsEstablished: crds.filter(isEstablishedCrd).length,
+        crdsUnavailable: crdsResult.unavailable,
       },
       failingPods: [],
       unavailableWorkloads: [],
@@ -175,4 +179,26 @@ function isRecentWarning(e: KubeObject, now: number): boolean {
 function isEstablishedCrd(crd: KubeObject): boolean {
   const conditions = (crd.status as { conditions?: Array<{ type?: string; status?: string }> } | undefined)?.conditions ?? [];
   return conditions.some((c) => c.type === 'Established' && c.status === 'True');
+}
+
+async function optionalItems(watcher: {
+  ready(): Promise<void>;
+  items(): KubeObject[];
+  currentState(): string;
+}): Promise<{ items: KubeObject[]; unavailable: boolean }> {
+  try {
+    await watcher.ready();
+    return { items: watcher.items(), unavailable: watcher.currentState() === 'unavailable' };
+  } catch (err) {
+    if (isOptionalWatchUnavailable(err)) return { items: [], unavailable: true };
+    throw err;
+  }
+}
+
+function isOptionalWatchUnavailable(err: unknown): boolean {
+  const code =
+    (err as { code?: number })?.code ??
+    (err as { statusCode?: number })?.statusCode ??
+    ((err as { body?: { code?: unknown } })?.body?.code as number | undefined);
+  return code === 403 || code === 404;
 }

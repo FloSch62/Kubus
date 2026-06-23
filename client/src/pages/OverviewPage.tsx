@@ -76,17 +76,23 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
             <StatCard label="Deployments" value={data.counts.deployments} icon={<RocketLaunchOutlinedIcon />} onClick={() => navigate('/r/apps/v1/deployments')} />
             <StatCard
               label="Persistent Volumes"
-              value={data.counts.persistentVolumesBound}
-              sub={data.counts.persistentVolumes === data.counts.persistentVolumesBound ? 'bound' : `of ${data.counts.persistentVolumes} bound`}
-              warn={data.counts.persistentVolumesBound < data.counts.persistentVolumes}
+              value={data.counts.persistentVolumesUnavailable ? '-' : data.counts.persistentVolumesBound}
+              sub={
+                data.counts.persistentVolumesUnavailable
+                  ? 'unavailable'
+                  : data.counts.persistentVolumes === data.counts.persistentVolumesBound
+                    ? 'bound'
+                    : `of ${data.counts.persistentVolumes} bound`
+              }
+              warn={!data.counts.persistentVolumesUnavailable && data.counts.persistentVolumesBound < data.counts.persistentVolumes}
               icon={<StorageOutlinedIcon />}
               onClick={() => navigate('/r/core/v1/persistentvolumes')}
             />
             <StatCard
               label="CRDs"
-              value={data.counts.crdsEstablished}
-              sub={data.counts.crds === data.counts.crdsEstablished ? 'active' : `of ${data.counts.crds} active`}
-              warn={data.counts.crdsEstablished < data.counts.crds}
+              value={data.counts.crdsUnavailable ? '-' : data.counts.crdsEstablished}
+              sub={data.counts.crdsUnavailable ? 'unavailable' : data.counts.crds === data.counts.crdsEstablished ? 'active' : `of ${data.counts.crds} active`}
+              warn={!data.counts.crdsUnavailable && data.counts.crdsEstablished < data.counts.crds}
               icon={<ExtensionOutlinedIcon />}
               onClick={() => navigate('/r/apiextensions.k8s.io/v1/customresourcedefinitions')}
             />
