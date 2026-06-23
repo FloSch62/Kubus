@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Alert, Box, Button, Chip, CircularProgress, Stack, TextField, Typography } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import { Alert, Box, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material';
 import type { KubeconfigSource } from '@kubus/shared';
 import { useKubeconfigSettings, useSetKubeconfig } from '../../api/queries.js';
-import { AddClusterDialog } from './AddClusterDialog.js';
 
 const SOURCE_LABEL: Record<KubeconfigSource, string> = {
   'cli-flag': 'from the --kubeconfig flag',
@@ -16,7 +14,6 @@ export function KubeconfigSection() {
   const { data, isLoading } = useKubeconfigSettings();
   const setKubeconfig = useSetKubeconfig();
   const [pathInput, setPathInput] = useState('');
-  const [addOpen, setAddOpen] = useState(false);
 
   // Sync the input with the server state whenever it (re)loads.
   useEffect(() => {
@@ -79,15 +76,6 @@ export function KubeconfigSection() {
       </Stack>
       {setKubeconfig.isError && <Alert severity="error">{setKubeconfig.error instanceof Error ? setKubeconfig.error.message : String(setKubeconfig.error)}</Alert>}
       {setKubeconfig.isSuccess && !setKubeconfig.isPending && <Alert severity="success">Kubeconfig updated — contexts reloaded.</Alert>}
-      <Box>
-        <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setAddOpen(true)}>
-          Add cluster…
-        </Button>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-          Merge a new cluster into <Chip label={data.primaryPath ?? 'kubeconfig'} size="small" sx={{ fontFamily: 'monospace' }} />
-        </Typography>
-      </Box>
-      {addOpen && <AddClusterDialog primaryPath={data.primaryPath} onClose={() => setAddOpen(false)} />}
     </Stack>
   );
 }

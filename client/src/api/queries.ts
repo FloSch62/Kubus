@@ -42,6 +42,8 @@ import type {
   SetKubeconfigRequest,
   KubeconfigImportRequest,
   KubeconfigImportResponse,
+  EditClusterRequest,
+  TestConnectionResponse,
 } from '@kubus/shared';
 import { groupToPath } from '@kubus/shared';
 import { apiFetch } from './http.js';
@@ -82,6 +84,37 @@ export function useConnectContext() {
       void qc.invalidateQueries({ queryKey: ['api-resources-multi'] });
       void qc.invalidateQueries({ queryKey: ['namespaces'] });
       void qc.invalidateQueries({ queryKey: ['overview'] });
+    },
+  });
+}
+
+export function useTestConnection() {
+  return useMutation({
+    mutationFn: (ctx: string) => apiFetch<TestConnectionResponse>(`/api/contexts/${encodeURIComponent(ctx)}/test`, { method: 'POST' }),
+  });
+}
+
+export function useClusterCa(ctx: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['cluster-ca', ctx],
+    queryFn: () => apiFetch<{ pem: string | null }>(`/api/contexts/${encodeURIComponent(ctx)}/ca`),
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
+export function useEditCluster() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx, body }: { ctx: string; body: EditClusterRequest }) =>
+      apiFetch<ContextInfo[]>(`/api/contexts/${encodeURIComponent(ctx)}/cluster`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (contexts) => {
+      qc.setQueryData(['contexts'], contexts);
+      void qc.invalidateQueries({ queryKey: ['kubeconfig-settings'] });
     },
   });
 }

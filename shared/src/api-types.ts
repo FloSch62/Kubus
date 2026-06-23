@@ -15,7 +15,21 @@ export interface ContextInfo {
   /** Whether the server currently holds an active handle (watchers, pollers). */
   active: boolean;
   kubernetesVersion?: string;
+  /** Effective `proxy-url` for this context's cluster, if any (kubeconfig or env-injected). */
+  proxyUrl?: string;
+  /** Whether proxyUrl came from an env var (HTTPS_PROXY/ALL_PROXY) rather than the kubeconfig file. */
+  proxyFromEnv?: boolean;
+  /** `tls-server-name` override for this context's cluster, if any. */
+  tlsServerName?: string;
+  /** Whether the cluster has `insecure-skip-tls-verify` set. */
+  skipTlsVerify?: boolean;
+  /** Whether the cluster has a custom CA certificate configured. */
+  caPresent?: boolean;
+  /** How the context's user authenticates (informational, for the editor). */
+  authType?: ClusterAuthType;
 }
+
+export type ClusterAuthType = 'token' | 'client-cert' | 'exec' | 'auth-provider' | 'basic' | 'none';
 
 // ---- Settings / kubeconfig management ----
 
@@ -32,6 +46,31 @@ export interface KubeconfigSettings {
   source: KubeconfigSource;
   /** $KUBECONFIG as seen by the server (informational). */
   kubeconfigEnv: string | null;
+}
+
+/** A full edit of an existing context's cluster + user, mirroring "Add cluster". */
+export interface EditClusterRequest {
+  /** API server URL. */
+  server: string;
+  /** Skip TLS certificate verification (insecure). */
+  skipTlsVerify: boolean;
+  /** New CA certificate PEM; null/empty keeps the current one. */
+  caPem: string | null;
+  /** Proxy URL (socks5://, http://, https://); null/empty clears it. */
+  proxyUrl: string | null;
+  /** TLS server name override (SNI/cert hostname); null/empty clears it. */
+  tlsServerName: string | null;
+  /** How to set credentials. `keep` preserves the existing user (incl. exec/auth-provider auth). */
+  auth:
+    | { method: 'keep' }
+    | { method: 'token'; token: string }
+    | { method: 'client-cert'; clientCertPem: string; clientKeyPem: string };
+}
+
+export interface TestConnectionResponse {
+  health: 'connected' | 'error';
+  healthMessage?: string;
+  kubernetesVersion?: string;
 }
 
 export interface SetKubeconfigRequest {
