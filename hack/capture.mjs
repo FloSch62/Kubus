@@ -60,6 +60,8 @@ add('crd-list', async () => {
   await page.waitForTimeout(1200);
   await page.keyboard.press('Enter'); // navigate to the Widgets list
   await page.waitForTimeout(2200);
+  await page.keyboard.press('Escape'); // close the auto-opened detail drawer to show a clean list
+  await page.waitForTimeout(900);
   await shot(page, 'crd-list');
   await page.context().close();
 });
@@ -262,6 +264,8 @@ add('production-guard', async () => {
   await page.waitForTimeout(900);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(2000);
+  await page.keyboard.press('Escape'); // close the auto-opened detail drawer so row actions are reachable
+  await page.waitForTimeout(900);
   const row = page.locator('[role="row"]', { hasText: 'bravo' }).first();
   await row.hover();
   await row.getByRole('button').last().click();

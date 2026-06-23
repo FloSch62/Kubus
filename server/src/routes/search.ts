@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { BUILTIN_NAV_GROUPS, groupToPath, type KubeObject, type ResourceKindInfo, type ResourceRef, type SearchResult } from '@kubus/shared';
+import { groupToPath, type ResourceKindInfo, type ResourceRef, type SearchResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
-import { resourcePath } from '../kube/raw-client.js';
+import type { IndexedResourceSearchEntry } from '../kube/search-index.js';
 import { sendError } from '../util/errors.js';
 
 const PAGES: Array<{ title: string; path: string; subtitle: string }> = [
@@ -12,9 +12,6 @@ const PAGES: Array<{ title: string; path: string; subtitle: string }> = [
   { title: 'Port Forwards', path: '/forwards', subtitle: 'Active local forwards' },
   { title: 'Diff', path: '/diff', subtitle: 'Compare resources' },
 ];
-
-const RESOURCE_SEARCH_KINDS = BUILTIN_NAV_GROUPS.flatMap((g) => g.kinds)
-  .filter((k) => ['Pod', 'Service', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'Ingress', 'ConfigMap', 'Secret', 'PersistentVolumeClaim', 'Node', 'Namespace'].includes(k.kind));
 
 function normalizeSearchText(value: string): string {
   return value
@@ -77,23 +74,17 @@ function scoreText(query: string, ...parts: Array<string | undefined>): number {
   return scoreOrderedTokens(q.split(' '), normalizedHay.split(' '));
 }
 
-function refFor(ctx: string, kind: ResourceKindInfo, obj: KubeObject): ResourceRef {
+function refFor(ctx: string, entry: IndexedResourceSearchEntry): ResourceRef {
   return {
     ctx,
-    group: kind.group,
-    version: kind.version,
-    plural: kind.plural,
-    kind: kind.kind,
-    name: obj.metadata.name,
-    namespace: obj.metadata.namespace,
-    uid: obj.metadata.uid,
+    group: entry.kind.group,
+    version: entry.kind.version,
+    plural: entry.kind.plural,
+    kind: entry.kind.kind,
+    name: entry.name,
+    namespace: entry.namespace,
+    uid: entry.uid,
   };
-}
-
-async function listKind(handle: ClusterHandle, kind: ResourceKindInfo): Promise<KubeObject[]> {
-  const query = new URLSearchParams({ limit: '500' });
-  const list = await handle.raw.json<{ items?: KubeObject[] }>(resourcePath(kind.group, kind.version, kind.plural, { query }));
-  return list.items ?? [];
 }
 
 async function searchContext(handle: ClusterHandle, query: string, limit: number): Promise<SearchResult[]> {
@@ -119,29 +110,24 @@ async function searchContext(handle: ClusterHandle, query: string, limit: number
     });
   }
 
-  const byGvr = new Map(resources.map((r) => [`${r.group}/${r.version}/${r.plural}`, r]));
-  await Promise.all(
-    RESOURCE_SEARCH_KINDS.map(async (base) => {
-      const kind = byGvr.get(`${base.group}/${base.version}/${base.plural}`);
-      if (!kind?.verbs.includes('list')) return;
-      const items = await listKind(handle, kind).catch(() => []);
-      for (const obj of items) {
-        const labels = Object.entries(obj.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(' ');
-        const score = scoreText(q, obj.metadata.name, obj.metadata.namespace, kind.kind, labels);
-        if (!score) continue;
-        const ref = refFor(handle.contextName, kind, obj);
-        out.push({
-          id: `resource:${ref.ctx}:${ref.group}/${ref.version}/${ref.plural}:${ref.namespace ?? ''}:${ref.name}`,
-          kind: 'resource',
-          title: `${kind.kind}/${obj.metadata.name}`,
-          subtitle: `${handle.contextName}${obj.metadata.namespace ? ` · ${obj.metadata.namespace}` : ''}`,
-          score: score + 5,
-          ref,
-          path: `/r/${groupToPath(kind.group)}/${kind.version}/${kind.plural}`,
-        });
-      }
-    }),
-  );
+  for (const entry of await handle.searchIndex.entries()) {
+    const nameScore = scoreText(q, entry.name);
+    const score = Math.max(
+      nameScore ? nameScore + 10 : 0,
+      scoreText(q, entry.name, entry.namespace, entry.kind.kind, entry.kind.plural, entry.kind.group, entry.labelsText),
+    );
+    if (!score) continue;
+    const ref = refFor(handle.contextName, entry);
+    out.push({
+      id: `resource:${ref.ctx}:${ref.group}/${ref.version}/${ref.plural}:${ref.namespace ?? ''}:${ref.name}`,
+      kind: 'resource',
+      title: `${entry.kind.kind}/${entry.name}`,
+      subtitle: `${handle.contextName}${entry.namespace ? ` · ${entry.namespace}` : ''}`,
+      score: score + 5,
+      ref,
+      path: `/r/${groupToPath(entry.kind.group)}/${entry.kind.version}/${entry.kind.plural}`,
+    });
+  }
 
   return out.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, limit);
 }

@@ -16,6 +16,8 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import SpaceDashboardOutlinedIcon from '@mui/icons-material/SpaceDashboardOutlined';
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
@@ -31,7 +33,7 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { NavLink, useLocation } from 'react-router';
-import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type ResourceKindInfo, type SavedView } from '@kubus/shared';
+import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -51,6 +53,47 @@ const GROUP_ICONS: Record<string, React.ReactElement> = {
 
 function kindPath(group: string, version: string, plural: string): string {
   return `/r/${groupToPath(group)}/${version}/${plural}`;
+}
+
+type NavKind = { group: string; version: string; plural: string; kind: string; label: string };
+
+function kindFavorite(k: NavKind): FavoriteItem {
+  return {
+    id: `kind:${k.group}/${k.version}/${k.plural}`,
+    title: k.label,
+    subtitle: `${k.group || 'core'}/${k.version}`,
+    path: kindPath(k.group, k.version, k.plural),
+  };
+}
+
+// Star toggle revealed on row hover (always visible once active). Rendered as a
+// <span> so it can sit inside a ListItemButton (group header) without nesting buttons.
+function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () => void; label: string }) {
+  return (
+    <Tooltip title={active ? 'Remove favorite' : 'Add favorite'}>
+      <IconButton
+        component="span"
+        role="button"
+        aria-label={label}
+        size="small"
+        className="fav-star"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggle();
+        }}
+        sx={{
+          opacity: active ? 1 : 0,
+          color: active ? 'warning.main' : 'text.secondary',
+          transition: 'opacity 120ms ease',
+          '& svg': { fontSize: 16 },
+          '&:focus-visible': { opacity: 1 },
+        }}
+      >
+        {active ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
+      </IconButton>
+    </Tooltip>
+  );
 }
 
 function versionScore(version: string): [number, number, number] {
@@ -79,16 +122,35 @@ function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   return [...byKind.values()];
 }
 
-function NavEntry({ to, label, icon }: { to: string; label: string; icon?: React.ReactElement }) {
+function NavEntry({ to, label, icon, favorite }: { to: string; label: string; icon?: React.ReactElement; favorite?: FavoriteItem }) {
   const location = useLocation();
   const active = location.pathname === to;
-  return (
-    <ListItemButton component={NavLink} to={to} dense selected={active} sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: 0.375 }}>
+  const isFav = useNavigationStore((s) => (favorite ? s.favorites.some((x) => x.id === favorite.id) : false));
+  const addFavorite = useNavigationStore((s) => s.addFavorite);
+  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+  const button = (
+    <ListItemButton component={NavLink} to={to} dense selected={active} sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: 0.375, pr: favorite ? 4 : undefined }}>
       {icon && (
         <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
       )}
       <ListItemText primary={label} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
     </ListItemButton>
+  );
+  if (!favorite) return button;
+  return (
+    <ListItem
+      disablePadding
+      secondaryAction={
+        <FavStar
+          active={isFav}
+          label={`${isFav ? 'Remove' : 'Add'} favorite ${label}`}
+          onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
+        />
+      }
+      sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 } }}
+    >
+      {button}
+    </ListItem>
   );
 }
 
@@ -123,14 +185,37 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
   );
 }
 
-function GroupHeader({ title, icon, open, onClick }: { title: string; icon?: React.ReactElement; open: boolean; onClick: () => void }) {
+function GroupHeader({
+  title,
+  icon,
+  open,
+  onClick,
+  favorite,
+}: {
+  title: string;
+  icon?: React.ReactElement;
+  open: boolean;
+  onClick: () => void;
+  favorite?: { active: boolean; onToggle: () => void };
+}) {
   return (
-    <ListItemButton dense onClick={onClick} sx={{ mt: 1.25, py: 0.25, color: 'text.secondary' }}>
+    <ListItemButton
+      dense
+      onClick={onClick}
+      sx={{ mt: 1.25, py: 0.25, color: 'text.secondary', pr: favorite ? 5.5 : undefined, '&:hover .fav-star': { opacity: 1 } }}
+    >
       <ListItemIcon sx={{ minWidth: 26, color: 'inherit', '& svg': { fontSize: 16 } }}>{icon}</ListItemIcon>
       <ListItemText
         primary={title}
         slotProps={{ primary: { variant: 'body2', sx: { fontWeight: 600, fontSize: 12.5, color: 'text.secondary' } } }}
       />
+      {favorite && (
+        <FavStar
+          active={favorite.active}
+          onToggle={favorite.onToggle}
+          label={`${favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
+        />
+      )}
       <ExpandMoreIcon
         sx={{ fontSize: 16, opacity: 0.6, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
       />
@@ -144,7 +229,17 @@ export function NavDrawer() {
   const favorites = useNavigationStore((s) => s.favorites);
   const savedViews = useNavigationStore((s) => s.savedViews);
   const removeSavedView = useNavigationStore((s) => s.removeSavedView);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['Custom Resources']));
+  const addFavorite = useNavigationStore((s) => s.addFavorite);
+  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+  // Favorited categories ('fav:<title>') start collapsed so they show as a
+  // single entry rather than flooding Favorites with every kind.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    const set = new Set<string>(['Custom Resources']);
+    for (const fav of useNavigationStore.getState().favorites) {
+      if (fav.id.startsWith('category:')) set.add(`fav:${fav.title}`);
+    }
+    return set;
+  });
   const [filter, setFilter] = useState('');
 
   const toggleGroup = (title: string) =>
@@ -154,6 +249,17 @@ export function NavDrawer() {
       else next.add(title);
       return next;
     });
+
+  const isFav = (id: string) => favorites.some((fav) => fav.id === id);
+  const toggleCategory = (title: string) => {
+    const id = `category:${title}`;
+    if (isFav(id)) {
+      removeFavorite(id);
+    } else {
+      addFavorite({ id, title });
+      setCollapsed((prev) => new Set(prev).add(`fav:${title}`));
+    }
+  };
 
   const customKinds = useMemo(() => {
     const custom = dedupeCustomNavKinds((apiResources?.resources ?? []).filter((r) => r.custom && r.verbs.includes('list')));
@@ -165,6 +271,23 @@ export function NavDrawer() {
     }
     return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [apiResources]);
+
+  // Kinds belonging to each favoritable category, used to expand a favorited
+  // category inline under the Favorites group.
+  const categoryKindsMap = useMemo(() => {
+    const map = new Map<string, NavKind[]>();
+    for (const group of BUILTIN_NAV_GROUPS) {
+      map.set(
+        group.title,
+        group.kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
+      );
+    }
+    map.set(
+      'Custom Resources',
+      customKinds.flatMap(([, kinds]) => kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind }))),
+    );
+    return map;
+  }, [customKinds]);
 
   const f = filter.toLowerCase();
   const matches = (label: string) => !f || label.toLowerCase().includes(f);
@@ -213,11 +336,35 @@ export function NavDrawer() {
         <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
         {favorites.length > 0 && (
           <Box>
-            <GroupHeader title="Favorites" icon={<SearchIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
+            <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
             <Collapse in={isOpen('Favorites')}>
-              {favorites.map((f) => (
-                <NavEntry key={f.id} to={f.path ?? '/'} label={f.title} />
-              ))}
+              {favorites.map((fav) => {
+                if (fav.id.startsWith('category:')) {
+                  const all = categoryKindsMap.get(fav.title) ?? [];
+                  const titleMatch = matches(fav.title);
+                  const kinds = titleMatch ? all : all.filter((k) => matches(k.kind));
+                  if (f && !titleMatch && kinds.length === 0) return null;
+                  const key = `fav:${fav.title}`;
+                  return (
+                    <Box key={fav.id}>
+                      <GroupHeader
+                        title={fav.title}
+                        icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
+                        open={isOpen(key)}
+                        onClick={() => toggleGroup(key)}
+                        favorite={{ active: true, onToggle: () => removeFavorite(fav.id) }}
+                      />
+                      <Collapse in={isOpen(key)}>
+                        {kinds.map((k) => (
+                          <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} />
+                        ))}
+                      </Collapse>
+                    </Box>
+                  );
+                }
+                if (!matches(fav.title)) return null;
+                return <NavEntry key={fav.id} to={fav.path ?? '/'} label={fav.title} favorite={fav} />;
+              })}
             </Collapse>
           </Box>
         )}
@@ -241,10 +388,16 @@ export function NavDrawer() {
                 icon={GROUP_ICONS[group.title]}
                 open={isOpen(group.title)}
                 onClick={() => toggleGroup(group.title)}
+                favorite={{ active: isFav(`category:${group.title}`), onToggle: () => toggleCategory(group.title) }}
               />
               <Collapse in={isOpen(group.title)}>
                 {visible.map((k) => (
-                  <NavEntry key={k.plural} to={kindPath(k.group, k.version, k.plural)} label={pluralLabel(k.kind)} />
+                  <NavEntry
+                    key={k.plural}
+                    to={kindPath(k.group, k.version, k.plural)}
+                    label={pluralLabel(k.kind)}
+                    favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
+                  />
                 ))}
               </Collapse>
             </Box>
@@ -257,6 +410,7 @@ export function NavDrawer() {
               icon={<ExtensionOutlinedIcon />}
               open={isOpen('Custom Resources')}
               onClick={() => toggleGroup('Custom Resources')}
+              favorite={{ active: isFav('category:Custom Resources'), onToggle: () => toggleCategory('Custom Resources') }}
             />
             <Collapse in={isOpen('Custom Resources')}>
               {customKinds.map(([groupName, kinds]) => {
@@ -273,7 +427,12 @@ export function NavDrawer() {
                       {groupName}
                     </Typography>
                     {visible.map((k) => (
-                      <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.kind} />
+                      <NavEntry
+                        key={`${k.group}/${k.version}/${k.plural}`}
+                        to={kindPath(k.group, k.version, k.plural)}
+                        label={k.kind}
+                        favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
+                      />
                     ))}
                   </Box>
                 );

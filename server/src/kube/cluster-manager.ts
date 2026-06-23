@@ -22,7 +22,8 @@ import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
-import { applyEnvProxy } from './connection.js';
+import { ResourceSearchIndex } from './search-index.js';
+import { applyEnvProxy, applyProxyRuntimeCompatibility } from './connection.js';
 import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { HttpProblem } from '../util/errors.js';
 import type { ClusterAuthType } from '@kubus/shared';
@@ -50,12 +51,14 @@ export class ClusterHandle {
   readonly discovery: DiscoveryCache;
   readonly watchers: WatcherRegistry;
   readonly metricsPoller: MetricsPoller;
+  readonly searchIndex: ResourceSearchIndex;
   health: ContextInfo['health'] = 'connecting';
   healthMessage?: string;
   kubernetesVersion?: string;
   activated = false;
 
   private clients = new Map<string, unknown>();
+  private searchIndexWarmup?: NodeJS.Timeout;
 
   constructor(
     baseConfig: KubeConfig,
@@ -66,11 +69,13 @@ export class ClusterHandle {
     // and exec-auth caches per-instance — never share across contexts.
     this.kc = new KubeConfig();
     this.kc.loadFromString(baseConfig.exportConfig());
+    applyProxyRuntimeCompatibility(this.kc);
     this.kc.setCurrentContext(contextName);
     this.raw = new RawClient(this.kc);
     this.discovery = new DiscoveryCache(this.raw);
     this.watchers = new WatcherRegistry(this.raw, log);
     this.metricsPoller = new MetricsPoller(new Metrics(this.kc), log);
+    this.searchIndex = new ResourceSearchIndex(this.discovery, this.raw, log);
   }
 
   client<T extends ApiType>(ctor: ApiConstructor<T>): T {
@@ -133,11 +138,15 @@ export class ClusterHandle {
     this.watchers.acquire('', 'v1', 'events');
     this.watchers.acquire('', 'v1', 'nodes');
     this.watchers.acquire('', 'v1', 'namespaces');
+    this.searchIndexWarmup = setTimeout(() => this.searchIndex.warm(), 1_000);
+    this.searchIndexWarmup.unref();
   }
 
   dispose(): void {
+    if (this.searchIndexWarmup) clearTimeout(this.searchIndexWarmup);
     this.metricsPoller.stop();
     this.watchers.stopAll();
+    this.searchIndex.dispose();
   }
 }
 
@@ -299,6 +308,7 @@ export class ClusterManager extends EventEmitter {
   private async probeContext(contextName: string, timeoutMs: number): Promise<TestConnectionResponse> {
     const kc = new KubeConfig();
     kc.loadFromString(this.kc.exportConfig());
+    applyProxyRuntimeCompatibility(kc);
     kc.setCurrentContext(contextName);
     const raw = new RawClient(kc);
     const controller = new AbortController();

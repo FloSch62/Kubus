@@ -505,6 +505,8 @@ export interface ClusterOverview {
     crds: number;
     crdsEstablished: number;
     crdsUnavailable: boolean;
+    customResources: number;
+    customResourcesIndexed: boolean;
   };
   failingPods: OverviewProblemPod[];
   unavailableWorkloads: OverviewWorkloadIssue[];

@@ -53,3 +53,24 @@ export function applyEnvProxy(kc: KubeConfig): Set<string> {
   });
   return fromEnv;
 }
+
+function proxyUrlWithProxySideDns(proxyUrl: string | undefined): string | undefined {
+  if (!proxyUrl) return proxyUrl;
+  // kubectl/client-go sends SOCKS5 hostnames to the proxy. socks-proxy-agent
+  // needs the "h" variant to avoid resolving API-server-only names locally.
+  return proxyUrl.replace(/^socks5?:\/\//i, 'socks5h://');
+}
+
+/**
+ * Apply kubectl-like SOCKS5 DNS semantics to a runtime KubeConfig copy.
+ *
+ * Do this only on per-request/per-context clones, not on the manager's root
+ * config, so list/edit flows still show and persist the kubeconfig as written.
+ */
+export function applyProxyRuntimeCompatibility(kc: KubeConfig): void {
+  if (!kc.clusters?.length) return;
+  kc.clusters = kc.clusters.map((c) => {
+    const proxyUrl = proxyUrlWithProxySideDns(c.proxyUrl);
+    return proxyUrl === c.proxyUrl ? c : { ...c, proxyUrl };
+  });
+}
