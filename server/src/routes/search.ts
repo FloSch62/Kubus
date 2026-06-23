@@ -16,13 +16,65 @@ const PAGES: Array<{ title: string; path: string; subtitle: string }> = [
 const RESOURCE_SEARCH_KINDS = BUILTIN_NAV_GROUPS.flatMap((g) => g.kinds)
   .filter((k) => ['Pod', 'Service', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'Ingress', 'ConfigMap', 'Secret', 'PersistentVolumeClaim', 'Node', 'Namespace'].includes(k.kind));
 
-function scoreText(q: string, ...parts: Array<string | undefined>): number {
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactSearchText(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+function scoreOrderedTokens(queryTokens: string[], hayTokens: string[]): number {
+  let nextIndex = 0;
+  let score = 0;
+
+  for (const queryToken of queryTokens) {
+    let matched = false;
+
+    for (let i = nextIndex; i < hayTokens.length; i += 1) {
+      const hayToken = hayTokens[i]!;
+      if (hayToken === queryToken) {
+        score += 8;
+        matched = true;
+      } else if (hayToken.startsWith(queryToken)) {
+        score += 6;
+        matched = true;
+      } else if (queryToken.length > 2 && hayToken.includes(queryToken)) {
+        score += 4;
+        matched = true;
+      }
+
+      if (matched) {
+        nextIndex = i + 1;
+        break;
+      }
+    }
+
+    if (!matched) return 0;
+  }
+
+  return Math.min(35, 20 + score);
+}
+
+function scoreText(query: string, ...parts: Array<string | undefined>): number {
+  const rawQuery = query.trim().toLowerCase();
+  const q = normalizeSearchText(rawQuery);
   const hay = parts.filter(Boolean).join(' ').toLowerCase();
+  const normalizedHay = normalizeSearchText(hay);
   if (!q) return 1;
-  if (hay === q) return 100;
-  if (hay.startsWith(q)) return 80;
-  if (hay.includes(q)) return 40;
-  return 0;
+  if (!normalizedHay) return 0;
+  if (hay === rawQuery || normalizedHay === q) return 100;
+  if (hay.startsWith(rawQuery) || normalizedHay.startsWith(q)) return 80;
+  if (hay.includes(rawQuery) || normalizedHay.includes(q)) return 40;
+
+  const compactQuery = compactSearchText(q);
+  if (compactQuery.length > 2 && compactSearchText(normalizedHay).includes(compactQuery)) return 35;
+
+  return scoreOrderedTokens(q.split(' '), normalizedHay.split(' '));
 }
 
 function refFor(ctx: string, kind: ResourceKindInfo, obj: KubeObject): ResourceRef {
