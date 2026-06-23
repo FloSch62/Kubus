@@ -3,6 +3,7 @@ import { CssBaseline, ThemeProvider } from '@mui/material';
 import { buildTheme, titleBarColors } from './theme.js';
 import { useClustersStore } from './state/clusters.js';
 import { AppRouter } from './router.js';
+import { UpdateNotification } from './components/UpdateNotification.js';
 
 export default function App() {
   const mode = useClustersStore((s) => s.themeMode);
@@ -15,6 +16,7 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AppRouter />
+      <UpdateNotification />
     </ThemeProvider>
   );
 }

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -29,12 +30,15 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import CachedOutlinedIcon from '@mui/icons-material/CachedOutlined';
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import AddIcon from '@mui/icons-material/Add';
-import type { ContextInfo } from '@kubus/shared';
+import type { AppInfo, ContextInfo, UpdateCheckResult } from '@kubus/shared';
 import { useContexts, useKubeconfigSettings } from '../../api/queries.js';
+import { checkForUpdate, getAppInfo } from '../../api/app.js';
 import { AddClusterDialog } from './AddClusterDialog.js';
 import { EditClusterDialog } from './EditClusterDialog.js';
 import { useClustersStore } from '../../state/clusters.js';
@@ -331,7 +335,116 @@ function LogsTerminalSection() {
   );
 }
 
-const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal'];
+function updateReasonLabel(reason?: string): string {
+  switch (reason) {
+    case 'timeout':
+      return 'The update check timed out.';
+    case 'network':
+      return 'The update check could not reach GitHub.';
+    case 'no-release':
+      return 'No published release was found.';
+    case 'missing-version':
+    case 'missing-release-url':
+      return 'The latest release metadata is incomplete.';
+    default:
+      return reason?.startsWith('manifest-')
+        ? `The update manifest returned ${reason.replace('manifest-', '')}.`
+        : 'The update check could not be completed.';
+  }
+}
+
+function AboutSection() {
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<UpdateCheckResult | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAppInfo()
+      .then((info) => {
+        if (!cancelled) setAppInfo(info ?? null);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const checkForUpdates = () => {
+    setChecking(true);
+    setResult(null);
+    void checkForUpdate({ force: true })
+      .then(setResult)
+      .catch(() => setResult({ available: false, currentVersion: appInfo?.version ?? '', reason: 'network' }))
+      .finally(() => setChecking(false));
+  };
+
+  const version = appInfo?.version ?? (loaded ? 'Unavailable' : 'Loading…');
+  const updatesAvailable = result?.available === true;
+
+  return (
+    <Stack spacing={3}>
+      <Section title="Application">
+        <Stack spacing={1.25}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Version
+            </Typography>
+            <Typography variant="body2">{version}</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Repository
+            </Typography>
+            <Link href="https://github.com/FloSch62/Kubus" target="_blank" rel="noreferrer">
+              github.com/FloSch62/Kubus
+            </Link>
+          </Box>
+        </Stack>
+      </Section>
+      <Section title="Updates">
+        <Stack spacing={1.5} alignItems="flex-start">
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              variant="contained"
+              startIcon={checking ? <CircularProgress color="inherit" size={16} /> : <CachedOutlinedIcon />}
+              disabled={checking}
+              onClick={checkForUpdates}
+            >
+              Check for updates
+            </Button>
+            {updatesAvailable && (
+              <Button startIcon={<DownloadOutlinedIcon />} href={result.releaseUrl} target="_blank" rel="noreferrer">
+                Download
+              </Button>
+            )}
+          </Stack>
+          {result?.available === false && result.latestVersion && (
+            <Alert severity="success" variant="outlined">
+              Kubus is up to date. Latest release: {result.latestVersion}.
+            </Alert>
+          )}
+          {result?.available === false && !result.latestVersion && (
+            <Alert severity="warning" variant="outlined">
+              {updateReasonLabel(result.reason)}
+            </Alert>
+          )}
+          {updatesAvailable && (
+            <Alert severity="info" variant="outlined">
+              Kubus {result.latestVersion} is available. You are running {result.currentVersion}.
+            </Alert>
+          )}
+        </Stack>
+      </Section>
+    </Stack>
+  );
+}
+
+const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'About'];
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState(0);
@@ -355,6 +468,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           {tab === 2 && <AppearanceSection />}
           {tab === 3 && <RefreshSection />}
           {tab === 4 && <LogsTerminalSection />}
+          {tab === 5 && <AboutSection />}
         </Box>
       </DialogContent>
       <DialogActions>

@@ -1,5 +1,26 @@
 /** REST API data transfer objects shared between server and client. */
 
+export interface AppInfo {
+  name: string;
+  version: string;
+}
+
+export type UpdateCheckResult =
+  | {
+      available: true;
+      currentVersion: string;
+      latestVersion: string;
+      releaseName?: string;
+      releaseUrl: string;
+      publishedAt?: string;
+    }
+  | {
+      available: false;
+      currentVersion: string;
+      latestVersion?: string;
+      reason?: string;
+    };
+
 export type ContextHealth = 'connected' | 'connecting' | 'error' | 'unknown';
 
 export interface ContextInfo {

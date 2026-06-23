@@ -7,6 +7,8 @@ on:
     paths:
       - "docs/**"
       - "zensical.toml"
+      - "package.json"
+      - "hack/write-latest-manifest.mjs"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -29,11 +31,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
       - run: pip install zensical
       - run: zensical build --clean --strict
+      - name: Write update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json; then
+            node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
+          else
+            echo "No release metadata available; skipping update manifest."
+            rm -f site/latest.json
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

@@ -9,6 +9,7 @@ import { ClusterManager } from './kube/cluster-manager.js';
 import { PortForwardManager } from './kube/portforward-manager.js';
 import { SettingsStore } from './settings-store.js';
 import { registerContextRoutes } from './routes/contexts.js';
+import { registerAppRoutes } from './routes/app.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerActionRoutes } from './routes/actions.js';
@@ -83,6 +84,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
     }
   });
 
+  registerAppRoutes(app, ctx);
   registerContextRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
   registerResourceRoutes(app, ctx);

@@ -114,3 +114,43 @@ jobs:
           done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
 
           gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
+
+  deploy-update-manifest:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '') }}
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install zensical
+      - name: Build Pages update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          zensical build --clean --strict
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json
+          node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+        id: deployment
