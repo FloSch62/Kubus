@@ -28,8 +28,12 @@ kubectl --context "$CTX_A" -n kube-system patch deploy metrics-server --type=jso
 helm --kube-context "$CTX_A" upgrade --install podinfo oci://ghcr.io/stefanprodan/charts/podinfo \
   -n demo --create-namespace --set replicaCount=3
 
-# Broken workloads for the overview dashboard
-kubectl --context "$CTX_A" apply -f "$(dirname "$0")/sample-apps/"
+# Demo workloads and CRDs.
+SAMPLE_DIR="$(dirname "$0")/sample-apps"
+kubectl --context "$CTX_A" apply -f "$SAMPLE_DIR/broken.yaml"
+kubectl --context "$CTX_A" apply -f "$SAMPLE_DIR/widgets-crd.yaml"
+kubectl --context "$CTX_A" wait --for=condition=Established crd/widgets.demo.kubus.io --timeout=60s
+kubectl --context "$CTX_A" apply -f "$SAMPLE_DIR/widgets.yaml"
 
 echo
 echo "Done. Contexts: kind-kubus-a (full demo), kind-kubus-b (empty)."

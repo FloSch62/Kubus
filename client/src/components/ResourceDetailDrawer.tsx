@@ -13,6 +13,7 @@ import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
+import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { MetricsChart } from './MetricsChart.js';
@@ -27,6 +28,7 @@ export interface ResourceSelection {
   kind: string;
   name: string;
   namespace?: string;
+  custom?: boolean;
 }
 
 interface Props {
@@ -39,6 +41,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const [tab, setTab] = useState('overview');
   const [reveal, setReveal] = useState(false);
   const isSecret = sel?.kind === 'Secret';
+  const isCrd = sel?.kind === 'CustomResourceDefinition';
 
   // Reset per-resource view state when the selection changes.
   const selKey = sel ? `${sel.ctx}|${sel.kind}|${sel.namespace ?? ''}|${sel.name}` : '';
@@ -47,13 +50,28 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
     setReveal(false);
   }, [selKey]);
   const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
+  const { data: backingCrd } = useResource(
+    sel?.custom && !isCrd && sel.group
+      ? {
+          ctx: sel.ctx,
+          group: 'apiextensions.k8s.io',
+          version: 'v1',
+          plural: 'customresourcedefinitions',
+          name: `${sel.plural}.${sel.group}`,
+        }
+      : undefined,
+  );
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
 
   const yamlText = useMemo(() => (obj ? yaml.dump(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''), [obj]);
+  const schemaSource = isCrd ? obj : backingCrd;
+  const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
   const hasRolloutHistory = sel?.kind === 'Deployment' || sel?.kind === 'StatefulSet';
+  const showMap = !isCrd;
+  const drawerWidth = tab === 'map' ? 'min(1060px, 92vw)' : tab.startsWith('crd:') ? 'min(920px, 90vw)' : 'min(720px, 80vw)';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
 
   const handleApply = async (text: string) => {
@@ -71,7 +89,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   };
 
   return (
-    <Drawer anchor="right" open={!!sel} onClose={onClose} slotProps={{ paper: { sx: { width: tab === 'map' ? 'min(1060px, 92vw)' : 'min(720px, 80vw)' } } }}>
+    <Drawer anchor="right" open={!!sel} onClose={onClose} slotProps={{ paper: { sx: { width: drawerWidth } } }}>
       {sel && (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
@@ -108,9 +126,18 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
               <CloseIcon />
             </IconButton>
           </Stack>
-          <Tabs value={tab} onChange={(_e, v) => setTab(v as string)} sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}>
+          <Tabs
+            value={tab}
+            onChange={(_e, v) => setTab(v as string)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
+          >
             <Tab value="overview" label="Overview" sx={{ minHeight: 36 }} />
-            <Tab value="map" label="Map" sx={{ minHeight: 36 }} />
+            {versions.map((v) => (
+              <Tab key={v.name} value={`crd:${v.name}`} label={v.name} sx={{ minHeight: 36 }} />
+            ))}
+            {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
             <Tab value="yaml" label="YAML" sx={{ minHeight: 36 }} />
             <Tab value="events" label="Events" sx={{ minHeight: 36 }} />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
@@ -118,7 +145,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
           </Tabs>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {tab === 'overview' && obj && <OverviewForKind kind={sel.kind} obj={obj} ctx={sel.ctx} />}
-            {tab === 'map' && (
+            {tab.startsWith('crd:') && schemaSource && <CrdSchemaDetail obj={schemaSource} versionName={tab.slice('crd:'.length)} />}
+            {showMap && tab === 'map' && (
               <Box sx={{ height: '100%', p: 1.25 }}>
                 <TopologyGraph
                   contexts={[sel.ctx]}
@@ -178,6 +206,8 @@ function OverviewForKind({ kind, obj, ctx }: { kind: string; obj: KubeObject; ct
       return <ServiceDetail obj={obj} ctx={ctx} />;
     case 'Secret':
       return <SecretDetail obj={obj} ctx={ctx} />;
+    case 'CustomResourceDefinition':
+      return <CrdDetail obj={obj} ctx={ctx} />;
     default:
       return <GenericDetail obj={obj} ctx={ctx} />;
   }

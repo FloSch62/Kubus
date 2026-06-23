@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: demo.kubus.io/v1
+kind: Widget
+metadata:
+  name: storefront
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: kubus-demo
+    tier: frontend
+spec:
+  color: blue
+  size: large
+  replicas: 3
+  enabled: true
+  owner: platform
+  endpoint: https://storefront.demo.example.com
+  settings:
+    cache: enabled
+    region: eu-central
+  rules:
+    - name: high-traffic
+      threshold: 80
+      action: scale
+    - name: stale-cache
+      threshold: 10
+      action: notify
+---
+apiVersion: demo.kubus.io/v1
+kind: Widget
+metadata:
+  name: analytics
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: kubus-demo
+    tier: backend
+spec:
+  color: green
+  size: medium
+  replicas: 2
+  enabled: true
+  owner: data
+  settings:
+    retention: 7d
+    sampleRate: "0.25"
+  rules:
+    - name: queue-depth
+      threshold: 50
+      action: notify
+---
+apiVersion: demo.kubus.io/v1
+kind: Widget
+metadata:
+  name: canary
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: kubus-demo
+    tier: experiment
+spec:
+  color: orange
+  size: small
+  replicas: 1
+  enabled: false
+  owner: release
+  settings:
+    rollout: paused
+  rules:
+    - name: error-rate
+      threshold: 5
+      action: pause

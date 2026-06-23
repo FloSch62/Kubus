@@ -36,6 +36,7 @@ export function ResourceListPage() {
   const kind = kindInfo?.kind ?? builtinKind?.kind ?? plural;
   const resourceTitle = pluralLabel(kind);
   const namespaced = kindInfo?.namespaced ?? true;
+  const isCustomKind = !!kindInfo?.custom;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const textFilter = searchParams.get('q') ?? '';
@@ -63,8 +64,8 @@ export function ResourceListPage() {
     if (!raw) return undefined;
     const [ctx, namespace, name] = raw.split('|');
     if (!ctx || !name) return undefined;
-    return { ctx, group, version, plural, kind, name, namespace: namespace || undefined };
-  }, [searchParams, group, version, plural, kind]);
+    return { ctx, group, version, plural, kind, name, namespace: namespace || undefined, custom: isCustomKind };
+  }, [searchParams, group, version, plural, kind, isCustomKind]);
 
   // Mirror the URL selection into the global detail drawer; close on unmount.
   const openDetail = useDetailStore((s) => s.open);
@@ -98,7 +99,6 @@ export function ResourceListPage() {
 
   // CRD printer columns: taken from the first selected cluster that serves
   // this GVR — multi-cluster CRD definition drift is not reconciled.
-  const isCustomKind = !!kindInfo?.custom;
   const crdCtx = useMemo(
     () => selected.find((c) => (apiResources?.byContext[c] ?? []).some((r) => r.group === group && r.version === version && r.plural === plural)),
     [selected, apiResources, group, version, plural],

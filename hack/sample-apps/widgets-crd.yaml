@@ -1,0 +1,274 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.demo.kubus.io
+spec:
+  group: demo.kubus.io
+  scope: Namespaced
+  names:
+    plural: widgets
+    singular: widget
+    kind: Widget
+    shortNames:
+      - wdg
+    categories:
+      - all
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Color
+          type: string
+          jsonPath: .spec.color
+          description: Display color for the widget.
+        - name: Size
+          type: string
+          jsonPath: .spec.size
+          description: Requested widget size.
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+          description: Desired widget replicas.
+        - name: Enabled
+          type: boolean
+          jsonPath: .spec.enabled
+          priority: 1
+      subresources:
+        status: {}
+        scale:
+          specReplicasPath: .spec.replicas
+          statusReplicasPath: .status.replicas
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Widget is a demo custom resource used to exercise Kubus CRD rendering.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: Desired state for a demo widget.
+              required:
+                - color
+                - size
+              properties:
+                color:
+                  type: string
+                  description: Color used to identify the widget in demos.
+                  enum:
+                    - blue
+                    - green
+                    - teal
+                    - crimson
+                    - amber
+                    - orange
+                    - purple
+                size:
+                  type: string
+                  description: Requested capacity profile for the widget.
+                  enum:
+                    - small
+                    - medium
+                    - large
+                replicas:
+                  type: integer
+                  format: int32
+                  description: Number of backing widget workers to run.
+                  minimum: 0
+                  default: 1
+                enabled:
+                  type: boolean
+                  description: Whether the widget should be active.
+                  default: true
+                owner:
+                  type: string
+                  description: Team or person responsible for this widget.
+                endpoint:
+                  type: string
+                  format: uri
+                  description: Optional external URL exposed by the widget.
+                settings:
+                  type: object
+                  description: Free-form string settings consumed by the widget controller.
+                  additionalProperties:
+                    type: string
+                rules:
+                  type: array
+                  description: Ordered rules evaluated by the widget.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - name
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - threshold
+                    properties:
+                      name:
+                        type: string
+                        description: Stable rule name.
+                      threshold:
+                        type: integer
+                        format: int32
+                        description: Trigger threshold for this rule.
+                        minimum: 1
+                      action:
+                        type: string
+                        description: Action taken when the threshold is met.
+                        enum:
+                          - notify
+                          - scale
+                          - pause
+            status:
+              type: object
+              description: Observed state reported by a widget controller.
+              properties:
+                phase:
+                  type: string
+                  description: Current widget lifecycle phase.
+                  enum:
+                    - Pending
+                    - Ready
+                    - Degraded
+                replicas:
+                  type: integer
+                  format: int32
+                  description: Observed ready replicas.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+    - name: v1alpha1
+      served: true
+      storage: false
+      deprecated: true
+      deprecationWarning: demo.kubus.io/v1alpha1 Widget is deprecated; use demo.kubus.io/v1.
+      additionalPrinterColumns:
+        - name: Color
+          type: string
+          jsonPath: .spec.color
+        - name: Size
+          type: string
+          jsonPath: .spec.size
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Alpha Widget schema kept for testing multi-version CRD tabs.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: Desired state for a demo widget.
+              required:
+                - color
+                - size
+              properties:
+                color:
+                  type: string
+                  description: Color used to identify the widget in demos.
+                  enum:
+                    - blue
+                    - green
+                    - teal
+                    - crimson
+                    - amber
+                    - orange
+                    - purple
+                size:
+                  type: string
+                  description: Requested capacity profile for the widget.
+                  enum:
+                    - small
+                    - medium
+                    - large
+                replicas:
+                  type: integer
+                  format: int32
+                  description: Number of backing widget workers to run.
+                  minimum: 0
+                  default: 1
+                enabled:
+                  type: boolean
+                  description: Whether the widget should be active.
+                  default: true
+                owner:
+                  type: string
+                  description: Team or person responsible for this widget.
+                endpoint:
+                  type: string
+                  format: uri
+                  description: Optional external URL exposed by the widget.
+                settings:
+                  type: object
+                  description: Free-form string settings consumed by the widget controller.
+                  additionalProperties:
+                    type: string
+                rules:
+                  type: array
+                  description: Ordered rules evaluated by the widget.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - name
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - threshold
+                    properties:
+                      name:
+                        type: string
+                        description: Stable rule name.
+                      threshold:
+                        type: integer
+                        format: int32
+                        description: Trigger threshold for this rule.
+                        minimum: 1
+                      action:
+                        type: string
+                        description: Action taken when the threshold is met.
+                        enum:
+                          - notify
+                          - scale
+                          - pause
+            status:
+              type: object
+              description: Observed state reported by a widget controller.
+              properties:
+                phase:
+                  type: string
+                  description: Current widget lifecycle phase.
+                  enum:
+                    - Pending
+                    - Ready
+                    - Degraded
+                replicas:
+                  type: integer
+                  format: int32
+                  description: Observed ready replicas.

@@ -1,0 +1,347 @@
+import { useState } from 'react';
+import { Box, Chip, Divider, IconButton, Stack, Table, TableBody, TableCell, TableRow, Typography } from '@mui/material';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import type { KubeObject } from '@kubus/shared';
+import { GenericDetail } from './GenericDetail.js';
+
+interface JsonSchema {
+  type?: string | string[];
+  format?: string;
+  title?: string;
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  additionalProperties?: boolean | JsonSchema;
+  required?: string[];
+  enum?: unknown[];
+  default?: unknown;
+  nullable?: boolean;
+  oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
+  allOf?: JsonSchema[];
+  'x-kubernetes-int-or-string'?: boolean;
+  'x-kubernetes-preserve-unknown-fields'?: boolean;
+  'x-kubernetes-list-type'?: string;
+}
+
+export interface CrdVersion {
+  name: string;
+  served?: boolean;
+  storage?: boolean;
+  deprecated?: boolean;
+  deprecationWarning?: string;
+  schema?: { openAPIV3Schema?: JsonSchema };
+  subresources?: {
+    status?: unknown;
+    scale?: {
+      specReplicasPath?: string;
+      statusReplicasPath?: string;
+      labelSelectorPath?: string;
+    };
+  };
+  additionalPrinterColumns?: Array<{ name?: string; type?: string; jsonPath?: string; priority?: number; description?: string }>;
+}
+
+interface CrdSpec {
+  group?: string;
+  names?: {
+    kind?: string;
+    plural?: string;
+    singular?: string;
+    shortNames?: string[];
+    categories?: string[];
+  };
+  scope?: string;
+  version?: string;
+  versions?: CrdVersion[];
+  validation?: { openAPIV3Schema?: JsonSchema };
+  subresources?: CrdVersion['subresources'];
+  additionalPrinterColumns?: CrdVersion['additionalPrinterColumns'];
+}
+
+const MAX_SCHEMA_DEPTH = 12;
+
+const STANDARD_ROOT_FIELDS: Record<string, JsonSchema> = {
+  apiVersion: {
+    type: 'string',
+    description: 'Versioned API group and version used by this object.',
+  },
+  kind: {
+    type: 'string',
+    description: 'REST resource kind represented by this object.',
+  },
+  metadata: {
+    type: 'object',
+    description: 'Standard Kubernetes metadata for the object.',
+  },
+};
+
+function crdSpec(obj: KubeObject): CrdSpec {
+  return (obj.spec ?? {}) as CrdSpec;
+}
+
+export function crdVersions(obj: KubeObject | undefined): CrdVersion[] {
+  if (!obj) return [];
+  const spec = crdSpec(obj);
+  if (Array.isArray(spec.versions)) return spec.versions.filter((v) => typeof v?.name === 'string' && v.name.length > 0);
+  return spec.version
+    ? [
+        {
+          name: spec.version,
+          served: true,
+          storage: true,
+          schema: spec.validation ? { openAPIV3Schema: spec.validation.openAPIV3Schema } : undefined,
+          subresources: spec.subresources,
+          additionalPrinterColumns: spec.additionalPrinterColumns,
+        },
+      ]
+    : [];
+}
+
+export function CrdDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
+  const spec = crdSpec(obj);
+  const names = spec.names ?? {};
+  const versions = crdVersions(obj);
+  const storageVersion = versions.find((v) => v.storage)?.name;
+
+  return (
+    <GenericDetail obj={obj} ctx={ctx} hideConditions>
+      <Divider />
+      <Box>
+        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+          Definition
+        </Typography>
+        <Table size="small">
+          <TableBody>
+            <InfoRow label="Group" value={spec.group} />
+            <InfoRow label="Kind" value={names.kind} />
+            <InfoRow label="Plural" value={names.plural} />
+            <InfoRow label="Singular" value={names.singular} />
+            <InfoRow label="Scope" value={spec.scope} />
+            <InfoRow label="Storage version" value={storageVersion} />
+            <InfoRow label="Versions" value={versions.map((v) => v.name).join(', ')} />
+            <InfoRow label="Short names" value={(names.shortNames ?? []).join(', ')} />
+            <InfoRow label="Categories" value={(names.categories ?? []).join(', ')} />
+          </TableBody>
+        </Table>
+      </Box>
+    </GenericDetail>
+  );
+}
+
+export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; versionName: string }) {
+  const version = crdVersions(obj).find((v) => v.name === versionName);
+  if (!version) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+        Version {versionName} is not defined on this CRD.
+      </Typography>
+    );
+  }
+
+  const schema = version.schema?.openAPIV3Schema;
+  const rootFields = rootSchemaFields(schema);
+  const printerColumns = version.additionalPrinterColumns ?? [];
+
+  return (
+    <Stack spacing={2} sx={{ p: 2 }}>
+      <Stack direction="row" gap={0.75} flexWrap="wrap">
+        <Chip label={version.name} color="primary" variant="outlined" />
+        {version.served !== false && <Chip label="served" variant="outlined" />}
+        {version.storage && <Chip label="storage" variant="outlined" />}
+        {version.subresources?.status !== undefined && <Chip label="status subresource" variant="outlined" />}
+        {version.subresources?.scale !== undefined && <Chip label="scale subresource" variant="outlined" />}
+        {version.deprecated && <Chip label="deprecated" color="warning" variant="outlined" />}
+      </Stack>
+      {version.deprecationWarning && (
+        <Typography variant="body2" color="warning.main">
+          {version.deprecationWarning}
+        </Typography>
+      )}
+      {!schema && (
+        <Typography variant="body2" color="text.secondary">
+          This CRD version does not publish an OpenAPI v3 schema.
+        </Typography>
+      )}
+      <Box>
+        {rootFields.map(({ name, fieldSchema, required }) => (
+          <SchemaField key={name} name={name} schema={fieldSchema} required={required} depth={0} />
+        ))}
+      </Box>
+      {printerColumns.length > 0 && (
+        <>
+          <Divider />
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              Printer columns
+            </Typography>
+            <Table size="small">
+              <TableBody>
+                {printerColumns.map((column, index) => (
+                  <TableRow key={`${column.name ?? index}:${column.jsonPath ?? ''}`}>
+                    <TableCell sx={{ width: 180, color: 'text.secondary', border: 0 }}>{column.name ?? ''}</TableCell>
+                    <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>
+                      <Typography component="span" variant="body2" color="warning.main" sx={{ fontWeight: 650, mr: 1 }}>
+                        {column.type ?? 'string'}
+                      </Typography>
+                      <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12 }}>
+                        {column.jsonPath ?? ''}
+                      </Typography>
+                      {column.description && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          {column.description}
+                        </Typography>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        </>
+      )}
+    </Stack>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string | undefined }) {
+  if (!value) return null;
+  return (
+    <TableRow>
+      <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{label}</TableCell>
+      <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>{value}</TableCell>
+    </TableRow>
+  );
+}
+
+function rootSchemaFields(schema: JsonSchema | undefined): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
+  const properties = mergedProperties(schema);
+  const required = new Set(mergedRequired(schema));
+  const names = new Set([...Object.keys(STANDARD_ROOT_FIELDS), ...Object.keys(properties)]);
+  return [...names].map((name) => ({
+    name,
+    fieldSchema: mergeSchema(STANDARD_ROOT_FIELDS[name], properties[name]),
+    required: required.has(name),
+  }));
+}
+
+function SchemaField({ name, schema, required, depth }: { name: string; schema: JsonSchema; required: boolean; depth: number }) {
+  const description = schema.description ?? schema.title;
+  const nestedChildren = childFields(schema);
+  const children = depth < MAX_SCHEMA_DEPTH ? nestedChildren : [];
+  const canExpand = children.length > 0;
+  const [expanded, setExpanded] = useState(false);
+  const meta = schemaMeta(schema);
+
+  return (
+    <Box sx={{ ml: depth ? 1.5 : 0, pl: depth ? 1.5 : 0, borderLeft: depth ? 1 : 0, borderColor: 'divider' }}>
+      <Box sx={{ py: 0.75 }}>
+        <Stack direction="row" alignItems="flex-start" spacing={0.75}>
+          {canExpand ? (
+            <IconButton
+              size="small"
+              aria-label={`${expanded ? 'Collapse' : 'Expand'} ${name}`}
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+              sx={{ width: 22, height: 22, mt: -0.25, color: 'text.secondary', flexShrink: 0 }}
+            >
+              {expanded ? <KeyboardArrowDownIcon sx={{ fontSize: 18 }} /> : <KeyboardArrowRightIcon sx={{ fontSize: 18 }} />}
+            </IconButton>
+          ) : (
+            <Box sx={{ width: 22, flexShrink: 0 }} />
+          )}
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Stack direction="row" alignItems="baseline" spacing={0.75} flexWrap="wrap">
+              <Typography component="span" variant="body2" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: depth ? 'monospace' : undefined }}>
+                {name}
+              </Typography>
+              <Typography component="span" variant="body2" color="warning.main" sx={{ fontWeight: 650 }}>
+                {displayType(schema)}
+              </Typography>
+              {required && <Chip label="required" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
+              {schema.nullable && <Chip label="nullable" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
+              {schema['x-kubernetes-preserve-unknown-fields'] && <Chip label="preserve unknown" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
+              {meta.map((m) => (
+                <Chip key={m} label={m} size="small" variant="outlined" sx={{ height: 18, fontSize: 10, maxWidth: 360 }} title={m} />
+              ))}
+            </Stack>
+            {description && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, whiteSpace: 'pre-wrap' }}>
+                {description}
+              </Typography>
+            )}
+          </Box>
+        </Stack>
+      </Box>
+      {depth >= MAX_SCHEMA_DEPTH && nestedChildren.length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pb: 0.75 }}>
+          More nested fields omitted.
+        </Typography>
+      )}
+      {expanded && children.map((child) => (
+        <SchemaField key={child.name} name={child.name} schema={child.fieldSchema} required={child.required} depth={depth + 1} />
+      ))}
+    </Box>
+  );
+}
+
+function childFields(schema: JsonSchema): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
+  const container = schema.type === 'array' && schema.items ? schema.items : schema;
+  const properties = mergedProperties(container);
+  const required = new Set(mergedRequired(container));
+  const entries = Object.entries(properties).map(([name, fieldSchema]) => ({ name, fieldSchema, required: required.has(name) }));
+
+  if (entries.length > 0) return entries;
+  const additional = container.additionalProperties;
+  if (typeof additional === 'object' && additional) {
+    const mapChildren = Object.entries(mergedProperties(additional)).map(([name, fieldSchema]) => ({
+      name: `<value>.${name}`,
+      fieldSchema,
+      required: mergedRequired(additional).includes(name),
+    }));
+    if (mapChildren.length > 0) return mapChildren;
+  }
+  return [];
+}
+
+function mergedProperties(schema: JsonSchema | undefined): Record<string, JsonSchema> {
+  if (!schema) return {};
+  return {
+    ...schema.allOf?.reduce<Record<string, JsonSchema>>((acc, branch) => ({ ...acc, ...mergedProperties(branch) }), {}),
+    ...(schema.properties ?? {}),
+  };
+}
+
+function mergedRequired(schema: JsonSchema | undefined): string[] {
+  if (!schema) return [];
+  return [...new Set([...(schema.allOf?.flatMap((branch) => mergedRequired(branch)) ?? []), ...(schema.required ?? [])])];
+}
+
+function mergeSchema(base: JsonSchema | undefined, override: JsonSchema | undefined): JsonSchema {
+  if (!base) return override ?? {};
+  if (!override) return base;
+  return { ...base, ...override, description: override.description ?? base.description };
+}
+
+function displayType(schema: JsonSchema): string {
+  if (schema['x-kubernetes-int-or-string']) return 'int-or-string';
+  if (Array.isArray(schema.type)) return schema.type.join(' | ');
+  if (schema.type === 'array') return `array<${displayType(schema.items ?? {})}>`;
+  if (schema.type === 'object' && typeof schema.additionalProperties === 'object') {
+    return `map<${displayType(schema.additionalProperties)}>`;
+  }
+  if (schema.type) return schema.format ? `${schema.type} (${schema.format})` : schema.type;
+  const union = schema.oneOf ?? schema.anyOf;
+  if (union?.length) return union.map((s) => displayType(s)).join(' | ');
+  if (schema.allOf?.length) return schema.allOf.map((s) => displayType(s)).find((t) => t !== 'unknown') ?? 'object';
+  return 'unknown';
+}
+
+function schemaMeta(schema: JsonSchema): string[] {
+  const meta: string[] = [];
+  if (schema.enum?.length) meta.push(`enum: ${schema.enum.map((v) => String(v)).join(', ')}`);
+  if (schema.default !== undefined) meta.push(`default: ${JSON.stringify(schema.default)}`);
+  if (schema['x-kubernetes-list-type']) meta.push(`list: ${schema['x-kubernetes-list-type']}`);
+  return meta;
+}
