@@ -191,3 +191,11 @@ export function normalizeForDiff(obj: KubeObject): KubeObject {
   }
   return clone;
 }
+
+/** Hide Kubernetes managed fields while preserving the editable resource shape. */
+export function withoutManagedFields(obj: KubeObject): KubeObject {
+  const clone = JSON.parse(JSON.stringify(obj)) as KubeObject;
+  const meta = clone.metadata as unknown as Record<string, unknown>;
+  delete meta.managedFields;
+  return clone;
+}

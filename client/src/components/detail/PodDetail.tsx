@@ -5,6 +5,7 @@ import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { KubeObject, PodEnvVar } from '@kubus/shared';
 import { gvkForKind } from '@kubus/shared';
 import { GenericDetail, KeyValueChips } from './GenericDetail.js';
+import { ReadyCounter } from '../ReadyCounter.js';
 import { StatusChip } from '../StatusChip.js';
 import { AgeCell } from '../AgeCell.js';
 import { podDebugContainers, podSummary } from '../../kube-display.js';
@@ -66,7 +67,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
     <Box>
       <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
         <StatusChip status={summary.status} />
-        <Chip label={`Ready ${summary.ready}`} variant="outlined" />
+        <Chip label={<>Ready <ReadyCounter value={summary.ready} /></>} variant="outlined" />
         <Chip label={`Restarts ${summary.restarts}`} variant="outlined" />
         {status?.podIP && <Chip label={`IP ${status.podIP}`} variant="outlined" />}
         {spec?.nodeName && (

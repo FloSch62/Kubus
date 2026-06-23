@@ -4,6 +4,7 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell } from './AgeCell.js';
+import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './Sparkline.js';
 import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeRoles, nodeStatus, podSummary, servicePorts, workloadReady } from '../kube-display.js';
@@ -59,6 +60,7 @@ const COLUMN_DEFS: Record<string, (opts: { metrics?: MetricsLookup }) => Col> = 
     headerName: 'Ready',
     width: 75,
     valueGetter: (_v, row) => podSummary(obj(row)).ready,
+    renderCell: (params) => <ReadyCounter value={String(params.value ?? '')} />,
   }),
   podStatus: () => ({
     field: 'podStatus',
@@ -116,6 +118,7 @@ const COLUMN_DEFS: Record<string, (opts: { metrics?: MetricsLookup }) => Col> = 
     headerName: 'Ready',
     width: 80,
     valueGetter: (_v, row) => workloadReady(obj(row)),
+    renderCell: (params) => <ReadyCounter value={String(params.value ?? '')} />,
   }),
   upToDate: () => ({
     field: 'upToDate',

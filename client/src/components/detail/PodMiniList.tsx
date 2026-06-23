@@ -1,5 +1,6 @@
 import { Box, CircularProgress, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import type { KubeObject } from '@kubus/shared';
+import { ReadyCounter } from '../ReadyCounter.js';
 import { StatusChip } from '../StatusChip.js';
 import { podSummary } from '../../kube-display.js';
 import { useDetailStore } from '../../state/detail.js';
@@ -44,7 +45,9 @@ export function PodMiniList({ ctx, pods, title, loading, emptyText }: { ctx: str
                   <TableCell sx={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }} title={pod.metadata.name}>
                     {pod.metadata.name}
                   </TableCell>
-                  <TableCell>{summary.ready}</TableCell>
+                  <TableCell>
+                    <ReadyCounter value={summary.ready} />
+                  </TableCell>
                   <TableCell>
                     <StatusChip status={summary.status} />
                   </TableCell>

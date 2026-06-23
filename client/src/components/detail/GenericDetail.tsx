@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Box, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import type { KubeObject } from '@kubus/shared';
 import { AgeCell } from '../AgeCell.js';
@@ -64,7 +65,7 @@ export function ConditionsTable({ obj, goodWhen }: { obj: KubeObject; goodWhen?:
   );
 }
 
-export function GenericDetail({ obj, ctx, hideConditions }: { obj: KubeObject; ctx: string; hideConditions?: boolean }) {
+export function GenericDetail({ obj, ctx, hideConditions, children }: { obj: KubeObject; ctx: string; hideConditions?: boolean; children?: ReactNode }) {
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
       <Box>
@@ -95,6 +96,7 @@ export function GenericDetail({ obj, ctx, hideConditions }: { obj: KubeObject; c
           <ConditionsTable obj={obj} />
         </>
       )}
+      {children}
     </Stack>
   );
 }

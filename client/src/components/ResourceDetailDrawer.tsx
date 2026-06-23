@@ -5,8 +5,10 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import yaml from 'js-yaml';
 import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
+import { withoutManagedFields } from '../kube-display.js';
 import { YamlEditor } from './YamlEditor.js';
 import { GenericDetail } from './detail/GenericDetail.js';
+import { DeploymentDetail } from './detail/DeploymentDetail.js';
 import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
@@ -49,7 +51,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
 
-  const yamlText = useMemo(() => (obj ? yaml.dump(obj, { noRefs: true, lineWidth: 140 }) : ''), [obj]);
+  const yamlText = useMemo(() => (obj ? yaml.dump(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''), [obj]);
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
   const hasRolloutHistory = sel?.kind === 'Deployment' || sel?.kind === 'StatefulSet';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
@@ -166,6 +168,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
 
 function OverviewForKind({ kind, obj, ctx }: { kind: string; obj: KubeObject; ctx: string }) {
   switch (kind) {
+    case 'Deployment':
+      return <DeploymentDetail obj={obj} ctx={ctx} />;
     case 'Pod':
       return <PodDetail obj={obj} ctx={ctx} />;
     case 'Node':

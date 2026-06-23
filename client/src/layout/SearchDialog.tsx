@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -89,14 +89,26 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const navigate = useNavigate();
   const runAction = usePaletteRunner();
   const listRef = useRef<HTMLUListElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const focusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }, []);
 
   useEffect(() => {
     if (open) {
       setQuery('');
       setStage(null);
       setActiveIndex(0);
+      focusInput();
     }
-  }, [open]);
+  }, [focusInput, open]);
+
+  useEffect(() => {
+    if (open) focusInput();
+  }, [focusInput, open, stage]);
 
   const rows = useMemo<Row[]>(() => {
     if (stage) {
@@ -210,10 +222,11 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <>
-      <Dialog open={open} onClose={closeAll} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={closeAll} maxWidth="sm" fullWidth slotProps={{ transition: { onEntered: focusInput } }}>
         <DialogContent sx={{ p: 1.25 }}>
           <TextField
             autoFocus
+            inputRef={inputRef}
             fullWidth
             placeholder={stage ? 'Filter actions…' : 'Search resources, pages, kinds… (> for commands)'}
             value={query}
