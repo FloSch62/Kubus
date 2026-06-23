@@ -4,8 +4,6 @@ import AddIcon from '@mui/icons-material/Add';
 import SubjectIcon from '@mui/icons-material/Subject';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
-import StarIcon from '@mui/icons-material/Star';
-import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { useParams, useSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDryRunResource, useFilteredList, useResourceMetrics, useWatchedList, type ClusterRow } from '../api/queries.js';
@@ -55,9 +53,6 @@ export function ResourceListPage() {
   const addTab = useDockStore((s) => s.addTab);
   const create = useCreateResource();
   const dryRun = useDryRunResource();
-  const addFavorite = useNavigationStore((s) => s.addFavorite);
-  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
-  const isFavorite = useNavigationStore((s) => s.isFavorite);
   const addSavedView = useNavigationStore((s) => s.addSavedView);
 
   // Detail selection deep-linked via ?sel=ctx|namespace|name
@@ -151,8 +146,6 @@ export function ResourceListPage() {
 
   const multiLogs = kind === 'Pod' && selectedRows.length > 0;
   const kindPath = `/r/${groupToPath(group)}/${version}/${plural}`;
-  const kindFavoriteId = `kind:${group}/${version}/${plural}`;
-  const kindFavorite = isFavorite(kindFavoriteId);
 
   const saveCurrentView = () => {
     const params = new URLSearchParams();
@@ -175,16 +168,6 @@ export function ResourceListPage() {
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="h6">{resourceTitle}</Typography>
-          <Button
-            size="small"
-            startIcon={kindFavorite ? <StarIcon /> : <StarBorderIcon />}
-            onClick={() => {
-              if (kindFavorite) removeFavorite(kindFavoriteId);
-              else addFavorite({ id: kindFavoriteId, title: resourceTitle, subtitle: `${group || 'core'}/${version}`, path: kindPath });
-            }}
-          >
-            {kindFavorite ? 'Favorited' : 'Favorite'}
-          </Button>
         </Box>
         {errors.map(([ctx, s]) => (
           <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>
