@@ -176,6 +176,11 @@ export class ResourceSearchIndex {
     return [...this.entriesById.values()];
   }
 
+  isReconciling(): boolean {
+    this.warm();
+    return !!this.reconcileInFlight;
+  }
+
   private scheduleReconcile(invalidateDiscovery: boolean): void {
     if (this.disposed) return;
     if (invalidateDiscovery) this.discovery.invalidate();
