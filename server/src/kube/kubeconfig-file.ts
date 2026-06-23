@@ -105,6 +105,21 @@ export interface ClusterEditPatch {
   auth: { method: 'keep' } | { method: 'token'; token: string } | { method: 'client-cert'; clientCertPem: string; clientKeyPem: string };
 }
 
+type AuthEditPatch = Exclude<ClusterEditPatch['auth'], { method: 'keep' }>;
+
+function loadDoc(existingYaml: string): KubeconfigDoc {
+  return (yaml.load(existingYaml) ?? {}) as KubeconfigDoc;
+}
+
+function dumpDoc(doc: KubeconfigDoc): string {
+  return yaml.dump(doc, { lineWidth: -1 });
+}
+
+function setString(obj: Record<string, unknown>, key: string, value: string | null): void {
+  if (value === null || value.trim() === '') delete obj[key];
+  else obj[key] = value.trim();
+}
+
 /**
  * Edit an existing context's cluster + user in place: update server/TLS/proxy
  * and optionally CA and credentials. Untouched fields (and the user's auth when
@@ -112,21 +127,24 @@ export interface ClusterEditPatch {
  * is the file's overall structure. Returns the new YAML.
  */
 export function patchCluster(existingYaml: string, contextName: string, patch: ClusterEditPatch): string {
-  const doc = (yaml.load(existingYaml) ?? {}) as KubeconfigDoc;
+  const doc = loadDoc(existingYaml);
   const ctxEntry = asEntries(doc.contexts).find((e) => e.name === contextName);
   if (!ctxEntry) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
   const ctxBody = (ctxEntry.context ?? {}) as { cluster?: string; user?: string };
+  let next = patchClusterEntry(existingYaml, ctxBody.cluster, patch);
+  if (patch.auth.method !== 'keep') next = patchUserEntry(next, ctxBody.user, patch.auth);
+  return next;
+}
 
-  const clusterEntry = asEntries(doc.clusters).find((e) => e.name === ctxBody.cluster);
-  if (!clusterEntry) throw new HttpProblem(404, `cluster "${ctxBody.cluster}" not found in kubeconfig`, 'NotFound');
+export function patchClusterEntry(existingYaml: string, clusterName: string | undefined, patch: ClusterEditPatch): string {
+  const doc = loadDoc(existingYaml);
+  if (!clusterName) throw new HttpProblem(400, 'context has no cluster reference', 'BadRequest');
+  const clusterEntry = asEntries(doc.clusters).find((e) => e.name === clusterName);
+  if (!clusterEntry) throw new HttpProblem(404, `cluster "${clusterName}" not found in kubeconfig`, 'NotFound');
   const cluster = (clusterEntry.cluster && typeof clusterEntry.cluster === 'object' ? clusterEntry.cluster : (clusterEntry.cluster = {})) as Record<
     string,
     unknown
   >;
-  const setString = (obj: Record<string, unknown>, key: string, value: string | null) => {
-    if (value === null || value.trim() === '') delete obj[key];
-    else obj[key] = value.trim();
-  };
 
   cluster.server = patch.server.trim();
   setString(cluster, 'proxy-url', patch.proxyUrl);
@@ -143,23 +161,27 @@ export function patchCluster(existingYaml: string, contextName: string, patch: C
     }
   }
 
-  if (patch.auth.method !== 'keep') {
-    const userEntry = asEntries(doc.users).find((e) => e.name === ctxBody.user);
-    if (!userEntry) throw new HttpProblem(400, `user "${ctxBody.user}" is not in this file, so credentials can't be edited here`, 'BadRequest');
-    const user = (userEntry.user && typeof userEntry.user === 'object' ? userEntry.user : (userEntry.user = {})) as Record<string, unknown>;
-    // Switching auth method makes the chosen credentials authoritative.
-    for (const k of ['token', 'client-certificate', 'client-certificate-data', 'client-key', 'client-key-data', 'exec', 'auth-provider', 'username', 'password']) {
-      delete user[k];
-    }
-    if (patch.auth.method === 'token') {
-      user.token = patch.auth.token.trim();
-    } else {
-      user['client-certificate-data'] = Buffer.from(`${patch.auth.clientCertPem.trim()}\n`).toString('base64');
-      user['client-key-data'] = Buffer.from(`${patch.auth.clientKeyPem.trim()}\n`).toString('base64');
-    }
+  return dumpDoc(doc);
+}
+
+export function patchUserEntry(existingYaml: string, userName: string | undefined, patch: AuthEditPatch): string {
+  const doc = loadDoc(existingYaml);
+  if (!userName) throw new HttpProblem(400, "context has no user reference, so credentials can't be edited", 'BadRequest');
+  const userEntry = asEntries(doc.users).find((e) => e.name === userName);
+  if (!userEntry) throw new HttpProblem(404, `user "${userName}" not found in kubeconfig`, 'NotFound');
+  const user = (userEntry.user && typeof userEntry.user === 'object' ? userEntry.user : (userEntry.user = {})) as Record<string, unknown>;
+  // Switching auth method makes the chosen credentials authoritative.
+  for (const k of ['token', 'client-certificate', 'client-certificate-data', 'client-key', 'client-key-data', 'exec', 'auth-provider', 'username', 'password']) {
+    delete user[k];
+  }
+  if (patch.method === 'token') {
+    user.token = patch.token.trim();
+  } else {
+    user['client-certificate-data'] = Buffer.from(`${patch.clientCertPem.trim()}\n`).toString('base64');
+    user['client-key-data'] = Buffer.from(`${patch.clientKeyPem.trim()}\n`).toString('base64');
   }
 
-  return yaml.dump(doc, { lineWidth: -1 });
+  return dumpDoc(doc);
 }
 
 /**

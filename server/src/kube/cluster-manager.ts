@@ -23,7 +23,7 @@ import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
 import { applyEnvProxy } from './connection.js';
-import { patchCluster, writeKubeconfig } from './kubeconfig-file.js';
+import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { HttpProblem } from '../util/errors.js';
 import type { ClusterAuthType } from '@kubus/shared';
 
@@ -283,34 +283,66 @@ export class ClusterManager extends EventEmitter {
   }
 
   /**
-   * Full edit of a context's cluster + user, persisted into the kubeconfig file
-   * that defines it (atomic write + backup), then reload so the change takes
-   * effect on the next connect.
+   * Full edit of a context's cluster + user, persisted into the kubeconfig
+   * files that define those entries (atomic write + backup), then reload so the
+   * change takes effect on the next connect.
    */
-  editCluster(contextName: string, patch: Parameters<typeof patchCluster>[2]): void {
+  editCluster(contextName: string, patch: ClusterEditPatch): void {
     const ctxObj = this.kc.getContexts().find((c) => c.name === contextName);
     if (!ctxObj) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
-    const file = this.findClusterFile(ctxObj.cluster);
-    if (!file) throw new HttpProblem(400, `could not find a kubeconfig file defining cluster "${ctxObj.cluster}"`, 'BadRequest');
-    const patched = patchCluster(fs.readFileSync(file, 'utf8'), contextName, patch);
-    writeKubeconfig(file, patched);
-    // Drop any active handle so it reconnects with the new settings.
-    this.disconnect(contextName);
+    const clusterName = ctxObj.cluster;
+    if (!clusterName) throw new HttpProblem(400, `context "${contextName}" has no cluster reference`, 'BadRequest');
+
+    const contextFile = this.findEntryFile('context', contextName);
+    if (!contextFile) throw new HttpProblem(400, `could not find a kubeconfig file defining context "${contextName}"`, 'BadRequest');
+    const clusterFile = this.findEntryFile('cluster', clusterName);
+    if (!clusterFile) throw new HttpProblem(400, `could not find a kubeconfig file defining cluster "${clusterName}"`, 'BadRequest');
+
+    const pendingWrites = new Map<string, string>();
+    const readPending = (file: string) => pendingWrites.get(file) ?? fs.readFileSync(file, 'utf8');
+    pendingWrites.set(clusterFile, patchClusterEntry(readPending(clusterFile), clusterName, patch));
+
+    const editedUserName = patch.auth.method === 'keep' ? undefined : ctxObj.user;
+    if (patch.auth.method !== 'keep') {
+      if (!editedUserName) throw new HttpProblem(400, `context "${contextName}" has no user reference, so credentials can't be edited`, 'BadRequest');
+      const userFile = this.findEntryFile('user', editedUserName);
+      if (!userFile) throw new HttpProblem(400, `could not find a kubeconfig file defining user "${editedUserName}"`, 'BadRequest');
+      pendingWrites.set(userFile, patchUserEntry(readPending(userFile), editedUserName, patch.auth));
+    }
+
+    for (const [file, content] of pendingWrites) {
+      writeKubeconfig(file, content);
+    }
+
+    // Drop every active handle backed by the edited entries so reconnects use a
+    // fresh KubeConfig clone.
+    this.disconnectHandlesForEntries(clusterName, editedUserName);
     this.reload();
   }
 
-  /** Locate the kubeconfig file (among the watched paths) that defines a cluster. */
-  private findClusterFile(clusterName: string): string | null {
+  /** Locate the kubeconfig file (among the watched paths) that defines an entry. */
+  private findEntryFile(kind: 'context' | 'cluster' | 'user', name: string | undefined): string | null {
+    if (!name) return null;
     for (const p of this.kubeconfigPaths()) {
       try {
         const kc = new KubeConfig();
         kc.loadFromFile(p);
-        if (kc.getClusters().some((c) => c.name === clusterName)) return p;
+        if (kind === 'context' && kc.getContexts().some((c) => c.name === name)) return p;
+        if (kind === 'cluster' && kc.getClusters().some((c) => c.name === name)) return p;
+        if (kind === 'user' && kc.getUsers().some((u) => u.name === name)) return p;
       } catch {
         // unreadable / invalid file — skip
       }
     }
     return null;
+  }
+
+  private disconnectHandlesForEntries(clusterName: string, userName: string | undefined): void {
+    const affected = new Set<string>();
+    for (const c of this.kc.getContexts()) {
+      if (c.cluster === clusterName || (userName && c.user === userName)) affected.add(c.name);
+    }
+    for (const contextName of affected) this.disconnect(contextName);
   }
 
   /** Get an active handle or throw 400/404. */
