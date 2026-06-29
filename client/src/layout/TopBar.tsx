@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AppBar, Box, IconButton, Stack, Toolbar, Tooltip, Typography } from '@mui/material';
+import BrightnessAutoOutlinedIcon from '@mui/icons-material/BrightnessAutoOutlined';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -86,9 +87,9 @@ export function TopBar() {
               </IconButton>
             </Tooltip>
           )}
-          <Tooltip title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          <Tooltip title={mode === 'light' ? 'Switch to dark mode' : mode === 'dark' ? 'Follow system theme' : 'Switch to light mode'}>
             <IconButton size="small" onClick={toggleTheme}>
-              {mode === 'dark' ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
+              {mode === 'light' ? <DarkModeOutlinedIcon fontSize="small" /> : mode === 'dark' ? <BrightnessAutoOutlinedIcon fontSize="small" /> : <LightModeOutlinedIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
           <Tooltip title="Settings">

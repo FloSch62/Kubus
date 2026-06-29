@@ -16,13 +16,16 @@ interface ClustersState {
   selected: string[];
   /** Namespace filter — empty means all namespaces. */
   namespaces: string[];
-  themeMode: 'light' | 'dark';
+  themeMode: 'light' | 'dark' | 'os';
   /** Per-context UI settings keyed by context name. */
   contextSettings: Record<string, ContextSettings>;
   setSelected: (selected: string[]) => void;
   toggleContext: (name: string) => void;
   setNamespaces: (namespaces: string[]) => void;
+  // Cycles light → dark → os → light
   toggleTheme: () => void;
+  // setTheme directly sets the theme mode to any valid value ('light', 'dark', 'os')
+  setTheme: (mode: 'light' | 'dark' | 'os') => void;
   setContextSetting: (ctx: string, patch: ContextSettings) => void;
 }
 
@@ -31,7 +34,7 @@ export const useClustersStore = create<ClustersState>()(
     (set) => ({
       selected: [],
       namespaces: [],
-      themeMode: window.matchMedia?.('(prefers-color-scheme: light)')?.matches ? 'light' : 'dark',
+      themeMode: 'os',
       contextSettings: {},
       setSelected: (selected) => set({ selected }),
       toggleContext: (name) =>
@@ -39,7 +42,9 @@ export const useClustersStore = create<ClustersState>()(
           selected: s.selected.includes(name) ? s.selected.filter((n) => n !== name) : [...s.selected, name],
         })),
       setNamespaces: (namespaces) => set({ namespaces }),
-      toggleTheme: () => set((s) => ({ themeMode: s.themeMode === 'dark' ? 'light' : 'dark' })),
+      //Ternary operator to cycle through three values: 'light' → 'dark' → 'os' → 'light'…
+      toggleTheme: () => set((s) => ({ themeMode: s.themeMode === 'light' ? 'dark' : s.themeMode === 'dark' ? 'os' : 'light' })),
+      setTheme: (mode) => set({ themeMode: mode }),
       setContextSetting: (ctx, patch) =>
         set((s) => ({
           contextSettings: { ...s.contextSettings, [ctx]: { ...s.contextSettings[ctx], ...patch } },

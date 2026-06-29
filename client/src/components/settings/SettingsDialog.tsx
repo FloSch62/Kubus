@@ -169,7 +169,7 @@ function ClustersSection() {
 
 function AppearanceSection() {
   const themeMode = useClustersStore((s) => s.themeMode);
-  const toggleTheme = useClustersStore((s) => s.toggleTheme);
+  const setTheme = useClustersStore((s) => s.setTheme);
   const { tableDensity, monoFontSize } = useUiPrefsStore();
   const setPrefs = useUiPrefsStore((s) => s.set);
 
@@ -180,12 +180,13 @@ function AppearanceSection() {
           size="small"
           exclusive
           value={themeMode}
-          onChange={(_, v: 'light' | 'dark' | null) => {
-            if (v && v !== themeMode) toggleTheme();
+          onChange={(_, v: 'light' | 'dark' | 'os' | null) => {
+            if (v) setTheme(v);
           }}
         >
           <ToggleButton value="light">Light</ToggleButton>
           <ToggleButton value="dark">Dark</ToggleButton>
+          <ToggleButton value="os">System</ToggleButton>
         </ToggleButtonGroup>
       </Section>
       <Section title="Table density">
