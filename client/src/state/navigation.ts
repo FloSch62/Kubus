@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { FavoriteItem, SavedView } from '@kubus/shared';
+import { kubusStateStorage } from './persist-storage.js';
 
 interface NavigationState {
   favorites: FavoriteItem[];
@@ -29,6 +30,6 @@ export const useNavigationStore = create<NavigationState>()(
         })),
       removeSavedView: (id) => set((s) => ({ savedViews: s.savedViews.filter((v) => v.id !== id) })),
     }),
-    { name: 'kubus-navigation' },
+    { name: 'kubus-navigation', storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );
