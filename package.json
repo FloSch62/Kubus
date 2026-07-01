@@ -19,7 +19,7 @@
     "build-docs": "uvx --native-tls zensical build --clean"
   },
   "devDependencies": {
-    "playwright-core": "^1.60.0",
+    "playwright-core": "^1.61.1",
     "typescript": "^5.8.3"
   }
 }

@@ -23,10 +23,10 @@
     "@kubus/server": "workspace:*",
     "@types/node": "^22.15.0",
     "electron": "^38.2.0",
-    "electron-builder": "^26.0.12",
-    "esbuild": "^0.25.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "fix-path": "^5.0.0",
-    "sharp": "^0.34.0",
+    "sharp": "^0.35.2",
     "typescript": "^5.8.3"
   }
 }
