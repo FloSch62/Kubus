@@ -11,12 +11,20 @@ export default defineConfig({
     },
   },
   build: {
+    target: 'esnext',
     chunkSizeWarningLimit: 4096,
     rollupOptions: {
       output: {
-        manualChunks: {
-          monaco: ['monaco-editor'],
-          mui: ['@mui/material', '@mui/icons-material', '@mui/x-data-grid', '@mui/x-charts'],
+        manualChunks(id) {
+          if (id.includes('node_modules/monaco-editor')) return 'monaco';
+          if (
+            id.includes('node_modules/@mui/material') ||
+            id.includes('node_modules/@mui/icons-material') ||
+            id.includes('node_modules/@mui/x-data-grid') ||
+            id.includes('node_modules/@mui/x-charts')
+          ) {
+            return 'mui';
+          }
         },
       },
     },

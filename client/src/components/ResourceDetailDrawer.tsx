@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Drawer, FormControlLabel, IconButton, Stack, Switch, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Drawer, FormControlLabel, IconButton, Link, Stack, Switch, Tab, Tabs, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import yaml from 'js-yaml';
+import { dump as dumpYaml } from 'js-yaml';
 import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { withoutManagedFields } from '../kube-display.js';
@@ -19,6 +19,7 @@ import { AgeCell } from './AgeCell.js';
 import { MetricsChart } from './MetricsChart.js';
 import { RowActions } from './RowActions.js';
 import { TopologyGraph } from './TopologyGraph.js';
+import { useDetailStore } from '../state/detail.js';
 
 export interface ResourceSelection {
   ctx: string;
@@ -40,8 +41,19 @@ interface Props {
 export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const [tab, setTab] = useState('overview');
   const [reveal, setReveal] = useState(false);
+  const pushDetail = useDetailStore((s) => s.push);
   const isSecret = sel?.kind === 'Secret';
   const isCrd = sel?.kind === 'CustomResourceDefinition';
+  const backingCrdSelection = sel?.custom && !isCrd && sel.group
+    ? {
+        ctx: sel.ctx,
+        group: 'apiextensions.k8s.io',
+        version: 'v1',
+        plural: 'customresourcedefinitions',
+        kind: 'CustomResourceDefinition',
+        name: `${sel.plural}.${sel.group}`,
+      }
+    : undefined;
 
   // Reset per-resource view state when the selection changes.
   const selKey = sel ? `${sel.ctx}|${sel.kind}|${sel.namespace ?? ''}|${sel.name}` : '';
@@ -50,22 +62,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
     setReveal(false);
   }, [selKey]);
   const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
-  const { data: backingCrd } = useResource(
-    sel?.custom && !isCrd && sel.group
-      ? {
-          ctx: sel.ctx,
-          group: 'apiextensions.k8s.io',
-          version: 'v1',
-          plural: 'customresourcedefinitions',
-          name: `${sel.plural}.${sel.group}`,
-        }
-      : undefined,
-  );
+  const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
 
-  const yamlText = useMemo(() => (obj ? yaml.dump(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''), [obj]);
+  const yamlText = useMemo(() => (obj ? dumpYaml(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''), [obj]);
   const schemaSource = isCrd ? obj : backingCrd;
   const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
@@ -92,7 +94,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
     <Drawer anchor="right" open={!!sel} onClose={onClose} slotProps={{ paper: { sx: { width: drawerWidth } } }}>
       {sel && (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
+          <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
             {onBack && (
               <IconButton onClick={onBack} sx={{ mr: 1 }}>
                 <ArrowBackIcon />
@@ -101,9 +103,22 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
             <Box sx={{ minWidth: 0 }}>
               <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
                 {sel.ctx} ·{' '}
-                <Typography component="span" variant="caption" color="primary.main" sx={{ fontWeight: 600 }}>
-                  {sel.kind}
-                </Typography>
+                {backingCrdSelection ? (
+                  <Link
+                    component="button"
+                    variant="caption"
+                    underline="hover"
+                    title={`Open CRD ${backingCrdSelection.name}`}
+                    onClick={() => pushDetail(backingCrdSelection)}
+                    sx={{ fontWeight: 600, verticalAlign: 'baseline' }}
+                  >
+                    {sel.kind}
+                  </Link>
+                ) : (
+                  <Typography component="span" variant="caption" color="primary.main" sx={{ fontWeight: 600 }}>
+                    {sel.kind}
+                  </Typography>
+                )}
                 {obj && (
                   <>
                     {' · '}

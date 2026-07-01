@@ -66,7 +66,7 @@ function TopologyNode({ data, selected }: NodeProps) {
         position={Position.Right}
         style={{ width: 8, height: 8, border: 0, background: color }}
       />
-      <Stack direction="row" spacing={0.75} alignItems="center">
+      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
         <Chip label={node.ref.kind} size="small" sx={{ height: 18, fontSize: 10, maxWidth: 120 }} />
         <Typography variant="caption" color="text.secondary" noWrap>
           {node.layer}

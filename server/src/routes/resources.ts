@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import yaml from 'js-yaml';
 import { ApiException, type KubernetesObject } from '@kubernetes/client-node';
 import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunResponse, type ResourceKindInfo, type ValidationFinding } from '@kubus/shared';
 import type { AppContext } from '../app.js';
@@ -7,6 +6,7 @@ import { getPrinterColumns } from '../kube/printer-columns.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { maybeRedact } from '../kube/redact.js';
 import { HttpProblem, sendError } from '../util/errors.js';
+import { dumpYaml, loadYaml } from '../util/yaml.js';
 
 interface GvrParams {
   ctx: string;
@@ -27,7 +27,7 @@ interface ListQuery {
 function parseManifest(body: unknown): KubernetesObject {
   let obj: unknown = body;
   if (typeof body === 'string') {
-    obj = yaml.load(body);
+    obj = loadYaml(body);
   }
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
     throw new HttpProblem(422, 'body must be a single YAML/JSON object');
@@ -192,7 +192,7 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
         name,
         query,
       });
-      const body = typeof req.body === 'string' ? req.body : yaml.dump(manifest, { noRefs: true });
+      const body = typeof req.body === 'string' ? req.body : dumpYaml(manifest, { noRefs: true });
       try {
         await handle.raw.json<KubeObject>(path, {
           method: 'PATCH',

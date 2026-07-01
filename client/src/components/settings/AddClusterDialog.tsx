@@ -18,7 +18,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import yaml from 'js-yaml';
+import { dump as dumpYaml } from 'js-yaml';
 import type { KubeconfigImportResponse } from '@kubus/shared';
 import { useImportKubeconfig } from '../../api/queries.js';
 import { ApiError } from '../../api/http.js';
@@ -40,7 +40,7 @@ function buildKubeconfigYaml(form: { name: string; server: string; ca: string; s
       ? { token: form.token.trim() }
       : { 'client-certificate-data': btoa(form.cert.trim() + '\n'), 'client-key-data': btoa(form.key.trim() + '\n') };
   const name = form.name.trim();
-  return yaml.dump({
+  return dumpYaml({
     apiVersion: 'v1',
     kind: 'Config',
     clusters: [{ name, cluster }],

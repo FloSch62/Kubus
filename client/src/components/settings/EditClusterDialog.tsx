@@ -22,7 +22,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import HelpOutlinedIcon from '@mui/icons-material/HelpOutlined';
 import type { ClusterAuthType, ContextInfo } from '@kubus/shared';
 import { useClusterCa, useEditCluster, useTestConnection } from '../../api/queries.js';
 
@@ -31,7 +31,7 @@ function helpTip(text: string) {
   return (
     <InputAdornment position="end">
       <Tooltip title={text} placement="top" arrow>
-        <HelpOutlineIcon sx={{ fontSize: 16, color: 'text.disabled', cursor: 'help' }} />
+        <HelpOutlinedIcon sx={{ fontSize: 16, color: 'text.disabled', cursor: 'help' }} />
       </Tooltip>
     </InputAdornment>
   );
@@ -148,7 +148,7 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
             )}
             {c.caPresent && revealCa && (
               <Box>
-                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                   <Typography variant="caption" color="text.secondary">
                     Current CA certificate
                   </Typography>

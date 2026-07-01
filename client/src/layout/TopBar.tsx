@@ -55,7 +55,7 @@ export function TopBar() {
             },
           }}
         >
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 1.5 }}>
+          <Stack direction="row" spacing={1} sx={{ mr: 1.5, alignItems: 'center' }}>
             <Box
               component="img"
               src="/kubus.svg"

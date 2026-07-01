@@ -1,7 +1,7 @@
-import yaml from 'js-yaml';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubernetesObject } from '@kubernetes/client-node';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
+import { loadAllYaml } from '../util/yaml.js';
 import { getLatestPayload, listReleaseSecretObjects } from './release-reader.js';
 
 export interface UninstallResult {
@@ -16,7 +16,7 @@ export interface UninstallResult {
  */
 export async function uninstallRelease(handle: ClusterHandle, namespace: string, name: string, log: FastifyBaseLogger): Promise<UninstallResult> {
   const payload = await getLatestPayload(handle, namespace, name);
-  const docs = yaml.loadAll(payload.manifest ?? '').filter((d): d is Record<string, unknown> => !!d && typeof d === 'object');
+  const docs = loadAllYaml(payload.manifest ?? '').filter((d): d is Record<string, unknown> => !!d && typeof d === 'object');
 
   const result: UninstallResult = { deleted: [], failed: [] };
   for (const doc of docs.reverse()) {

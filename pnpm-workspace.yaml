@@ -7,4 +7,5 @@ allowBuilds:
   esbuild: true
   electron: true
   sharp: true
+  core-js-pure: false
   electron-winstaller: false

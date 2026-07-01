@@ -29,8 +29,8 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import ReplayIcon from '@mui/icons-material/Replay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
-import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import PauseCircleOutlinedIcon from '@mui/icons-material/PauseCircleOutlined';
+import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import LayersIcon from '@mui/icons-material/Layers';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
@@ -69,6 +69,14 @@ export interface RowActionTarget {
   obj: KubeObject;
 }
 
+export interface RowActionMenuProps {
+  target: RowActionTarget;
+  anchorEl?: HTMLElement | null;
+  anchorPosition?: { top: number; left: number } | null;
+  open: boolean;
+  onClose: () => void;
+}
+
 const LOG_TARGET_KINDS = new Set<string>(['Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service']);
 
 function isLogTargetKind(kind: string): kind is LogTargetKind {
@@ -77,6 +85,24 @@ function isLogTargetKind(kind: string): kind is LogTargetKind {
 
 export function RowActions({ target }: { target: RowActionTarget }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+
+  return (
+    <>
+      <IconButton
+        size="small"
+        onClick={(e) => {
+          e.stopPropagation();
+          setAnchor(e.currentTarget);
+        }}
+      >
+        <MoreVertIcon fontSize="small" />
+      </IconButton>
+      <RowActionMenu target={target} anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} />
+    </>
+  );
+}
+
+export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose }: RowActionMenuProps) {
   const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'files' | null>(null);
   const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
@@ -94,7 +120,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
   const name = obj.metadata.name;
   const namespace = obj.metadata.namespace;
   const isProtected = useIsProtected(ctx);
-  const close = () => setAnchor(null);
+  const close = onClose;
 
   const ok = (text: string) => setToast({ severity: 'success', text });
   const fail = (err: unknown) => setToast({ severity: 'error', text: err instanceof Error ? err.message : String(err) });
@@ -145,16 +171,14 @@ export function RowActions({ target }: { target: RowActionTarget }) {
 
   return (
     <>
-      <IconButton
-        size="small"
-        onClick={(e) => {
-          e.stopPropagation();
-          setAnchor(e.currentTarget);
-        }}
+      <Menu
+        anchorEl={anchorEl}
+        anchorPosition={anchorPosition ?? undefined}
+        anchorReference={anchorPosition ? 'anchorPosition' : 'anchorEl'}
+        open={open}
+        onClose={close}
+        onClick={(e) => e.stopPropagation()}
       >
-        <MoreVertIcon fontSize="small" />
-      </IconButton>
-      <Menu anchorEl={anchor} open={!!anchor} onClose={close} onClick={(e) => e.stopPropagation()}>
         {canViewLogs && (
           <MenuItem
             onClick={() => {
@@ -261,7 +285,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
               close();
             }}
           >
-            <ListItemIcon>{rolloutPaused ? <PlayCircleOutlineIcon fontSize="small" /> : <PauseCircleOutlineIcon fontSize="small" />}</ListItemIcon>
+            <ListItemIcon>{rolloutPaused ? <PlayCircleOutlinedIcon fontSize="small" /> : <PauseCircleOutlinedIcon fontSize="small" />}</ListItemIcon>
             <ListItemText>{rolloutPaused ? 'Resume rollout' : 'Pause rollout'}</ListItemText>
           </MenuItem>
         )}
@@ -327,7 +351,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
               close();
             }}
           >
-            <ListItemIcon>{cjSuspended ? <PlayCircleOutlineIcon fontSize="small" /> : <PauseCircleOutlineIcon fontSize="small" />}</ListItemIcon>
+            <ListItemIcon>{cjSuspended ? <PlayCircleOutlinedIcon fontSize="small" /> : <PauseCircleOutlinedIcon fontSize="small" />}</ListItemIcon>
             <ListItemText>{cjSuspended ? 'Resume' : 'Suspend'}</ListItemText>
           </MenuItem>
         )}

@@ -146,7 +146,7 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
 
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
-      <Stack direction="row" gap={0.75} flexWrap="wrap">
+      <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>
         <Chip label={version.name} color="primary" variant="outlined" />
         {version.served !== false && <Chip label="served" variant="outlined" />}
         {version.storage && <Chip label="storage" variant="outlined" />}
@@ -237,7 +237,7 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
   return (
     <Box sx={{ ml: depth ? 1.5 : 0, pl: depth ? 1.5 : 0, borderLeft: depth ? 1 : 0, borderColor: 'divider' }}>
       <Box sx={{ py: 0.75 }}>
-        <Stack direction="row" alignItems="flex-start" spacing={0.75}>
+        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'flex-start' }}>
           {canExpand ? (
             <IconButton
               size="small"
@@ -252,7 +252,7 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
             <Box sx={{ width: 22, flexShrink: 0 }} />
           )}
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Stack direction="row" alignItems="baseline" spacing={0.75} flexWrap="wrap">
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
               <Typography component="span" variant="body2" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: depth ? 'monospace' : undefined }}>
                 {name}
               </Typography>

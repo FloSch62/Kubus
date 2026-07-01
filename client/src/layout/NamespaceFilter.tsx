@@ -19,8 +19,8 @@ export function NamespaceFilter() {
       onChange={(_e, value) => setNamespaces(value)}
       limitTags={2}
       disableCloseOnSelect
-      renderTags={(value, getTagProps) =>
-        value.map((option, index) => <Chip {...getTagProps({ index })} key={option} label={option} size="small" />)
+      renderValue={(value, getItemProps) =>
+        value.map((option, index) => <Chip {...getItemProps({ index })} key={option} label={option} size="small" />)
       }
       renderInput={(params) => <TextField {...params} placeholder={namespaces.length ? '' : 'All namespaces'} variant="outlined" />}
       sx={{ minWidth: 260, maxWidth: 480 }}

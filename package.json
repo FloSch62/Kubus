@@ -5,7 +5,7 @@
   "description": "Free, open-source Kubernetes GUI — multi-cluster browsing, logs, exec, port-forward, metrics, Helm",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=24.17.0"
   },
   "scripts": {
     "dev": "pnpm -r --parallel --stream dev",
@@ -19,7 +19,7 @@
     "build-docs": "uvx --native-tls zensical build --clean"
   },
   "devDependencies": {
-    "playwright-core": "^1.60.0",
-    "typescript": "^5.8.3"
+    "playwright-core": "^1.61.1",
+    "typescript": "^6.0.3"
   }
 }

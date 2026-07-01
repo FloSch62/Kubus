@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'js-yaml';
 import { KubeConfig } from '@kubernetes/client-node';
 import { HttpProblem } from '../util/errors.js';
+import { dumpYaml, loadYaml } from '../util/yaml.js';
 
 interface NamedEntry {
   name: string;
@@ -52,8 +52,8 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
     throw new HttpProblem(400, 'kubeconfig contains no contexts', 'BadRequest');
   }
 
-  const incoming = (yaml.load(incomingYaml) ?? {}) as KubeconfigDoc;
-  const existing: KubeconfigDoc | null = existingYaml?.trim() ? ((yaml.load(existingYaml) ?? {}) as KubeconfigDoc) : null;
+  const incoming = (loadYaml(incomingYaml) ?? {}) as KubeconfigDoc;
+  const existing: KubeconfigDoc | null = existingYaml?.trim() ? ((loadYaml(existingYaml) ?? {}) as KubeconfigDoc) : null;
 
   const added = { contexts: [] as string[], clusters: [] as string[], users: [] as string[] };
   const skipped: string[] = [];
@@ -69,7 +69,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
     added.contexts = asEntries(incoming.contexts).map((e) => e.name);
     added.clusters = asEntries(incoming.clusters).map((e) => e.name);
     added.users = asEntries(incoming.users).map((e) => e.name);
-    return { merged: yaml.dump(doc, { lineWidth: -1 }), added, skipped, conflicts };
+    return { merged: dumpYaml(doc, { lineWidth: -1 }), added, skipped, conflicts };
   }
 
   for (const section of ['clusters', 'users', 'contexts'] as const) {
@@ -93,7 +93,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   }
 
   // Never touch current-context of an existing file.
-  return { merged: yaml.dump(existing, { lineWidth: -1 }), added, skipped, conflicts };
+  return { merged: dumpYaml(existing, { lineWidth: -1 }), added, skipped, conflicts };
 }
 
 export interface ClusterEditPatch {
@@ -108,11 +108,11 @@ export interface ClusterEditPatch {
 type AuthEditPatch = Exclude<ClusterEditPatch['auth'], { method: 'keep' }>;
 
 function loadDoc(existingYaml: string): KubeconfigDoc {
-  return (yaml.load(existingYaml) ?? {}) as KubeconfigDoc;
+  return (loadYaml(existingYaml) ?? {}) as KubeconfigDoc;
 }
 
 function dumpDoc(doc: KubeconfigDoc): string {
-  return yaml.dump(doc, { lineWidth: -1 });
+  return dumpYaml(doc, { lineWidth: -1 });
 }
 
 function setString(obj: Record<string, unknown>, key: string, value: string | null): void {

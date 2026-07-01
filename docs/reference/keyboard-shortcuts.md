@@ -13,6 +13,13 @@ is the hub — almost everything is reachable through it.
 | --- | --- |
 | ++ctrl+k++ / ++cmd+k++ | Open the command palette |
 
+## Resource tables
+
+| Shortcut | Action |
+| --- | --- |
+| ++ctrl+f++ / ++cmd+f++ | Focus the table search |
+| `s` / `:` | Focus the table search |
+
 ## Inside the command palette
 
 | Key | Action |

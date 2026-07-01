@@ -226,7 +226,7 @@ function EnvSection({ ctx, namespace, pod, onOpenRef }: { ctx: string; namespace
 
   return (
     <Box sx={{ px: 2, pt: 2 }}>
-      <Stack direction="row" alignItems="center" sx={{ mb: 0.5 }}>
+      <Stack direction="row" sx={{ mb: 0.5, alignItems: 'center' }}>
         <Typography variant="subtitle2">Environment</Typography>
         <Box sx={{ flex: 1 }} />
         {hasSecrets && (

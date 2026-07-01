@@ -1,10 +1,10 @@
-import yaml from 'js-yaml';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubernetesObject } from '@kubernetes/client-node';
 import type { HelmRollbackResult } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';
+import { dumpYaml, loadAllYaml } from '../util/yaml.js';
 import { decodeReleaseSecret, encodeReleasePayload, listReleaseSecretsRaw, type HelmReleasePayload, type ReleaseSecret } from './release-reader.js';
 
 function revOf(secret: ReleaseSecret): number {
@@ -25,8 +25,7 @@ function rfc3339Local(date: Date): string {
 }
 
 function manifestDocs(manifest: string | undefined, defaultNamespace: string): KubernetesObject[] {
-  return yaml
-    .loadAll(manifest ?? '')
+  return loadAllYaml(manifest ?? '')
     .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
     .map((d) => d as unknown as KubernetesObject)
     .filter((obj) => !!obj.kind && !!obj.metadata?.name)
@@ -102,7 +101,7 @@ export async function rollbackRelease(handle: ClusterHandle, namespace: string, 
       const res = await handle.raw.request(path, {
         method: 'PATCH',
         headers: { 'content-type': 'application/apply-patch+yaml' },
-        body: yaml.dump(doc, { noRefs: true }),
+        body: dumpYaml(doc, { noRefs: true }),
       });
       if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.trim());
       result.applied.push(label);

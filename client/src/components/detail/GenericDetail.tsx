@@ -12,7 +12,7 @@ export function KeyValueChips({ title, entries }: { title: string; entries: Reco
       <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
         {title}
       </Typography>
-      <Stack direction="row" flexWrap="wrap" gap={0.5}>
+      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
         {items.map(([k, v]) => (
           <Chip key={k} label={`${k}=${v}`} variant="outlined" sx={{ maxWidth: 420 }} title={`${k}=${v}`} />
         ))}

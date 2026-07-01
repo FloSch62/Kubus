@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Autocomplete, Box, FormControlLabel, Grid, Stack, Switch, TextField, Typography } from '@mui/material';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useQuery } from '@tanstack/react-query';
-import yaml from 'js-yaml';
+import { dump as dumpYaml } from 'js-yaml';
 import { groupToPath, type KubeObject, type ListResponse, type ResourceKindInfo } from '@kubus/shared';
 import { apiFetch } from '../api/http.js';
 import { resourceUrl, useApiResources, useContexts, useNamespaces } from '../api/queries.js';
@@ -47,7 +47,7 @@ export function DiffPage() {
 
   const toYaml = (obj: KubeObject | undefined) => {
     if (!obj) return '';
-    return yaml.dump(normalize ? normalizeForDiff(obj) : obj, { noRefs: true, sortKeys: true, lineWidth: 120 });
+    return dumpYaml(normalize ? normalizeForDiff(obj) : obj, { noRefs: true, sortKeys: true, lineWidth: 120 });
   };
   const leftText = useMemo(() => toYaml(leftObj.data), [leftObj.data, normalize]); // eslint-disable-line react-hooks/exhaustive-deps
   const rightText = useMemo(() => toYaml(rightObj.data), [rightObj.data, normalize]); // eslint-disable-line react-hooks/exhaustive-deps

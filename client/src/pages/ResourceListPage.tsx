@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Dialog, DialogContent, DialogTitle, Typography } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SubjectIcon from '@mui/icons-material/Subject';
@@ -13,7 +13,7 @@ import { ResourceTable } from '../components/ResourceTable.js';
 import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup } from '../components/columns.js';
 import type { ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { useDetailStore } from '../state/detail.js';
-import { RowActions } from '../components/RowActions.js';
+import { RowActionMenu, RowActions, type RowActionTarget } from '../components/RowActions.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -50,6 +50,8 @@ export function ResourceListPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
+  const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number } | null>(null);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
   const create = useCreateResource();
   const dryRun = useDryRunResource();
@@ -102,6 +104,11 @@ export function ResourceListPage() {
   );
   const { data: printerCols } = useCrdColumns(crdCtx, group, version, plural, isCustomKind);
 
+  const rowActionTarget = useCallback(
+    (row: ClusterRow): RowActionTarget => ({ ctx: row.ctx, group, version, plural, kind, obj: row.obj }),
+    [group, version, plural, kind],
+  );
+
   const columns = useMemo(() => {
     const ids = columnsForKind(kind, namespaced);
     const cols = buildColumns(ids, { multiCluster: selected.length > 1, metrics: makeMetricsLookup(kind, podMetrics), nodeAllocation });
@@ -115,10 +122,10 @@ export function ResourceListPage() {
       width: 50,
       sortable: false,
       filterable: false,
-      renderCell: (p) => <RowActions target={{ ctx: p.row.ctx, group, version, plural, kind, obj: p.row.obj }} />,
+      renderCell: (p) => <RowActions target={rowActionTarget(p.row)} />,
     });
     return cols;
-  }, [kind, namespaced, selected.length, podMetrics, nodeAllocation, group, version, plural, isCustomKind, printerCols]);
+  }, [kind, namespaced, selected.length, podMetrics, nodeAllocation, isCustomKind, printerCols, rowActionTarget]);
   const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
 
   const supportsGvr = (r: ResourceKindInfo) => r.group === group && r.version === version && r.plural === plural;
@@ -205,6 +212,10 @@ export function ResourceListPage() {
           next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
           setSearchParams(next);
         }}
+        onRowContextMenu={(row, event) => {
+          setContextAction({ target: rowActionTarget(row), mouseX: event.clientX + 2, mouseY: event.clientY - 6 });
+          setContextMenuOpen(true);
+        }}
         checkboxSelection={kind === 'Pod'}
         onSelectionChange={kind === 'Pod' ? setSelectedRows : undefined}
         hiddenFields={hiddenFields}
@@ -248,6 +259,15 @@ export function ResourceListPage() {
           </>
         }
       />
+      {contextAction && (
+        <RowActionMenu
+          key={contextAction.target.obj.metadata.uid}
+          target={contextAction.target}
+          anchorPosition={{ top: contextAction.mouseY, left: contextAction.mouseX }}
+          open={contextMenuOpen}
+          onClose={() => setContextMenuOpen(false)}
+        />
+      )}
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="md" fullWidth slotProps={{ paper: { sx: { height: '80vh' } } }}>
         <DialogTitle>Create resource{selected.length > 1 ? ` on ${selected[0]}` : ''}</DialogTitle>
         <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>

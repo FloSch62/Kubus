@@ -10,7 +10,7 @@ interface Props {
 
 export function PageHeader({ title, icon, children }: Props) {
   return (
-    <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
+    <Stack direction="row" spacing={1.25} sx={{ mb: 1.5, flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
       {icon && (
         <Box
           sx={(theme) => ({

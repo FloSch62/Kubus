@@ -1,10 +1,11 @@
+import { useMemo } from 'react';
 import { Alert, Box, Card, CardContent, Chip, Grid, LinearProgress, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
 import WorkspacesOutlinedIcon from '@mui/icons-material/WorkspacesOutlined';
 import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined';
 import RocketLaunchOutlinedIcon from '@mui/icons-material/RocketLaunchOutlined';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
@@ -55,7 +56,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
 
   return (
     <Box>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'center' }}>
         <HubOutlinedIcon sx={{ fontSize: 18, color: 'primary.main' }} />
         <Typography variant="h6">{ctx}</Typography>
       </Stack>
@@ -107,7 +108,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
               label="Failing pods"
               value={data.failingPods.length}
               warn={data.failingPods.length > 0}
-              icon={<ErrorOutlineIcon />}
+              icon={<ErrorOutlinedIcon />}
               onClick={() => navigate('/r/core/v1/pods')}
             />
             <StatCard
@@ -154,7 +155,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
 
           {data.unavailableWorkloads.length > 0 && (
             <ProblemCard title="Unavailable workloads">
-              <Stack direction="row" flexWrap="wrap" gap={1}>
+              <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
                 {data.unavailableWorkloads.map((w) => (
                   <Chip
                     key={`${w.namespace}/${w.name}`}
@@ -170,7 +171,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
 
           {data.recentRestarts.length > 0 && (
             <ProblemCard title="Recent restarts (1h)">
-              <Stack direction="row" flexWrap="wrap" gap={1}>
+              <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1 }}>
                 {data.recentRestarts.slice(0, 20).map((r) => (
                   <Chip key={`${r.namespace}/${r.pod}/${r.container}`} label={`${r.namespace}/${r.pod} ×${r.restarts}${r.reason ? ` (${r.reason})` : ''}`} variant="outlined" color="warning" />
                 ))}
@@ -213,6 +214,19 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
 }
 
 function NodeUsageCard({ nodeMetrics }: { nodeMetrics: ReturnType<typeof useNodeMetrics>['data'] }) {
+  const total = useMemo(() => {
+    if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return undefined;
+    return nodeMetrics.items.reduce(
+      (acc, item) => ({
+        cpuMilli: acc.cpuMilli + item.cpuMilli,
+        memBytes: acc.memBytes + item.memBytes,
+        cpuCapacityMilli: acc.cpuCapacityMilli + (item.cpuCapacityMilli ?? 0),
+        memCapacityBytes: acc.memCapacityBytes + (item.memCapacityBytes ?? 0),
+      }),
+      { cpuMilli: 0, memBytes: 0, cpuCapacityMilli: 0, memCapacityBytes: 0 },
+    );
+  }, [nodeMetrics]);
+
   return (
     <Card variant="outlined" sx={{ mb: 2 }}>
       <CardContent sx={{ py: 1.5 }}>
@@ -232,6 +246,24 @@ function NodeUsageCard({ nodeMetrics }: { nodeMetrics: ReturnType<typeof useNode
         )}
         {nodeMetrics?.available && nodeMetrics.items.length > 0 && (
           <Stack spacing={1}>
+            {total && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  pb: 1,
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                }}
+              >
+                <Typography variant="body2" sx={{ width: 220, fontWeight: 600 }} noWrap>
+                  Total
+                </Typography>
+                <UsageBar label={`CPU ${formatCpu(total.cpuMilli)}`} pct={total.cpuCapacityMilli > 0 ? (total.cpuMilli / total.cpuCapacityMilli) * 100 : undefined} />
+                <UsageBar label={`Mem ${formatBytes(total.memBytes)}`} pct={total.memCapacityBytes > 0 ? (total.memBytes / total.memCapacityBytes) * 100 : undefined} />
+              </Box>
+            )}
             {nodeMetrics.items.map((n) => (
               <Box key={n.name} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Typography variant="body2" sx={{ width: 220 }} noWrap>

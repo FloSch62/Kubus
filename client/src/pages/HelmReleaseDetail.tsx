@@ -3,7 +3,7 @@ import { Alert, Box, Breadcrumbs, Button, Chip, Link, Snackbar, Stack, Tab, Tabl
 import DeleteIcon from '@mui/icons-material/Delete';
 import UndoIcon from '@mui/icons-material/Undo';
 import { useNavigate, useParams } from 'react-router';
-import yaml from 'js-yaml';
+import { dump as dumpYaml } from 'js-yaml';
 import { useHelmHistory, useHelmRelease, useHelmRollback, useHelmUninstall } from '../api/queries.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -24,8 +24,8 @@ export function HelmReleaseDetailPage() {
   const [rollbackTo, setRollbackTo] = useState<number | null>(null);
   const [toast, setToast] = useState<string>();
 
-  const valuesYaml = useMemo(() => (release ? yaml.dump(release.values ?? {}, { noRefs: true }) : ''), [release]);
-  const computedYaml = useMemo(() => (release ? yaml.dump(release.computedValues ?? {}, { noRefs: true }) : ''), [release]);
+  const valuesYaml = useMemo(() => (release ? dumpYaml(release.values ?? {}, { noRefs: true }) : ''), [release]);
+  const computedYaml = useMemo(() => (release ? dumpYaml(release.computedValues ?? {}, { noRefs: true }) : ''), [release]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 2 }}>
@@ -38,7 +38,7 @@ export function HelmReleaseDetailPage() {
       {error && <Alert severity="error">{error.message}</Alert>}
       {release && (
         <>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }}>
+          <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Typography variant="h6">{release.name}</Typography>
             <StatusChip status={release.status} />
             <Chip label={`${release.chart}-${release.chartVersion}`} variant="outlined" />

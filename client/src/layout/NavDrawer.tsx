@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import SpaceDashboardOutlinedIcon from '@mui/icons-material/SpaceDashboardOutlined';
@@ -31,7 +32,7 @@ import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import { NavLink, useLocation } from 'react-router';
 import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts } from '../api/queries.js';
@@ -172,7 +173,7 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
             }}
             sx={{ '& svg': { fontSize: 17 } }}
           >
-            <DeleteOutlineIcon fontSize="small" />
+            <DeleteOutlinedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       }
@@ -323,6 +324,20 @@ export function NavDrawer() {
                   <SearchIcon sx={{ fontSize: 18 }} />
                 </InputAdornment>
               ),
+              endAdornment: filter ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear resource filter"
+                    edge="end"
+                    size="small"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setFilter('')}
+                    sx={{ mr: -0.75 }}
+                  >
+                    <ClearIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
             },
           }}
         />

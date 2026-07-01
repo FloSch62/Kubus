@@ -90,7 +90,7 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
       >
         <ListItemText
           primary={
-            <Stack direction="row" spacing={0.75} alignItems="center" component="span">
+            <Stack direction="row" spacing={0.75} component="span" sx={{ alignItems: 'center' }}>
               <span>{c.name}</span>
               {c.proxyUrl && <Chip size="small" label={c.proxyFromEnv ? 'env proxy' : 'proxy'} sx={{ height: 18, fontSize: 10 }} />}
               {c.skipTlsVerify && <Chip size="small" color="warning" variant="outlined" label="insecure" sx={{ height: 18, fontSize: 10 }} />}
@@ -137,7 +137,7 @@ function ClustersSection() {
         }
       />
       <Box>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+        <Stack direction="row" sx={{ mb: 0.5, alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="subtitle2">Clusters</Typography>
           <Button size="small" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
             Add cluster
@@ -408,8 +408,8 @@ function AboutSection() {
         </Stack>
       </Section>
       <Section title="Updates">
-        <Stack spacing={1.5} alignItems="flex-start">
-          <Stack direction="row" spacing={1} alignItems="center">
+        <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Button
               variant="contained"
               startIcon={checking ? <CircularProgress color="inherit" size={16} /> : <CachedOutlinedIcon />}

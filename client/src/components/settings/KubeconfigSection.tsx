@@ -57,7 +57,7 @@ export function KubeconfigSection() {
           The server was started with <code>--kubeconfig</code>. Changes here apply immediately and persist, but the flag wins again on the next launch.
         </Alert>
       )}
-      <Stack direction="row" spacing={1} alignItems="flex-start">
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
         <TextField
           fullWidth
           size="small"

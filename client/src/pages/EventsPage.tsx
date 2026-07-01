@@ -183,7 +183,7 @@ export function EventsPage() {
           </Alert>
         ))}
       </Box>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, py: 1, flexShrink: 0 }}>
+      <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center' }}>
         <TextField
           placeholder="Search message, reason, object…"
           value={text}

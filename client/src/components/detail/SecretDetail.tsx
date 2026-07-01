@@ -36,7 +36,7 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
               Data keys
             </Typography>
-            <Stack direction="row" flexWrap="wrap" gap={0.5}>
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
               {keys.map((k) => (
                 <Chip key={k} label={k} variant="outlined" />
               ))}
@@ -50,7 +50,7 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           (tls.data?.certificates ?? []).map((cert, i) => (
             <Card key={cert.serialNumber || i} variant="outlined">
               <CardContent sx={{ '&:last-child': { pb: 2 } }}>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }}>
+                <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Typography variant="subtitle2">{commonName(cert.subject)}</Typography>
                   {expiryChip(cert)}
                   {cert.isCA && <Chip label="CA" variant="outlined" />}
@@ -66,7 +66,7 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
                   Serial: {cert.serialNumber}
                 </Typography>
                 {cert.sans.length > 0 && (
-                  <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mt: 1 }}>
+                  <Stack direction="row" sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
                     {cert.sans.map((san) => (
                       <Chip key={san} label={san} variant="outlined" sx={{ maxWidth: 360 }} title={san} />
                     ))}
