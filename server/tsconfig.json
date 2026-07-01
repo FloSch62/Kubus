@@ -3,7 +3,7 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "lib": ["ES2022"],
+    "lib": ["ES2025"],
     "types": ["node"]
   },
   "include": ["src"]
