@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { kubusStateStorage } from './persist-storage.js';
 
 export type TsMode = 'off' | 'local' | 'utc';
 
@@ -26,6 +27,6 @@ export const useLogPrefsStore = create<LogPrefsState>()(
       setTsMode: (tsMode) => set({ tsMode }),
       setHighlight: (highlight) => set({ highlight }),
     }),
-    { name: 'kubus-log-prefs' },
+    { name: 'kubus-log-prefs', storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );

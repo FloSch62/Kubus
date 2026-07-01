@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { kubusStateStorage } from './persist-storage.js';
 
 export type TableDensity = 'compact' | 'comfortable';
 export type RefreshRate = 'fast' | 'normal' | 'slow' | 'off';
@@ -33,7 +34,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       protectByDefault: false,
       set: (patch) => set(patch),
     }),
-    { name: 'kubus-prefs' },
+    { name: 'kubus-prefs', storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );
 

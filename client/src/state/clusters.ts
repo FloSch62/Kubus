@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { useUiPrefsStore } from './prefs.js';
+import { kubusStateStorage } from './persist-storage.js';
 
 export interface ContextSettings {
   /**
@@ -45,7 +46,7 @@ export const useClustersStore = create<ClustersState>()(
           contextSettings: { ...s.contextSettings, [ctx]: { ...s.contextSettings[ctx], ...patch } },
         })),
     }),
-    { name: 'kubus-clusters' },
+    { name: 'kubus-clusters', storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );
 

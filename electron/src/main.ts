@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   app,
   BrowserWindow,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
   ipcMain,
   Menu,
   nativeTheme,
@@ -72,6 +74,11 @@ interface AppInfo {
 }
 
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
+const clientStateFile = () => path.join(app.getPath('userData'), 'client-state.json');
+
+function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!mainWindow && event.sender === mainWindow.webContents;
+}
 
 function loadWindowState(): WindowState {
   const fallback: WindowState = { width: 1440, height: 900 };
@@ -92,6 +99,24 @@ function saveWindowState(win: BrowserWindow): void {
   } catch {
     /* state is a nicety; never block shutdown on it */
   }
+}
+
+function loadClientState(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(clientStateFile(), 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
+  }
+}
+
+function saveClientState(state: Record<string, string>): void {
+  const file = clientStateFile();
+  const tmp = `${file}.tmp`;
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmp, file);
 }
 
 function buildMenu(): void {
@@ -247,23 +272,57 @@ function createWindow(url: string): void {
 }
 
 ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
-  if (isMac || !mainWindow || event.sender !== mainWindow.webContents) return;
+  if (isMac || !isMainWindowSender(event)) return;
+  const win = mainWindow;
+  if (!win) return;
   const { color, symbolColor } = (options ?? {}) as { color?: unknown; symbolColor?: unknown };
   if (typeof color !== 'string' || typeof symbolColor !== 'string') return;
   try {
-    mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
+    win.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
   } catch {
     /* overlay not supported in this environment */
   }
 });
 
+ipcMain.on('kubus:state:get-item', (event, name: unknown) => {
+  event.returnValue = isMainWindowSender(event) && typeof name === 'string' ? (loadClientState()[name] ?? null) : null;
+});
+
+ipcMain.on('kubus:state:set-item', (event, name: unknown, value: unknown) => {
+  if (!isMainWindowSender(event) || typeof name !== 'string' || typeof value !== 'string') {
+    event.returnValue = false;
+    return;
+  }
+  try {
+    saveClientState({ ...loadClientState(), [name]: value });
+    event.returnValue = true;
+  } catch {
+    event.returnValue = false;
+  }
+});
+
+ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
+  if (!isMainWindowSender(event) || typeof name !== 'string') {
+    event.returnValue = false;
+    return;
+  }
+  try {
+    const next = loadClientState();
+    delete next[name];
+    saveClientState(next);
+    event.returnValue = true;
+  } catch {
+    event.returnValue = false;
+  }
+});
+
 ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) return undefined;
+  if (!isMainWindowSender(event)) return undefined;
   return { name: app.getName(), version: app.getVersion() };
 });
 
 ipcMain.handle('kubus:check-for-update', async (event, options?: { force?: unknown }): Promise<UpdateCheckResult> => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) {
+  if (!isMainWindowSender(event)) {
     return { available: false, currentVersion: app.getVersion(), reason: 'invalid-sender' };
   }
   if (options?.force === true) updateCheck = checkForUpdate(true);
