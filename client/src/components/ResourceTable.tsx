@@ -1,9 +1,21 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Box, Chip, InputAdornment, Stack, TextField, Typography } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { useUiPrefsStore } from '../state/prefs.js';
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    target.isContentEditable ||
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    !!target.closest('[contenteditable="true"], [role="textbox"], [role="dialog"], [role="menu"], [role="listbox"], .monaco-editor')
+  );
+}
 
 interface Props {
   rows: ClusterRow[];
@@ -47,6 +59,7 @@ export function ResourceTable({
 }: Props) {
   const [localFilter, setLocalFilter] = useState('');
   const activeFilter = filter ?? localFilter;
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const hiddenKey = (hiddenFields ?? []).join(',');
   const [visibility, setVisibility] = useState<GridColumnVisibilityModel>({});
@@ -78,10 +91,34 @@ export function ResourceTable({
     else setLocalFilter(value);
   };
 
+  const focusSearch = useCallback(() => {
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isTextEntryTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      const shortcutModifier = event.ctrlKey || event.metaKey;
+      const isFindShortcut = shortcutModifier && !event.altKey && !event.shiftKey && key === 'f';
+      const isQuickSearchShortcut = !shortcutModifier && !event.altKey && (key === 's' || key === ':');
+      if (!isFindShortcut && !isQuickSearchShortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      focusSearch();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusSearch]);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, py: 1, flexShrink: 0 }}>
         <TextField
+          inputRef={searchInputRef}
           placeholder="Search…"
           value={activeFilter}
           onChange={(e) => setTextFilter(e.target.value)}
