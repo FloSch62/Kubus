@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { Box, Chip, InputAdornment, Stack, TextField, Typography } from '@mui/material';
+import { Box, Chip, IconButton, InputAdornment, Stack, TextField, Typography } from '@mui/material';
+import ClearIcon from '@mui/icons-material/Clear';
 import SearchIcon from '@mui/icons-material/Search';
 import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
@@ -130,6 +131,20 @@ export function ResourceTable({
                   <SearchIcon sx={{ fontSize: 18 }} />
                 </InputAdornment>
               ),
+              endAdornment: activeFilter ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear table search"
+                    edge="end"
+                    size="small"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setTextFilter('')}
+                    sx={{ mr: -0.75 }}
+                  >
+                    <ClearIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
             },
           }}
         />

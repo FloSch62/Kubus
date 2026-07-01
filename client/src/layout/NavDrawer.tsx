@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import SpaceDashboardOutlinedIcon from '@mui/icons-material/SpaceDashboardOutlined';
@@ -323,6 +324,20 @@ export function NavDrawer() {
                   <SearchIcon sx={{ fontSize: 18 }} />
                 </InputAdornment>
               ),
+              endAdornment: filter ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear resource filter"
+                    edge="end"
+                    size="small"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setFilter('')}
+                    sx={{ mr: -0.75 }}
+                  >
+                    <ClearIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
             },
           }}
         />
