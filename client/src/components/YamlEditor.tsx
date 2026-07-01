@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Stack } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
 import type { ResourceDryRunResponse } from '@kubus/shared';
@@ -24,18 +25,41 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
   const [dryRunBusy, setDryRunBusy] = useState(false);
   const [dryRunText, setDryRunText] = useState<string>();
   const [dryRun, setDryRun] = useState<ResourceDryRunResponse>();
+  const [copied, setCopied] = useState(false);
+  const copyResetRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setText(value);
     setError(undefined);
     setDryRun(undefined);
     setDryRunText(undefined);
+    setCopied(false);
   }, [value]);
+
+  useEffect(
+    () => () => {
+      if (copyResetRef.current) window.clearTimeout(copyResetRef.current);
+    },
+    [],
+  );
 
   const dirty = text !== value;
   const dryRunCurrent = dryRunText === text ? dryRun : undefined;
   const dryRunRequired = !!onDryRun && !!onApply && dirty;
   const dryRunPassed = !dryRunRequired || dryRunCurrent?.ok;
+
+  const copyYaml = async () => {
+    setError(undefined);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (copyResetRef.current) window.clearTimeout(copyResetRef.current);
+      copyResetRef.current = window.setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setCopied(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const apply = async () => {
     if (!onApply) return;
@@ -69,27 +93,28 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {(onApply || toolbar) && (
-        <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0 }}>
-          {toolbar}
-          <Box sx={{ flex: 1 }} />
-          {onApply && (
-            <>
-              {onDryRun && (
-                <Button disabled={!dirty || dryRunBusy || busy} onClick={() => void validate()}>
-                  {dryRunBusy ? 'Validating…' : dryRunCurrent?.ok ? 'Validated' : 'Dry run'}
-                </Button>
-              )}
-              <Button disabled={!dirty || busy} onClick={() => setText(value)}>
-                Reset
+      <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0 }}>
+        {toolbar}
+        <Box sx={{ flex: 1 }} />
+        <Button startIcon={<ContentCopyIcon fontSize="small" />} color={copied ? 'success' : 'primary'} disabled={!text} onClick={() => void copyYaml()}>
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+        {onApply && (
+          <>
+            {onDryRun && (
+              <Button disabled={!dirty || dryRunBusy || busy} onClick={() => void validate()}>
+                {dryRunBusy ? 'Validating…' : dryRunCurrent?.ok ? 'Validated' : 'Dry run'}
               </Button>
-              <Button variant="contained" disabled={!dirty || busy || !dryRunPassed} onClick={() => void apply()}>
-                {busy ? 'Applying…' : applyLabel}
-              </Button>
-            </>
-          )}
-        </Stack>
-      )}
+            )}
+            <Button disabled={!dirty || busy} onClick={() => setText(value)}>
+              Reset
+            </Button>
+            <Button variant="contained" disabled={!dirty || busy || !dryRunPassed} onClick={() => void apply()}>
+              {busy ? 'Applying…' : applyLabel}
+            </Button>
+          </>
+        )}
+      </Stack>
       {error && (
         <Alert severity="error" onClose={() => setError(undefined)} sx={{ borderRadius: 0, flexShrink: 0 }}>
           {error}
@@ -112,6 +137,7 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
           value={text}
           onChange={(v) => {
             setText(v ?? '');
+            setCopied(false);
             setDryRun(undefined);
             setDryRunText(undefined);
           }}
