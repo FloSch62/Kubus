@@ -1,5 +1,9 @@
+import crypto from 'node:crypto';
+import type { Agent } from 'node:http';
 import fetch, { type RequestInit, type Response } from 'node-fetch';
 import { ApiException, type KubeConfig } from '@kubernetes/client-node';
+
+type FetchAgent = Agent & { options: Record<string, unknown> };
 
 /**
  * Authenticated HTTP access to arbitrary API server paths for the things the
@@ -8,6 +12,9 @@ import { ApiException, type KubeConfig } from '@kubernetes/client-node';
  * re-applied per request via KubeConfig.applyToFetchOptions.
  */
 export class RawClient {
+  /** Keep-alive agent shared across requests while the TLS/proxy identity is stable. */
+  private agentCache?: { key: string; agent: FetchAgent };
+
   constructor(private kc: KubeConfig) {}
 
   private serverUrl(): string {
@@ -16,8 +23,47 @@ export class RawClient {
     return cluster.server.replace(/\/$/, '');
   }
 
+  /**
+   * applyToFetchOptions builds a brand-new Agent per call, so every request
+   * would pay a full TCP+TLS handshake. Swap it for a cached keep-alive agent,
+   * keyed by everything that affects the connection (server, proxy, TLS
+   * material) so exec-plugin cert rotation still gets a fresh pool.
+   */
+  private pooledAgent(fresh: unknown): unknown {
+    const agent = fresh as FetchAgent | undefined;
+    if (!agent || typeof agent !== 'object' || !agent.options) return fresh;
+    const cluster = this.kc.getCurrentCluster();
+    const hash = crypto.createHash('sha256');
+    hash.update(agent.constructor?.name ?? '');
+    hash.update('\0').update(cluster?.server ?? '');
+    hash.update('\0').update(cluster?.proxyUrl ?? '');
+    hash.update('\0').update(String(agent.options.rejectUnauthorized ?? ''));
+    hash.update('\0').update(String(agent.options.servername ?? ''));
+    for (const field of ['ca', 'cert', 'key', 'pfx'] as const) {
+      hash.update('\0');
+      const value = agent.options[field];
+      if (value === undefined || value === null) continue;
+      for (const part of Array.isArray(value) ? value : [value]) {
+        hash.update(Buffer.isBuffer(part) ? part : String(part));
+      }
+    }
+    const key = hash.digest('hex');
+    if (this.agentCache?.key === key) return this.agentCache.agent;
+    // New identity: promote the fresh agent to a keep-alive pool. The previous
+    // agent (if any) is dropped; its free sockets are unref'd and close on the
+    // server's idle timeout, while in-flight watches finish undisturbed.
+    (agent as { keepAlive?: boolean }).keepAlive = true;
+    agent.options.keepAlive = true;
+    // Bound the idle pool: bursts (search-index warmup) shouldn't pin dozens
+    // of sockets per cluster until the API server times them out.
+    (agent as { maxFreeSockets?: number }).maxFreeSockets = 8;
+    this.agentCache = { key, agent };
+    return agent;
+  }
+
   async request(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
     const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
+    requestInit.agent = this.pooledAgent(requestInit.agent) as RequestInit['agent'];
     requestInit.method = init?.method ?? 'GET';
     if (init?.body !== undefined) requestInit.body = init.body;
     if (init?.signal) requestInit.signal = init.signal;

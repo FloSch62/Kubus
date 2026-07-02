@@ -7,10 +7,12 @@ import fastifyStatic from '@fastify/static';
 import type { ServerConfig } from './config.js';
 import { ClusterManager } from './kube/cluster-manager.js';
 import { PortForwardManager } from './kube/portforward-manager.js';
+import { SshTunnelManager } from './ssh/tunnel-manager.js';
 import { SettingsStore } from './settings-store.js';
 import { registerContextRoutes } from './routes/contexts.js';
 import { registerAppRoutes } from './routes/app.js';
 import { registerSettingsRoutes } from './routes/settings.js';
+import { registerSshRoutes } from './routes/ssh.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerActionRoutes } from './routes/actions.js';
 import { registerDetailRoutes } from './routes/detail.js';
@@ -29,6 +31,7 @@ export interface AppContext {
   config: ServerConfig;
   clusters: ClusterManager;
   portForwards: PortForwardManager;
+  sshTunnels: SshTunnelManager;
   settings: SettingsStore;
   /** Raw --kubeconfig CLI flag (cleared when the user resets the override). */
   cliKubeconfig: string | undefined;
@@ -49,9 +52,10 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   const settings = new SettingsStore(app.log);
   // CLI flag > persisted UI setting > $KUBECONFIG > ~/.kube/config.
   const effectiveOverride = config.kubeconfigOverride ?? settings.load().kubeconfigPath;
-  const clusters = new ClusterManager(app.log, effectiveOverride);
+  const sshTunnels = new SshTunnelManager(app.log, settings);
+  const clusters = new ClusterManager(app.log, effectiveOverride, sshTunnels);
   const portForwards = new PortForwardManager(clusters, app.log);
-  const ctx: AppContext = { config, clusters, portForwards, settings, cliKubeconfig: config.kubeconfigOverride };
+  const ctx: AppContext = { config, clusters, portForwards, sshTunnels, settings, cliKubeconfig: config.kubeconfigOverride };
 
   await app.register(fastifyWebsocket, {
     options: {
@@ -87,6 +91,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerAppRoutes(app, ctx);
   registerContextRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
+  registerSshRoutes(app, ctx);
   registerResourceRoutes(app, ctx);
   registerActionRoutes(app, ctx);
   registerDetailRoutes(app, ctx);
@@ -117,6 +122,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   app.addHook('onClose', async () => {
     portForwards.stopAll();
     clusters.dispose();
+    sshTunnels.stopAll();
   });
 
   return { app, ctx };

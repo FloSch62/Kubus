@@ -16,6 +16,7 @@ export function broadcastWatchMessage(msg: WatchServerMessage): void {
 
 export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void {
   ctx.clusters.on('contexts-changed', () => broadcastWatchMessage({ op: 'contexts-changed' }));
+  ctx.clusters.on('context-reset', (name: string) => broadcastWatchMessage({ op: 'context-reset', ctx: name }));
   ctx.portForwards.on('update', (forwards) => broadcastWatchMessage({ op: 'pf-update', forwards }));
 
   app.get('/ws/watch', { websocket: true }, (socket: WebSocket) => {

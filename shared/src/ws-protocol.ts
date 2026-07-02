@@ -33,7 +33,9 @@ export type WatchServerMessage =
   | { op: 'status'; id: string; state: WatchStatusState; message?: string }
   | { op: 'drain-progress'; drainId: string; evicted: number; total: number; current?: string; done?: boolean; error?: string }
   | { op: 'pf-update'; forwards: PortForwardInfo[] }
-  | { op: 'contexts-changed' };
+  | { op: 'contexts-changed' }
+  /** A context's server-side session was torn down or (re)created — watch subscriptions for it must resubscribe. */
+  | { op: 'context-reset'; ctx: string };
 
 // ---- Logs ----
 

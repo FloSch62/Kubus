@@ -17,8 +17,9 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CircleIcon from '@mui/icons-material/Circle';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import type { ContextHealth, ContextInfo } from '@kubus/shared';
-import { useConnectContext, useContexts } from '../api/queries.js';
+import { useConnectContext, useContexts, useReconnectContext } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 
 const HEALTH_COLOR: Record<ContextHealth, 'success' | 'error' | 'warning' | 'disabled'> = {
@@ -48,6 +49,7 @@ function selectedHealth(contexts: ContextInfo[] | undefined, selected: string[])
 export function ClusterSwitcher() {
   const { data: contexts } = useContexts();
   const connect = useConnectContext();
+  const reconnect = useReconnectContext();
   const selected = useClustersStore((s) => s.selected);
   const toggleContext = useClustersStore((s) => s.toggleContext);
   const setSelected = useClustersStore((s) => s.setSelected);
@@ -55,23 +57,32 @@ export function ClusterSwitcher() {
   const setContextSetting = useClustersStore((s) => s.setContextSetting);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
-  // Reconnect persisted selections on startup; drop ones gone from kubeconfig.
+  // On startup pick the persisted (or kubeconfig-current) selection; afterwards
+  // keep the selection healthy on every context update: drop contexts gone from
+  // the kubeconfig and re-establish sessions lost to a server restart or a live
+  // kubeconfig change.
   const restored = useRef(false);
+  const connecting = useRef(new Set<string>());
   useEffect(() => {
-    if (restored.current || !contexts) return;
-    restored.current = true;
+    if (!contexts) return;
     const valid = new Set(contexts.map((c) => c.name));
-    const keep = selected.filter((name) => valid.has(name));
+    let keep = selected.filter((name) => valid.has(name));
     if (keep.length !== selected.length) setSelected(keep);
-    const current = contexts.find((c) => c.current);
-    const startupSelection = keep.length > 0 ? keep : current ? [current.name] : [];
-    if (keep.length === 0 && startupSelection.length > 0) setSelected(startupSelection);
-    for (const name of startupSelection) {
+    if (!restored.current) {
+      restored.current = true;
+      if (keep.length === 0) {
+        const current = contexts.find((c) => c.current);
+        if (current) setSelected((keep = [current.name]));
+      }
+    }
+    for (const name of keep) {
       const info = contexts.find((c) => c.name === name);
-      if (info && !info.active) connect.mutate({ ctx: name, connect: true });
+      if (!info || info.active || connecting.current.has(name)) continue;
+      connecting.current.add(name);
+      connect.mutate({ ctx: name, connect: true }, { onSettled: () => connecting.current.delete(name) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contexts]);
+  }, [contexts, selected]);
 
   const handleToggle = (name: string) => {
     const isSelected = selected.includes(name);
@@ -98,11 +109,12 @@ export function ClusterSwitcher() {
       <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} slotProps={{ paper: { sx: { minWidth: 340 } } }}>
         {(contexts ?? []).map((c) => {
           const isProtected = !!contextSettings[c.name]?.protected;
+          const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
           return (
             <MenuItem key={c.name} onClick={() => handleToggle(c.name)} dense>
               <Checkbox checked={selected.includes(c.name)} size="small" sx={{ p: 0.5, mr: 1 }} />
               <ListItemIcon sx={{ minWidth: 28 }}>
-                {connect.isPending && connect.variables?.ctx === c.name ? (
+                {(connect.isPending && connect.variables?.ctx === c.name) || isReconnecting ? (
                   <CircularProgress size={12} />
                 ) : (
                   <Tooltip title={healthTitle(c)}>
@@ -119,6 +131,21 @@ export function ClusterSwitcher() {
                   </Typography>
                 }
               />
+              {c.active && (
+                <Tooltip title="Reconnect: rebuild this session with fresh credentials, discovery, and watches">
+                  <IconButton
+                    aria-label={`Reconnect ${c.name}`}
+                    size="small"
+                    disabled={isReconnecting}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reconnect.mutate(c.name);
+                    }}
+                  >
+                    <RestartAltIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
                 <IconButton
                   size="small"

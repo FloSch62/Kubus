@@ -5,6 +5,15 @@ import type { AppContext } from '../app.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 
 const nullableString = z.string().nullable().or(z.literal(''));
+const setSshHostSchema = z.object({
+  sshHost: z
+    .string()
+    .trim()
+    .max(256)
+    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
+    .nullable()
+    .or(z.literal('')),
+});
 const editClusterSchema = z.object({
   server: z.string().trim().regex(/^https?:\/\//i, 'API server URL must start with http:// or https://'),
   skipTlsVerify: z.boolean(),
@@ -15,6 +24,14 @@ const editClusterSchema = z.object({
     .regex(/^(socks5?|socks5h|https?):\/\//i, 'proxy URL must start with socks5://, socks5h://, http:// or https://')
     .nullable()
     .or(z.literal('')),
+  sshHost: z
+    .string()
+    .trim()
+    .max(256)
+    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
+    .nullable()
+    .or(z.literal(''))
+    .optional(),
   tlsServerName: nullableString,
   auth: z.discriminatedUnion('method', [
     z.object({ method: z.literal('keep') }),
@@ -53,6 +70,9 @@ export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): vo
       const parsed = editClusterSchema.safeParse(req.body);
       if (!parsed.success) throw new HttpProblem(400, parsed.error.issues[0]?.message ?? 'invalid body', 'BadRequest');
       const d = parsed.data;
+      if (d.proxyUrl && d.sshHost) {
+        throw new HttpProblem(400, 'choose either an SSH jump host or a proxy URL, not both', 'BadRequest');
+      }
       ctx.clusters.editCluster(req.params.ctx, {
         server: d.server,
         skipTlsVerify: d.skipTlsVerify,
@@ -61,6 +81,21 @@ export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): vo
         tlsServerName: d.tlsServerName || null,
         auth: d.auth,
       });
+      // Only touch the tunnel mapping when the client sends the field, so
+      // older clients that omit it can't silently clear an existing jump host.
+      if (d.sshHost !== undefined) ctx.clusters.setSshHost(req.params.ctx, d.sshHost || null);
+      return ctx.clusters.listContexts();
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.put<{ Params: { ctx: string } }>('/api/contexts/:ctx/ssh-host', async (req, reply) => {
+    try {
+      const parsed = setSshHostSchema.safeParse(req.body);
+      if (!parsed.success) throw new HttpProblem(400, parsed.error.issues[0]?.message ?? 'invalid body', 'BadRequest');
+      ctx.clusters.setSshHost(req.params.ctx, parsed.data.sshHost || null);
       return ctx.clusters.listContexts();
     } catch (err) {
       sendError(reply, err);
@@ -81,6 +116,16 @@ export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): vo
   app.delete<{ Params: { ctx: string } }>('/api/contexts/:ctx/connect', async (req) => {
     ctx.clusters.disconnect(req.params.ctx);
     return ctx.clusters.listContexts();
+  });
+
+  app.post<{ Params: { ctx: string } }>('/api/contexts/:ctx/reconnect', async (req, reply) => {
+    try {
+      await ctx.clusters.reconnect(req.params.ctx);
+      return ctx.clusters.listContexts();
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
   });
 
   app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/api-resources', async (req, reply) => {
