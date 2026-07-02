@@ -74,3 +74,13 @@ export function applyProxyRuntimeCompatibility(kc: KubeConfig): void {
     return proxyUrl === c.proxyUrl ? c : { ...c, proxyUrl };
   });
 }
+
+/**
+ * Point a cluster at a Kubus-managed SSH tunnel's SOCKS endpoint. Runtime-only
+ * (applied to per-context clones): the managed tunnel wins over any proxy-url
+ * in the file or the environment, and nothing is persisted.
+ */
+export function overrideClusterProxyUrl(kc: KubeConfig, clusterName: string, proxyUrl: string): void {
+  if (!kc.clusters?.length) return;
+  kc.clusters = kc.clusters.map((c) => (c.name === clusterName ? { ...c, proxyUrl } : c));
+}

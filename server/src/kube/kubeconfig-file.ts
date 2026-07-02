@@ -121,6 +121,22 @@ function setString(obj: Record<string, unknown>, key: string, value: string | nu
 }
 
 /**
+ * Accept certificate material as PEM *or* as the base64 `*-data` value copied
+ * out of another kubeconfig — a very easy mix-up that otherwise lands
+ * double-encoded in the file and fails with cryptic OpenSSL PEM errors.
+ */
+function normalizePem(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes('-----BEGIN')) return trimmed;
+  const decoded = Buffer.from(trimmed.replace(/\s+/g, ''), 'base64').toString('utf8');
+  return decoded.includes('-----BEGIN') ? decoded.trim() : trimmed;
+}
+
+function pemToData(pem: string): string {
+  return Buffer.from(`${normalizePem(pem)}\n`).toString('base64');
+}
+
+/**
  * Edit an existing context's cluster + user in place: update server/TLS/proxy
  * and optionally CA and credentials. Untouched fields (and the user's auth when
  * `auth.method === 'keep'`, e.g. exec/auth-provider plugins) are preserved, as
@@ -156,7 +172,7 @@ export function patchClusterEntry(existingYaml: string, clusterName: string | un
   } else {
     delete cluster['insecure-skip-tls-verify'];
     if (patch.caPem && patch.caPem.trim()) {
-      cluster['certificate-authority-data'] = Buffer.from(`${patch.caPem.trim()}\n`).toString('base64');
+      cluster['certificate-authority-data'] = pemToData(patch.caPem);
       delete cluster['certificate-authority'];
     }
   }
@@ -177,8 +193,8 @@ export function patchUserEntry(existingYaml: string, userName: string | undefine
   if (patch.method === 'token') {
     user.token = patch.token.trim();
   } else {
-    user['client-certificate-data'] = Buffer.from(`${patch.clientCertPem.trim()}\n`).toString('base64');
-    user['client-key-data'] = Buffer.from(`${patch.clientKeyPem.trim()}\n`).toString('base64');
+    user['client-certificate-data'] = pemToData(patch.clientCertPem);
+    user['client-key-data'] = pemToData(patch.clientKeyPem);
   }
 
   return dumpDoc(doc);

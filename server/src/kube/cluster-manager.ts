@@ -23,9 +23,11 @@ import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
-import { applyEnvProxy, applyProxyRuntimeCompatibility } from './connection.js';
+import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { HttpProblem } from '../util/errors.js';
+import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
+import { isValidSshDestination } from '../ssh/tunnel-manager.js';
 import type { ClusterAuthType } from '@kubus/shared';
 
 const BACKGROUND_HEALTH_INTERVAL_MS = 60_000;
@@ -64,6 +66,7 @@ export class ClusterHandle {
     baseConfig: KubeConfig,
     public readonly contextName: string,
     log: FastifyBaseLogger,
+    sshProxyUrl?: string,
   ) {
     // Each handle owns its own KubeConfig: setCurrentContext mutates state
     // and exec-auth caches per-instance — never share across contexts.
@@ -71,6 +74,8 @@ export class ClusterHandle {
     this.kc.loadFromString(baseConfig.exportConfig());
     applyProxyRuntimeCompatibility(this.kc);
     this.kc.setCurrentContext(contextName);
+    const clusterName = this.kc.getContexts().find((c) => c.name === contextName)?.cluster;
+    if (sshProxyUrl && clusterName) overrideClusterProxyUrl(this.kc, clusterName, sshProxyUrl);
     this.raw = new RawClient(this.kc);
     this.discovery = new DiscoveryCache(this.raw);
     this.watchers = new WatcherRegistry(this.raw, log);
@@ -153,16 +158,26 @@ export class ClusterHandle {
 export class ClusterManager extends EventEmitter {
   private kc = new KubeConfig();
   private handles = new Map<string, ClusterHandle>();
+  private connecting = new Map<string, Promise<ClusterHandle>>();
   private fsWatchers: fs.FSWatcher[] = [];
+  private watchRetryTimers: NodeJS.Timeout[] = [];
+  private reloadDebounce?: NodeJS.Timeout;
   private healthCache = new Map<string, CachedContextHealth>();
   private healthTimer?: NodeJS.Timeout;
   private healthRun?: Promise<void>;
+  /**
+   * Long-lived per-context clients for health probes. Reusing them keeps the
+   * exec-plugin token cache and TLS connection pool warm instead of spawning
+   * cloud CLIs and re-handshaking on every probe cycle.
+   */
+  private probeClients = new Map<string, { raw: RawClient; proxyUrl?: string }>();
   /** Cluster names whose proxy-url was injected from env vars (not the kubeconfig). */
   private envProxyClusters = new Set<string>();
 
   constructor(
     private log: FastifyBaseLogger,
     private kubeconfigOverride?: string,
+    private sshTunnels?: SshTunnelManager,
   ) {
     super();
     this.loadKubeconfig();
@@ -210,41 +225,92 @@ export class ClusterManager extends EventEmitter {
   /** Re-point the kubeconfig at runtime: reload contexts and re-watch files. */
   setKubeconfigOverride(p: string | undefined): void {
     this.kubeconfigOverride = p;
-    for (const w of this.fsWatchers) w.close();
-    this.fsWatchers = [];
+    this.closeFileWatchers();
     this.reload();
     this.watchKubeconfigFiles();
   }
 
+  private closeFileWatchers(): void {
+    for (const w of this.fsWatchers) w.close();
+    this.fsWatchers = [];
+    for (const t of this.watchRetryTimers) clearTimeout(t);
+    this.watchRetryTimers = [];
+  }
+
+  /**
+   * Watch the parent directories of the kubeconfig paths rather than the files
+   * themselves: fs.watch on a file goes stale once the file is replaced via
+   * tmp+rename (which is how kubectl — and our own writeKubeconfig — save it),
+   * and a directory watch also picks up kubeconfigs created after startup.
+   */
   private watchKubeconfigFiles(): void {
+    const byDir = new Map<string, Set<string>>();
     for (const p of this.kubeconfigPaths()) {
-      try {
-        let debounce: NodeJS.Timeout | undefined;
-        const w = fs.watch(p, () => {
-          if (debounce) clearTimeout(debounce);
-          debounce = setTimeout(() => this.reload(), 500);
-        });
-        w.unref();
-        this.fsWatchers.push(w);
-      } catch {
-        // file may not exist yet
-      }
+      const abs = path.resolve(p);
+      const dir = path.dirname(abs);
+      let names = byDir.get(dir);
+      if (!names) byDir.set(dir, (names = new Set()));
+      names.add(path.basename(abs));
     }
+    for (const [dir, names] of byDir) this.watchKubeconfigDir(dir, names);
+  }
+
+  private watchKubeconfigDir(dir: string, names: Set<string>): void {
+    try {
+      const w = fs.watch(dir, (_event, filename) => {
+        // A null filename (possible on some platforms) may still concern us.
+        if (filename && !names.has(filename.toString())) return;
+        this.scheduleReload();
+      });
+      w.unref();
+      this.fsWatchers.push(w);
+    } catch {
+      // Directory missing (e.g. ~/.kube on a fresh machine) — retry until it appears.
+      const timer = setTimeout(() => {
+        this.watchRetryTimers = this.watchRetryTimers.filter((t) => t !== timer);
+        this.watchKubeconfigDir(dir, names);
+      }, 10_000);
+      timer.unref();
+      this.watchRetryTimers.push(timer);
+    }
+  }
+
+  private scheduleReload(): void {
+    if (this.reloadDebounce) clearTimeout(this.reloadDebounce);
+    this.reloadDebounce = setTimeout(() => {
+      this.reloadDebounce = undefined;
+      this.reload();
+    }, 300);
+    this.reloadDebounce.unref();
+  }
+
+  /** Serialized (context, cluster, user) per context — for change detection across reloads. */
+  private contextFingerprints(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const c of this.kc.getContexts()) {
+      map.set(c.name, JSON.stringify([c, this.kc.getCluster(c.cluster) ?? null, this.kc.getUser(c.user) ?? null]));
+    }
+    return map;
   }
 
   reload(): void {
     this.log.info('kubeconfig changed, reloading');
+    const before = this.contextFingerprints();
     this.kc = new KubeConfig();
     this.loadKubeconfig();
-    const valid = new Set(this.kc.getContexts().map((c) => c.name));
+    this.probeClients.clear();
+    const after = this.contextFingerprints();
     for (const [name, handle] of this.handles) {
-      if (!valid.has(name)) {
-        handle.dispose();
-        this.handles.delete(name);
-      }
+      // Drop sessions whose backing entries were removed or edited so clients
+      // reconnect against the new definition instead of a stale clone.
+      if (after.get(name) === before.get(name)) continue;
+      handle.dispose();
+      this.handles.delete(name);
+      this.healthCache.delete(name);
+      this.emit('context-reset', name);
     }
     for (const name of this.healthCache.keys()) {
-      if (!valid.has(name)) this.healthCache.delete(name);
+      if (!after.has(name)) this.healthCache.delete(name);
     }
     this.refreshCachedHealth();
     this.emit('contexts-changed');
@@ -257,6 +323,7 @@ export class ClusterManager extends EventEmitter {
       const cachedHealth = this.healthCache.get(c.name);
       const cluster = this.kc.getCluster(c.cluster);
       const user = this.kc.getUser(c.user);
+      const sshTunnelKey = this.sshTunnelKeyForContext(c.name);
       return {
         name: c.name,
         cluster: c.cluster,
@@ -270,6 +337,7 @@ export class ClusterManager extends EventEmitter {
         kubernetesVersion: handle?.kubernetesVersion ?? cachedHealth?.kubernetesVersion,
         proxyUrl: cluster?.proxyUrl,
         proxyFromEnv: this.envProxyClusters.has(c.cluster) || undefined,
+        sshHost: sshTunnelKey ? this.sshTunnels?.hostForContextKey(sshTunnelKey) : undefined,
         tlsServerName: cluster?.tlsServerName,
         skipTlsVerify: cluster?.skipTLSVerify || undefined,
         caPresent: !!(cluster?.caData || cluster?.caFile) || undefined,
@@ -305,12 +373,40 @@ export class ClusterManager extends EventEmitter {
     return result;
   }
 
-  private async probeContext(contextName: string, timeoutMs: number): Promise<TestConnectionResponse> {
+  /** SOCKS URL of the managed SSH tunnel for a context, spawning the tunnel if needed. */
+  private async sshProxyFor(contextName: string): Promise<string | undefined> {
+    if (!this.sshTunnels) return undefined;
+    const sshTunnelKey = this.sshTunnelKeyForContext(contextName);
+    if (!sshTunnelKey) return undefined;
+    const host = this.sshTunnels.hostForContextKey(sshTunnelKey);
+    if (!host) return undefined;
+    return this.sshTunnels.ensure(host);
+  }
+
+  private async probeClient(contextName: string): Promise<RawClient> {
+    // For SSH-tunneled clusters the proxy URL can move (tunnel respawned on a
+    // new port), so the cached client is only valid while the URL matches.
+    const sshProxyUrl = await this.sshProxyFor(contextName);
+    const cached = this.probeClients.get(contextName);
+    if (cached && cached.proxyUrl === sshProxyUrl) return cached.raw;
     const kc = new KubeConfig();
     kc.loadFromString(this.kc.exportConfig());
     applyProxyRuntimeCompatibility(kc);
     kc.setCurrentContext(contextName);
+    const clusterName = kc.getContexts().find((c) => c.name === contextName)?.cluster;
+    if (sshProxyUrl && clusterName) overrideClusterProxyUrl(kc, clusterName, sshProxyUrl);
     const raw = new RawClient(kc);
+    this.probeClients.set(contextName, { raw, proxyUrl: sshProxyUrl });
+    return raw;
+  }
+
+  private async probeContext(contextName: string, timeoutMs: number): Promise<TestConnectionResponse> {
+    let raw: RawClient;
+    try {
+      raw = await this.probeClient(contextName);
+    } catch (err) {
+      return { health: 'error', healthMessage: err instanceof Error ? err.message : String(err) };
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref();
@@ -413,6 +509,35 @@ export class ClusterManager extends EventEmitter {
     this.reload();
   }
 
+  /**
+   * Set or clear the Kubus-managed SSH jump host for a context's cluster.
+   * Persisted in Kubus settings (not the kubeconfig); affected sessions are
+   * dropped so the next connect goes through (or stops using) the tunnel.
+   */
+  setSshHost(contextName: string, host: string | null): void {
+    const ctxObj = this.kc.getContexts().find((c) => c.name === contextName);
+    if (!ctxObj) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    if (!ctxObj.cluster) throw new HttpProblem(400, `context "${contextName}" has no cluster reference`, 'BadRequest');
+    if (!this.sshTunnels) throw new HttpProblem(500, 'SSH tunnel support is not available in this server', 'SshUnavailable');
+    if (host && !isValidSshDestination(host)) {
+      throw new HttpProblem(400, 'SSH jump host must be an ssh config alias or user@host (no spaces or leading "-")', 'BadRequest');
+    }
+    const sshTunnelKey = this.sshTunnelKeyForContext(contextName);
+    if (!sshTunnelKey) throw new HttpProblem(400, `could not find a kubeconfig file defining context "${contextName}"`, 'BadRequest');
+    if ((this.sshTunnels.hostForContextKey(sshTunnelKey) ?? null) === host) return;
+    this.sshTunnels.setHostForContextKey(sshTunnelKey, host);
+    this.disconnect(contextName);
+    this.probeClients.delete(contextName);
+    this.refreshCachedHealth();
+    this.emit('contexts-changed');
+  }
+
+  private sshTunnelKeyForContext(contextName: string): string | null {
+    const contextFile = this.findEntryFile('context', contextName);
+    if (!contextFile) return null;
+    return `context:${JSON.stringify([path.resolve(contextFile), contextName])}`;
+  }
+
   /** Locate the kubeconfig file (among the watched paths) that defines an entry. */
   private findEntryFile(kind: 'context' | 'cluster' | 'user', name: string | undefined): string | null {
     if (!name) return null;
@@ -452,15 +577,35 @@ export class ClusterManager extends EventEmitter {
   async connect(contextName: string): Promise<ClusterHandle> {
     const existing = this.handles.get(contextName);
     if (existing) return existing;
-    if (!this.kc.getContexts().some((c) => c.name === contextName)) {
+    const inFlight = this.connecting.get(contextName);
+    if (inFlight) return inFlight;
+    const connecting = this.connectFresh(contextName).finally(() => {
+      if (this.connecting.get(contextName) === connecting) this.connecting.delete(contextName);
+    });
+    this.connecting.set(contextName, connecting);
+    return connecting;
+  }
+
+  private async connectFresh(contextName: string): Promise<ClusterHandle> {
+    const ctxEntry = this.kc.getContexts().find((c) => c.name === contextName);
+    if (!ctxEntry) {
       throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
     }
-    const handle = new ClusterHandle(this.kc, contextName, this.log);
+    let sshProxyUrl: string | undefined;
+    try {
+      sshProxyUrl = await this.sshProxyFor(contextName);
+    } catch (err) {
+      throw new HttpProblem(502, err instanceof Error ? err.message : String(err), 'SshTunnelFailed');
+    }
+    const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
     this.handles.set(contextName, handle);
     await handle.probe();
     if (handle.health === 'connected') {
       handle.activate();
     }
+    // A fresh session exists: watch subscriptions must (re)attach to it.
+    this.emit('context-reset', contextName);
+    this.emit('contexts-changed');
     return handle;
   }
 
@@ -469,12 +614,26 @@ export class ClusterManager extends EventEmitter {
     if (handle) {
       handle.dispose();
       this.handles.delete(contextName);
+      this.emit('context-reset', contextName);
+      this.emit('contexts-changed');
     }
+  }
+
+  /**
+   * Tear down a context's session and build a fresh one: new KubeConfig clone,
+   * new auth state, discovery, watchers, and metrics. The user-facing "my
+   * session is stuck / my credentials rotated" escape hatch.
+   */
+  async reconnect(contextName: string): Promise<ClusterHandle> {
+    this.disconnect(contextName);
+    this.probeClients.delete(contextName);
+    return this.connect(contextName);
   }
 
   dispose(): void {
     if (this.healthTimer) clearInterval(this.healthTimer);
-    for (const w of this.fsWatchers) w.close();
+    if (this.reloadDebounce) clearTimeout(this.reloadDebounce);
+    this.closeFileWatchers();
     for (const handle of this.handles.values()) handle.dispose();
     this.handles.clear();
   }

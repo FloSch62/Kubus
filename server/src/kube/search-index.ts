@@ -7,7 +7,7 @@ import type { DiscoveryCache } from './discovery.js';
 import { resourcePath, type RawClient } from './raw-client.js';
 
 const LIST_PAGE_SIZE = 1_000;
-const START_CONCURRENCY = 8;
+const START_CONCURRENCY = 16;
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const WATCH_FORBIDDEN_RELIST_MS = 60_000;
@@ -144,6 +144,8 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
  */
 export class ResourceSearchIndex {
   private entriesById = new Map<string, IndexedResourceSearchEntry>();
+  /** Snapshot of entriesById.values(), rebuilt lazily after mutations. */
+  private entriesSnapshot?: IndexedResourceSearchEntry[];
   private idByNameKey = new Map<string, string>();
   private kinds = new Map<string, IndexedKindState>();
   private started = false;
@@ -178,12 +180,15 @@ export class ResourceSearchIndex {
     for (const state of this.kinds.values()) this.stopKind(state);
     this.kinds.clear();
     this.entriesById.clear();
+    this.entriesSnapshot = undefined;
     this.idByNameKey.clear();
   }
 
+  /** Shared snapshot — callers must not mutate the returned array. */
   async entries(): Promise<IndexedResourceSearchEntry[]> {
     this.warm();
-    return [...this.entriesById.values()];
+    this.entriesSnapshot ??= [...this.entriesById.values()];
+    return this.entriesSnapshot;
   }
 
   isReconciling(): boolean {
@@ -220,7 +225,18 @@ export class ResourceSearchIndex {
       return;
     }
 
-    const desired = new Map(resources.filter(shouldIndexKind).map((kind) => [gvrKey(kind), kind]));
+    // Every served version of a resource exposes the same objects, so index
+    // one version per group/plural. Discovery lists versions preferred-first
+    // (aggregated discovery orders by version priority), so keep the first.
+    const desired = new Map<string, ResourceKindInfo>();
+    const seenResource = new Set<string>();
+    for (const kind of resources) {
+      if (!shouldIndexKind(kind)) continue;
+      const resource = `${kind.group}/${kind.plural}`;
+      if (seenResource.has(resource)) continue;
+      seenResource.add(resource);
+      desired.set(gvrKey(kind), kind);
+    }
     for (const [key, state] of this.kinds) {
       if (desired.has(key)) continue;
       this.stopKind(state);
@@ -299,15 +315,24 @@ export class ResourceSearchIndex {
     return res;
   }
 
-  private async listKindMetadata(state: IndexedKindState): Promise<{ rv: string; items: MetadataObject[] }> {
+  private async listKindMetadata(state: IndexedKindState, opts?: { quorum?: boolean }): Promise<{ rv: string; items: MetadataObject[] }> {
     const items: MetadataObject[] = [];
     const query = new URLSearchParams({ limit: String(LIST_PAGE_SIZE) });
+    // resourceVersion=0 lets the apiserver answer from its watch cache instead
+    // of a quorum etcd read — usually the whole set in a single unpaginated
+    // response (limit is ignored on the cache path; the continue loop below
+    // still handles servers that fall back to paginated etcd lists).
+    if (!opts?.quorum) query.set('resourceVersion', '0');
     let cursor: string | undefined;
     let rv = '';
 
     do {
-      if (cursor) query.set('continue', cursor);
-      else query.delete('continue');
+      if (cursor) {
+        query.set('continue', cursor);
+        // A continue token pins the list snapshot; combining it with an
+        // explicit resourceVersion is rejected by the apiserver.
+        query.delete('resourceVersion');
+      }
       const list = await this.metadataJson<MetadataList>(this.path(state.kind, query));
       rv = list.metadata?.resourceVersion ?? rv;
       cursor = list.metadata?.continue || undefined;
@@ -325,6 +350,7 @@ export class ResourceSearchIndex {
   }
 
   private removeKindEntries(state: IndexedKindState): void {
+    if (state.entryIds.size) this.entriesSnapshot = undefined;
     for (const id of state.entryIds) {
       const entry = this.entriesById.get(id);
       if (entry) this.idByNameKey.delete(`${state.key}|${entry.namespace ?? ''}|${entry.name}`);
@@ -354,6 +380,7 @@ export class ResourceSearchIndex {
     });
     this.idByNameKey.set(byName, id);
     state.entryIds.add(id);
+    this.entriesSnapshot = undefined;
   }
 
   private deleteEntry(state: IndexedKindState, metadata: Metadata | undefined): void {
@@ -365,10 +392,11 @@ export class ResourceSearchIndex {
     this.idByNameKey.delete(byName);
     this.entriesById.delete(id);
     state.entryIds.delete(id);
+    this.entriesSnapshot = undefined;
   }
 
-  private async relistKind(state: IndexedKindState): Promise<void> {
-    const { rv, items } = await this.listKindMetadata(state);
+  private async relistKind(state: IndexedKindState, opts?: { quorum?: boolean }): Promise<void> {
+    const { rv, items } = await this.listKindMetadata(state, opts);
     state.rv = rv;
     this.replaceKindEntries(state, items);
   }
@@ -399,7 +427,9 @@ export class ResourceSearchIndex {
         }
         if (isGone(err)) {
           try {
-            await this.relistKind(state);
+            // After a 410 the watch cache itself may be behind the RV we
+            // already saw — re-anchor with a quorum list (client-go does the same).
+            await this.relistKind(state, { quorum: true });
             continue;
           } catch (relistErr) {
             this.log.debug({ gvr: state.key, err: String(relistErr) }, 'search index relist failed');

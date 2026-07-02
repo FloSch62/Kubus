@@ -32,6 +32,21 @@ class WatchClient {
   private connecting = false;
   private closedByUser = false;
 
+  constructor() {
+    // Don't sit out a long backoff when we can tell connectivity is back.
+    window.addEventListener('online', () => this.reconnectNow());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.reconnectNow();
+    });
+  }
+
+  private reconnectNow(): void {
+    if (this.subs.size === 0 && this.broadcastHandlers.size === 0) return;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+    this.reconnectDelay = 1000;
+    this.ensureConnected();
+  }
+
   subscribe(params: Subscription['params'], handlers: WatchHandlers): () => void {
     const id = `sub-${++this.counter}`;
     const sub: Subscription = { params, handlers, pending: [] };
@@ -103,6 +118,20 @@ class WatchClient {
         case 'pf-update':
         case 'contexts-changed': {
           for (const handler of this.broadcastHandlers) handler(msg);
+          break;
+        }
+        case 'context-reset': {
+          // The server-side session for this context was torn down or rebuilt:
+          // resubscribe so lists attach to the new session instead of silently
+          // going stale on the disposed one.
+          for (const [id, sub] of this.subs) {
+            if (sub.params.ctx !== msg.ctx) continue;
+            sub.pending = [];
+            if (this.ws?.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({ op: 'unsub', id }));
+              this.sendSub(id, sub);
+            }
+          }
           break;
         }
       }

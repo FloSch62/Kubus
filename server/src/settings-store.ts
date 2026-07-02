@@ -6,6 +6,8 @@ import type { FastifyBaseLogger } from 'fastify';
 export interface PersistedSettings {
   /** Explicit kubeconfig path chosen in the UI; overrides $KUBECONFIG. */
   kubeconfigPath?: string;
+  /** Kubus-managed SSH tunnels: scoped kubeconfig context key -> ssh destination (config alias or user@host). */
+  sshTunnels?: Record<string, string>;
 }
 
 /**

@@ -25,6 +25,7 @@ import {
 import HelpOutlinedIcon from '@mui/icons-material/HelpOutlined';
 import type { ClusterAuthType, ContextInfo } from '@kubus/shared';
 import { useClusterCa, useEditCluster, useTestConnection } from '../../api/queries.js';
+import { SshJumpHostField, SSH_DESTINATION_RE } from './SshJumpHostField.js';
 
 /** A "?" icon that reveals a fuller explanation on hover — keeps field labels short. */
 function helpTip(text: string) {
@@ -47,6 +48,9 @@ const AUTH_LABEL: Record<ClusterAuthType, string> = {
 };
 
 type AuthMode = 'keep' | 'token' | 'client-cert';
+type ConnMode = 'direct' | 'ssh' | 'proxy';
+
+const PROXY_URL_RE = /^(socks5?|socks5h|https?):\/\//i;
 
 /** Full edit of an existing cluster — same fields as "Add cluster", prefilled. */
 export function EditClusterDialog({ context: c, onClose }: { context: ContextInfo; onClose: () => void }) {
@@ -54,11 +58,14 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
   const test = useTestConnection();
   const [revealCa, setRevealCa] = useState(false);
   const ca = useClusterCa(c.name, revealCa);
+  const initialConnMode: ConnMode = c.sshHost ? 'ssh' : c.proxyUrl && !c.proxyFromEnv ? 'proxy' : 'direct';
+  const [connMode, setConnMode] = useState<ConnMode>(initialConnMode);
   const [form, setForm] = useState({
     server: c.server ?? '',
     skipTls: c.skipTlsVerify ?? false,
     ca: '',
     proxyUrl: c.proxyFromEnv ? '' : c.proxyUrl ?? '', // env proxies aren't in the file — don't pre-fill
+    sshHost: c.sshHost ?? '',
     tlsServerName: c.tlsServerName ?? '',
     auth: 'keep' as AuthMode,
     token: '',
@@ -71,14 +78,18 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
   const authValid =
     form.auth === 'keep' ||
     (form.auth === 'token' ? !!form.token.trim() : !!form.cert.trim() && !!form.key.trim());
+  const sshHostValid = SSH_DESTINATION_RE.test(form.sshHost.trim());
+  const proxyUrlValid = PROXY_URL_RE.test(form.proxyUrl.trim());
   const dirty =
     form.server.trim() !== (c.server ?? '') ||
     form.skipTls !== (c.skipTlsVerify ?? false) ||
-    form.proxyUrl.trim() !== (c.proxyFromEnv ? '' : c.proxyUrl ?? '') ||
+    connMode !== initialConnMode ||
+    (connMode === 'proxy' && form.proxyUrl.trim() !== (c.proxyFromEnv ? '' : c.proxyUrl ?? '')) ||
+    (connMode === 'ssh' && form.sshHost.trim() !== (c.sshHost ?? '')) ||
     form.tlsServerName.trim() !== (c.tlsServerName ?? '') ||
     form.ca.trim() !== '' ||
     form.auth !== 'keep';
-  const valid = serverValid && authValid;
+  const valid = serverValid && authValid && (connMode !== 'ssh' || sshHostValid) && (connMode !== 'proxy' || proxyUrlValid);
   const busy = edit.isPending;
 
   const save = () => {
@@ -95,7 +106,8 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
           server: form.server.trim(),
           skipTlsVerify: form.skipTls,
           caPem: form.ca.trim() || null,
-          proxyUrl: form.proxyUrl.trim() || null,
+          proxyUrl: connMode === 'proxy' ? form.proxyUrl.trim() || null : null,
+          sshHost: connMode === 'ssh' ? form.sshHost.trim() || null : null,
           tlsServerName: form.tlsServerName.trim() || null,
           auth,
         },
@@ -138,7 +150,11 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
               value={form.ca}
               onChange={(e) => set('ca', e.target.value)}
               placeholder="-----BEGIN CERTIFICATE-----"
-              helperText={c.caPresent ? 'Leave blank to keep the current CA certificate' : 'Optional — paste a CA certificate to verify the server'}
+              helperText={
+                c.caPresent
+                  ? 'Leave blank to keep the current CA certificate — PEM or base64 kubeconfig data both work'
+                  : 'Optional — paste a CA certificate to verify the server (PEM or base64 kubeconfig data)'
+              }
               slotProps={{ input: { sx: { fontFamily: 'monospace', fontSize: 12 } } }}
             />
             {c.caPresent && !revealCa && (
@@ -218,24 +234,40 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
             Only if this cluster isn&apos;t reachable directly
           </Typography>
         </Divider>
-        {c.proxyFromEnv && (
-          <Alert severity="info" sx={{ py: 0 }}>
-            A proxy is currently applied from an environment variable ({c.proxyUrl}). Saving here writes it into the kubeconfig and takes over.
-          </Alert>
+        <FormControl size="small">
+          <InputLabel id="edit-conn">Connection</InputLabel>
+          <Select labelId="edit-conn" label="Connection" value={connMode} onChange={(e) => setConnMode(e.target.value as ConnMode)}>
+            <MenuItem value="direct">Direct — the API server is reachable from this machine</MenuItem>
+            <MenuItem value="ssh">SSH jump host — Kubus opens the tunnel for you</MenuItem>
+            <MenuItem value="proxy">Proxy URL — an existing SOCKS or HTTP proxy</MenuItem>
+          </Select>
+        </FormControl>
+        {connMode === 'ssh' && <SshJumpHostField value={form.sshHost} onChange={(v) => set('sshHost', v)} />}
+        {connMode === 'proxy' && (
+          <>
+            {c.proxyFromEnv && (
+              <Alert severity="info" sx={{ py: 0 }}>
+                A proxy is currently applied from an environment variable ({c.proxyUrl}). Saving here writes it into the kubeconfig and takes over.
+              </Alert>
+            )}
+            <TextField
+              label="Proxy"
+              size="small"
+              value={form.proxyUrl}
+              onChange={(e) => set('proxyUrl', e.target.value)}
+              placeholder="socks5://host:port"
+              error={!!form.proxyUrl.trim() && !proxyUrlValid}
+              helperText="Send this cluster's traffic through an already-running proxy"
+              slotProps={{
+                input: {
+                  endAdornment: helpTip(
+                    'Use when you already have a proxy, e.g. a corporate HTTP proxy or a manually started `ssh -D 1080 bastion` (then enter socks5://localhost:1080). To have Kubus manage the SSH tunnel itself, pick "SSH jump host" instead.',
+                  ),
+                },
+              }}
+            />
+          </>
         )}
-        <TextField
-          label="Proxy"
-          size="small"
-          value={form.proxyUrl}
-          onChange={(e) => set('proxyUrl', e.target.value)}
-          placeholder="socks5://host:port"
-          helperText="Send this cluster's traffic through a proxy"
-          slotProps={{
-            input: {
-              endAdornment: helpTip('Use when the API server is only reachable via a bastion or VPN. Tip: run `ssh -D 1080 bastion`, then enter socks5://localhost:1080'),
-            },
-          }}
-        />
         <TextField
           label="Certificate hostname"
           size="small"

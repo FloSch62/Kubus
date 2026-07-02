@@ -62,7 +62,8 @@ Open **Settings → Clusters** to manage the entries in your kubeconfig:
   CA, and either a bearer token or a client certificate). It's merged into your kubeconfig,
   and a backup is written first.
 - **Edit** (:material-pencil: on any row) — change a cluster's **API server**,
-  **credentials**, TLS settings, and the proxy options below. Cloud-provider clusters that
+  **credentials**, TLS settings, and the connection options below (SSH jump host /
+  proxy). Cloud-provider clusters that
   authenticate with an exec plugin (EKS/GKE/AKS) keep their existing login — leave
   **Credentials** on *Keep current* and only the other fields change.
 
@@ -72,24 +73,53 @@ Every change is written straight to your kubeconfig file (with a `.kubus.bak` ba
 ## Reaching clusters behind a proxy or bastion
 
 If a cluster's API server isn't directly reachable from your machine — only through a
-bastion, VPN, or SSH jump host — open its **Edit** dialog and use the two fields under
+bastion, VPN, or SSH jump host — open its **Edit** dialog and pick a **Connection** under
 *"Only if this cluster isn't reachable directly"*:
 
-| Field | What it does | Typical value |
+| Connection | What it does | Typical value |
 | --- | --- | --- |
-| **Proxy** | Sends this cluster's traffic through a SOCKS or HTTP proxy. | `socks5://localhost:1080` |
-| **Certificate hostname** | The hostname to expect on the server's TLS certificate — set it when the API server address is an IP or tunnel that doesn't match the certificate. | `api.prod.example.com` |
+| **SSH jump host** | Kubus opens and supervises an SSH tunnel to this host and routes the cluster's traffic through it. | `bastion` (a `Host` from `~/.ssh/config`) or `user@bastion.example.com` |
+| **Proxy URL** | Sends this cluster's traffic through an already-running SOCKS or HTTP proxy. | `socks5://localhost:1080` |
 
-!!! tip "SOCKS over an SSH jump is the easy path"
+There's also a **Certificate hostname** field for either mode: the hostname to expect on
+the server's TLS certificate — set it when the API server address is an IP or tunnel that
+doesn't match the certificate (e.g. `api.prod.example.com`).
 
-    Run `ssh -D 1080 bastion` to open a SOCKS proxy, then set **Proxy** to
-    `socks5://localhost:1080`. Because SOCKS keeps the original hostname, TLS verification
-    just works — no certificate hostname needed. Prefer this over an `ssh -L` port-forward,
-    which points the server at `localhost` and then *does* need a **Certificate hostname**.
+### SSH jump host (managed tunnel)
 
-Both fields map to standard kubeconfig keys (`proxy-url` and `tls-server-name`), so they
-work with `kubectl` too. **Test connection** in the dialog tells you immediately whether
-the settings work.
+The same **Connection** choice is available in **Add cluster**, so a cluster that's only
+reachable through a bastion can be set up in one go — when pasting a kubeconfig, the jump
+host is applied to every context the import adds.
+
+Pick a host from your `~/.ssh/config` (Kubus lists them for you) or type a destination
+like `user@bastion.example.com` or `ssh://user@bastion.example.com:2222` — no config file
+needed. Kubus runs your system's OpenSSH client (`ssh -N -D <port>`), so everything from
+your SSH setup applies exactly as in a terminal: identities, `ssh-agent`, `ProxyJump`
+chains, per-host options. Works the same on macOS, Linux, and Windows (Windows needs the
+built-in *OpenSSH Client* optional feature).
+
+A few things to know:
+
+- **Authentication must be non-interactive.** Kubus starts ssh with `BatchMode=yes`, so
+  it never hangs on a password prompt. If `ssh <host>` asks for anything in a terminal,
+  load your key into `ssh-agent` first (or use a key without a passphrase).
+- **The tunnel is self-healing.** If it drops (laptop sleep, network change), Kubus
+  respawns it on the next use — usually within a minute via the background health probe.
+- **Host keys**: new hosts are accepted on first contact (`accept-new`); a *changed* host
+  key is still refused — run `ssh <host>` in a terminal to sort that out.
+- The mapping is stored in Kubus's own settings, **not** in your kubeconfig, so the file
+  stays fully `kubectl`-compatible.
+
+!!! tip "Already running your own `ssh -D`?"
+
+    That still works: keep the tunnel running yourself and set **Proxy URL** to
+    `socks5://localhost:1080` instead. The managed **SSH jump host** mode just does this
+    for you — including restarting the tunnel when it drops.
+
+The **Proxy URL** and certificate hostname fields map to standard kubeconfig keys
+(`proxy-url` and `tls-server-name`), so they work with `kubectl` too. Whatever you pick,
+**Test connection** in the dialog tells you immediately whether it works — SSH problems
+come back with an actionable message (unreachable host, key not loaded, changed host key…).
 
 !!! note "Already using a proxy environment variable?"
 

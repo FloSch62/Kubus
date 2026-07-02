@@ -40,6 +40,8 @@ export interface ContextInfo {
   proxyUrl?: string;
   /** Whether proxyUrl came from an env var (HTTPS_PROXY/ALL_PROXY) rather than the kubeconfig file. */
   proxyFromEnv?: boolean;
+  /** SSH jump host whose Kubus-managed tunnel carries this cluster's traffic. */
+  sshHost?: string;
   /** `tls-server-name` override for this context's cluster, if any. */
   tlsServerName?: string;
   /** Whether the cluster has `insecure-skip-tls-verify` set. */
@@ -79,6 +81,12 @@ export interface EditClusterRequest {
   caPem: string | null;
   /** Proxy URL (socks5://, http://, https://); null/empty clears it. */
   proxyUrl: string | null;
+  /**
+   * SSH jump host for a Kubus-managed tunnel (an ssh_config Host alias or
+   * `user@host`). Stored in Kubus settings — not the kubeconfig — so the file
+   * stays kubectl-compatible. null/empty clears it. Mutually exclusive with proxyUrl.
+   */
+  sshHost?: string | null;
   /** TLS server name override (SNI/cert hostname); null/empty clears it. */
   tlsServerName: string | null;
   /** How to set credentials. `keep` preserves the existing user (incl. exec/auth-provider auth). */
@@ -86,6 +94,37 @@ export interface EditClusterRequest {
     | { method: 'keep' }
     | { method: 'token'; token: string }
     | { method: 'client-cert'; clientCertPem: string; clientKeyPem: string };
+}
+
+// ---- SSH jump hosts ----
+
+/** One usable `Host` entry from the user's ssh config (wildcard patterns are skipped). */
+export interface SshConfigHost {
+  alias: string;
+  hostname?: string;
+  user?: string;
+  port?: number;
+}
+
+export interface SshInfoResponse {
+  /** Whether an OpenSSH client binary was found on the machine running Kubus. */
+  sshAvailable: boolean;
+  /** e.g. "OpenSSH_9.6p1" when available. */
+  sshVersion?: string;
+  /** Platform the Kubus server runs on — drives OS-specific help in the UI. */
+  platform: string;
+  /** Resolved path of the user's ssh config (~/.ssh/config). */
+  configPath: string;
+  configExists: boolean;
+  hosts: SshConfigHost[];
+  /** Non-fatal problem while reading the config (hosts may be incomplete). */
+  parseError?: string;
+}
+
+/** Set/clear a context's Kubus-managed SSH jump host without touching other cluster fields. */
+export interface SetSshHostRequest {
+  /** ssh_config Host alias, user@host or ssh://user@host:port; null clears the tunnel. */
+  sshHost: string | null;
 }
 
 export interface TestConnectionResponse {

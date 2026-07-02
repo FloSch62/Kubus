@@ -75,7 +75,7 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
         disableGutters
         secondaryAction={
           <Stack direction="row" spacing={0.5}>
-            <Tooltip title="Edit cluster (server, credentials, proxy, certificate)">
+            <Tooltip title="Edit cluster (server, credentials, SSH jump host / proxy, certificate)">
               <IconButton size="small" onClick={() => setEditOpen(true)}>
                 <EditOutlinedIcon sx={{ fontSize: 18 }} />
               </IconButton>
@@ -92,7 +92,12 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
           primary={
             <Stack direction="row" spacing={0.75} component="span" sx={{ alignItems: 'center' }}>
               <span>{c.name}</span>
-              {c.proxyUrl && <Chip size="small" label={c.proxyFromEnv ? 'env proxy' : 'proxy'} sx={{ height: 18, fontSize: 10 }} />}
+              {c.sshHost && (
+                <Tooltip title={`Kubus-managed SSH tunnel via ${c.sshHost}`}>
+                  <Chip size="small" label="ssh jump" sx={{ height: 18, fontSize: 10 }} />
+                </Tooltip>
+              )}
+              {c.proxyUrl && !c.sshHost && <Chip size="small" label={c.proxyFromEnv ? 'env proxy' : 'proxy'} sx={{ height: 18, fontSize: 10 }} />}
               {c.skipTlsVerify && <Chip size="small" color="warning" variant="outlined" label="insecure" sx={{ height: 18, fontSize: 10 }} />}
             </Stack>
           }
@@ -104,7 +109,7 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
         <Alert severity="warning" sx={{ py: 0, mb: 0.5 }}>
           Can&apos;t reach the API server. Only reachable through a bastion or proxy?{' '}
           <Link component="button" type="button" onClick={() => setEditOpen(true)} sx={{ verticalAlign: 'baseline' }}>
-            Set up a proxy
+            Set up an SSH jump host or proxy
           </Link>
           .
         </Alert>
@@ -143,6 +148,10 @@ function ClustersSection() {
             Add cluster
           </Button>
         </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+          Cluster behind a bastion? Open its edit dialog (<EditOutlinedIcon sx={{ fontSize: 12, verticalAlign: 'text-top' }} />) and set an SSH jump
+          host — Kubus manages the tunnel — or a proxy URL.
+        </Typography>
         <List dense disablePadding>
           {(contexts ?? []).map((c) => {
             const isProtected = contextSettings[c.name]?.protected ?? protectByDefault;
