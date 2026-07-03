@@ -8,6 +8,24 @@ import type { KubeconfigImportResponse, KubeconfigSettings } from '@kubus/shared
 import type { AppContext } from '../app.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { mergeKubeconfig, writeKubeconfig } from '../kube/kubeconfig-file.js';
+import { authWarningForUser } from '../kube/auth-diagnostics.js';
+
+/** Credential problems (missing exec plugin, legacy auth-provider) in the users an import brings in. */
+function importAuthWarnings(incomingYaml: string, addedUsers: string[]): string[] {
+  if (!addedUsers.length) return [];
+  const kc = new KubeConfig();
+  try {
+    kc.loadFromString(incomingYaml);
+  } catch {
+    return [];
+  }
+  const warnings: string[] = [];
+  for (const name of addedUsers) {
+    const warning = authWarningForUser(kc.getUsers().find((u) => u.name === name));
+    if (warning) warnings.push(`user "${name}": ${warning}`);
+  }
+  return warnings;
+}
 
 const setKubeconfigSchema = z.object({ path: z.string().min(1).nullable() });
 const importSchema = z.object({ yaml: z.string().min(1), overwrite: z.boolean().optional() });
@@ -73,6 +91,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
         skipped: result.skipped,
         backupPath,
         contexts: ctx.clusters.listContexts(),
+        warnings: importAuthWarnings(parsed.data.yaml, result.added.users),
       };
       return response;
     } catch (err) {

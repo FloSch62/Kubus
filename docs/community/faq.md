@@ -23,7 +23,9 @@ everything degrades gracefully without them.
 ### Does it work with my managed cluster (EKS / GKE / AKS / k3s / …)?
 
 If `kubectl` can talk to it, so can Kubus — it uses the same kubeconfig and credential
-plugins.
+plugins. Getting a 401 or 403 from a cloud cluster? That's almost always the credential
+plugin or the cloud login, not Kubus — see
+[Cloud-managed clusters](../guide/clusters.md#cloud-managed-clusters-gke-eks-aks).
 
 ### Will it show my CustomResourceDefinitions?
 

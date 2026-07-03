@@ -50,6 +50,8 @@ export interface ContextInfo {
   caPresent?: boolean;
   /** How the context's user authenticates (informational, for the editor). */
   authType?: ClusterAuthType;
+  /** Actionable problem with the user's credentials (exec plugin missing from PATH, legacy auth-provider). */
+  authWarning?: string;
 }
 
 export type ClusterAuthType = 'token' | 'client-cert' | 'exec' | 'auth-provider' | 'basic' | 'none';
@@ -152,6 +154,8 @@ export interface KubeconfigImportResponse {
   backupPath: string | null;
   /** Fresh context list after the reload. */
   contexts: ContextInfo[];
+  /** Per-user credential problems in the imported entries (e.g. exec plugin not installed here). */
+  warnings?: string[];
 }
 
 export interface ResourceKindInfo {

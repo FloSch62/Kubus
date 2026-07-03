@@ -70,6 +70,49 @@ Open **Settings → Clusters** to manage the entries in your kubeconfig:
 Every change is written straight to your kubeconfig file (with a `.kubus.bak` backup), so
 `kubectl` and other tools see the same settings.
 
+## Cloud-managed clusters (GKE, EKS, AKS)
+
+Managed clusters work out of the box — with one thing to understand: the kubeconfig that
+`gcloud container clusters get-credentials`, `aws eks update-kubeconfig` or
+`az aks get-credentials` writes contains **no credentials at all**. It only names a
+*credential plugin* (`gke-gcloud-auth-plugin`, `aws`, `kubelogin`) that is run to mint a
+short-lived token for every connection — by `kubectl` and by Kubus alike.
+
+That means two things must be true **on the machine where the Kubus server runs**:
+
+1. **The plugin is installed and on `PATH`.**
+
+    | Provider | Plugin | Install |
+    | --- | --- | --- |
+    | GKE | `gke-gcloud-auth-plugin` | `gcloud components install gke-gcloud-auth-plugin` |
+    | EKS | `aws` | AWS CLI v2 |
+    | AKS | `kubelogin` | `az aks install-cli` |
+
+2. **The cloud CLI behind it is logged in** (`gcloud auth login`, `aws sso login`,
+   `az login`) as an identity that may access the cluster.
+
+If either is missing, Kubus tells you — the cluster's row in **Settings → Clusters**, the
+**Edit** dialog and **Test connection** all show what's wrong and how to fix it.
+
+A few pitfalls worth knowing:
+
+- **Restart Kubus after installing a plugin.** A running app keeps the `PATH` it started
+  with, so a freshly installed plugin isn't visible until relaunch.
+- **Kubus running elsewhere?** In a container, on a server, or under WSL, copying the
+  kubeconfig is not enough — the plugin and a logged-in CLI must exist in *that*
+  environment too. Alternatively, switch the entry to a self-contained credential (a
+  Kubernetes ServiceAccount token).
+- **Don't paste short-lived tokens.** A token from `gcloud auth print-access-token` (or
+  `kubectl create token`) dies within about an hour and you're back to 401s. Prefer the
+  plugin-based kubeconfig, or a ServiceAccount token you control.
+- **401 vs 403**: a **401** means the credentials were rejected (expired token, logged-out
+  CLI); a **403** means you authenticated fine but the identity lacks permission — Kubus
+  shows *which* identity the cluster resolved, so you can fix RBAC or cloud IAM for it.
+- **Old kubeconfig entries** with an `auth-provider: gcp`/`azure` block predate the
+  plugins (kubectl dropped them in v1.26) and rely on a cached token that expires after
+  an hour. Kubus flags these — re-run the provider's `get-credentials` command with a
+  current CLI to regenerate them.
+
 ## Reaching clusters behind a proxy or bastion
 
 If a cluster's API server isn't directly reachable from your machine — only through a

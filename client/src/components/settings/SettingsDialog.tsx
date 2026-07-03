@@ -65,9 +65,19 @@ function looksLikeNetworkError(msg?: string): boolean {
   );
 }
 
+/** Failures where the server was reached but the credentials are the problem. */
+function looksLikeAuthError(msg?: string): boolean {
+  if (!msg) return false;
+  return /\b401\b|\b403\b|Unauthorized|Forbidden|credential plugin|auth-provider/i.test(msg);
+}
+
 function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isProtected: boolean; onToggleProtected: () => void }) {
   const [editOpen, setEditOpen] = useState(false);
-  const networkHint = c.health === 'error' && looksLikeNetworkError(c.healthMessage);
+  // One hint at a time, most actionable first: a proactive credential warning
+  // (plugin missing, legacy stanza), then the probe's auth failure, then the
+  // "maybe it needs a tunnel" nudge.
+  const authHint = c.authWarning ?? (c.health === 'error' && looksLikeAuthError(c.healthMessage) ? c.healthMessage : undefined);
+  const networkHint = !authHint && c.health === 'error' && looksLikeNetworkError(c.healthMessage);
 
   return (
     <Box sx={{ borderBottom: 1, borderColor: 'divider', py: 0.25 }}>
@@ -105,6 +115,11 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
           slotProps={{ secondary: { sx: { fontSize: 12 } } }}
         />
       </ListItem>
+      {authHint && (
+        <Alert severity="warning" sx={{ py: 0, mb: 0.5 }}>
+          {authHint}
+        </Alert>
+      )}
       {networkHint && (
         <Alert severity="warning" sx={{ py: 0, mb: 0.5 }}>
           Can&apos;t reach the API server. Only reachable through a bastion or proxy?{' '}

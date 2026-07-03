@@ -207,6 +207,11 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
             <MenuItem value="client-cert">Replace with client certificate</MenuItem>
           </Select>
         </FormControl>
+        {form.auth === 'keep' && c.authWarning && (
+          <Alert severity="warning" sx={{ py: 0 }}>
+            {c.authWarning}
+          </Alert>
+        )}
         {form.auth === 'token' && <TextField label="Token" size="small" value={form.token} onChange={(e) => set('token', e.target.value)} />}
         {form.auth === 'client-cert' && (
           <>

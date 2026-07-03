@@ -67,8 +67,19 @@ export class RawClient {
     requestInit.method = init?.method ?? 'GET';
     if (init?.body !== undefined) requestInit.body = init.body;
     if (init?.signal) requestInit.signal = init.signal;
-    const headers = requestInit.headers as Record<string, string> | undefined;
-    requestInit.headers = { ...(headers ?? {}), ...(init?.headers ?? {}) };
+    // applyToFetchOptions returns a Headers instance; spreading one yields {}
+    // and silently drops Authorization — token/exec clusters then probe as
+    // anonymous and fail with 401/403. Copy entries explicitly instead.
+    const baseHeaders: Record<string, string> = {};
+    const applied = requestInit.headers as unknown;
+    if (applied && typeof (applied as Headers).forEach === 'function') {
+      (applied as Headers).forEach((value, key) => {
+        baseHeaders[key] = value;
+      });
+    } else if (applied) {
+      Object.assign(baseHeaders, applied as Record<string, string>);
+    }
+    requestInit.headers = { ...baseHeaders, ...(init?.headers ?? {}) };
     return fetch(this.serverUrl() + path, requestInit);
   }
 

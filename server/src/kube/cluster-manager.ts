@@ -13,7 +13,6 @@ import {
   Log,
   Metrics,
   PortForward,
-  VersionApi,
   type ApiConstructor,
   type ApiType,
 } from '@kubernetes/client-node';
@@ -25,26 +24,16 @@ import { MetricsPoller } from './metrics-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
+import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
 import { HttpProblem } from '../util/errors.js';
 import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
 import { isValidSshDestination } from '../ssh/tunnel-manager.js';
-import type { ClusterAuthType } from '@kubus/shared';
 
 const BACKGROUND_HEALTH_INTERVAL_MS = 60_000;
 const BACKGROUND_HEALTH_TIMEOUT_MS = 8_000;
 const BACKGROUND_HEALTH_CONCURRENCY = 4;
 
 type CachedContextHealth = Pick<ContextInfo, 'health' | 'healthMessage' | 'kubernetesVersion'>;
-
-function authTypeOf(user: ReturnType<KubeConfig['getUser']>): ClusterAuthType {
-  if (!user) return 'none';
-  if (user.exec) return 'exec';
-  if (user.authProvider) return 'auth-provider';
-  if (user.certData || user.certFile) return 'client-cert';
-  if (user.token) return 'token';
-  if (user.username) return 'basic';
-  return 'none';
-}
 
 /** Everything the server holds for one connected kubeconfig context. */
 export class ClusterHandle {
@@ -122,13 +111,13 @@ export class ClusterHandle {
 
   async probe(): Promise<void> {
     try {
-      const info = await this.client(VersionApi).getCode();
+      const info = await this.raw.json<{ gitVersion?: string }>('/version');
       this.kubernetesVersion = info.gitVersion;
       this.health = 'connected';
       this.healthMessage = undefined;
     } catch (err) {
       this.health = 'error';
-      this.healthMessage = err instanceof Error ? err.message : String(err);
+      this.healthMessage = await describeProbeFailure(err, this.kc.getCurrentUser(), this.raw);
     }
   }
 
@@ -342,6 +331,7 @@ export class ClusterManager extends EventEmitter {
         skipTlsVerify: cluster?.skipTLSVerify || undefined,
         caPresent: !!(cluster?.caData || cluster?.caFile) || undefined,
         authType: authTypeOf(user),
+        authWarning: authWarningForUser(user),
       };
     });
   }
@@ -401,11 +391,13 @@ export class ClusterManager extends EventEmitter {
   }
 
   private async probeContext(contextName: string, timeoutMs: number): Promise<TestConnectionResponse> {
+    const userName = this.kc.getContexts().find((c) => c.name === contextName)?.user;
+    const user = userName ? this.kc.getUser(userName) : null;
     let raw: RawClient;
     try {
       raw = await this.probeClient(contextName);
     } catch (err) {
-      return { health: 'error', healthMessage: err instanceof Error ? err.message : String(err) };
+      return { health: 'error', healthMessage: await describeProbeFailure(err, user) };
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -414,7 +406,7 @@ export class ClusterManager extends EventEmitter {
       const info = await raw.json<{ gitVersion?: string }>('/version', { signal: controller.signal });
       return { health: 'connected', kubernetesVersion: info.gitVersion };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error && err.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : await describeProbeFailure(err, user, raw);
       return { health: 'error', healthMessage: message };
     } finally {
       clearTimeout(timeout);

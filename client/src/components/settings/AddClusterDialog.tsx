@@ -256,6 +256,11 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
             {result.backupPath && ` Backup: ${result.backupPath}`}
           </Alert>
         )}
+        {(result?.warnings ?? []).map((w) => (
+          <Alert key={w} severity="warning">
+            {w}
+          </Alert>
+        ))}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={busy}>
