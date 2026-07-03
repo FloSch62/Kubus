@@ -76,15 +76,9 @@ jobs:
     if: needs.check-release-state.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -104,11 +98,30 @@ jobs:
             echo "No release metadata available; skipping update manifest."
             rm -f site/latest.json
           fi
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          name: github-pages-${{ github.run_attempt }}
-          path: site
-      - uses: actions/deploy-pages@v5
-        id: deployment
-        with:
-          artifact_name: github-pages-${{ github.run_attempt }}
+      - name: Publish Pages branch
+        run: |
+          publish_dir="$(mktemp -d)"
+          cp -a site/. "$publish_dir/"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin gh-pages --depth=1 || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git switch --detach refs/remotes/origin/gh-pages
+          else
+            git switch --orphan gh-pages
+          fi
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$publish_dir"/. .
+          touch .nojekyll
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Pages branch already up to date."
+            exit 0
+          fi
+
+          git commit -m "docs: publish ${GITHUB_SHA}"
+          git push origin HEAD:gh-pages
