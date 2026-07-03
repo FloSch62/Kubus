@@ -123,7 +123,12 @@ jobs:
       group: pages
       cancel-in-progress: false
     permissions:
-      contents: write
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
     steps:
@@ -139,33 +144,22 @@ jobs:
           mkdir -p site
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json
           node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
-      - name: Publish Pages branch
+      - name: Build Pages site
         run: |
-          publish_dir="$(mktemp -d)"
-          cp site/latest.json "$publish_dir/latest.json"
-          cat > "$publish_dir/index.html" <<'HTML'
+          pages_dir="$(mktemp -d)"
+          cp site/latest.json "$pages_dir/latest.json"
+          cat > "$pages_dir/index.html" <<'HTML'
           <!doctype html><meta charset="utf-8"><title>Kubus</title><h1>Kubus</h1><p>Release metadata is available at <a href="latest.json">latest.json</a>.</p>
           HTML
-          cp "$publish_dir/index.html" "$publish_dir/404.html"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch origin gh-pages --depth=1 || true
-          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
-            git switch --detach refs/remotes/origin/gh-pages
-          else
-            git switch --orphan gh-pages
-          fi
-
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$publish_dir"/. .
-
-          git add -A
-          if git diff --cached --quiet; then
-            echo "Pages branch already up to date."
-            exit 0
-          fi
-
-          git commit -m "docs: publish ${RELEASE_TAG}"
-          git push origin HEAD:gh-pages
+          cp "$pages_dir/index.html" "$pages_dir/404.html"
+          rm -rf pages-site
+          mv "$pages_dir" pages-site
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          name: github-pages-${{ github.run_attempt }}
+          path: pages-site
+      - id: deployment
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
