@@ -151,6 +151,9 @@ jobs:
           node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
       - uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: site
       - uses: actions/deploy-pages@v5
         id: deployment
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

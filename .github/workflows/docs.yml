@@ -13,8 +13,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Allow one concurrent deployment; cancel in-progress runs for the same ref.
 concurrency:
@@ -22,20 +20,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  check-release-state:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      deploy: ${{ steps.release-state.outputs.deploy }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
       - name: Check release state
         id: release-state
         env:
@@ -77,12 +70,30 @@ jobs:
             echo "deploy=true" >> "$GITHUB_OUTPUT"
             echo "Deploying docs with update manifest from $latest_tag."
           fi
+
+  build-and-deploy:
+    needs: check-release-state
+    if: needs.check-release-state.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
       - run: pip install zensical
-        if: steps.release-state.outputs.deploy == 'true'
       - run: zensical build --clean --strict
-        if: steps.release-state.outputs.deploy == 'true'
       - name: Write update manifest
-        if: steps.release-state.outputs.deploy == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -94,9 +105,10 @@ jobs:
             rm -f site/latest.json
           fi
       - uses: actions/upload-pages-artifact@v5
-        if: steps.release-state.outputs.deploy == 'true'
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: site
       - uses: actions/deploy-pages@v5
-        if: steps.release-state.outputs.deploy == 'true'
         id: deployment
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
