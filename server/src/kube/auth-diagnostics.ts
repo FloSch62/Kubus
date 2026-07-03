@@ -235,8 +235,20 @@ export async function describeProbeFailure(err: unknown, user: User | null | und
   if (status === 401) return describe401(user, authTypeOf(user));
   if (status === 403) {
     const detail = clip(apiDetailOf(err));
-    let message = `Authenticated, but not authorized (403 Forbidden)${detail ? `: ${detail}` : '.'}`;
+    // A 403 doesn't guarantee real credentials: entries without any, on an
+    // apiserver that allows anonymous requests, are denied as
+    // system:anonymous — the fix is the kubeconfig, not RBAC for anonymous.
+    if (authTypeOf(user) === 'none') {
+      return (
+        `The cluster denied the request (403 Forbidden)${detail ? `: ${detail}` : '.'} ` +
+        `This kubeconfig entry has no credentials, so the request was anonymous. Cloud clusters (GKE/EKS/AKS) authenticate via an exec plugin — regenerate the entry with the provider's CLI.`
+      );
+    }
     const identity = raw ? await whoAmI(raw) : null;
+    if (identity?.includes('"system:anonymous"')) {
+      return `The cluster denied the request (403 Forbidden)${detail ? `: ${detail}` : '.'} The request was treated as anonymous (system:anonymous) — the credentials were not applied at all; check this kubeconfig entry.`;
+    }
+    let message = `Authenticated, but not authorized (403 Forbidden)${detail ? `: ${detail}` : '.'}`;
     if (identity) message += ` The cluster resolved the credentials to ${identity} — grant that identity the needed RBAC (and cloud IAM) permissions.`;
     else message += ' Check the RBAC (and cloud IAM) permissions of the identity Kubus authenticates as.';
     return message;
