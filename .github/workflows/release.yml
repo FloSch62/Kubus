@@ -131,22 +131,22 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - run: pip install zensical
       - name: Build Pages update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          zensical build --clean --strict
+          mkdir -p site
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json
           node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
       - name: Publish Pages branch
         run: |
           publish_dir="$(mktemp -d)"
-          cp -a site/. "$publish_dir/"
+          cp site/latest.json "$publish_dir/latest.json"
+          cat > "$publish_dir/index.html" <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>Kubus</title><h1>Kubus</h1><p>Release metadata is available at <a href="latest.json">latest.json</a>.</p>
+          HTML
+          cp "$publish_dir/index.html" "$publish_dir/404.html"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -160,7 +160,6 @@ jobs:
 
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "$publish_dir"/. .
-          touch .nojekyll
 
           git add -A
           if git diff --cached --quiet; then
