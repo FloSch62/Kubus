@@ -128,7 +128,6 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
