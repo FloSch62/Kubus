@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Drawer, FormControlLabel, IconButton, Link, Stack, Switch, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Drawer, FormControlLabel, IconButton, Link, Stack, Switch, Tab, Tabs, Tooltip, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import { dump as dumpYaml } from 'js-yaml';
 import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
@@ -41,6 +43,7 @@ interface Props {
 export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const [tab, setTab] = useState('overview');
   const [reveal, setReveal] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
   const pushDetail = useDetailStore((s) => s.push);
   const isSecret = sel?.kind === 'Secret';
   const isCrd = sel?.kind === 'CustomResourceDefinition';
@@ -61,6 +64,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
     setTab('overview');
     setReveal(false);
   }, [selKey]);
+
+  useEffect(() => {
+    if (!sel) setFullScreen(false);
+  }, [sel]);
+
   const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
@@ -73,7 +81,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
   const hasRolloutHistory = sel?.kind === 'Deployment' || sel?.kind === 'StatefulSet';
   const showMap = !isCrd;
-  const drawerWidth = tab === 'map' ? 'min(1060px, 92vw)' : tab.startsWith('crd:') ? 'min(920px, 90vw)' : 'min(720px, 80vw)';
+  const drawerTopOffset = 52;
+  const drawerViewportSx = {
+    top: `${drawerTopOffset}px`,
+    height: `calc(100% - ${drawerTopOffset}px)`,
+  };
+  const drawerWidth = fullScreen ? '100vw' : tab === 'map' ? 'min(1060px, 92vw)' : tab.startsWith('crd:') ? 'min(920px, 90vw)' : 'min(720px, 80vw)';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
 
   const handleApply = async (text: string) => {
@@ -91,7 +104,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   };
 
   return (
-    <Drawer anchor="right" open={!!sel} onClose={onClose} slotProps={{ paper: { sx: { width: drawerWidth } } }}>
+    <Drawer
+      anchor="right"
+      open={!!sel}
+      onClose={onClose}
+      slotProps={{
+        root: { sx: drawerViewportSx },
+        backdrop: { sx: { top: `${drawerTopOffset}px` } },
+        paper: { sx: { ...drawerViewportSx, width: drawerWidth, maxWidth: '100vw' } },
+      }}
+    >
       {sel && (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
@@ -137,6 +159,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
             </Box>
             <Box sx={{ flex: 1 }} />
             {obj && <RowActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
+            <Tooltip title={fullScreen ? 'Restore drawer' : 'Full screen'}>
+              <IconButton onClick={() => setFullScreen((v) => !v)} aria-label={fullScreen ? 'Restore drawer' : 'Full screen'}>
+                {fullScreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+              </IconButton>
+            </Tooltip>
             <IconButton onClick={onClose}>
               <CloseIcon />
             </IconButton>
