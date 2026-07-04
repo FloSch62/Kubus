@@ -76,7 +76,7 @@ export function registerLogsSocket(app: FastifyInstance, ctx: AppContext): void 
     void (async () => {
       try {
         const handle = ctx.clusters.get(ctxName);
-        for (const pod of pods) {
+        await Promise.all(pods.map(async (pod) => {
           if (closed) return;
           let containers: string[];
           if (container) {
@@ -84,13 +84,14 @@ export function registerLogsSocket(app: FastifyInstance, ctx: AppContext): void 
           } else {
             // Resolve all containers from the pod spec.
             const podObj = await handle.core.readNamespacedPod({ name: pod, namespace }).catch(() => undefined);
+            if (closed) return;
             containers = podObj ? podContainers(podObj as never) : [''];
             if (!containers.length) containers = [''];
           }
           for (const c of containers) {
             void streamOne(pod, c || '');
           }
-        }
+        }));
       } catch (err) {
         send({ op: 'pod-status', pod: '', container: '', state: 'error', message: err instanceof Error ? err.message : String(err) });
         socket.close();

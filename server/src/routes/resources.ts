@@ -61,9 +61,12 @@ function apiExceptionFindings(err: ApiException<unknown>): ValidationFinding[] {
 
 async function kindForManifest(kinds: ResourceKindInfo[], manifest: KubernetesObject): Promise<ResourceKindInfo> {
   const { group, version } = splitApiVersion(manifest.apiVersion!);
-  const exact = kinds.find((k) => k.group === group && k.version === version && k.kind === manifest.kind);
-  if (exact) return exact;
-  const fallback = kinds.find((k) => k.group === group && k.kind === manifest.kind);
+  let fallback: ResourceKindInfo | undefined;
+  for (const k of kinds) {
+    if (k.group !== group || k.kind !== manifest.kind) continue;
+    if (k.version === version) return k;
+    fallback ??= k;
+  }
   if (fallback) return fallback;
   throw new HttpProblem(422, `resource kind ${manifest.apiVersion}/${manifest.kind} is not available in this cluster`, 'UnknownKind');
 }
@@ -178,9 +181,9 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       const manifest = parseManifest(req.body);
-      const kind = await kindForManifest(await handle.discovery.getResources(), manifest);
       const name = manifest.metadata?.name;
       if (!name) throw new HttpProblem(422, 'manifest must have metadata.name');
+      const kind = await kindForManifest(await handle.discovery.getResources(), manifest);
       const namespace = kind.namespaced ? (manifest.metadata?.namespace ?? 'default') : undefined;
       const findings: ValidationFinding[] = [];
       if (kind.namespaced && !manifest.metadata?.namespace) {

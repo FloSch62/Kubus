@@ -35,6 +35,8 @@ function packageVersion(): string {
   return '0.0.0';
 }
 
+const APP_VERSION = packageVersion();
+
 function versionParts(version: string): [number, number, number] | undefined {
   const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version.trim());
   if (!match) return undefined;
@@ -76,7 +78,7 @@ function releaseUrl(value: unknown): string | undefined {
 }
 
 function appInfo(): AppInfo {
-  return { name: 'Kubus', version: packageVersion() };
+  return { name: 'Kubus', version: APP_VERSION };
 }
 
 async function checkForUpdate(force = false): Promise<UpdateCheckResult> {

@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { Alert, Button, Chip, Snackbar, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
+import Snackbar from '@mui/material/Snackbar';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import Typography from '@mui/material/Typography';
 import UndoIcon from '@mui/icons-material/Undo';
 import type { KubeObject } from '@kubus/shared';
 import { useRolloutHistory, useRolloutUndo } from '../../api/queries.js';

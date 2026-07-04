@@ -25,6 +25,8 @@ interface PodSpec {
   serviceAccountName?: string;
 }
 
+const KEYED_FIELD_REF_RE = /^metadata\.(labels|annotations)\['([^']+)'\]$/;
+
 /**
  * Resolve a pod's effective environment variables, expanding ConfigMap and
  * Secret references server-side. Secret-sourced values are replaced with the
@@ -51,7 +53,7 @@ export async function resolvePodEnv(handle: ClusterHandle, namespace: string, po
   const resolveFieldRef = (fieldPath: string): string | undefined => {
     const meta = pod.metadata;
     const status = (pod.status ?? {}) as { podIP?: string; hostIP?: string; podIPs?: Array<{ ip: string }> };
-    const keyed = /^metadata\.(labels|annotations)\['([^']+)'\]$/.exec(fieldPath);
+    const keyed = KEYED_FIELD_REF_RE.exec(fieldPath);
     if (keyed) {
       const map = keyed[1] === 'labels' ? meta.labels : meta.annotations;
       return map?.[keyed[2]!];

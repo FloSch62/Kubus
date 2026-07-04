@@ -1,17 +1,29 @@
 import { useEffect } from 'react';
-import { Box, IconButton, Tab, Tabs, Tooltip } from '@mui/material';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Tooltip from '@mui/material/Tooltip';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SubjectIcon from '@mui/icons-material/Subject';
-import { useDockStore } from '../state/dock.js';
+import { clampDockHeight, useDockStore } from '../state/dock.js';
 import { TerminalPane } from '../components/TerminalPane.js';
 import { LogViewer } from '../components/LogViewer.js';
 
-export function BottomDock() {
-  const { tabs, activeId, open, setActive, closeTab, setOpen, height, setHeight, maximized, setMaximized } = useDockStore();
+export function BottomDock({ containerRef }: { containerRef: React.RefObject<HTMLDivElement | null> }) {
+  const tabs = useDockStore((s) => s.tabs);
+  const activeId = useDockStore((s) => s.activeId);
+  const open = useDockStore((s) => s.open);
+  const setActive = useDockStore((s) => s.setActive);
+  const closeTab = useDockStore((s) => s.closeTab);
+  const setOpen = useDockStore((s) => s.setOpen);
+  const setHeight = useDockStore((s) => s.setHeight);
+  const maximized = useDockStore((s) => s.maximized);
+  const setMaximized = useDockStore((s) => s.setMaximized);
 
   useEffect(() => {
     if (!maximized) return;
@@ -24,12 +36,32 @@ export function BottomDock() {
 
   if (!open || tabs.length === 0) return null;
 
+  // Resize by writing the container height directly to the DOM (one write per
+  // frame), keeping React out of the drag loop; the store is committed once on
+  // mouseup so the rest of the app re-renders a single time.
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
+    const el = containerRef.current;
+    if (!el) return;
     const startY = e.clientY;
-    const startHeight = height;
-    const onMove = (ev: MouseEvent) => setHeight(startHeight + (startY - ev.clientY));
+    const startHeight = useDockStore.getState().height;
+    let pending = startHeight;
+    let frame = 0;
+    el.style.transition = 'none';
+    const onMove = (ev: MouseEvent) => {
+      pending = clampDockHeight(startHeight + (startY - ev.clientY));
+      if (!frame) {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          el.style.height = `${pending}px`;
+        });
+      }
+    };
     const onUp = () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.style.height = `${pending}px`;
+      el.style.transition = '';
+      setHeight(pending);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };

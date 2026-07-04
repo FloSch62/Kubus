@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { Box, Chip } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import { useNavigate } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';
@@ -30,28 +31,31 @@ export function HelmPage() {
     return all.filter((r) => set.has(r.release.namespace));
   }, [data, namespaces]);
 
-  const columns: GridColDef<Row>[] = [
-    { field: 'name', headerName: 'Release', flex: 1, minWidth: 160, valueGetter: (_v, row) => row.release.name },
-    { field: 'namespace', headerName: 'Namespace', width: 130, valueGetter: (_v, row) => row.release.namespace },
-    ...(selected.length > 1 ? [{ field: 'cluster', headerName: 'Cluster', width: 140, valueGetter: (_v: never, row: Row) => row.ctx } as GridColDef<Row>] : []),
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 120,
-      valueGetter: (_v, row) => row.release.status,
-      renderCell: (p) => <StatusChip status={p.row.release.status} />,
-    },
-    { field: 'chart', headerName: 'Chart', width: 160, valueGetter: (_v, row) => `${row.release.chart}-${row.release.chartVersion}` },
-    { field: 'appVersion', headerName: 'App version', width: 110, valueGetter: (_v, row) => row.release.appVersion ?? '' },
-    { field: 'revision', headerName: 'Revision', width: 80, type: 'number', valueGetter: (_v, row) => row.release.revision },
-    {
-      field: 'updated',
-      headerName: 'Updated',
-      width: 100,
-      valueGetter: (_v, row) => row.release.updated ?? '',
-      renderCell: (p) => <AgeCell timestamp={p.row.release.updated} />,
-    },
-  ];
+  const columns: GridColDef<Row>[] = useMemo(
+    () => [
+      { field: 'name', headerName: 'Release', flex: 1, minWidth: 160, valueGetter: (_v, row) => row.release.name },
+      { field: 'namespace', headerName: 'Namespace', width: 130, valueGetter: (_v, row) => row.release.namespace },
+      ...(selected.length > 1 ? [{ field: 'cluster', headerName: 'Cluster', width: 140, valueGetter: (_v: never, row: Row) => row.ctx } as GridColDef<Row>] : []),
+      {
+        field: 'status',
+        headerName: 'Status',
+        width: 120,
+        valueGetter: (_v, row) => row.release.status,
+        renderCell: (p) => <StatusChip status={p.row.release.status} />,
+      },
+      { field: 'chart', headerName: 'Chart', width: 160, valueGetter: (_v, row) => `${row.release.chart}-${row.release.chartVersion}` },
+      { field: 'appVersion', headerName: 'App version', width: 110, valueGetter: (_v, row) => row.release.appVersion ?? '' },
+      { field: 'revision', headerName: 'Revision', width: 80, type: 'number', valueGetter: (_v, row) => row.release.revision },
+      {
+        field: 'updated',
+        headerName: 'Updated',
+        width: 100,
+        valueGetter: (_v, row) => row.release.updated ?? '',
+        renderCell: (p) => <AgeCell timestamp={p.row.release.updated} />,
+      },
+    ],
+    [selected.length],
+  );
 
   if (selected.length === 0) {
     return (

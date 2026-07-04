@@ -1,5 +1,28 @@
-import { useEffect, useState } from 'react';
-import { Tooltip, Typography } from '@mui/material';
+import { useSyncExternalStore } from 'react';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
+
+const tickListeners = new Set<() => void>();
+let tickTimer: number | undefined;
+let tickCount = 0;
+
+function subscribeTick(listener: () => void): () => void {
+  tickListeners.add(listener);
+  if (tickListeners.size === 1) {
+    tickTimer = window.setInterval(() => {
+      tickCount += 1;
+      for (const l of tickListeners) l();
+    }, 10_000);
+  }
+  return () => {
+    tickListeners.delete(listener);
+    if (tickListeners.size === 0) window.clearInterval(tickTimer);
+  };
+}
+
+function getTick(): number {
+  return tickCount;
+}
 
 export function formatAge(timestamp: string | undefined): string {
   if (!timestamp) return '';
@@ -19,11 +42,7 @@ export function formatAge(timestamp: string | undefined): string {
 
 /** Live-ticking relative age. */
 export function AgeCell({ timestamp }: { timestamp?: string }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 10_000);
-    return () => window.clearInterval(t);
-  }, []);
+  useSyncExternalStore(subscribeTick, getTick);
   if (!timestamp) return null;
   return (
     <Tooltip title={new Date(timestamp).toLocaleString()}>

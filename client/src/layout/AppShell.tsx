@@ -1,4 +1,5 @@
-import { Box } from '@mui/material';
+import { useRef } from 'react';
+import Box from '@mui/material/Box';
 import { Outlet } from 'react-router';
 import { TopBar } from './TopBar.js';
 import { NavDrawer } from './NavDrawer.js';
@@ -14,6 +15,7 @@ export function AppShell() {
   const stack = useDetailStore((s) => s.stack);
   const back = useDetailStore((s) => s.back);
   const closeDetail = useDetailStore((s) => s.close);
+  const dockRef = useRef<HTMLDivElement>(null);
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <TopBar />
@@ -23,8 +25,8 @@ export function AppShell() {
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <Outlet />
           </Box>
-          <Box sx={{ height: dockOpen ? (maximized ? '100%' : dockHeight) : 0, flexShrink: 0, transition: 'height 120ms ease' }}>
-            <BottomDock />
+          <Box ref={dockRef} style={{ height: dockOpen ? (maximized ? '100%' : dockHeight) : 0 }} sx={{ flexShrink: 0, transition: 'height 120ms ease' }}>
+            <BottomDock containerRef={dockRef} />
           </Box>
         </Box>
       </Box>

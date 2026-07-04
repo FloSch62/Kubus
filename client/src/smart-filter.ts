@@ -58,6 +58,7 @@ const KNOWN_KEYS = new Set([
 ]);
 
 const CLAUSE_RE = /^([a-zA-Z]+)(>=|<=|:|>|<)(.*)$/;
+const WHITESPACE_RE = /\s/;
 
 function splitTokens(input: string): string[] {
   const tokens: string[] = [];
@@ -69,7 +70,7 @@ function splitTokens(input: string): string[] {
       else current += ch;
     } else if (ch === '"' || ch === "'") {
       quote = ch;
-    } else if (/\s/.test(ch)) {
+    } else if (WHITESPACE_RE.test(ch)) {
       if (current) tokens.push(current);
       current = '';
     } else {
@@ -114,10 +115,11 @@ export function parseSmartFilter(input: string): FilterClause[] {
 // ---- value helpers ----
 
 const DURATION_UNITS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 };
+const DURATION_RE = /^([0-9]+(?:\.[0-9]+)?)([smhdw]?)$/;
 
 /** Parse "90s" / "5m" / "2h" / "7d" / "1w" (default seconds) to seconds. */
 function parseDuration(value: string): number | undefined {
-  const m = /^([0-9]+(?:\.[0-9]+)?)([smhdw]?)$/.exec(value.trim());
+  const m = DURATION_RE.exec(value.trim());
   if (!m) return undefined;
   return Number(m[1]) * (DURATION_UNITS[m[2] || 's'] ?? 1);
 }
@@ -192,6 +194,8 @@ function statusText(kind: string, obj: KubeObject): string {
   return '';
 }
 
+const UNHEALTHY_STATUSES = new Set(['failed', 'notready', 'pending', 'lost', 'released']);
+
 function isHealthy(kind: string, obj: KubeObject): boolean {
   if (kind === 'Pod') {
     const s = podSummary(obj);
@@ -205,7 +209,7 @@ function isHealthy(kind: string, obj: KubeObject): boolean {
   const counts = workloadCounts(kind, obj);
   if (counts) return counts.ready >= counts.desired;
   const text = statusText(kind, obj).toLowerCase();
-  return !['failed', 'notready', 'pending', 'lost', 'released'].includes(text);
+  return !UNHEALTHY_STATUSES.has(text);
 }
 
 function isReady(kind: string, obj: KubeObject): boolean {
@@ -230,46 +234,66 @@ const SERVICE_TYPE_ALIASES: Record<string, string> = {
   external: 'externalname',
 };
 
+const globRegExpCache = new Map<string, RegExp>();
+
+function globRegExp(want: string): RegExp {
+  let re = globRegExpCache.get(want);
+  if (!re) {
+    re = new RegExp(`^${want.split('*').map(escapeRegExp).join('.*')}$`, 'i');
+    globRegExpCache.set(want, re);
+  }
+  return re;
+}
+
 /** Match `label:key=value`, `label:key` (presence) with `*` globs in values. */
 function matchKeyValueMap(map: Record<string, string> | undefined, raw: string): boolean {
   if (!map) return false;
   const eq = raw.indexOf('=');
-  if (eq === -1) return Object.keys(map).some((k) => k.toLowerCase().includes(raw.toLowerCase()));
+  if (eq === -1) {
+    const rawLower = raw.toLowerCase();
+    return Object.keys(map).some((k) => k.toLowerCase().includes(rawLower));
+  }
   const key = raw.slice(0, eq);
   const want = raw.slice(eq + 1);
   const actual = map[key];
   if (actual === undefined) return false;
-  if (want.includes('*')) {
-    const re = new RegExp(`^${want.split('*').map(escapeRegExp).join('.*')}$`, 'i');
-    return re.test(actual);
-  }
+  if (want.includes('*')) return globRegExp(want).test(actual);
   return actual.toLowerCase() === want.toLowerCase();
 }
 
+const REGEXP_SPECIALS_RE = /[.*+?^${}()|[\]\\]/g;
+
 function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(REGEXP_SPECIALS_RE, '\\$&');
 }
 
 // ---- status alias predicates ----
 
 type StatusPredicate = (kind: string, obj: KubeObject) => boolean;
 
+const ERROR_STATUS_RE = /err|failed|backoff/;
+const COMPLETED_STATUS_RE = /succeeded|complete/;
+
 const STATUS_ALIASES: Record<string, StatusPredicate> = {
   crash: (k, o) => statusText(k, o).toLowerCase().includes('crashloop'),
   oom: (k, o) => statusText(k, o).toLowerCase().includes('oomkilled'),
-  error: (k, o) => /err|failed|backoff/.test(statusText(k, o).toLowerCase()),
+  error: (k, o) => ERROR_STATUS_RE.test(statusText(k, o).toLowerCase()),
   unhealthy: (k, o) => !isHealthy(k, o),
   healthy: (k, o) => isHealthy(k, o),
   ok: (k, o) => isHealthy(k, o),
-  completed: (k, o) => /succeeded|complete/.test(statusText(k, o).toLowerCase()),
+  completed: (k, o) => COMPLETED_STATUS_RE.test(statusText(k, o).toLowerCase()),
   degraded: (k, o) => statusText(k, o).toLowerCase() === 'degraded',
   progressing: (k, o) => statusText(k, o).toLowerCase() === 'progressing',
 };
 
 // ---- evaluation ----
 
+const haystackCache = new WeakMap<KubeObject, { ctx: string; kind: string; text: string }>();
+
 function freeTextHaystack(row: ClusterRow, kind: string): string {
   const obj = row.obj;
+  const cached = haystackCache.get(obj);
+  if (cached && cached.ctx === row.ctx && cached.kind === kind) return cached.text;
   const labels = Object.entries(obj.metadata.labels ?? {})
     .map(([k, v]) => `${k}=${v}`)
     .join(' ');
@@ -279,7 +303,9 @@ function freeTextHaystack(row: ClusterRow, kind: string): string {
     const ev = eventFields(obj);
     parts.push(ev.reason, ev.message, ev.object);
   }
-  return parts.join(' ').toLowerCase();
+  const text = parts.join(' ').toLowerCase();
+  haystackCache.set(obj, { ctx: row.ctx, kind, text });
+  return text;
 }
 
 function matchClauseValue(clause: FilterClause, value: string, row: ClusterRow, ctx: FilterContext): boolean {
@@ -466,26 +492,29 @@ export function smartFilterSuggestions(
   }
 
   const out: FilterSuggestion[] = [];
-  const keyMatch = /^([a-zA-Z]+)(>=|<=|:|>|<)(.*)$/.exec(token);
+  const keyMatch = CLAUSE_RE.exec(token);
 
   if (keyMatch) {
     const [, key, op, partial] = keyMatch;
     const keyLower = key!.toLowerCase();
+    const partialLower = partial!.toLowerCase();
     const suggestion = KEY_SUGGESTIONS.find((s) => s.key.slice(0, -1) === keyLower);
     const statics = suggestion?.values ?? [];
     const dynamics = dynamicValues(keyLower).map((value) => ({ value, hint: undefined as string | undefined }));
     for (const { value, hint } of [...statics, ...dynamics]) {
-      if (partial && !value.toLowerCase().startsWith(partial.toLowerCase())) continue;
-      if (value.toLowerCase() === partial!.toLowerCase()) continue;
+      const valueLower = value.toLowerCase();
+      if (partial && !valueLower.startsWith(partialLower)) continue;
+      if (valueLower === partialLower) continue;
       out.push({ completion: `${prefix}${negation}${key}${op}${value}`, hint: hint ?? '' });
     }
     return out.slice(0, 12);
   }
 
   // Empty token (just `/`, or after a completed clause) → list all keys.
+  const tokenLower = token.toLowerCase();
   for (const s of KEY_SUGGESTIONS) {
     if (s.kinds && !s.kinds.includes(kind)) continue;
-    if (!s.key.toLowerCase().startsWith(token.toLowerCase())) continue;
+    if (!s.key.toLowerCase().startsWith(tokenLower)) continue;
     out.push({ completion: `${prefix}${negation}${s.key}`, hint: s.hint });
   }
   return out.slice(0, 12);

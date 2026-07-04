@@ -1,6 +1,7 @@
 import { memo } from 'react';
-import { SparkLineChart } from '@mui/x-charts';
-import { Box, Tooltip } from '@mui/material';
+import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
+import Box from '@mui/material/Box';
+import Tooltip from '@mui/material/Tooltip';
 
 interface Props {
   values: number[];

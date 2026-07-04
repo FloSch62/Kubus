@@ -78,7 +78,11 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
           const { pods } = await resolveLogTargetPods({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: ref.kind as 'Pod', namespace, name: ref.name });
           if (!pods.length) throw new Error(`No pods found for ${ref.kind} ${namespace}/${ref.name}`);
           const byNamespace = new Map<string, string[]>();
-          for (const pod of pods) byNamespace.set(pod.namespace, [...(byNamespace.get(pod.namespace) ?? []), pod.name]);
+          for (const pod of pods) {
+            const names = byNamespace.get(pod.namespace);
+            if (names) names.push(pod.name);
+            else byNamespace.set(pod.namespace, [pod.name]);
+          }
           for (const [ns, podNames] of byNamespace) {
             addTab({
               kind: 'logs',

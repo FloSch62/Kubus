@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Alert, Box, Dialog, DialogContent, DialogTitle, MenuItem, Select, Stack, Tab, Tabs, Typography } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Dialog from '@mui/material/Dialog';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Typography from '@mui/material/Typography';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { dump as dumpYaml } from 'js-yaml';
 import type { HelmReleaseDetail, HelmRevision } from '@kubus/shared';
@@ -39,7 +49,7 @@ export function HelmRevisionDiffDialog({ ctx, ns, name, revisions, from: initial
 
   const left = useMemo(() => textFor(fromQuery.data, tab), [fromQuery.data, tab]);
   const right = useMemo(() => textFor(toQuery.data, tab), [toQuery.data, tab]);
-  const sorted = useMemo(() => [...revisions].sort((a, b) => a.revision - b.revision), [revisions]);
+  const sorted = useMemo(() => revisions.toSorted((a, b) => a.revision - b.revision), [revisions]);
 
   const revisionSelect = (value: number, onChange: (rev: number) => void, label: string) => (
     <Select size="small" value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label={label} sx={{ width: 150 }}>

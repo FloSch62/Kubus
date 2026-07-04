@@ -194,8 +194,12 @@ function allContainers(spec: PodSpec): Container[] {
 
 const DANGEROUS_CAPS = new Set(['SYS_ADMIN', 'NET_ADMIN', 'SYS_PTRACE', 'SYS_MODULE', 'DAC_READ_SEARCH', 'DAC_OVERRIDE', 'CAP_SYS_ADMIN', 'CAP_NET_ADMIN', 'BPF', 'SYS_BOOT', 'SYS_RAWIO']);
 const SECRET_NAME_RE = /(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)/i;
+const IMAGE_TAG_RE = /:[\w][\w.-]*$/;
 const RUNTIME_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock', '/run/containerd/containerd.sock', '/var/run/crio/crio.sock'];
 const PROBE_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'Pod']);
+const RESOURCE_TYPES = ['cpu', 'memory'];
+const ESCALATION_VERBS = new Set(['escalate', 'bind', 'impersonate']);
+const SECRET_READ_VERBS = new Set(['get', 'list', 'watch', '*']);
 
 type Emit = (checkId: string, resource: ResourceRef, message: string) => void;
 
@@ -204,7 +208,9 @@ function auditPodSource(source: PodSource, emit: Emit): void {
   const containers = allContainers(spec);
   const byCheck = new Map<string, string[]>();
   const add = (checkId: string, message: string) => {
-    byCheck.set(checkId, [...(byCheck.get(checkId) ?? []), message]);
+    const messages = byCheck.get(checkId);
+    if (messages) messages.push(message);
+    else byCheck.set(checkId, [message]);
   };
 
   if (spec.hostNetwork) add('host-network', 'spec.hostNetwork is true');
@@ -246,13 +252,13 @@ function auditPodSource(source: PodSource, emit: Emit): void {
       if (port.hostPort) add('host-port', `container "${c.name}" binds host port ${port.hostPort}`);
     }
     const image = c.image ?? '';
-    const tagless = !image.includes('@') && !/:[\w][\w.-]*$/.test(image.slice(image.lastIndexOf('/') + 1)) ;
+    const tagless = !image.includes('@') && !IMAGE_TAG_RE.test(image.slice(image.lastIndexOf('/') + 1));
     if (image.endsWith(':latest') || (image && tagless)) add('latest-tag', `container "${c.name}" uses ${image || 'an untagged image'}`);
 
     const limits = c.resources?.limits ?? {};
     const requests = c.resources?.requests ?? {};
-    const missingLimits = ['cpu', 'memory'].filter((r) => !limits[r]);
-    const missingRequests = ['cpu', 'memory'].filter((r) => !requests[r]);
+    const missingLimits = RESOURCE_TYPES.filter((r) => !limits[r]);
+    const missingRequests = RESOURCE_TYPES.filter((r) => !requests[r]);
     if (missingLimits.length) add('missing-limits', `container "${c.name}" has no ${missingLimits.join('/')} limit`);
     if (missingRequests.length) add('missing-requests', `container "${c.name}" has no ${missingRequests.join('/')} request`);
 
@@ -300,12 +306,12 @@ function auditRbac(ctx: string, lists: Lists, emit: Emit): void {
           break;
         }
       }
-      const escalation = rules.some((r) => (r.verbs ?? []).some((v) => ['escalate', 'bind', 'impersonate'].includes(v)));
+      const escalation = rules.some((r) => (r.verbs ?? []).some((v) => ESCALATION_VERBS.has(v)));
       if (escalation) emit('rbac-escalation-verbs', ref(ctx, spec, obj), 'rules include escalate/bind/impersonate');
       const secretsRead = rules.some(
         (r) =>
           (r.resources ?? []).includes('secrets') &&
-          (r.verbs ?? []).some((v) => ['get', 'list', 'watch', '*'].includes(v)) &&
+          (r.verbs ?? []).some((v) => SECRET_READ_VERBS.has(v)) &&
           !(r as { resourceNames?: string[] }).resourceNames?.length,
       );
       if (secretsRead) emit('secrets-read-access', ref(ctx, spec, obj), 'can read all secrets it can see');
@@ -362,26 +368,27 @@ function auditNetwork(ctx: string, lists: Lists, emit: Emit): void {
 
 function auditPdb(ctx: string, sources: PodSource[], lists: Lists, emit: Emit): void {
   interface PdbSelector {
-    namespace: string;
-    matchLabels: Record<string, string>;
+    labelEntries: Array<[string, string]>;
     hasExpressions: boolean;
   }
-  const pdbs: PdbSelector[] = lists.poddisruptionbudgets.map((pdb) => {
+  const pdbsByNs = new Map<string, PdbSelector[]>();
+  for (const pdb of lists.poddisruptionbudgets) {
     const selector = (pdb.spec as { selector?: { matchLabels?: Record<string, string>; matchExpressions?: unknown[] } } | undefined)?.selector;
-    return {
-      namespace: pdb.metadata.namespace ?? '',
-      matchLabels: selector?.matchLabels ?? {},
+    const ns = pdb.metadata.namespace ?? '';
+    const entry: PdbSelector = {
+      labelEntries: Object.entries(selector?.matchLabels ?? {}),
       hasExpressions: !!selector?.matchExpressions?.length,
     };
-  });
+    const list = pdbsByNs.get(ns);
+    if (list) list.push(entry);
+    else pdbsByNs.set(ns, [entry]);
+  }
   for (const source of sources) {
     if (source.kind !== 'Deployment' && source.kind !== 'StatefulSet') continue;
     if ((source.replicas ?? 1) < 2) continue;
-    const covered = pdbs.some((pdb) => {
-      if (pdb.namespace !== (source.ref.namespace ?? '')) return false;
+    const covered = (pdbsByNs.get(source.ref.namespace ?? '') ?? []).some((pdb) => {
       if (pdb.hasExpressions) return true; // conservatively assume it matches
-      const entries = Object.entries(pdb.matchLabels);
-      return entries.length > 0 && entries.every(([k, v]) => source.templateLabels[k] === v);
+      return pdb.labelEntries.length > 0 && pdb.labelEntries.every(([k, v]) => source.templateLabels[k] === v);
     });
     if (!covered) emit('no-pdb', source.ref, `${source.replicas} replicas but no matching PodDisruptionBudget`);
   }
@@ -412,9 +419,9 @@ function auditNodes(ctx: string, lists: Lists, emit: Emit): void {
 /** Resolve default-SA automount at the ServiceAccount level to cut noise. */
 function pruneDefaultSaFindings(findings: AuditFinding[], lists: Lists): AuditFinding[] {
   const optedOut = new Set(
-    lists.serviceaccounts
-      .filter((sa) => sa.metadata.name === 'default' && (sa as { automountServiceAccountToken?: boolean }).automountServiceAccountToken === false)
-      .map((sa) => sa.metadata.namespace ?? ''),
+    lists.serviceaccounts.flatMap((sa) =>
+      sa.metadata.name === 'default' && (sa as { automountServiceAccountToken?: boolean }).automountServiceAccountToken === false ? [sa.metadata.namespace ?? ''] : [],
+    ),
   );
   if (!optedOut.size) return findings;
   return findings.filter((f) => f.checkId !== 'default-service-account' || !optedOut.has(f.resource.namespace ?? ''));

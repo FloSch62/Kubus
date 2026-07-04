@@ -1,7 +1,9 @@
-import { Box } from '@mui/material';
+import Box from '@mui/material/Box';
+
+const READY_RE = /^(\d+)\/(\d+)$/;
 
 function isNotReady(value: string): boolean {
-  const match = /^(\d+)\/(\d+)$/.exec(value.trim());
+  const match = READY_RE.exec(value.trim());
   if (!match) return false;
   return Number(match[1]) < Number(match[2]);
 }

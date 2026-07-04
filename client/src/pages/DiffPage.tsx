@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Autocomplete, Box, FormControlLabel, Grid, Stack, Switch, TextField, Typography } from '@mui/material';
+import Autocomplete from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Grid from '@mui/material/Grid';
+import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useQuery } from '@tanstack/react-query';
 import { dump as dumpYaml } from 'js-yaml';
@@ -25,6 +32,11 @@ function useSideObject(side: Side) {
   });
 }
 
+function toYaml(obj: KubeObject | undefined, normalize: boolean): string {
+  if (!obj) return '';
+  return dumpYaml(normalize ? normalizeForDiff(obj) : obj, { noRefs: true, sortKeys: true, lineWidth: 120 });
+}
+
 function useNames(side: Side) {
   return useQuery({
     queryKey: ['diff-names', side.ctx, side.kind, side.namespace],
@@ -45,12 +57,8 @@ export function DiffPage() {
   const leftObj = useSideObject(left);
   const rightObj = useSideObject(right);
 
-  const toYaml = (obj: KubeObject | undefined) => {
-    if (!obj) return '';
-    return dumpYaml(normalize ? normalizeForDiff(obj) : obj, { noRefs: true, sortKeys: true, lineWidth: 120 });
-  };
-  const leftText = useMemo(() => toYaml(leftObj.data), [leftObj.data, normalize]); // eslint-disable-line react-hooks/exhaustive-deps
-  const rightText = useMemo(() => toYaml(rightObj.data), [rightObj.data, normalize]); // eslint-disable-line react-hooks/exhaustive-deps
+  const leftText = useMemo(() => toYaml(leftObj.data, normalize), [leftObj.data, normalize]);
+  const rightText = useMemo(() => toYaml(rightObj.data, normalize), [rightObj.data, normalize]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>

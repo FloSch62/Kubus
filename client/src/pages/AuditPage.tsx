@@ -1,21 +1,19 @@
-import { useMemo, useState } from 'react';
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  IconButton,
-  InputAdornment,
-  Link,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { useDeferredValue, useMemo, useState } from 'react';
+import Accordion from '@mui/material/Accordion';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import Link from '@mui/material/Link';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -105,6 +103,7 @@ export function AuditPage() {
   const { dismissedChecks, dismissCheck, restoreCheck } = useAuditPrefsStore();
   const [severityFilter, setSeverityFilter] = useState<ReadonlySet<AuditSeverity>>(new Set());
   const [textFilter, setTextFilter] = useState('');
+  const deferredTextFilter = useDeferredValue(textFilter);
 
   const reports = useMemo(() => (data ?? []).filter((r) => r.report), [data]);
   const failures = useMemo(() => (data ?? []).filter((r) => r.error), [data]);
@@ -112,16 +111,14 @@ export function AuditPage() {
 
   const activeFindings = useMemo(() => {
     const dismissed = new Set(dismissedChecks);
-    let out = allFindings.filter((f) => !dismissed.has(f.checkId));
-    if (severityFilter.size) out = out.filter((f) => severityFilter.has(f.severity));
-    const q = textFilter.trim().toLowerCase();
-    if (q) {
-      out = out.filter((f) =>
-        [f.title, f.message, f.checkId, f.category, f.resource.name, f.resource.namespace ?? '', f.resource.kind, f.resource.ctx].join(' ').toLowerCase().includes(q),
-      );
-    }
-    return out;
-  }, [allFindings, dismissedChecks, severityFilter, textFilter]);
+    const q = deferredTextFilter.trim().toLowerCase();
+    return allFindings.filter((f) => {
+      if (dismissed.has(f.checkId)) return false;
+      if (severityFilter.size && !severityFilter.has(f.severity)) return false;
+      if (q && ![f.title, f.message, f.checkId, f.category, f.resource.name, f.resource.namespace ?? '', f.resource.kind, f.resource.ctx].join(' ').toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [allFindings, dismissedChecks, severityFilter, deferredTextFilter]);
 
   const severityCounts = useMemo(() => {
     const dismissed = new Set(dismissedChecks);

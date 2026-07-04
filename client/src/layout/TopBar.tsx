@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AppBar, Box, IconButton, Stack, Toolbar, Tooltip, Typography } from '@mui/material';
+import AppBar from '@mui/material/AppBar';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Stack from '@mui/material/Stack';
+import Toolbar from '@mui/material/Toolbar';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import BrightnessAutoOutlinedIcon from '@mui/icons-material/BrightnessAutoOutlined';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
@@ -16,7 +22,9 @@ import { SettingsDialog } from '../components/settings/SettingsDialog.js';
 export function TopBar() {
   const mode = useClustersStore((s) => s.themeMode);
   const toggleTheme = useClustersStore((s) => s.toggleTheme);
-  const dock = useDockStore();
+  const dockOpen = useDockStore((s) => s.open);
+  const dockTabCount = useDockStore((s) => s.tabs.length);
+  const setDockOpen = useDockStore((s) => s.setOpen);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -80,9 +88,9 @@ export function TopBar() {
               <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          {dock.tabs.length > 0 && (
-            <Tooltip title={dock.open ? 'Hide dock' : `Show dock (${dock.tabs.length} tabs)`}>
-              <IconButton size="small" onClick={() => dock.setOpen(!dock.open)} color={dock.open ? 'primary' : 'default'}>
+          {dockTabCount > 0 && (
+            <Tooltip title={dockOpen ? 'Hide dock' : `Show dock (${dockTabCount} tabs)`}>
+              <IconButton size="small" onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
                 <TerminalIcon fontSize="small" />
               </IconButton>
             </Tooltip>

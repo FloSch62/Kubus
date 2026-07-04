@@ -1,5 +1,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { Autocomplete, Box, Checkbox, Chip, Stack, TextField, Typography, createFilterOptions } from '@mui/material';
+import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
+import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';

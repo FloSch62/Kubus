@@ -20,8 +20,9 @@ function importAuthWarnings(incomingYaml: string, addedUsers: string[]): string[
     return [];
   }
   const warnings: string[] = [];
+  const users = kc.getUsers();
   for (const name of addedUsers) {
-    const warning = authWarningForUser(kc.getUsers().find((u) => u.name === name));
+    const warning = authWarningForUser(users.find((u) => u.name === name));
     if (warning) warnings.push(`user "${name}": ${warning}`);
   }
   return warnings;

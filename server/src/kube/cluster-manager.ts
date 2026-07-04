@@ -307,12 +307,14 @@ export class ClusterManager extends EventEmitter {
 
   listContexts(): ContextInfo[] {
     const current = this.kc.getCurrentContext();
+    const contextFiles = this.contextFilesByName();
     return this.kc.getContexts().map((c) => {
       const handle = this.handles.get(c.name);
       const cachedHealth = this.healthCache.get(c.name);
       const cluster = this.kc.getCluster(c.cluster);
       const user = this.kc.getUser(c.user);
-      const sshTunnelKey = this.sshTunnelKeyForContext(c.name);
+      const contextFile = contextFiles.get(c.name);
+      const sshTunnelKey = contextFile ? sshTunnelKeyFor(contextFile, c.name) : null;
       return {
         name: c.name,
         cluster: c.cluster,
@@ -527,7 +529,24 @@ export class ClusterManager extends EventEmitter {
   private sshTunnelKeyForContext(contextName: string): string | null {
     const contextFile = this.findEntryFile('context', contextName);
     if (!contextFile) return null;
-    return `context:${JSON.stringify([path.resolve(contextFile), contextName])}`;
+    return sshTunnelKeyFor(contextFile, contextName);
+  }
+
+  /** The kubeconfig file defining each context, loading every watched path once. */
+  private contextFilesByName(): Map<string, string> {
+    const files = new Map<string, string>();
+    for (const p of this.kubeconfigPaths()) {
+      try {
+        const kc = new KubeConfig();
+        kc.loadFromFile(p);
+        for (const c of kc.getContexts()) {
+          if (!files.has(c.name)) files.set(c.name, p);
+        }
+      } catch {
+        // unreadable / invalid file — skip
+      }
+    }
+    return files;
   }
 
   /** Locate the kubeconfig file (among the watched paths) that defines an entry. */
@@ -629,4 +648,8 @@ export class ClusterManager extends EventEmitter {
     for (const handle of this.handles.values()) handle.dispose();
     this.handles.clear();
   }
+}
+
+function sshTunnelKeyFor(contextFile: string, contextName: string): string {
+  return `context:${JSON.stringify([path.resolve(contextFile), contextName])}`;
 }

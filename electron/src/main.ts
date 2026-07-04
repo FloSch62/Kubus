@@ -102,14 +102,21 @@ function saveWindowState(win: BrowserWindow): void {
   }
 }
 
+let clientStateCache: Record<string, string> | undefined;
+
 function loadClientState(): Record<string, string> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(clientStateFile(), 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-  } catch {
-    return {};
+  if (!clientStateCache) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(clientStateFile(), 'utf8'));
+      clientStateCache =
+        !parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+          ? {}
+          : Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+    } catch {
+      clientStateCache = {};
+    }
   }
+  return clientStateCache;
 }
 
 function saveClientState(state: Record<string, string>): void {
@@ -118,6 +125,7 @@ function saveClientState(state: Record<string, string>): void {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, file);
+  clientStateCache = state;
 }
 
 function buildMenu(): void {
@@ -313,7 +321,7 @@ ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
     return;
   }
   try {
-    const next = loadClientState();
+    const next = { ...loadClientState() };
     delete next[name];
     saveClientState(next);
     event.returnValue = true;

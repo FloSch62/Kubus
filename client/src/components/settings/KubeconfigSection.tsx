@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Alert, Box, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import type { KubeconfigSource } from '@kubus/shared';
 import { useKubeconfigSettings, useSetKubeconfig } from '../../api/queries.js';
 
@@ -16,9 +22,10 @@ export function KubeconfigSection() {
   const [pathInput, setPathInput] = useState('');
 
   // Sync the input with the server state whenever it (re)loads.
+  const override = data?.override;
   useEffect(() => {
-    if (data) setPathInput(data.override ?? '');
-  }, [data]);
+    if (override !== undefined) setPathInput(override ?? '');
+  }, [override]);
 
   if (isLoading || !data) {
     return <CircularProgress size={20} />;

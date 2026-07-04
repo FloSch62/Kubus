@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { groupToPath, type ResourceKindInfo, type ResourceRef, type SearchResult } from '@kubus/shared';
+import { groupToPath, type ResourceRef, type SearchResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import type { IndexedResourceSearchEntry } from '../kube/search-index.js';
@@ -14,16 +14,32 @@ const PAGES: Array<{ title: string; path: string; subtitle: string }> = [
   { title: 'Diff', path: '/diff', subtitle: 'Compare resources' },
 ];
 
+const NON_ALPHANUMERIC_RE = /[^a-z0-9]+/g;
+const WHITESPACE_RE = /\s+/g;
+
 function normalizeSearchText(value: string): string {
   return value
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(NON_ALPHANUMERIC_RE, ' ')
+    .replace(WHITESPACE_RE, ' ')
     .trim();
 }
 
 function compactSearchText(value: string): string {
-  return value.replace(/\s+/g, '');
+  return value.replace(WHITESPACE_RE, '');
+}
+
+interface PreparedQuery {
+  rawQuery: string;
+  q: string;
+  qTokens: string[];
+  compactQuery: string;
+}
+
+function prepareQuery(query: string): PreparedQuery {
+  const rawQuery = query.trim().toLowerCase();
+  const q = normalizeSearchText(rawQuery);
+  return { rawQuery, q, qTokens: q.split(' '), compactQuery: compactSearchText(q) };
 }
 
 function scoreOrderedTokens(queryTokens: string[], hayTokens: string[]): number {
@@ -58,21 +74,19 @@ function scoreOrderedTokens(queryTokens: string[], hayTokens: string[]): number 
   return Math.min(35, 20 + score);
 }
 
-function scoreText(query: string, ...parts: Array<string | undefined>): number {
-  const rawQuery = query.trim().toLowerCase();
-  const q = normalizeSearchText(rawQuery);
+function scoreText(query: PreparedQuery, ...parts: Array<string | undefined>): number {
+  const { rawQuery, q, qTokens, compactQuery } = query;
+  if (!q) return 1;
   const hay = parts.filter(Boolean).join(' ').toLowerCase();
   const normalizedHay = normalizeSearchText(hay);
-  if (!q) return 1;
   if (!normalizedHay) return 0;
   if (hay === rawQuery || normalizedHay === q) return 100;
   if (hay.startsWith(rawQuery) || normalizedHay.startsWith(q)) return 80;
   if (hay.includes(rawQuery) || normalizedHay.includes(q)) return 40;
 
-  const compactQuery = compactSearchText(q);
   if (compactQuery.length > 2 && compactSearchText(normalizedHay).includes(compactQuery)) return 35;
 
-  return scoreOrderedTokens(q.split(' '), normalizedHay.split(' '));
+  return scoreOrderedTokens(qTokens, normalizedHay.split(' '));
 }
 
 function refFor(ctx: string, entry: IndexedResourceSearchEntry): ResourceRef {
@@ -89,15 +103,16 @@ function refFor(ctx: string, entry: IndexedResourceSearchEntry): ResourceRef {
 }
 
 async function searchContext(handle: ClusterHandle, query: string, limit: number): Promise<SearchResult[]> {
-  const q = query.trim().toLowerCase();
+  const q = prepareQuery(query);
   const out: SearchResult[] = [];
+
+  const [resources, entries] = await Promise.all([handle.discovery.getResources(), handle.searchIndex.entries()]);
 
   for (const page of PAGES) {
     const score = scoreText(q, page.title, page.subtitle);
     if (score) out.push({ id: `page:${page.path}`, kind: 'page', title: page.title, subtitle: page.subtitle, score, path: page.path });
   }
 
-  const resources = await handle.discovery.getResources();
   for (const kind of resources) {
     const score = scoreText(q, kind.kind, kind.plural, kind.group, ...(kind.shortNames ?? []));
     if (!score) continue;
@@ -113,7 +128,7 @@ async function searchContext(handle: ClusterHandle, query: string, limit: number
     });
   }
 
-  for (const entry of await handle.searchIndex.entries()) {
+  for (const entry of entries) {
     const nameScore = scoreText(q, entry.name);
     const score = Math.max(
       nameScore ? nameScore + 10 : 0,

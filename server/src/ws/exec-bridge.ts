@@ -1,6 +1,7 @@
 import { PassThrough } from 'node:stream';
 import type { WebSocket } from 'ws';
-import { execClientControlSchema, type ExecServerControl } from '@kubus/shared';
+import type { ExecServerControl } from '@kubus/shared';
+import { execClientControlSchema } from '@kubus/shared/ws-protocol';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 
 export interface ExecBridgeOptions {
@@ -68,7 +69,8 @@ export async function runExecBridge(socket: WebSocket, handle: ClusterHandle, op
 
   try {
     const upstream = await handle.makeExec().exec(opts.namespace, opts.pod, opts.container, opts.command, stdout, stderr, stdin, true, (status) => {
-      const code = status.status === 'Success' ? 0 : (status.details?.causes?.find((c) => c.reason === 'ExitCode')?.message ? Number(status.details.causes.find((c) => c.reason === 'ExitCode')!.message) : 1);
+      const exitCode = status.details?.causes?.find((c) => c.reason === 'ExitCode')?.message;
+      const code = status.status === 'Success' ? 0 : exitCode ? Number(exitCode) : 1;
       sendControl({ op: 'exit', code, message: status.message });
     });
     upstream.on('close', () => {

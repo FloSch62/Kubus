@@ -303,7 +303,7 @@ export function useWatchedList(contexts: string[], group: string, version: strin
   // Per-ctx object maps live in a ref; state is derived on each change.
   const mapsRef = useRef(new Map<string, Map<string, KubeObject>>());
 
-  const key = useMemo(() => `${contexts.join(',')}|${group}/${version}/${plural}`, [contexts, group, version, plural]);
+  const key = `${contexts.join(',')}|${group}/${version}/${plural}`;
 
   useEffect(() => {
     const maps = mapsRef.current;

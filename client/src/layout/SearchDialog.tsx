@@ -1,20 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Chip,
-  Dialog,
-  DialogContent,
-  IconButton,
-  InputAdornment,
-  List,
-  ListItemButton,
-  ListItemText,
-  Snackbar,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogContent from '@mui/material/DialogContent';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemText from '@mui/material/ListItemText';
+import Snackbar from '@mui/material/Snackbar';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
@@ -80,11 +78,11 @@ const RESULT_CHIP_COLOR: Record<SearchResultKind, 'info' | 'secondary' | 'succes
 export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const selected = useClustersStore((s) => s.selected);
   const toggleTheme = useClustersStore((s) => s.toggleTheme);
-  const dock = useDockStore();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [stage, setStage] = useState<{ ref: ResourceRef; title: string } | null>(null);
   const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(null);
+  const deferredQuery = useDeferredValue(query);
   const commandMode = query.startsWith('>');
   const searchQuery = stage || commandMode ? '' : query;
   const { data: results, isFetching } = useGlobalSearch(selected, searchQuery);
@@ -118,21 +116,21 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   const rows = useMemo<Row[]>(() => {
     if (stage) {
-      const f = query.trim().toLowerCase();
+      const f = deferredQuery.trim().toLowerCase();
       return actionsForRef(stage.ref.kind)
         .filter((a) => !f || a.title.toLowerCase().includes(f))
         .map((action) => ({ type: 'action', action }));
     }
-    if (commandMode) {
-      const f = query.slice(1).trim().toLowerCase();
+    if (deferredQuery.startsWith('>')) {
+      const f = deferredQuery.slice(1).trim().toLowerCase();
       return STATIC_COMMANDS.filter((c) => !f || c.title.toLowerCase().includes(f)).map((command) => ({ type: 'command', command }));
     }
-    if (query.trim().length > 1) return (results ?? []).map((result) => ({ type: 'result', result }));
+    if (deferredQuery.trim().length > 1) return (results ?? []).map((result) => ({ type: 'result', result }));
     return favorites.map<Row>((f) => ({
       type: 'result',
       result: { id: f.id, kind: f.ref ? 'resource' : 'page', title: f.title, subtitle: f.subtitle, score: 1, ref: f.ref, path: f.path },
     }));
-  }, [stage, commandMode, query, results, favorites]);
+  }, [stage, deferredQuery, results, favorites]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -151,7 +149,14 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   const activate = (row: Row) => {
     if (row.type === 'command') {
-      row.command.run({ navigate, toggleTheme, toggleDock: () => dock.setOpen(!dock.open) });
+      row.command.run({
+        navigate,
+        toggleTheme,
+        toggleDock: () => {
+          const { open, setOpen } = useDockStore.getState();
+          setOpen(!open);
+        },
+      });
       closeAll();
       return;
     }

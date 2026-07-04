@@ -54,6 +54,10 @@ export function dockTabId(): string {
   return `dock-${++counter}-${Date.now().toString(36)}`;
 }
 
+export function clampDockHeight(height: number): number {
+  return Math.max(160, Math.min(window.innerHeight - 200, height));
+}
+
 export const useDockStore = create<DockState>((set) => ({
   tabs: [],
   activeId: undefined,
@@ -78,6 +82,6 @@ export const useDockStore = create<DockState>((set) => ({
     }),
   setActive: (id) => set({ activeId: id, open: true }),
   setOpen: (open) => set(open ? { open } : { open, maximized: false }),
-  setHeight: (height) => set({ height: Math.max(160, Math.min(window.innerHeight - 200, height)) }),
+  setHeight: (height) => set({ height: clampDockHeight(height) }),
   setMaximized: (maximized) => set({ maximized }),
 }));

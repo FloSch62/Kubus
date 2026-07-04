@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Drawer, FormControlLabel, IconButton, Link, Stack, Switch, Tab, Tabs, Tooltip, Typography } from '@mui/material';
+import Box from '@mui/material/Box';
+import Drawer from '@mui/material/Drawer';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import IconButton from '@mui/material/IconButton';
+import Link from '@mui/material/Link';
+import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -65,9 +75,10 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
     setReveal(false);
   }, [selKey]);
 
+  const hasSel = !!sel;
   useEffect(() => {
-    if (!sel) setFullScreen(false);
-  }, [sel]);
+    if (!hasSel) setFullScreen(false);
+  }, [hasSel]);
 
   const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
   const { data: backingCrd } = useResource(backingCrdSelection);

@@ -26,10 +26,12 @@ const DECIMAL_SUFFIX: Record<string, number> = {
   E: 1e18,
 };
 
+const QUANTITY_RE = /^([+-]?[0-9.eE+-]+?)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/;
+
 /** Parse a quantity string to a plain number (base units). */
 export function parseQuantity(q: string | undefined): number {
   if (!q) return 0;
-  const m = /^([+-]?[0-9.eE+-]+?)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/.exec(q.trim());
+  const m = QUANTITY_RE.exec(q.trim());
   if (!m) return 0;
   const value = Number(m[1]);
   if (Number.isNaN(value)) return 0;

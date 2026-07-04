@@ -1,17 +1,19 @@
-import { DiffEditor } from '@monaco-editor/react';
-import { useTheme } from '@mui/material/styles';
-import { useUiPrefsStore } from '../state/prefs.js';
+import { Suspense, lazy } from 'react';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
 
-export function DiffViewer({ left, right }: { left: string; right: string }) {
-  const theme = useTheme();
-  const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
+const DiffViewerImpl = lazy(() => import('./DiffViewerImpl.js'));
+
+const diffLoading = (
+  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+    <CircularProgress size={24} />
+  </Box>
+);
+
+export function DiffViewer(props: { left: string; right: string }) {
   return (
-    <DiffEditor
-      language="yaml"
-      original={left}
-      modified={right}
-      theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
-      options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: monoFontSize }}
-    />
+    <Suspense fallback={diffLoading}>
+      <DiffViewerImpl {...props} />
+    </Suspense>
   );
 }

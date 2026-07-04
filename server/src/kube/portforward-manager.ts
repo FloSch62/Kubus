@@ -123,6 +123,8 @@ export class PortForwardManager extends EventEmitter {
     if (req.kind === 'pod') return { pod: req.name, port: req.remotePort };
     const handle = this.clusters.get(ctx);
 
+    const svcPromise = handle.core.readNamespacedService({ name: req.name, namespace: req.namespace });
+    svcPromise.catch(() => undefined);
     const endpoints = await handle.core.readNamespacedEndpoints({ name: req.name, namespace: req.namespace });
     let podName: string | undefined;
     for (const subset of endpoints.subsets ?? []) {
@@ -136,7 +138,7 @@ export class PortForwardManager extends EventEmitter {
     }
     if (!podName) throw new HttpProblem(503, `service "${req.namespace}/${req.name}" has no ready pod endpoints`);
 
-    const svc = await handle.core.readNamespacedService({ name: req.name, namespace: req.namespace });
+    const svc = await svcPromise;
     const portSpec = (svc.spec?.ports ?? []).find((p) => p.port === req.remotePort);
     const targetPort = portSpec?.targetPort ?? req.remotePort;
     if (typeof targetPort === 'number') return { pod: podName, port: targetPort };

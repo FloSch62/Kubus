@@ -1,9 +1,17 @@
-import { Box, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 import type { KubeObject, TlsCertInfo } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
 import { useSecretTls } from '../../api/queries.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const CN_RE = /(?:^|\n|,\s*)CN=([^\n,]+)/;
+const NEWLINE_RE = /\n/g;
 
 function expiryChip(cert: TlsCertInfo) {
   const expiresAt = Date.parse(cert.notAfter);
@@ -15,8 +23,8 @@ function expiryChip(cert: TlsCertInfo) {
 
 /** Extract the CN from an X.509 subject/issuer string ("CN=foo\nO=bar"). */
 function commonName(dn: string): string {
-  const m = /(?:^|\n|,\s*)CN=([^\n,]+)/.exec(dn);
-  return m?.[1] ?? dn.replace(/\n/g, ', ');
+  const m = CN_RE.exec(dn);
+  return m?.[1] ?? dn.replace(NEWLINE_RE, ', ');
 }
 
 export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {

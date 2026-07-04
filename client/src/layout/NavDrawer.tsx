@@ -1,19 +1,17 @@
-import { useMemo, useState } from 'react';
-import {
-  Box,
-  Collapse,
-  Drawer,
-  IconButton,
-  InputAdornment,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Tooltip,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { useDeferredValue, useMemo, useState } from 'react';
+import Box from '@mui/material/Box';
+import Collapse from '@mui/material/Collapse';
+import Drawer from '@mui/material/Drawer';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Tooltip from '@mui/material/Tooltip';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -98,8 +96,10 @@ function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () =>
   );
 }
 
+const VERSION_RE = /^v(\d+)(?:(alpha|beta)(\d+))?$/;
+
 function versionScore(version: string): [number, number, number] {
-  const match = /^v(\d+)(?:(alpha|beta)(\d+))?$/.exec(version);
+  const match = VERSION_RE.exec(version);
   if (!match) return [0, 0, 0];
   const stability = match[2] === 'alpha' ? 1 : match[2] === 'beta' ? 2 : 3;
   return [stability, Number(match[1]), Number(match[3] ?? 0)];
@@ -243,6 +243,7 @@ export function NavDrawer() {
     return set;
   });
   const [filter, setFilter] = useState('');
+  const deferredFilter = useDeferredValue(filter);
 
   const toggleGroup = (title: string) =>
     setCollapsed((prev) => {
@@ -291,7 +292,7 @@ export function NavDrawer() {
     return map;
   }, [customKinds]);
 
-  const f = filter.toLowerCase();
+  const f = deferredFilter.toLowerCase();
   const matches = (label: string) => !f || label.toLowerCase().includes(f);
   // While filtering, always expand so matches are visible.
   const isOpen = (title: string) => !!f || !collapsed.has(title);

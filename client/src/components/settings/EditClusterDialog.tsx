@@ -1,27 +1,25 @@
 import { useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  Checkbox,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  FormControlLabel,
-  InputAdornment,
-  InputLabel,
-  Link,
-  MenuItem,
-  Select,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import Divider from '@mui/material/Divider';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import InputAdornment from '@mui/material/InputAdornment';
+import InputLabel from '@mui/material/InputLabel';
+import Link from '@mui/material/Link';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import HelpOutlinedIcon from '@mui/icons-material/HelpOutlined';
 import type { ClusterAuthType, ContextInfo } from '@kubus/shared';
 import { useClusterCa, useEditCluster, useTestConnection } from '../../api/queries.js';
@@ -51,6 +49,7 @@ type AuthMode = 'keep' | 'token' | 'client-cert';
 type ConnMode = 'direct' | 'ssh' | 'proxy';
 
 const PROXY_URL_RE = /^(socks5?|socks5h|https?):\/\//i;
+const SERVER_URL_RE = /^https?:\/\//i;
 
 /** Full edit of an existing cluster — same fields as "Add cluster", prefilled. */
 export function EditClusterDialog({ context: c, onClose }: { context: ContextInfo; onClose: () => void }) {
@@ -74,7 +73,7 @@ export function EditClusterDialog({ context: c, onClose }: { context: ContextInf
   });
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
 
-  const serverValid = /^https?:\/\//i.test(form.server.trim());
+  const serverValid = SERVER_URL_RE.test(form.server.trim());
   const authValid =
     form.auth === 'keep' ||
     (form.auth === 'token' ? !!form.token.trim() : !!form.cert.trim() && !!form.key.trim());

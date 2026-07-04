@@ -1,35 +1,33 @@
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormControlLabel,
-  IconButton,
-  InputLabel,
-  Link,
-  List,
-  ListItem,
-  ListItemText,
-  MenuItem,
-  Select,
-  Slider,
-  Stack,
-  Switch,
-  Tab,
-  Tabs,
-  TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import IconButton from '@mui/material/IconButton';
+import InputLabel from '@mui/material/InputLabel';
+import Link from '@mui/material/Link';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Slider from '@mui/material/Slider';
+import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import TextField from '@mui/material/TextField';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import CachedOutlinedIcon from '@mui/icons-material/CachedOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
@@ -57,18 +55,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+const NETWORK_ERROR_RE =
+  /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|timed?\s*out|socket hang up|network|getaddrinfo|tunneling socket|certificate|self.?signed/i;
+const AUTH_ERROR_RE = /\b401\b|\b403\b|Unauthorized|Forbidden|credential plugin|auth-provider/i;
+
 /** Connection errors that usually mean the API server isn't directly reachable. */
 function looksLikeNetworkError(msg?: string): boolean {
   if (!msg) return false;
-  return /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|timed?\s*out|socket hang up|network|getaddrinfo|tunneling socket|certificate|self.?signed/i.test(
-    msg,
-  );
+  return NETWORK_ERROR_RE.test(msg);
 }
 
 /** Failures where the server was reached but the credentials are the problem. */
 function looksLikeAuthError(msg?: string): boolean {
   if (!msg) return false;
-  return /\b401\b|\b403\b|Unauthorized|Forbidden|credential plugin|auth-provider/i.test(msg);
+  return AUTH_ERROR_RE.test(msg);
 }
 
 function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isProtected: boolean; onToggleProtected: () => void }) {

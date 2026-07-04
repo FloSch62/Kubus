@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./ws-protocol": {
+      "types": "./dist/ws-protocol.d.ts",
+      "import": "./dist/ws-protocol.js"
     }
   },
   "scripts": {

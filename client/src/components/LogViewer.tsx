@@ -1,5 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Chip, IconButton, MenuItem, Select, TextField, ToggleButton, Tooltip, Typography } from '@mui/material';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import TextField from '@mui/material/TextField';
+import ToggleButton from '@mui/material/ToggleButton';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import DownloadIcon from '@mui/icons-material/Download';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -211,6 +219,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     });
   };
 
+  const deferredFilter = useDeferredValue(filter);
   const visible = useMemo(() => {
     let out = lines;
     if (levelFilter.size) {
@@ -219,15 +228,15 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
         return level !== undefined && levelFilter.has(level);
       });
     }
-    if (!filter) return out;
+    if (!deferredFilter) return out;
     try {
-      const re = new RegExp(filter, 'i');
+      const re = new RegExp(deferredFilter, 'i');
       return out.filter((l) => re.test(strippedOf(l)) || re.test(l.pod));
     } catch {
-      const f = filter.toLowerCase();
+      const f = deferredFilter.toLowerCase();
       return out.filter((l) => strippedOf(l).toLowerCase().includes(f) || l.pod.toLowerCase().includes(f));
     }
-  }, [lines, filter, levelFilter]);
+  }, [lines, deferredFilter, levelFilter]);
 
   const matches = useMemo(() => {
     if (!find) return [];
@@ -303,7 +312,11 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
 
   const recentRate = useMemo(() => {
     const cutoff = Date.now() - 10_000;
-    return lines.filter((l) => l.receivedAt >= cutoff).length / 10;
+    let count = 0;
+    for (const l of lines) {
+      if (l.receivedAt >= cutoff) count++;
+    }
+    return count / 10;
   }, [lines]);
 
   // Simple windowed rendering (nowrap) — only rows near the viewport mount.

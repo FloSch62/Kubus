@@ -6,7 +6,11 @@
  * objects; returns undefined instead of throwing on any malformed path.
  */
 export function evalPrinterColumnPath(obj: unknown, jsonPath: string): unknown {
-  const segments = parsePath(jsonPath);
+  let segments = parsedPathCache.get(jsonPath);
+  if (segments === undefined && !parsedPathCache.has(jsonPath)) {
+    segments = parsePath(jsonPath);
+    parsedPathCache.set(jsonPath, segments);
+  }
   if (!segments) return undefined;
   let values: unknown[] = [obj];
   for (const seg of segments) {
@@ -32,6 +36,9 @@ export function evalPrinterColumnPath(obj: unknown, jsonPath: string): unknown {
 
 type Segment = string | number | '*';
 
+const parsedPathCache = new Map<string, Segment[] | undefined>();
+const INDEX_RE = /^-?\d+$/;
+
 function parsePath(jsonPath: string): Segment[] | undefined {
   let path = jsonPath.trim();
   if (path.startsWith('{') && path.endsWith('}')) path = path.slice(1, -1).trim();
@@ -56,7 +63,7 @@ function parsePath(jsonPath: string): Segment[] | undefined {
       const inner = path.slice(i + 1, end).trim();
       i = end + 1;
       if (inner === '*') segments.push('*');
-      else if (/^-?\d+$/.test(inner)) segments.push(Number(inner));
+      else if (INDEX_RE.test(inner)) segments.push(Number(inner));
       else if ((inner.startsWith("'") && inner.endsWith("'")) || (inner.startsWith('"') && inner.endsWith('"'))) segments.push(inner.slice(1, -1));
       else return undefined;
     } else {

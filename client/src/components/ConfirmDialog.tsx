@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, TextField, Typography } from '@mui/material';
+import { useState } from 'react';
+import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogTitle from '@mui/material/DialogTitle';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 
 interface Props {
   open: boolean;
@@ -16,9 +23,11 @@ interface Props {
 
 export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger, busy, confirmText, onConfirm, onClose }: Props) {
   const [typed, setTyped] = useState('');
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) setTyped('');
-  }, [open]);
+  }
   const blocked = !!confirmText && typed !== confirmText;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
