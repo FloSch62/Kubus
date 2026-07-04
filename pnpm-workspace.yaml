@@ -3,6 +3,12 @@ packages:
   - server
   - client
   - electron
+# monaco-yaml's worker imports path-browserify, which is CJS-only; the Vite dev
+# server serves worker-graph deps as native ESM without CJS interop, so the
+# yaml worker dies with "module is not defined" (prod builds are unaffected).
+# pathe is an ESM drop-in for node:path covering every function the worker uses.
+overrides:
+  "monaco-yaml>path-browserify": "npm:pathe@^2.0.3"
 allowBuilds:
   esbuild: true
   electron: true
