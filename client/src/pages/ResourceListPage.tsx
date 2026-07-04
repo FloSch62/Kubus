@@ -256,6 +256,7 @@ export function ResourceListPage() {
         )}
       </Box>
       <ResourceTable
+        tableId={kindPath}
         rows={list.rows}
         columns={columns}
         loading={Object.values(list.status).some((s) => s.state === 'loading')}

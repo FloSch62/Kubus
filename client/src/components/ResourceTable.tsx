@@ -42,6 +42,8 @@ interface Props {
   checkboxSelection?: boolean;
   /** Column fields hidden by default (user can re-enable via the column menu). */
   hiddenFields?: string[];
+  /** Stable id used to persist user-resized column widths for this table. */
+  tableId?: string;
 }
 
 const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
@@ -76,6 +78,7 @@ export function ResourceTable({
   checkboxSelection,
   onSelectionChange,
   hiddenFields,
+  tableId,
 }: Props) {
   const [localFilter, setLocalFilter] = useState('');
   // The committed value lives in the URL (or localFilter); the input itself is
@@ -99,14 +102,37 @@ export function ResourceTable({
   const hiddenKey = (hiddenFields ?? []).join(',');
   const [visibility, setVisibility] = useState<GridColumnVisibilityModel>({});
   const tableDensity = useUiPrefsStore((s) => s.tableDensity);
+  // Retrieve this table's saved column widths (if any)
+  const storedWidths = useUiPrefsStore((s) => (tableId ? s.columnWidths[tableId] : undefined));
+  // Retrieve the action used to persist a column width
+  const setColumnWidth = useUiPrefsStore((s) => s.setColumnWidth);
   useEffect(() => {
     setVisibility(Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []));
   }, [hiddenKey]);
 
-  const gridColumns = useMemo(
-    () => columns.map((column) => (column.renderCell && !column.display ? { ...column, display: 'flex' as const } : column)),
-    [columns],
-  );
+  // Check the watchlist and rebuild the columns upon detected changes
+  const gridColumns = useMemo(() => {
+    const result: GridColDef<ClusterRow>[] = [];
+    for (const column of columns) {
+      let next = column;
+      let stored;
+      if (storedWidths) {
+        stored = storedWidths[column.field];
+      }
+      // If a saved width exists, make a copy of the column with that width applied
+      if (stored !== undefined) {
+        next = { ...next, width: stored, flex: undefined };
+      }
+      // If this column draws custom cells, make sure they lay out correctly
+      if (next.renderCell && !next.display) {
+        next = { ...next, display: 'flex' as const };
+      }
+      result.push(next);
+    }
+
+    // Hand back the whole adjusted list.
+    return result;
+  }, [columns, storedWidths]); // watch list
 
   // Filter on the deferred value so keystrokes render before the table does.
   const deferredFilter = useDeferredValue(inputValue);
@@ -247,6 +273,7 @@ export function ResourceTable({
         }
         columnVisibilityModel={visibility}
         onColumnVisibilityModelChange={setVisibility}
+        onColumnWidthChange={tableId ? (params) => setColumnWidth(tableId, params.colDef.field, params.width) : undefined}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
         sx={{
           border: 0,

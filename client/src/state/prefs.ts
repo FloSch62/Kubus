@@ -20,7 +20,10 @@ interface UiPrefsState {
   defaultShell: string;
   /** Treat contexts without an explicit protected flag as protected. */
   protectByDefault: boolean;
+  /** User-resized column widths, keyed by table id then column field. */
+  columnWidths: Record<string, Record<string, number>>;
   set: (patch: Partial<Omit<UiPrefsState, 'set'>>) => void;
+  setColumnWidth: (tableId: string, field: string, width: number) => void;
 }
 
 export const useUiPrefsStore = create<UiPrefsState>()(
@@ -32,7 +35,12 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       defaultTailLines: 500,
       defaultShell: 'auto',
       protectByDefault: false,
+      columnWidths: {},
       set: (patch) => set(patch),
+      setColumnWidth: (tableId, field, width) =>
+        set((state) => ({
+          columnWidths: { ...state.columnWidths, [tableId]: { ...state.columnWidths[tableId], [field]: width } },
+        })),
     }),
     { name: 'kubus-prefs', storage: createJSONStorage(() => kubusStateStorage) },
   ),
