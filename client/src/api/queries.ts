@@ -415,6 +415,20 @@ export function useResource(sel: { ctx: string; group: string; version: string; 
   });
 }
 
+/** JSON Schema for a kind, derived from the cluster's OpenAPI (covers CRDs). Best-effort: consumers degrade gracefully without it. */
+export function useResourceSchema(sel: { ctx: string; group: string; version: string; kind: string } | undefined) {
+  return useQuery({
+    queryKey: ['resource-schema', sel],
+    queryFn: () => {
+      const params = new URLSearchParams({ group: sel!.group, version: sel!.version, kind: sel!.kind });
+      return apiFetch<Record<string, unknown>>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/schema?${params}`);
+    },
+    enabled: !!sel,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
 /** One-shot (non-watched) list of a resource kind, with optional selectors. */
 export function useResourceList(sel: { ctx: string; group: string; version: string; plural: string; namespace?: string; labelSelector?: string; fieldSelector?: string } | undefined) {
   return useQuery({

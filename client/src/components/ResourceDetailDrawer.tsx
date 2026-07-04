@@ -8,7 +8,7 @@ import { dump as dumpYaml } from 'js-yaml';
 import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { withoutManagedFields } from '../kube-display.js';
-import { YamlEditor } from './YamlEditor.js';
+import { YamlEditor, useYamlSchema } from './YamlEditor.js';
 import { GenericDetail } from './detail/GenericDetail.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
 import { PodDetail } from './detail/PodDetail.js';
@@ -74,6 +74,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
+  // Warm the schema (fetch + yaml-worker registration) while the drawer is on
+  // Overview, so hover/validation are ready the moment the YAML tab opens.
+  useYamlSchema(sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined);
 
   // Only serialize on the YAML tab — dumping a large object mid-open would
   // stall the drawer's slide-in animation.
@@ -217,6 +220,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
                 applyLabel="Replace"
                 onApply={handleApply}
                 onDryRun={sel ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
+                schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
                 toolbar={
                   isSecret ? (
                     <FormControlLabel

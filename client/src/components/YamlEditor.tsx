@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Stack } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
 import type { ResourceDryRunResponse } from '@kubus/shared';
+import { useResourceSchema } from '../api/queries.js';
+import { newYamlModelPath, registerYamlSchema, type YamlSchemaRef } from '../monaco-setup.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 
 interface Props {
@@ -14,9 +16,29 @@ interface Props {
   applyLabel?: string;
   /** Extra toolbar content (e.g. reveal-secrets toggle). */
   toolbar?: React.ReactNode;
+  /** Kind being edited; enables schema-based hover docs, completion and validation. */
+  schema?: YamlSchemaRef;
 }
 
-export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', toolbar }: Props) {
+/**
+ * Fetch a kind's JSON schema and register it with monaco-yaml. Callers that
+ * know the kind ahead of time (e.g. the detail drawer) can invoke this before
+ * the editor mounts so the yaml worker is warm when the YAML tab opens.
+ */
+export function useYamlSchema(schema: YamlSchemaRef | undefined): YamlSchemaRef | undefined {
+  const { ctx, group, version, kind } = schema ?? {};
+  const schemaRef = useMemo<YamlSchemaRef | undefined>(
+    () => (ctx !== undefined && group !== undefined && version && kind ? { ctx, group, version, kind } : undefined),
+    [ctx, group, version, kind],
+  );
+  const { data: schemaDoc } = useResourceSchema(schemaRef);
+  useEffect(() => {
+    if (schemaRef && schemaDoc) registerYamlSchema(schemaRef, schemaDoc);
+  }, [schemaRef, schemaDoc]);
+  return schemaRef;
+}
+
+export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', toolbar, schema }: Props) {
   const theme = useTheme();
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
   const [text, setText] = useState(value);
@@ -27,6 +49,10 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
   const [dryRun, setDryRun] = useState<ResourceDryRunResponse>();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | undefined>(undefined);
+  const schemaRef = useYamlSchema(schema);
+  // Per-mount model path under the schema's glob prefix, so the registered
+  // schema matches this editor without reconfiguring the yaml worker.
+  const modelPath = useMemo(() => newYamlModelPath(schemaRef), [schemaRef]);
 
   useEffect(() => {
     setText(value);
@@ -134,6 +160,7 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <Editor
           language="yaml"
+          path={modelPath}
           value={text}
           onChange={(v) => {
             setText(v ?? '');
@@ -149,6 +176,10 @@ export function YamlEditor({ value, readOnly, onApply, onDryRun, applyLabel = 'A
             scrollBeyondLastLine: false,
             wordWrap: 'on',
             tabSize: 2,
+            // Render hover/suggest widgets in a viewport-fixed layer so they
+            // aren't clipped by the editor container (drawer sits at the
+            // screen edge, so clipped widgets end up off-screen).
+            fixedOverflowWidgets: true,
           }}
         />
       </Box>
