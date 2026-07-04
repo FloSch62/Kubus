@@ -5,9 +5,20 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to a PR (or main) supersedes in-flight runs for the same ref;
+# cancel the stale ones to free runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      # Report every OS result; don't cancel the matrix on the first failure.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -23,6 +34,10 @@ jobs:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
           key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       # build first: @kubus/shared (and /server for electron) resolve types
@@ -30,6 +45,11 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       # Unpacked desktop build so a broken electron-builder config fails PRs.
-      - run: pnpm --filter @kubus/electron exec electron-builder --dir --linux
+      # No platform flag: each runner packages for its own OS.
+      - run: pnpm --filter @kubus/electron exec electron-builder --dir
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Boot the app's server on each OS to catch runtime startup regressions
+      # (won't listen, missing static assets, crash-on-boot) that packaging
+      # alone misses. Headless, so it needs no display on any runner.
+      - run: pnpm smoke

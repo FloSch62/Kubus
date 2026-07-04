@@ -14,6 +14,7 @@
     "electron": "pnpm build && pnpm --filter @kubus/electron start",
     "dist": "pnpm build && pnpm --filter @kubus/electron dist",
     "typecheck": "pnpm -r typecheck",
+    "smoke": "node hack/smoke-server.mjs",
     "lint": "pnpm -r lint",
     "serve-docs": "uvx --native-tls zensical serve --open",
     "build-docs": "uvx --native-tls zensical build --clean"
