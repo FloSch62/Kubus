@@ -187,18 +187,31 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
         findings.push({ severity: 'warning', field: 'metadata.namespace', message: 'No namespace set; dry-run used default namespace.' });
       }
       const query = new URLSearchParams({ dryRun: 'All', fieldManager: 'kubus', fieldValidation: 'Strict' });
-      const path = resourcePath(kind.group, kind.version, kind.plural, {
-        namespace,
-        name,
-        query,
-      });
       const body = typeof req.body === 'string' ? req.body : dumpYaml(manifest, { noRefs: true });
+      const headers = { 'content-type': 'application/yaml' };
       try {
-        await handle.raw.json<KubeObject>(path, {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/apply-patch+yaml' },
-          body,
-        });
+        // Dry-run the same operation the editor will actually perform: a PUT
+        // replace for existing objects (server-side apply would merge keyed
+        // lists like Service ports against other field managers' entries and
+        // reject valid edits), falling back to a POST create when the object
+        // doesn't exist yet.
+        try {
+          await handle.raw.json<KubeObject>(resourcePath(kind.group, kind.version, kind.plural, { namespace, name, query }), {
+            method: 'PUT',
+            headers,
+            body,
+          });
+        } catch (err) {
+          if (err instanceof ApiException && err.code === 404) {
+            await handle.raw.json<KubeObject>(resourcePath(kind.group, kind.version, kind.plural, { namespace, query }), {
+              method: 'POST',
+              headers,
+              body,
+            });
+          } else {
+            throw err;
+          }
+        }
         const response: ResourceDryRunResponse = {
           ok: true,
           ref: {
