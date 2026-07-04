@@ -183,6 +183,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
             {tab === 'yaml' && (
               <YamlEditor
                 value={yamlText}
+                applyLabel="Replace"
                 onApply={handleApply}
                 onDryRun={sel ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
                 toolbar={

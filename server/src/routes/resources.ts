@@ -186,17 +186,23 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
       if (kind.namespaced && !manifest.metadata?.namespace) {
         findings.push({ severity: 'warning', field: 'metadata.namespace', message: 'No namespace set; dry-run used default namespace.' });
       }
-      const query = new URLSearchParams({ dryRun: 'All', fieldManager: 'kubus', fieldValidation: 'Strict' });
-      const path = resourcePath(kind.group, kind.version, kind.plural, {
-        namespace,
-        name,
-        query,
-      });
+      const existsPath = resourcePath(kind.group, kind.version, kind.plural, { namespace, name });
+      const exists = await handle.raw
+        .json<KubeObject>(existsPath)
+        .then(() => true)
+        .catch((err: unknown) => {
+          if (err instanceof ApiException && err.code === 404) return false;
+          throw err;
+        });
+      const query = new URLSearchParams({ dryRun: 'All', fieldValidation: 'Strict' });
+      const path = exists
+        ? resourcePath(kind.group, kind.version, kind.plural, { namespace, name, query })
+        : resourcePath(kind.group, kind.version, kind.plural, { namespace, query });
       const body = typeof req.body === 'string' ? req.body : dumpYaml(manifest, { noRefs: true });
       try {
         await handle.raw.json<KubeObject>(path, {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/apply-patch+yaml' },
+          method: exists ? 'PUT' : 'POST',
+          headers: { 'content-type': 'application/yaml' },
           body,
         });
         const response: ResourceDryRunResponse = {
