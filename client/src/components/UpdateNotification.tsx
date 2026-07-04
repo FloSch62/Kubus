@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Snackbar, Stack } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Snackbar from '@mui/material/Snackbar';
+import Stack from '@mui/material/Stack';
 import type { UpdateCheckResult } from '@kubus/shared';
 import { checkForUpdate as checkForAppUpdate } from '../api/app.js';
 

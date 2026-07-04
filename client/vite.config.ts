@@ -17,12 +17,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/monaco-editor')) return 'monaco';
-          if (
-            id.includes('node_modules/@mui/material') ||
-            id.includes('node_modules/@mui/icons-material') ||
-            id.includes('node_modules/@mui/x-data-grid') ||
-            id.includes('node_modules/@mui/x-charts')
-          ) {
+          // x-charts and x-data-grid stay out of this eager group: they are
+          // only reachable from lazy chunks and should load on demand.
+          if (id.includes('node_modules/@mui/material') || id.includes('node_modules/@mui/icons-material')) {
             return 'mui';
           }
         },

@@ -68,7 +68,8 @@ export async function runExecBridge(socket: WebSocket, handle: ClusterHandle, op
 
   try {
     const upstream = await handle.makeExec().exec(opts.namespace, opts.pod, opts.container, opts.command, stdout, stderr, stdin, true, (status) => {
-      const code = status.status === 'Success' ? 0 : (status.details?.causes?.find((c) => c.reason === 'ExitCode')?.message ? Number(status.details.causes.find((c) => c.reason === 'ExitCode')!.message) : 1);
+      const exitCode = status.details?.causes?.find((c) => c.reason === 'ExitCode')?.message;
+      const code = status.status === 'Success' ? 0 : exitCode ? Number(exitCode) : 1;
       sendControl({ op: 'exit', code, message: status.message });
     });
     upstream.on('close', () => {

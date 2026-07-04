@@ -1,4 +1,4 @@
-import { Box } from '@mui/material';
+import Box from '@mui/material/Box';
 import CircleIcon from '@mui/icons-material/Circle';
 
 const GOOD = new Set(['Running', 'Succeeded', 'Active', 'Bound', 'Ready', 'Available', 'Completed', 'deployed', 'True']);

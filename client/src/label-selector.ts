@@ -12,18 +12,25 @@ export function splitLabelSelector(selector: string): string[] {
     if (ch === '(') depth++;
     else if (ch === ')') depth = Math.max(0, depth - 1);
     if (ch === ',' && depth === 0) {
-      if (current.trim()) terms.push(current.trim());
+      const term = current.trim();
+      if (term) terms.push(term);
       current = '';
     } else {
       current += ch;
     }
   }
-  if (current.trim()) terms.push(current.trim());
+  const last = current.trim();
+  if (last) terms.push(last);
   return terms;
 }
 
 export function joinLabelSelector(terms: string[]): string {
-  return terms.map((t) => t.trim()).filter(Boolean).join(',');
+  return terms
+    .flatMap((t) => {
+      const trimmed = t.trim();
+      return trimmed ? [trimmed] : [];
+    })
+    .join(',');
 }
 
 /** Add one term (e.g. `app=nginx`) unless the selector already contains it. */

@@ -8,10 +8,11 @@ import { isValidSshDestination } from '../ssh/tunnel-manager.js';
 export function registerSshRoutes(app: FastifyInstance, ctx: AppContext): void {
   /** Everything the cluster editor needs to offer SSH jump hosts safely. */
   app.get('/api/ssh/info', async (): Promise<SshInfoResponse> => {
+    const binaryPromise = ctx.sshTunnels.binaryInfo();
     const configPath = defaultSshConfigPath();
     const configExists = fs.existsSync(configPath);
     const parsed = configExists ? parseSshConfigHosts(configPath) : { hosts: [] as SshInfoResponse['hosts'] };
-    const binary = await ctx.sshTunnels.binaryInfo();
+    const binary = await binaryPromise;
     return {
       sshAvailable: binary.available,
       sshVersion: binary.version,

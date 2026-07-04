@@ -1,4 +1,8 @@
-import { Box, Chip, IconButton, Link, Tooltip } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import Link from '@mui/material/Link';
+import Tooltip from '@mui/material/Tooltip';
 import StopIcon from '@mui/icons-material/Stop';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import type { GridColDef } from '@mui/x-data-grid';

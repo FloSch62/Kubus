@@ -5,6 +5,8 @@ import { ApiException, type KubeConfig } from '@kubernetes/client-node';
 
 type FetchAgent = Agent & { options: Record<string, unknown> };
 
+const TRAILING_SLASH_RE = /\/$/;
+
 /**
  * Authenticated HTTP access to arbitrary API server paths for the things the
  * typed clients can't do generically: discovery, dynamic resource list/get,
@@ -20,7 +22,7 @@ export class RawClient {
   private serverUrl(): string {
     const cluster = this.kc.getCurrentCluster();
     if (!cluster) throw new Error('no active cluster in kubeconfig context');
-    return cluster.server.replace(/\/$/, '');
+    return cluster.server.replace(TRAILING_SLASH_RE, '');
   }
 
   /**

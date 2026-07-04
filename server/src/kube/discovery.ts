@@ -100,13 +100,16 @@ export class DiscoveryCache {
   private async discover(): Promise<ResourceKindInfo[]> {
     const kinds: ResourceKindInfo[] = [];
     // Core group is never in /apis.
-    const coreList = await this.raw.json<LegacyResourceList>('/api/v1');
+    const coreListPromise = this.raw.json<LegacyResourceList>('/api/v1');
+    const aggPromise = this.raw.json<AggregatedDiscovery>('/apis', {
+      headers: { accept: 'application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList,application/json' },
+    });
+    aggPromise.catch(() => undefined);
+    const coreList = await coreListPromise;
     pushLegacy(kinds, '', 'v1', coreList);
 
     try {
-      const agg = await this.raw.json<AggregatedDiscovery>('/apis', {
-        headers: { accept: 'application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList,application/json' },
-      });
+      const agg = await aggPromise;
       if (Array.isArray(agg.items)) {
         for (const group of agg.items) {
           const groupName = group.metadata?.name ?? '';

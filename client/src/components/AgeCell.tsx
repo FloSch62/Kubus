@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Tooltip, Typography } from '@mui/material';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 
 export function formatAge(timestamp: string | undefined): string {
   if (!timestamp) return '';

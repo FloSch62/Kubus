@@ -1,5 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Alert, Box, Chip, FormControl, FormControlLabel, InputAdornment, InputLabel, MenuItem, Select, Stack, Switch, TextField, Typography } from '@mui/material';
+import { useDeferredValue, useMemo, useState } from 'react';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import InputAdornment from '@mui/material/InputAdornment';
+import InputLabel from '@mui/material/InputLabel';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
@@ -75,6 +87,7 @@ export function EventsPage() {
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [kindFilter, setKindFilter] = useState('');
   const [text, setText] = useState('');
+  const deferredText = useDeferredValue(text);
 
   const kinds = useMemo(() => {
     const set = new Set<string>();
@@ -85,15 +98,22 @@ export function EventsPage() {
     return [...set].sort();
   }, [list.rows]);
 
-  const rows = useMemo(() => {
+  const deduped = useMemo(() => {
     let filtered = list.rows;
-    if (namespaces.length > 0) filtered = filtered.filter((r) => !r.obj.metadata.namespace || namespaces.includes(r.obj.metadata.namespace));
-    let deduped = dedupe(filtered);
-    if (warningsOnly) deduped = deduped.filter((r) => r.ev.type === 'Warning');
-    if (kindFilter) deduped = deduped.filter((r) => r.ev.involvedObject?.kind === kindFilter);
-    const f = text.trim().toLowerCase();
-    if (f) {
-      deduped = deduped.filter((r) => {
+    if (namespaces.length > 0) {
+      const nsSet = new Set(namespaces);
+      filtered = filtered.filter((r) => !r.obj.metadata.namespace || nsSet.has(r.obj.metadata.namespace));
+    }
+    return dedupe(filtered);
+  }, [list.rows, namespaces]);
+
+  const rows = useMemo(() => {
+    const f = deferredText.trim().toLowerCase();
+    if (!warningsOnly && !kindFilter && !f) return deduped;
+    return deduped.filter((r) => {
+      if (warningsOnly && r.ev.type !== 'Warning') return false;
+      if (kindFilter && r.ev.involvedObject?.kind !== kindFilter) return false;
+      if (f) {
         const o = r.ev.involvedObject;
         return (
           (r.ev.message ?? '').toLowerCase().includes(f) ||
@@ -102,10 +122,10 @@ export function EventsPage() {
           (o?.namespace ?? '').toLowerCase().includes(f) ||
           r.ctx.toLowerCase().includes(f)
         );
-      });
-    }
-    return deduped;
-  }, [list.rows, namespaces, warningsOnly, kindFilter, text]);
+      }
+      return true;
+    });
+  }, [deduped, warningsOnly, kindFilter, deferredText]);
 
   const openInvolved = (row: EventRow) => {
     const o = row.ev.involvedObject;

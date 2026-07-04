@@ -46,7 +46,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
         nodes: nodesWatcher.watcher.items().length,
         namespaces: namespacesWatcher.watcher.items().length,
         pods: pods.length,
-        podsRunning: pods.filter((p) => (p.status as { phase?: string })?.phase === 'Running').length,
+        podsRunning: 0,
         deployments: deployments.length,
         persistentVolumes: persistentVolumes.length,
         persistentVolumesBound: persistentVolumes.filter((pv) => (pv.status as { phase?: string } | undefined)?.phase === 'Bound').length,
@@ -54,7 +54,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
         crds: crds.length,
         crdsEstablished: crds.filter(isEstablishedCrd).length,
         crdsUnavailable: crdsResult.unavailable,
-        customResources: customResourceEntries.filter((entry) => entry.kind.custom).length,
+        customResources: customResourceEntries.reduce((n, entry) => (entry.kind.custom ? n + 1 : n), 0),
         customResourcesIndexed,
       },
       failingPods: [],
@@ -66,6 +66,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     const now = Date.now();
     for (const pod of pods) {
       const status = pod.status as { phase?: string; reason?: string; message?: string; containerStatuses?: ContainerStatus[] } | undefined;
+      if (status?.phase === 'Running') overview.counts.podsRunning += 1;
       const statuses = status?.containerStatuses ?? [];
       const restarts = statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0);
 
@@ -133,10 +134,15 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     }
 
     overview.warningEvents = events
-      .filter((e) => isRecentWarning(e, now))
-      .sort((a, b) => eventTime(b).localeCompare(eventTime(a)))
+      .flatMap((e) => {
+        if ((e as { type?: string }).type !== 'Warning') return [];
+        const time = eventTime(e);
+        const t = Date.parse(time);
+        return !Number.isNaN(t) && now - t < RECENT_MS ? [{ e, time }] : [];
+      })
+      .sort((a, b) => b.time.localeCompare(a.time))
       .slice(0, 50)
-      .map((e) => {
+      .map(({ e, time }) => {
         const ev = e as KubeObject & {
           reason?: string;
           message?: string;
@@ -151,7 +157,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
           involvedKind: ev.involvedObject?.kind ?? '',
           involvedName: ev.involvedObject?.name ?? '',
           count: ev.count ?? 1,
-          lastTimestamp: eventTime(e) || undefined,
+          lastTimestamp: time || undefined,
         };
       });
 
@@ -172,12 +178,6 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
 function eventTime(e: KubeObject): string {
   const ev = e as KubeObject & { lastTimestamp?: string; eventTime?: string; firstTimestamp?: string };
   return ev.lastTimestamp ?? ev.eventTime ?? ev.firstTimestamp ?? e.metadata.creationTimestamp ?? '';
-}
-
-function isRecentWarning(e: KubeObject, now: number): boolean {
-  if ((e as { type?: string }).type !== 'Warning') return false;
-  const t = Date.parse(eventTime(e));
-  return !Number.isNaN(t) && now - t < RECENT_MS;
 }
 
 function isEstablishedCrd(crd: KubeObject): boolean {

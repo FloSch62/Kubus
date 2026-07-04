@@ -34,6 +34,9 @@ export interface ReleaseSecret {
 const decodeCache = new Map<string, HelmReleasePayload>();
 const DECODE_CACHE_MAX = 200;
 
+const RELEASE_SECRET_NAME_RE = /^sh\.helm\.release\.v1\.(.+)\.v(\d+)$/;
+const REVISION_SUFFIX_RE = /\.v(\d+)$/;
+
 /** Helm release payload: k8s base64 -> helm base64 -> gzip -> JSON. */
 export function decodeReleaseSecret(secret: ReleaseSecret): HelmReleasePayload {
   const cacheKey = `${secret.metadata.namespace}/${secret.metadata.name}@${secret.metadata.resourceVersion ?? ''}`;
@@ -92,17 +95,17 @@ export async function listReleases(handle: ClusterHandle, namespace?: string): P
   const secrets = await listReleaseSecrets(handle, namespace);
   // Group by release, keep highest revision; revision is in the secret name
   // (".vN" suffix) so we can pick the latest before decoding anything else.
-  const latest = new Map<string, ReleaseSecret>();
+  const latest = new Map<string, { secret: ReleaseSecret; rev: number }>();
   for (const secret of secrets) {
-    const m = /^sh\.helm\.release\.v1\.(.+)\.v(\d+)$/.exec(secret.metadata.name);
+    const m = RELEASE_SECRET_NAME_RE.exec(secret.metadata.name);
     if (!m) continue;
     const key = `${secret.metadata.namespace}/${m[1]}`;
+    const rev = Number(m[2]);
     const prev = latest.get(key);
-    const prevRev = prev ? Number(/\.v(\d+)$/.exec(prev.metadata.name)?.[1] ?? 0) : -1;
-    if (Number(m[2]) > prevRev) latest.set(key, secret);
+    if (!prev || rev > prev.rev) latest.set(key, { secret, rev });
   }
   const out: HelmReleaseSummary[] = [];
-  for (const secret of latest.values()) {
+  for (const { secret } of latest.values()) {
     try {
       out.push(summarize(decodeReleaseSecret(secret)));
     } catch {
@@ -145,8 +148,16 @@ export async function getRevisionDetail(handle: ClusterHandle, namespace: string
 export async function getLatestPayload(handle: ClusterHandle, namespace: string, name: string): Promise<HelmReleasePayload> {
   const secrets = await listReleaseSecrets(handle, namespace, name);
   if (!secrets.length) throw new HttpProblem(404, `helm release "${namespace}/${name}" not found`);
-  secrets.sort((a, b) => revOf(b) - revOf(a));
-  return decodeReleaseSecret(secrets[0]!);
+  let latest = secrets[0]!;
+  let latestRev = revOf(latest);
+  for (let i = 1; i < secrets.length; i++) {
+    const rev = revOf(secrets[i]!);
+    if (rev > latestRev) {
+      latest = secrets[i]!;
+      latestRev = rev;
+    }
+  }
+  return decodeReleaseSecret(latest);
 }
 
 export async function getHistory(handle: ClusterHandle, namespace: string, name: string): Promise<HelmRevision[]> {
@@ -174,7 +185,7 @@ export async function listReleaseSecretObjects(handle: ClusterHandle, namespace:
 }
 
 function revOf(secret: ReleaseSecret): number {
-  return Number(/\.v(\d+)$/.exec(secret.metadata.name)?.[1] ?? 0);
+  return Number(REVISION_SUFFIX_RE.exec(secret.metadata.name)?.[1] ?? 0);
 }
 
 function deepMerge(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {

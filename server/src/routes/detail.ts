@@ -14,6 +14,8 @@ interface LabelSelector {
   matchExpressions?: Array<{ key: string; operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'; values?: string[] }>;
 }
 
+const CERT_BLOCK_RE = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+
 function selectorToString(selector: LabelSelector | undefined): string | undefined {
   if (!selector) return undefined;
   const parts = Object.entries(selector.matchLabels ?? {}).map(([k, v]) => `${k}=${v}`);
@@ -52,9 +54,11 @@ async function resolveLogTargetPods(handle: ClusterHandle, target: KubeObject, k
 
   if (kind === 'Deployment') {
     const query = new URLSearchParams({ labelSelector: selector });
-    const rsList = await handle.raw.json<{ items?: KubeObject[] }>(resourcePath('apps', 'v1', 'replicasets', { namespace, query }));
+    const [rsList, pods] = await Promise.all([
+      handle.raw.json<{ items?: KubeObject[] }>(resourcePath('apps', 'v1', 'replicasets', { namespace, query })),
+      listPods(handle, namespace, selector),
+    ]);
     const rsUids = new Set((rsList.items ?? []).filter((rs) => owns(rs, target.metadata.uid)).map((rs) => rs.metadata.uid));
-    const pods = await listPods(handle, namespace, selector);
     return pods.filter((pod) => (pod.metadata.ownerReferences ?? []).some((owner) => rsUids.has(owner.uid) && owner.controller));
   }
 
@@ -134,7 +138,7 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
         if (!crt) throw new HttpProblem(422, 'secret has no tls.crt');
         // Only the public certificate chain is parsed; tls.key is never read.
         const pem = Buffer.from(crt, 'base64').toString('utf8');
-        const blocks = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+        const blocks = pem.match(CERT_BLOCK_RE) ?? [];
         const certificates: TlsCertInfo[] = blocks.map((block) => {
           const cert = new X509Certificate(block);
           return {

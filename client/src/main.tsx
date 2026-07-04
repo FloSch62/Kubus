@@ -2,8 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
-import '@xyflow/react/dist/style.css';
-import './monaco-setup.js';
 import { initAuthToken } from './api/http.js';
 import App from './App.js';
 

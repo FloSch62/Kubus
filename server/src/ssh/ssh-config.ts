@@ -13,6 +13,10 @@ import type { SshConfigHost } from '@kubus/shared';
 
 const MAX_INCLUDE_DEPTH = 8;
 
+const CONFIG_LINE_RE = /^([A-Za-z][A-Za-z0-9]*)\s*(?:=|\s)\s*(.*)$/;
+const WILDCARD_RE = /[*?]/;
+const ARG_TOKEN_RE = /"([^"]*)"|(\S+)/g;
+
 /** ~/.ssh/config — the OpenSSH per-user config location on macOS, Linux and Windows. */
 export function defaultSshConfigPath(): string {
   return path.join(os.homedir(), '.ssh', 'config');
@@ -68,7 +72,7 @@ function parseFile(file: string, state: ParseState, depth: number): void {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
     // `Keyword value`, `Keyword=value` and `Keyword = value` are all valid.
-    const m = /^([A-Za-z][A-Za-z0-9]*)\s*(?:=|\s)\s*(.*)$/.exec(line);
+    const m = CONFIG_LINE_RE.exec(line);
     if (!m) continue;
     const keyword = (m[1] ?? '').toLowerCase();
     const args = splitArgs(m[2] ?? '');
@@ -77,7 +81,7 @@ function parseFile(file: string, state: ParseState, depth: number): void {
       case 'host': {
         block = [];
         for (const pattern of args) {
-          if (!pattern || /[*?]/.test(pattern) || pattern.startsWith('!')) continue;
+          if (!pattern || WILDCARD_RE.test(pattern) || pattern.startsWith('!')) continue;
           let entry = state.hosts.get(pattern);
           if (!entry) {
             entry = { alias: pattern };
@@ -121,8 +125,8 @@ function parseFile(file: string, state: ParseState, depth: number): void {
 /** Split a config value into tokens, honoring double quotes. */
 function splitArgs(value: string): string[] {
   const out: string[] = [];
-  const re = /"([^"]*)"|(\S+)/g;
-  for (let m = re.exec(value); m; m = re.exec(value)) out.push(m[1] ?? m[2] ?? '');
+  ARG_TOKEN_RE.lastIndex = 0;
+  for (let m = ARG_TOKEN_RE.exec(value); m; m = ARG_TOKEN_RE.exec(value)) out.push(m[1] ?? m[2] ?? '');
   return out;
 }
 
@@ -131,7 +135,7 @@ function expandIncludePath(pattern: string, includeBase: string): string[] {
   let p = pattern.replace(/^~(?=$|[\\/])/, os.homedir());
   if (!path.isAbsolute(p)) p = path.join(includeBase, p);
   const name = path.basename(p);
-  if (!/[*?]/.test(name)) return [p];
+  if (!WILDCARD_RE.test(name)) return [p];
   const dir = path.dirname(p);
   const rx = new RegExp(
     `^${name.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/\\\\]*').replace(/\?/g, '.')}$`,

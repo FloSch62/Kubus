@@ -1,25 +1,23 @@
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  IconButton,
-  InputLabel,
-  LinearProgress,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
-  Select,
-  Snackbar,
-  TextField,
-  Typography,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import Divider from '@mui/material/Divider';
+import FormControl from '@mui/material/FormControl';
+import IconButton from '@mui/material/IconButton';
+import InputLabel from '@mui/material/InputLabel';
+import LinearProgress from '@mui/material/LinearProgress';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Snackbar from '@mui/material/Snackbar';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SubjectIcon from '@mui/icons-material/Subject';
@@ -150,7 +148,11 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
       const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind, namespace, name });
       if (!pods.length) throw new Error(`No pods found for ${kind} ${namespace}/${name}`);
       const byNamespace = new Map<string, string[]>();
-      for (const pod of pods) byNamespace.set(pod.namespace, [...(byNamespace.get(pod.namespace) ?? []), pod.name]);
+      for (const pod of pods) {
+        const names = byNamespace.get(pod.namespace);
+        if (names) names.push(pod.name);
+        else byNamespace.set(pod.namespace, [pod.name]);
+      }
       for (const [ns, podNames] of byNamespace) {
         addTab({
           kind: 'logs',

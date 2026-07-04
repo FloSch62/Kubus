@@ -1,4 +1,4 @@
-import { Box } from '@mui/material';
+import Box from '@mui/material/Box';
 import { Outlet } from 'react-router';
 import { TopBar } from './TopBar.js';
 import { NavDrawer } from './NavDrawer.js';

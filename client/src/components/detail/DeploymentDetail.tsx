@@ -1,4 +1,4 @@
-import { Divider } from '@mui/material';
+import Divider from '@mui/material/Divider';
 import type { KubeObject } from '@kubus/shared';
 import { useMemo } from 'react';
 import { useResourceList } from '../../api/queries.js';

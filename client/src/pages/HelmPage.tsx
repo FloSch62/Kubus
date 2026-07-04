@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { Box, Chip } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import { useNavigate } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';

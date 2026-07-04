@@ -1,4 +1,10 @@
-import { Alert, Autocomplete, Box, CircularProgress, Stack, TextField, Typography } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Autocomplete from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import type { SshConfigHost } from '@kubus/shared';
 import { useSshInfo } from '../../api/queries.js';
 

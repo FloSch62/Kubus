@@ -90,11 +90,14 @@ function applySgr(state: SgrState, params: number[]): void {
   }
 }
 
+const CSI_RE = /\x1b\[([0-9;]*)([A-Za-z])/g;
+
 function parseAnsi(line: string): Seg[] {
   const segs: Seg[] = [];
   const state: SgrState = {};
   let last = 0;
-  const re = /\x1b\[([0-9;]*)([A-Za-z])/g;
+  const re = CSI_RE;
+  re.lastIndex = 0;
   let m: RegExpExecArray | null;
   const emit = (text: string) => {
     if (!text) return;
@@ -111,6 +114,9 @@ function parseAnsi(line: string): Seg[] {
   emit(line.slice(last));
   return segs.length ? segs : [{ text: '' }];
 }
+
+const NUMBER_CHAR_RE = /[0-9.eE+-]/;
+const LOWER_CHAR_RE = /[a-z]/;
 
 /** Tokenize a JSON document, keeping output text byte-identical to input. */
 function parseJsonSegs(line: string): Seg[] | undefined {
@@ -152,11 +158,11 @@ function parseJsonSegs(line: string): Seg[] | undefined {
     } else if (ch === '-' || (ch >= '0' && ch <= '9')) {
       const start = i;
       i++;
-      while (i < n && /[0-9.eE+-]/.test(line[i]!)) i++;
+      while (i < n && NUMBER_CHAR_RE.test(line[i]!)) i++;
       push(start, i, 'num');
-    } else if (/[a-z]/.test(ch)) {
+    } else if (LOWER_CHAR_RE.test(ch)) {
       const start = i;
-      while (i < n && /[a-z]/.test(line[i]!)) i++;
+      while (i < n && LOWER_CHAR_RE.test(line[i]!)) i++;
       const word = line.slice(start, i);
       push(start, i, word === 'true' || word === 'false' || word === 'null' ? 'bool' : 'punct');
     } else {
@@ -168,6 +174,7 @@ function parseJsonSegs(line: string): Seg[] | undefined {
 }
 
 const LOGFMT_PAIR = /([A-Za-z0-9_.@/-]+)=("(?:[^"\\]|\\.)*"|\S*)/g;
+const LOGFMT_NUM_RE = /^-?[0-9.]+$/;
 
 function parseLogfmtSegs(line: string): Seg[] | undefined {
   // Require at least two key=value pairs to avoid false positives.
@@ -180,7 +187,7 @@ function parseLogfmtSegs(line: string): Seg[] | undefined {
     segs.push({ text: m[1]!, cls: 'key' });
     segs.push({ text: '=', cls: 'punct' });
     const value = m[2]!;
-    if (value) segs.push({ text: value, cls: /^-?[0-9.]+$/.test(value) ? 'num' : 'str' });
+    if (value) segs.push({ text: value, cls: LOGFMT_NUM_RE.test(value) ? 'num' : 'str' });
     last = m.index + m[0].length;
   }
   if (last < line.length) segs.push({ text: line.slice(last) });

@@ -1,4 +1,5 @@
-import { Box, Chip } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import { EmptyState } from '../components/EmptyState.js';

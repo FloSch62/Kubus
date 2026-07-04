@@ -1,5 +1,9 @@
 import type { GridColDef } from '@mui/x-data-grid';
-import { Box, Chip, LinearProgress, Tooltip, Typography } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import LinearProgress from '@mui/material/LinearProgress';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
@@ -31,6 +35,28 @@ export interface NodeAllocationSummary {
 
 function obj(row: ClusterRow): KubeObject {
   return row.obj;
+}
+
+const podSummaryCache = new WeakMap<KubeObject, ReturnType<typeof podSummary>>();
+
+function cachedPodSummary(o: KubeObject): ReturnType<typeof podSummary> {
+  let summary = podSummaryCache.get(o);
+  if (!summary) {
+    summary = podSummary(o);
+    podSummaryCache.set(o, summary);
+  }
+  return summary;
+}
+
+const eventFieldsCache = new WeakMap<KubeObject, ReturnType<typeof eventFields>>();
+
+function cachedEventFields(o: KubeObject): ReturnType<typeof eventFields> {
+  let fields = eventFieldsCache.get(o);
+  if (!fields) {
+    fields = eventFields(o);
+    eventFieldsCache.set(o, fields);
+  }
+  return fields;
 }
 
 /** Build DataGrid column definitions from semantic column ids. */
@@ -86,17 +112,17 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     field: 'ready',
     headerName: 'Ready',
     width: 75,
-    valueGetter: (_v, row) => podSummary(obj(row)).ready,
+    valueGetter: (_v, row) => cachedPodSummary(obj(row)).ready,
     renderCell: (params) => <ReadyCounter value={String(params.value ?? '')} />,
   }),
   podStatus: () => ({
     field: 'podStatus',
     headerName: 'Status',
     width: 150,
-    valueGetter: (_v, row) => podSummary(obj(row)).status,
+    valueGetter: (_v, row) => cachedPodSummary(obj(row)).status,
     renderCell: (params) => (
       <>
-        <StatusChip status={podSummary(obj(params.row)).status} />
+        <StatusChip status={cachedPodSummary(obj(params.row)).status} />
         {hasRunningDebugContainer(obj(params.row)) && (
           <Tooltip title="A debug container is running in this pod">
             <BugReportOutlinedIcon color="warning" sx={{ fontSize: 15, ml: 0.5, verticalAlign: 'middle' }} />
@@ -110,13 +136,13 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Restarts',
     width: 80,
     type: 'number',
-    valueGetter: (_v, row) => podSummary(obj(row)).restarts,
+    valueGetter: (_v, row) => cachedPodSummary(obj(row)).restarts,
   }),
   node: () => ({
     field: 'node',
     headerName: 'Node',
     width: 150,
-    valueGetter: (_v, row) => podSummary(obj(row)).node ?? '',
+    valueGetter: (_v, row) => cachedPodSummary(obj(row)).node ?? '',
   }),
   cpu: (opts) => ({
     field: 'cpu',
@@ -461,41 +487,41 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     field: 'eventType',
     headerName: 'Type',
     width: 90,
-    valueGetter: (_v, row) => eventFields(obj(row)).type,
-    renderCell: (params) => <StatusChip status={eventFields(obj(params.row)).type === 'Warning' ? 'Error' : 'Ready'} />,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).type,
+    renderCell: (params) => <StatusChip status={cachedEventFields(obj(params.row)).type === 'Warning' ? 'Error' : 'Ready'} />,
   }),
   eventReason: () => ({
     field: 'eventReason',
     headerName: 'Reason',
     width: 140,
-    valueGetter: (_v, row) => eventFields(obj(row)).reason,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).reason,
   }),
   eventObject: () => ({
     field: 'eventObject',
     headerName: 'Object',
     width: 220,
-    valueGetter: (_v, row) => eventFields(obj(row)).object,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).object,
   }),
   eventMessage: () => ({
     field: 'eventMessage',
     headerName: 'Message',
     flex: 2,
     minWidth: 240,
-    valueGetter: (_v, row) => eventFields(obj(row)).message,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).message,
   }),
   eventCount: () => ({
     field: 'eventCount',
     headerName: 'Count',
     width: 70,
     type: 'number',
-    valueGetter: (_v, row) => eventFields(obj(row)).count,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).count,
   }),
   eventLastSeen: () => ({
     field: 'eventLastSeen',
     headerName: 'Last seen',
     width: 95,
-    valueGetter: (_v, row) => eventFields(obj(row)).lastSeen ?? '',
-    renderCell: (params) => <AgeCell timestamp={eventFields(obj(params.row)).lastSeen} />,
+    valueGetter: (_v, row) => cachedEventFields(obj(row)).lastSeen ?? '',
+    renderCell: (params) => <AgeCell timestamp={cachedEventFields(obj(params.row)).lastSeen} />,
   }),
   hpaTarget: () => ({
     field: 'hpaTarget',
@@ -670,14 +696,25 @@ function podRequestTotals(pod: KubeObject): { cpuMilli: number; memoryBytes: num
     | undefined;
   const containers = spec?.containers ?? [];
   const initContainers = spec?.initContainers ?? [];
-  const restartableInitContainers = initContainers.filter(isRestartableInitContainer);
-  const regularInitContainers = initContainers.filter((c) => !isRestartableInitContainer(c));
-  const appCpu = containers.reduce((sum, c) => sum + parseCpuRequest(c), 0);
-  const appMemory = containers.reduce((sum, c) => sum + parseMemoryRequest(c), 0);
-  const sidecarCpu = restartableInitContainers.reduce((sum, c) => sum + parseCpuRequest(c), 0);
-  const sidecarMemory = restartableInitContainers.reduce((sum, c) => sum + parseMemoryRequest(c), 0);
-  const initCpu = regularInitContainers.reduce((max, c) => Math.max(max, parseCpuRequest(c)), 0);
-  const initMemory = regularInitContainers.reduce((max, c) => Math.max(max, parseMemoryRequest(c)), 0);
+  let appCpu = 0;
+  let appMemory = 0;
+  for (const c of containers) {
+    appCpu += parseCpuRequest(c);
+    appMemory += parseMemoryRequest(c);
+  }
+  let sidecarCpu = 0;
+  let sidecarMemory = 0;
+  let initCpu = 0;
+  let initMemory = 0;
+  for (const c of initContainers) {
+    if (isRestartableInitContainer(c)) {
+      sidecarCpu += parseCpuRequest(c);
+      sidecarMemory += parseMemoryRequest(c);
+    } else {
+      initCpu = Math.max(initCpu, parseCpuRequest(c));
+      initMemory = Math.max(initMemory, parseMemoryRequest(c));
+    }
+  }
   return {
     cpuMilli: sidecarCpu + Math.max(appCpu, initCpu) + Math.round(parseQuantity(spec?.overhead?.cpu) * 1000),
     memoryBytes: sidecarMemory + Math.max(appMemory, initMemory) + Math.round(parseQuantity(spec?.overhead?.memory)),
@@ -751,10 +788,20 @@ export function crdHiddenFields(cols: PrinterColumn[]): string[] {
 /** Lookup helper bridging pod/node metrics snapshots into the column defs. */
 export function makeMetricsLookup(kind: string, metrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {
   if (!metrics || (kind !== 'Pod' && kind !== 'Node')) return undefined;
+  const indexes = new Map<string, Map<string, MetricsSnapshot['items'][number]>>();
   return (ctx, namespace, name) => {
     const snap = metrics.get(ctx);
     if (!snap?.available) return undefined;
-    const entry = snap.items.find((i) => i.name === name && (kind === 'Node' || i.namespace === namespace));
+    let index = indexes.get(ctx);
+    if (!index) {
+      index = new Map();
+      for (const item of snap.items) {
+        const key = kind === 'Node' ? item.name : `${item.namespace}\0${item.name}`;
+        if (!index.has(key)) index.set(key, item);
+      }
+      indexes.set(ctx, index);
+    }
+    const entry = index.get(kind === 'Node' ? name : `${namespace}\0${name}`);
     return entry
       ? {
           cpuMilli: entry.cpuMilli,

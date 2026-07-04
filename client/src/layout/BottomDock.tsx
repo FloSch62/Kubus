@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
-import { Box, IconButton, Tab, Tabs, Tooltip } from '@mui/material';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Tooltip from '@mui/material/Tooltip';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -11,7 +15,15 @@ import { TerminalPane } from '../components/TerminalPane.js';
 import { LogViewer } from '../components/LogViewer.js';
 
 export function BottomDock() {
-  const { tabs, activeId, open, setActive, closeTab, setOpen, height, setHeight, maximized, setMaximized } = useDockStore();
+  const tabs = useDockStore((s) => s.tabs);
+  const activeId = useDockStore((s) => s.activeId);
+  const open = useDockStore((s) => s.open);
+  const setActive = useDockStore((s) => s.setActive);
+  const closeTab = useDockStore((s) => s.closeTab);
+  const setOpen = useDockStore((s) => s.setOpen);
+  const setHeight = useDockStore((s) => s.setHeight);
+  const maximized = useDockStore((s) => s.maximized);
+  const setMaximized = useDockStore((s) => s.setMaximized);
 
   useEffect(() => {
     if (!maximized) return;
@@ -27,7 +39,7 @@ export function BottomDock() {
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startY = e.clientY;
-    const startHeight = height;
+    const startHeight = useDockStore.getState().height;
     const onMove = (ev: MouseEvent) => setHeight(startHeight + (startY - ev.clientY));
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);

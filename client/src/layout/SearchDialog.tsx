@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Chip,
-  Dialog,
-  DialogContent,
-  IconButton,
-  InputAdornment,
-  List,
-  ListItemButton,
-  ListItemText,
-  Snackbar,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogContent from '@mui/material/DialogContent';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemText from '@mui/material/ListItemText';
+import Snackbar from '@mui/material/Snackbar';
+import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
@@ -80,7 +78,6 @@ const RESULT_CHIP_COLOR: Record<SearchResultKind, 'info' | 'secondary' | 'succes
 export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const selected = useClustersStore((s) => s.selected);
   const toggleTheme = useClustersStore((s) => s.toggleTheme);
-  const dock = useDockStore();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [stage, setStage] = useState<{ ref: ResourceRef; title: string } | null>(null);
@@ -151,7 +148,14 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   const activate = (row: Row) => {
     if (row.type === 'command') {
-      row.command.run({ navigate, toggleTheme, toggleDock: () => dock.setOpen(!dock.open) });
+      row.command.run({
+        navigate,
+        toggleTheme,
+        toggleDock: () => {
+          const { open, setOpen } = useDockStore.getState();
+          setOpen(!open);
+        },
+      });
       closeAll();
       return;
     }

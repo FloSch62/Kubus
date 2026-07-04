@@ -7,8 +7,10 @@ import { HttpProblem } from '../util/errors.js';
 import { dumpYaml, loadAllYaml } from '../util/yaml.js';
 import { decodeReleaseSecret, encodeReleasePayload, listReleaseSecretsRaw, type HelmReleasePayload, type ReleaseSecret } from './release-reader.js';
 
+const REVISION_SUFFIX_RE = /\.v(\d+)$/;
+
 function revOf(secret: ReleaseSecret): number {
-  return Number(/\.v(\d+)$/.exec(secret.metadata.name)?.[1] ?? 0);
+  return Number(REVISION_SUFFIX_RE.exec(secret.metadata.name)?.[1] ?? 0);
 }
 
 /** RFC3339 with the local UTC offset — matches how helm stamps last_deployed. */

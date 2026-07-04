@@ -74,6 +74,11 @@ function nodeId(ctx: string, spec: KindSpec, obj: KubeObject): string {
   return `${ctx}|${spec.group}|${spec.version}|${spec.plural}|${obj.metadata.namespace ?? ''}|${obj.metadata.name}`;
 }
 
+const POD_WAITING_ERROR_REASONS = new Set(['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'CreateContainerConfigError', 'CreateContainerError']);
+const STATE_SUCCESS_TERMS = new Set(['up', 'ready', 'running', 'active', 'available', 'succeeded', 'synced']);
+const STATE_ERROR_TERMS = new Set(['down', 'failed', 'error', 'degraded', 'lost']);
+const STATE_WARNING_TERMS = new Set(['pending', 'progressing', 'reconciling']);
+
 function statusFor(kind: string, obj: KubeObject): { status: GraphNodeStatus; reason?: string } {
   const st = obj.status ?? {};
   const sp = obj.spec ?? {};
@@ -83,7 +88,7 @@ function statusFor(kind: string, obj: KubeObject): { status: GraphNodeStatus; re
     const statuses = (st.containerStatuses ?? []) as Array<{ restartCount?: number; state?: { waiting?: { reason?: string; message?: string } } }>;
     const waiting = statuses.find((c) => c.state?.waiting?.reason)?.state?.waiting;
     if (phase === 'Failed') return { status: 'error', reason: (st.reason as string | undefined) ?? 'Failed' };
-    if (waiting?.reason && ['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'CreateContainerConfigError', 'CreateContainerError'].includes(waiting.reason)) {
+    if (waiting?.reason && POD_WAITING_ERROR_REASONS.has(waiting.reason)) {
       return { status: 'error', reason: waiting.reason };
     }
     if (phase === 'Pending') return { status: 'warning', reason: waiting?.reason ?? 'Pending' };
@@ -117,9 +122,9 @@ function statusFor(kind: string, obj: KubeObject): { status: GraphNodeStatus; re
     return { status: 'unknown' };
   }
   const operationalState = ((st.operationalState as string | undefined) ?? (st.state as string | undefined) ?? (st.phase as string | undefined))?.toLowerCase();
-  if (operationalState && ['up', 'ready', 'running', 'active', 'available', 'succeeded', 'synced'].includes(operationalState)) return { status: 'success' };
-  if (operationalState && ['down', 'failed', 'error', 'degraded', 'lost'].includes(operationalState)) return { status: 'error', reason: operationalState };
-  if (operationalState && ['pending', 'progressing', 'reconciling'].includes(operationalState)) return { status: 'warning', reason: operationalState };
+  if (operationalState && STATE_SUCCESS_TERMS.has(operationalState)) return { status: 'success' };
+  if (operationalState && STATE_ERROR_TERMS.has(operationalState)) return { status: 'error', reason: operationalState };
+  if (operationalState && STATE_WARNING_TERMS.has(operationalState)) return { status: 'warning', reason: operationalState };
   if (ready?.status === 'True') return { status: 'success' };
   if (ready?.status === 'False') return { status: 'warning', reason: ready.reason ?? ready.message ?? 'NotReady' };
   return { status: 'unknown' };
@@ -166,13 +171,17 @@ const IGNORED_RELATION_TERMS = new Set([
   'version',
 ]);
 
+const CAMEL_BOUNDARY_RE = /([a-z0-9])([A-Z])/g;
+const ACRONYM_BOUNDARY_RE = /([A-Z]+)([A-Z][a-z])/g;
+const NON_ALPHANUMERIC_RE = /[^a-z0-9]+/;
+
 function tokens(input: string): string[] {
   const spaced = input
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+    .replace(CAMEL_BOUNDARY_RE, '$1 $2')
+    .replace(ACRONYM_BOUNDARY_RE, '$1 $2');
   return spaced
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(NON_ALPHANUMERIC_RE)
     .filter(Boolean)
     .map((token) => (token.endsWith('ies') ? `${token.slice(0, -3)}y` : token.endsWith('s') && token.length > 3 ? token.slice(0, -1) : token))
     .filter((token) => !IGNORED_RELATION_TERMS.has(token));
@@ -193,10 +202,12 @@ function parseEqualitySelector(value: string): Record<string, string> | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
+const URL_VALUE_RE = /^https?:\/\//i;
+
 function collectRelationHints(value: unknown, prefix = ''): RelationHint[] {
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (!trimmed || trimmed.length > 120 || /^https?:\/\//i.test(trimmed)) return [];
+    if (!trimmed || trimmed.length > 120 || URL_VALUE_RE.test(trimmed)) return [];
     return [{ path: prefix, value: trimmed, selector: parseEqualitySelector(trimmed) }];
   }
   if (Array.isArray(value)) {
@@ -208,8 +219,10 @@ function collectRelationHints(value: unknown, prefix = ''): RelationHint[] {
   return [];
 }
 
+const ARRAY_INDEX_RE = /\[\d+\]/g;
+
 function hintLabel(path: string): string {
-  const parts = path.replace(/\[\d+\]/g, '').split('.').filter(Boolean);
+  const parts = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean);
   return parts.slice(-2).join('.') || 'ref';
 }
 
@@ -230,8 +243,10 @@ function sameGvr(a: KindSpec, b: KindSpec): boolean {
   return a.group === b.group && a.version === b.version && a.plural === b.plural;
 }
 
+const K8S_VERSION_RE = /^v(\d+)(?:(alpha|beta)(\d+))?$/;
+
 function versionScore(version: string): [number, number, number] {
-  const match = /^v(\d+)(?:(alpha|beta)(\d+))?$/.exec(version);
+  const match = K8S_VERSION_RE.exec(version);
   if (!match) return [0, 0, 0];
   const stability = match[2] === 'alpha' ? 1 : match[2] === 'beta' ? 2 : 3;
   return [stability, Number(match[1]), Number(match[3] ?? 0)];
@@ -305,9 +320,8 @@ function layerForDynamicKind(kind: string): GraphNode['layer'] {
   return 'other';
 }
 
-function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hints: RelationHint[]): number {
+function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hintTerms: Set<string>): number {
   if (!kind.verbs.includes('list') || sameGvr(resourceKindToSpec(kind), focusSpec)) return 0;
-  const hintTerms = new Set(hints.flatMap((hint) => tokens(hint.path)));
   const kindTerms = tokens(`${kind.kind} ${kind.plural}`);
   let score = kind.group === focusSpec.group ? 1 : 0;
   for (const term of kindTerms) {
@@ -319,9 +333,12 @@ function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hints: 
 
 function pickDynamicCandidateSpecs(kinds: ResourceKindInfo[], focusSpec: KindSpec, focusObj: KubeObject): KindSpec[] {
   const hints = collectRelationHints({ spec: focusObj.spec, status: focusObj.status });
+  const hintTerms = new Set(hints.flatMap((hint) => tokens(hint.path)));
   return dedupeResourceKinds(kinds)
-    .map((kind) => ({ kind, score: scoreCandidateKind(kind, focusSpec, hints) }))
-    .filter(({ score }) => score > 0)
+    .flatMap((kind) => {
+      const score = scoreCandidateKind(kind, focusSpec, hintTerms);
+      return score > 0 ? [{ kind, score }] : [];
+    })
     .sort((a, b) => b.score - a.score || a.kind.kind.localeCompare(b.kind.kind))
     .slice(0, 48)
     .map(({ kind }) => resourceKindToSpec(kind));
@@ -388,10 +405,18 @@ function addFocusedResourceEdges(edges: GraphEdge[], focus: Item | undefined, no
   }
 }
 
+const edgeIdsByList = new WeakMap<GraphEdge[], Set<string>>();
+
 function addEdge(edges: GraphEdge[], source: string | undefined, target: string | undefined, kind: GraphEdge['kind'], label?: string): boolean {
   if (!source || !target || source === target) return false;
   const id = `${source}->${target}:${kind}:${label ?? ''}`;
-  if (edges.some((e) => e.id === id)) return true;
+  let ids = edgeIdsByList.get(edges);
+  if (!ids) {
+    ids = new Set();
+    edgeIdsByList.set(edges, ids);
+  }
+  if (ids.has(id)) return true;
+  ids.add(id);
   edges.push({ id, source, target, kind, label });
   return true;
 }
@@ -431,9 +456,17 @@ function focusGraph(graph: RelationshipGraph, query: FocusQuery): RelationshipGr
   }
   const depth = Math.max(1, Math.min(4, Number(query.depth ?? 2)));
   const adjacency = new Map<string, Set<string>>();
+  const neighborsOf = (id: string): Set<string> => {
+    let set = adjacency.get(id);
+    if (!set) {
+      set = new Set();
+      adjacency.set(id, set);
+    }
+    return set;
+  };
   for (const edge of graph.edges) {
-    adjacency.set(edge.source, new Set([...(adjacency.get(edge.source) ?? []), edge.target]));
-    adjacency.set(edge.target, new Set([...(adjacency.get(edge.target) ?? []), edge.source]));
+    neighborsOf(edge.source).add(edge.target);
+    neighborsOf(edge.target).add(edge.source);
   }
   const keep = new Set<string>([focus.id]);
   let frontier = new Set<string>([focus.id]);
@@ -459,9 +492,10 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const namespaces = query.namespace ? new Set(query.namespace.split(',').map((n) => n.trim()).filter(Boolean)) : undefined;
   const warnings: string[] = [];
   const focusSpec = focusKindSpec(query);
-  const listedItems = (await Promise.all(KINDS.map((spec) => listKind(handle, spec, namespaces, warnings)))).flat();
+  const listedItemsPromise = Promise.all(KINDS.map((spec) => listKind(handle, spec, namespaces, warnings)));
   const focusItems = focusSpec && !KINDS.some((spec) => sameGvr(spec, focusSpec)) ? await getFocusedItem(handle, focusSpec, query, warnings) : [];
   const dynamicItems = focusItems[0] ? await listFocusedRelatedItems(handle, focusItems[0], namespaces, warnings) : [];
+  const listedItems = (await listedItemsPromise).flat();
   const items = [...listedItems, ...focusItems, ...dynamicItems];
 
   const nodes = new Map<string, GraphNode>(items.map(({ spec, obj }) => {
@@ -469,7 +503,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     const id = nodeId(handle.contextName, spec, obj);
     const app = appName(obj);
     return [id, {
-      id: nodeId(handle.contextName, spec, obj),
+      id,
       ref: ref(handle.contextName, spec, obj),
       label: obj.metadata.name,
       sublabel: app ? `${sublabel(spec.kind, obj) ?? ''} · app ${app}` : sublabel(spec.kind, obj),
@@ -483,12 +517,20 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const byKindName = new Map<string, string>();
   const byKindNsName = new Map<string, string>();
   const nodeItems = new Map<string, Item>();
+  const pods: Item[] = [];
+  const services: Item[] = [];
+  const ingresses: Item[] = [];
+  const pvcs: Item[] = [];
   for (const item of items) {
     const id = nodeId(handle.contextName, item.spec, item.obj);
     nodeItems.set(id, item);
     if (item.obj.metadata.uid) byUid.set(item.obj.metadata.uid, id);
     byKindName.set(`${item.spec.kind}|${item.obj.metadata.name}`, id);
     byKindNsName.set(`${item.spec.kind}|${item.obj.metadata.namespace ?? ''}|${item.obj.metadata.name}`, id);
+    if (item.spec.kind === 'Pod') pods.push(item);
+    else if (item.spec.kind === 'Service') services.push(item);
+    else if (item.spec.kind === 'Ingress') ingresses.push(item);
+    else if (item.spec.kind === 'PersistentVolumeClaim') pvcs.push(item);
   }
 
   const edges: GraphEdge[] = [];
@@ -499,8 +541,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   }
   addFocusedResourceEdges(edges, focusItems[0], nodeItems, nodes, byUid);
 
-  const pods = items.filter((i) => i.spec.kind === 'Pod');
-  for (const svc of items.filter((i) => i.spec.kind === 'Service')) {
+  for (const svc of services) {
     const svcId = nodeId(handle.contextName, svc.spec, svc.obj);
     const selector = svc.obj.spec?.selector as Record<string, string> | undefined;
     let matched = 0;
@@ -518,7 +559,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     }
   }
 
-  for (const ing of items.filter((i) => i.spec.kind === 'Ingress')) {
+  for (const ing of ingresses) {
     const ingId = nodeId(handle.contextName, ing.spec, ing.obj);
     const spec = ing.obj.spec as {
       defaultBackend?: { service?: { name?: string } };
@@ -566,7 +607,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     }
   }
 
-  for (const pvc of items.filter((i) => i.spec.kind === 'PersistentVolumeClaim')) {
+  for (const pvc of pvcs) {
     const volumeName = pvc.obj.spec?.volumeName as string | undefined;
     const pvcId = nodeId(handle.contextName, pvc.spec, pvc.obj);
     if (volumeName && !addEdge(edges, pvcId, byKindName.get(`PersistentVolume|${volumeName}`), 'binds')) {

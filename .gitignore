@@ -9,3 +9,8 @@ electron/release/
 # Zensical docs build output & cache
 site/
 .cache/
+
+# local agent and lock metadata
+.agents/
+.claude/skills
+skills-lock.json

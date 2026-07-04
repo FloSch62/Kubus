@@ -12,6 +12,7 @@ interface Crd {
 
 const TTL_MS = 5 * 60_000;
 const cache = new Map<string, { at: number; columns: PrinterColumn[] }>();
+const COLUMN_TYPES = new Set(['string', 'integer', 'number', 'boolean', 'date']);
 
 /**
  * additionalPrinterColumns for a CRD-backed kind. Not part of API discovery —
@@ -31,7 +32,7 @@ export async function getPrinterColumns(handle: ClusterHandle, group: string, ve
       .filter((c) => c.jsonPath !== '.metadata.creationTimestamp')
       .map((c) => ({
         name: c.name,
-        type: (['string', 'integer', 'number', 'boolean', 'date'].includes(c.type) ? c.type : 'string') as PrinterColumn['type'],
+        type: (COLUMN_TYPES.has(c.type) ? c.type : 'string') as PrinterColumn['type'],
         jsonPath: c.jsonPath,
         priority: c.priority,
         description: c.description,

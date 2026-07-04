@@ -144,21 +144,23 @@ export function pluralLabel(kind: string): string {
   return `${kind}s`;
 }
 
+const GVK_BY_KIND = new Map<string, GVK>();
+const GVK_BY_RESOURCE = new Map<string, GVK>();
+for (const navGroup of BUILTIN_NAV_GROUPS) {
+  for (const gvk of navGroup.kinds) {
+    if (!GVK_BY_KIND.has(gvk.kind)) GVK_BY_KIND.set(gvk.kind, gvk);
+    const key = `${gvk.group}/${gvk.version}/${gvk.plural}`;
+    if (!GVK_BY_RESOURCE.has(key)) GVK_BY_RESOURCE.set(key, gvk);
+  }
+}
+
 /** Look up the GVK for a builtin kind (e.g. to navigate to a related resource). */
 export function gvkForKind(kind: string): GVK | undefined {
-  for (const group of BUILTIN_NAV_GROUPS) {
-    const found = group.kinds.find((k) => k.kind === kind);
-    if (found) return found;
-  }
-  return undefined;
+  return GVK_BY_KIND.get(kind);
 }
 
 export function gvkForResource(group: string, version: string, plural: string): GVK | undefined {
-  for (const navGroup of BUILTIN_NAV_GROUPS) {
-    const found = navGroup.kinds.find((k) => k.group === group && k.version === version && k.plural === plural);
-    if (found) return found;
-  }
-  return undefined;
+  return GVK_BY_RESOURCE.get(`${group}/${version}/${plural}`);
 }
 
 /** Sentinel used in URLs/routes for the core API group. */

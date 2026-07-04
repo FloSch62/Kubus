@@ -26,8 +26,12 @@ export function podSummary(pod: KubeObject): PodSummary {
   const spec = pod.spec as { nodeName?: string; containers?: unknown[] } | undefined;
   const statuses = status?.containerStatuses ?? [];
   const total = (spec?.containers ?? []).length || statuses.length;
-  const readyCount = statuses.filter((c) => c.ready).length;
-  const restarts = statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0);
+  let readyCount = 0;
+  let restarts = 0;
+  for (const c of statuses) {
+    if (c.ready) readyCount++;
+    restarts += c.restartCount ?? 0;
+  }
 
   let display = status?.reason ?? status?.phase ?? 'Unknown';
   if (pod.metadata.deletionTimestamp) {
@@ -63,10 +67,11 @@ export function nodeStatus(node: KubeObject): string {
   return s;
 }
 
+const NODE_ROLE_PREFIX = 'node-role.kubernetes.io/';
+
 export function nodeRoles(node: KubeObject): string {
   return Object.keys(node.metadata.labels ?? {})
-    .filter((l) => l.startsWith('node-role.kubernetes.io/'))
-    .map((l) => l.slice('node-role.kubernetes.io/'.length))
+    .flatMap((l) => (l.startsWith(NODE_ROLE_PREFIX) ? [l.slice(NODE_ROLE_PREFIX.length)] : []))
     .join(',');
 }
 
@@ -78,16 +83,17 @@ export function nodeAddress(node: KubeObject, type: string): string {
 export function nodeTaints(node: KubeObject): string {
   const taints = (node.spec as { taints?: Array<{ key?: string; value?: string; effect?: string }> } | undefined)?.taints ?? [];
   return taints
-    .map((t) => `${t.key ?? ''}${t.value ? `=${t.value}` : ''}${t.effect ? `:${t.effect}` : ''}`)
-    .filter(Boolean)
+    .flatMap((t) => {
+      const text = `${t.key ?? ''}${t.value ? `=${t.value}` : ''}${t.effect ? `:${t.effect}` : ''}`;
+      return text ? [text] : [];
+    })
     .join(', ');
 }
 
 export function nodeConditions(node: KubeObject): string {
   const conditions = (node.status as { conditions?: Array<{ type: string; status: string }> } | undefined)?.conditions ?? [];
   return conditions
-    .filter((c) => c.status !== nodeGoodConditionStatus(c.type))
-    .map((c) => `${c.type}=${c.status}`)
+    .flatMap((c) => (c.status !== nodeGoodConditionStatus(c.type) ? [`${c.type}=${c.status}`] : []))
     .join(', ');
 }
 
@@ -191,10 +197,12 @@ export function hasRunningDebugContainer(pod: KubeObject): boolean {
 const QUANTITY_BINARY: Record<string, number> = { Ki: 2 ** 10, Mi: 2 ** 20, Gi: 2 ** 30, Ti: 2 ** 40, Pi: 2 ** 50, Ei: 2 ** 60 };
 const QUANTITY_DECIMAL: Record<string, number> = { n: 1e-9, u: 1e-6, m: 1e-3, '': 1, k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18 };
 
+const QUANTITY_RE = /^([+-]?[0-9.eE+-]+?)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/;
+
 /** Parse a Kubernetes quantity ("500m", "1Gi", "128974848") to base units. */
 export function parseQuantity(q: string | undefined): number {
   if (!q) return 0;
-  const m = /^([+-]?[0-9.eE+-]+?)(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E)?$/.exec(q.trim());
+  const m = QUANTITY_RE.exec(q.trim());
   if (!m) return 0;
   const value = Number(m[1]);
   if (Number.isNaN(value)) return 0;

@@ -1,4 +1,13 @@
-import { Box, Chip, Divider, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import Divider from '@mui/material/Divider';
+import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import Typography from '@mui/material/Typography';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, KeyValueChips } from './GenericDetail.js';
 import { PodMiniList } from './PodMiniList.js';
@@ -19,7 +28,10 @@ interface ServiceStatus {
 export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const spec = (obj.spec ?? {}) as ServiceSpec;
   const status = (obj.status ?? {}) as ServiceStatus;
-  const lbAddresses = (status.loadBalancer?.ingress ?? []).map((i) => i.ip ?? i.hostname).filter(Boolean) as string[];
+  const lbAddresses = (status.loadBalancer?.ingress ?? []).flatMap((i) => {
+    const addr = i.ip ?? i.hostname;
+    return addr ? [addr] : [];
+  });
   const selector = spec.selector ?? {};
   const labelSelector = Object.entries(selector)
     .map(([k, v]) => `${k}=${v}`)

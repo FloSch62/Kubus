@@ -1,18 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  Box,
-  Button,
-  Checkbox,
-  Chip,
-  CircularProgress,
-  IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CircleIcon from '@mui/icons-material/Circle';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
@@ -65,8 +63,8 @@ export function ClusterSwitcher() {
   const connecting = useRef(new Set<string>());
   useEffect(() => {
     if (!contexts) return;
-    const valid = new Set(contexts.map((c) => c.name));
-    let keep = selected.filter((name) => valid.has(name));
+    const byName = new Map(contexts.map((c) => [c.name, c]));
+    let keep = selected.filter((name) => byName.has(name));
     if (keep.length !== selected.length) setSelected(keep);
     if (!restored.current) {
       restored.current = true;
@@ -76,7 +74,7 @@ export function ClusterSwitcher() {
       }
     }
     for (const name of keep) {
-      const info = contexts.find((c) => c.name === name);
+      const info = byName.get(name);
       if (!info || info.active || connecting.current.has(name)) continue;
       connecting.current.add(name);
       connect.mutate({ ctx: name, connect: true }, { onSettled: () => connecting.current.delete(name) });

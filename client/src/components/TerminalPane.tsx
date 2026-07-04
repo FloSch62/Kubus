@@ -1,94 +1,15 @@
-import { useEffect, useRef } from 'react';
-import { Box, useTheme } from '@mui/material';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
-import type { ExecServerControl } from '@kubus/shared';
-import { wsUrl } from '../api/http.js';
+import { Suspense, lazy } from 'react';
+import Box from '@mui/material/Box';
 import type { NodeShellTab, TerminalTab } from '../state/dock.js';
-import { useUiPrefsStore } from '../state/prefs.js';
 
-export function TerminalPane({ tab, active }: { tab: TerminalTab | NodeShellTab; active: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const theme = useTheme();
+const TerminalPaneImpl = lazy(() => import('./TerminalPaneImpl.js'));
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+const terminalLoading = <Box sx={{ height: '100%', bgcolor: '#16161e' }} />;
 
-    const { monoFontSize, defaultShell } = useUiPrefsStore.getState();
-    const term = new Terminal({
-      fontSize: monoFontSize + 1,
-      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-      cursorBlink: true,
-      theme: { background: '#16161e' },
-    });
-    const fit = new FitAddon();
-    fitRef.current = fit;
-    term.loadAddon(fit);
-    term.open(el);
-    fit.fit();
-
-    const ws = new WebSocket(
-      tab.kind === 'node-shell'
-        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows })
-        : wsUrl('/ws/exec', {
-            ctx: tab.ctx,
-            namespace: tab.namespace,
-            pod: tab.pod,
-            container: tab.container,
-            shell: defaultShell !== 'auto' && defaultShell.trim() ? defaultShell.trim() : undefined,
-            cols: term.cols,
-            rows: term.rows,
-          }),
-    );
-    ws.binaryType = 'arraybuffer';
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ op: 'resize', cols: term.cols, rows: term.rows }));
-    };
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(ev.data));
-      } else if (typeof ev.data === 'string') {
-        try {
-          const ctl = JSON.parse(ev.data) as ExecServerControl;
-          if (ctl.op === 'exit') {
-            term.write(`\r\n\x1b[33m[session ended${ctl.message ? `: ${ctl.message}` : ''}]\x1b[0m\r\n`);
-          }
-        } catch {
-          term.write(ev.data);
-        }
-      }
-    };
-    ws.onclose = () => term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
-
-    const encoder = new TextEncoder();
-    const onData = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
-    });
-    const onResize = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'resize', cols, rows }));
-    });
-
-    const observer = new ResizeObserver(() => fit.fit());
-    observer.observe(el);
-
-    return () => {
-      observer.disconnect();
-      onData.dispose();
-      onResize.dispose();
-      ws.close();
-      term.dispose();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id]);
-
-  // Refit when this tab becomes visible (display:none panes have zero size).
-  useEffect(() => {
-    if (active) requestAnimationFrame(() => fitRef.current?.fit());
-  }, [active]);
-
-  return <Box ref={containerRef} sx={{ height: '100%', bgcolor: '#16161e', '& .xterm': { height: '100%', p: theme.spacing(0.5) } }} />;
+export function TerminalPane(props: { tab: TerminalTab | NodeShellTab; active: boolean }) {
+  return (
+    <Suspense fallback={terminalLoading}>
+      <TerminalPaneImpl {...props} />
+    </Suspense>
+  );
 }
