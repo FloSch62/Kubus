@@ -267,6 +267,10 @@ export function ResourceListPage() {
         onFilterChange={(value) => setQueryParam('q', value)}
         onLabelSelectorChange={(value) => setQueryParam('label', value)}
         onRowClick={(row) => {
+          // Open the drawer directly — going through ?sel alone would delay it
+          // by a full render + post-paint effect; the URL write below is kept
+          // for deep-linking and the mirror effect re-opens an equal selection.
+          openDetail({ ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind });
           const next = new URLSearchParams(searchParams);
           next.delete('field');
           next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);

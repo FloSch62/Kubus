@@ -75,7 +75,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
 
-  const yamlText = useMemo(() => (obj ? dumpYaml(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''), [obj]);
+  // Only serialize on the YAML tab — dumping a large object mid-open would
+  // stall the drawer's slide-in animation.
+  const yamlText = useMemo(
+    () => (obj && tab === 'yaml' ? dumpYaml(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''),
+    [obj, tab],
+  );
   const schemaSource = isCrd ? obj : backingCrd;
   const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
   const hasMetrics = sel?.kind === 'Pod' || sel?.kind === 'Node';
