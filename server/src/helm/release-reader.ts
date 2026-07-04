@@ -125,6 +125,23 @@ export async function getRelease(handle: ClusterHandle, namespace: string, name:
   };
 }
 
+/** Full detail of one specific revision — backs the revision diff. */
+export async function getRevisionDetail(handle: ClusterHandle, namespace: string, name: string, revision: number): Promise<HelmReleaseDetail> {
+  const secrets = await listReleaseSecrets(handle, namespace, name);
+  const secret = secrets.find((s) => revOf(s) === revision);
+  if (!secret) throw new HttpProblem(404, `revision ${revision} of helm release "${namespace}/${name}" not found`);
+  const payload = decodeReleaseSecret(secret);
+  return {
+    ...summarize(payload),
+    notes: payload.info?.notes,
+    values: payload.config ?? {},
+    computedValues: deepMerge(payload.chart?.values ?? {}, payload.config ?? {}),
+    manifest: payload.manifest ?? '',
+    firstDeployed: payload.info?.first_deployed,
+    description: payload.info?.description,
+  };
+}
+
 export async function getLatestPayload(handle: ClusterHandle, namespace: string, name: string): Promise<HelmReleasePayload> {
   const secrets = await listReleaseSecrets(handle, namespace, name);
   if (!secrets.length) throw new HttpProblem(404, `helm release "${namespace}/${name}" not found`);

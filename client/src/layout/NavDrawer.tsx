@@ -31,6 +31,7 @@ import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
+import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import { NavLink, useLocation } from 'react-router';
@@ -345,6 +346,7 @@ export function NavDrawer() {
       <List dense disablePadding sx={{ pb: 4 }}>
         <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
         <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
+        <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
         <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} />
         <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
         <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />

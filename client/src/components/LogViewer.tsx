@@ -16,7 +16,7 @@ import { wsUrl } from '../api/http.js';
 import { useDockStore, type LogsTab } from '../state/dock.js';
 import { useLogPrefsStore, type TsMode } from '../state/log-prefs.js';
 import { useUiPrefsStore } from '../state/prefs.js';
-import { markSegs, parseLine, stripAnsi, type Seg } from './log-format.js';
+import { detectLevel, LOG_LEVELS, markSegs, parseLine, stripAnsi, type LogLevel, type Seg } from './log-format.js';
 
 interface LogLine {
   pod: string;
@@ -53,6 +53,21 @@ const CLS_COLORS: Record<NonNullable<Seg['cls']>, string> = {
 
 const segCache = new WeakMap<LogLine, Seg[]>();
 const stripCache = new WeakMap<LogLine, string>();
+const levelCache = new WeakMap<LogLine, LogLevel | null>();
+
+const LEVEL_STYLE: Record<LogLevel, { letter: string; color: string }> = {
+  error: { letter: 'E', color: '#f7768e' },
+  warn: { letter: 'W', color: '#e0af68' },
+  info: { letter: 'I', color: '#7aa2f7' },
+  debug: { letter: 'D', color: '#9aa0b5' },
+  trace: { letter: 'T', color: '#6b7089' },
+};
+
+/** Row tint for lines that demand attention while scanning. */
+const LEVEL_ROW_TINT: Partial<Record<LogLevel, string>> = {
+  error: 'rgba(247,118,142,0.08)',
+  warn: 'rgba(224,175,104,0.07)',
+};
 
 function strippedOf(l: LogLine): string {
   let s = stripCache.get(l);
@@ -70,6 +85,15 @@ function segsOf(l: LogLine): Seg[] {
     segCache.set(l, segs);
   }
   return segs;
+}
+
+function levelOf(l: LogLine): LogLevel | undefined {
+  let level = levelCache.get(l);
+  if (level === undefined) {
+    level = detectLevel(strippedOf(l)) ?? null;
+    levelCache.set(l, level);
+  }
+  return level ?? undefined;
 }
 
 function fmtTs(ts: string, mode: TsMode): string {
@@ -94,6 +118,7 @@ function paramsForMode(mode: LogTimeMode): (typeof TIME_OPTIONS)[number]['params
 export function LogViewer({ tab }: { tab: LogsTab }) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState('');
+  const [levelFilter, setLevelFilter] = useState<ReadonlySet<LogLevel>>(new Set());
   const [find, setFind] = useState('');
   const [cursor, setCursor] = useState(0);
   const [follow, setFollow] = useState(true);
@@ -168,16 +193,41 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.id, timeMode]);
 
+  const levelCounts = useMemo(() => {
+    const counts: Record<LogLevel, number> = { error: 0, warn: 0, info: 0, debug: 0, trace: 0 };
+    for (const l of lines) {
+      const level = levelOf(l);
+      if (level) counts[level] += 1;
+    }
+    return counts;
+  }, [lines]);
+
+  const toggleLevel = (level: LogLevel) => {
+    setLevelFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  };
+
   const visible = useMemo(() => {
-    if (!filter) return lines;
+    let out = lines;
+    if (levelFilter.size) {
+      out = out.filter((l) => {
+        const level = levelOf(l);
+        return level !== undefined && levelFilter.has(level);
+      });
+    }
+    if (!filter) return out;
     try {
       const re = new RegExp(filter, 'i');
-      return lines.filter((l) => re.test(strippedOf(l)) || re.test(l.pod));
+      return out.filter((l) => re.test(strippedOf(l)) || re.test(l.pod));
     } catch {
       const f = filter.toLowerCase();
-      return lines.filter((l) => strippedOf(l).toLowerCase().includes(f) || l.pod.toLowerCase().includes(f));
+      return out.filter((l) => strippedOf(l).toLowerCase().includes(f) || l.pod.toLowerCase().includes(f));
     }
-  }, [lines, filter]);
+  }, [lines, filter, levelFilter]);
 
   const matches = useMemo(() => {
     if (!find) return [];
@@ -311,6 +361,29 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
             </IconButton>
           </>
         )}
+        {LOG_LEVELS.filter((level) => levelCounts[level] > 0 || levelFilter.has(level)).map((level) => {
+          const active = levelFilter.has(level);
+          const { letter, color } = LEVEL_STYLE[level];
+          return (
+            <Tooltip key={level} title={`${active ? 'Stop filtering by' : 'Only show'} ${level} lines`}>
+              <Chip
+                label={`${letter} ${levelCounts[level]}`}
+                size="small"
+                variant={active ? 'filled' : 'outlined'}
+                onClick={() => toggleLevel(level)}
+                aria-label={`Filter ${level} logs`}
+                sx={{
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  color: active ? '#1a1a1e' : color,
+                  bgcolor: active ? color : undefined,
+                  borderColor: color,
+                  '&:hover': { bgcolor: active ? color : undefined },
+                }}
+              />
+            </Tooltip>
+          );
+        })}
         <Chip label={`${visible.length}/${lines.length} lines`} variant="outlined" />
         <Chip label={`${recentRate >= 10 ? recentRate.toFixed(0) : recentRate.toFixed(1)}/s`} variant="outlined" />
         <Typography variant="caption" color="text.secondary">
@@ -404,13 +477,15 @@ interface LineRowProps {
 const LineRow = memo(function LineRow({ line, idx, wrap, showPod, podColor, tsMode, highlight, find, isCurrent, rowHeight }: LineRowProps) {
   const segs = highlight ? segsOf(line) : [{ text: strippedOf(line) }];
   const marked = find ? markSegs(segs, find) : segs;
+  const level = levelOf(line);
+  const tint = level ? LEVEL_ROW_TINT[level] : undefined;
   return (
     <Box
       data-idx={idx}
       sx={
         wrap
-          ? { px: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all', contentVisibility: 'auto', containIntrinsicSize: `auto ${rowHeight}px`, '&:hover': { bgcolor: 'rgba(255,255,255,0.04)' } }
-          : { position: 'absolute', top: idx * rowHeight, left: 0, right: 0, height: rowHeight, px: 1, whiteSpace: 'pre', display: 'flex', gap: 1, '&:hover': { bgcolor: 'rgba(255,255,255,0.04)' } }
+          ? { px: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all', contentVisibility: 'auto', containIntrinsicSize: `auto ${rowHeight}px`, bgcolor: tint, '&:hover': { bgcolor: 'rgba(255,255,255,0.04)' } }
+          : { position: 'absolute', top: idx * rowHeight, left: 0, right: 0, height: rowHeight, px: 1, whiteSpace: 'pre', display: 'flex', gap: 1, bgcolor: tint, '&:hover': { bgcolor: 'rgba(255,255,255,0.04)' } }
       }
     >
       {showPod && (

@@ -1,5 +1,5 @@
 import type { GridColDef } from '@mui/x-data-grid';
-import { Box, LinearProgress, Tooltip, Typography } from '@mui/material';
+import { Box, Chip, LinearProgress, Tooltip, Typography } from '@mui/material';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
@@ -18,6 +18,8 @@ interface ColumnBuildOptions {
   multiCluster: boolean;
   metrics?: MetricsLookup;
   nodeAllocation?: NodeAllocationLookup;
+  /** Clicking a label chip adds that `key=value` term to the label filter. */
+  onLabelClick?: (term: string) => void;
 }
 
 export interface NodeAllocationSummary {
@@ -43,6 +45,17 @@ export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col
 }
 
 const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
+  labels: (opts) => ({
+    field: 'labels',
+    headerName: 'Labels',
+    width: 220,
+    sortable: false,
+    valueGetter: (_v, row) =>
+      Object.entries(obj(row).metadata.labels ?? {})
+        .map(([k, v]) => `${k}=${v}`)
+        .join(' '),
+    renderCell: (params) => <LabelsCell labels={obj(params.row).metadata.labels} onLabelClick={opts.onLabelClick} />,
+  }),
   name: () => ({
     field: 'name',
     headerName: 'Name',
@@ -517,6 +530,69 @@ const EMPTY_NODE_ALLOCATION: NodeAllocationSummary = {
   cpuRequestMilli: 0,
   memoryRequestBytes: 0,
 };
+
+const LABEL_CELL_VISIBLE = 2;
+
+function LabelsCell({ labels, onLabelClick }: { labels?: Record<string, string>; onLabelClick?: (term: string) => void }) {
+  const entries = Object.entries(labels ?? {});
+  if (entries.length === 0) {
+    return (
+      <Typography variant="body2" color="text.disabled">
+        —
+      </Typography>
+    );
+  }
+  const visible = entries.slice(0, LABEL_CELL_VISIBLE);
+  const overflow = entries.length - visible.length;
+  const chip = ([key, value]: [string, string]) => {
+    const term = value ? `${key}=${value}` : key;
+    return (
+      <Chip
+        key={key}
+        label={term}
+        size="small"
+        variant="outlined"
+        onClick={
+          onLabelClick
+            ? (event) => {
+                event.stopPropagation();
+                onLabelClick(term);
+              }
+            : undefined
+        }
+        sx={{ maxWidth: 170, height: 20, fontSize: 11 }}
+      />
+    );
+  };
+  return (
+    <Tooltip
+      placement="bottom-start"
+      arrow={false}
+      slotProps={{
+        tooltip: {
+          sx: {
+            bgcolor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
+            boxShadow: 4,
+            maxWidth: 480,
+            p: 1,
+          },
+        },
+      }}
+      title={
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+          {entries.map(chip)}
+        </Box>
+      }
+    >
+      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+        {visible.map(chip)}
+        {overflow > 0 && <Chip label={`+${overflow}`} size="small" sx={{ height: 20, fontSize: 11, flexShrink: 0 }} />}
+      </Box>
+    </Tooltip>
+  );
+}
 
 function TextCell({ value }: { value: string }) {
   const text = value || '-';

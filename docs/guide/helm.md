@@ -33,8 +33,19 @@ shows a Cluster column when several are selected. Click a release to open it.
 | **Values** | The values *you* supplied at install/upgrade. |
 | **Computed values** | The fully-merged values Helm actually used (your values + chart defaults). |
 | **Manifest** | The rendered Kubernetes manifests for the release. |
-| **History** | Every revision, with chart/app version, change-cause and a **Roll back** button. |
+| **History** | Every revision, with chart/app version, change-cause, a **Diff** and a **Roll back** button. |
 | **Notes** | The release `NOTES.txt`, if the chart provides one. |
+
+## Comparing revisions
+
+Before rolling back — or when you're wondering what an upgrade actually changed — hit
+**Diff** on any revision in the History tab. You get a side-by-side comparison against the
+current revision, and you can re-pick either side to compare **any two revisions**, across
+three views:
+
+- **Values** — what *you* changed between the revisions.
+- **Computed** — the fully-merged values, chart defaults included.
+- **Manifest** — the rendered Kubernetes objects, the ground truth of what changed.
 
 ## Rollback & uninstall
 

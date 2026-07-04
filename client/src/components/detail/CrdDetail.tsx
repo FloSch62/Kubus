@@ -182,7 +182,7 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
                   <TableRow key={`${column.name ?? index}:${column.jsonPath ?? ''}`}>
                     <TableCell sx={{ width: 180, color: 'text.secondary', border: 0 }}>{column.name ?? ''}</TableCell>
                     <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>
-                      <Typography component="span" variant="body2" color="warning.main" sx={{ fontWeight: 650, mr: 1 }}>
+                      <Typography component="span" variant="body2" sx={{ fontWeight: 650, mr: 1, color: typeColor(column.type ?? 'string') }}>
                         {column.type ?? 'string'}
                       </Typography>
                       <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12 }}>
@@ -233,17 +233,35 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
   const canExpand = children.length > 0;
   const [expanded, setExpanded] = useState(false);
   const meta = schemaMeta(schema);
+  const typeLabel = displayType(schema);
+
+  const toggleExpanded = () => {
+    // Don't collapse/expand when the user is selecting description text.
+    if (window.getSelection()?.toString()) return;
+    setExpanded((v) => !v);
+  };
 
   return (
     <Box sx={{ ml: depth ? 1.5 : 0, pl: depth ? 1.5 : 0, borderLeft: depth ? 1 : 0, borderColor: 'divider' }}>
-      <Box sx={{ py: 0.75 }}>
+      <Box
+        onClick={canExpand ? toggleExpanded : undefined}
+        sx={{
+          py: 0.75,
+          ...(canExpand && {
+            cursor: 'pointer',
+            borderRadius: 1,
+            mx: -0.5,
+            px: 0.5,
+            '&:hover': { bgcolor: 'action.hover' },
+          }),
+        }}
+      >
         <Stack direction="row" spacing={0.75} sx={{ alignItems: 'flex-start' }}>
           {canExpand ? (
             <IconButton
               size="small"
               aria-label={`${expanded ? 'Collapse' : 'Expand'} ${name}`}
               aria-expanded={expanded}
-              onClick={() => setExpanded((v) => !v)}
               sx={{ width: 22, height: 22, mt: -0.25, color: 'text.secondary', flexShrink: 0 }}
             >
               {expanded ? <KeyboardArrowDownIcon sx={{ fontSize: 18 }} /> : <KeyboardArrowRightIcon sx={{ fontSize: 18 }} />}
@@ -256,8 +274,8 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
               <Typography component="span" variant="body2" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: depth ? 'monospace' : undefined }}>
                 {name}
               </Typography>
-              <Typography component="span" variant="body2" color="warning.main" sx={{ fontWeight: 650 }}>
-                {displayType(schema)}
+              <Typography component="span" variant="body2" sx={{ fontWeight: 650, color: typeColor(typeLabel) }}>
+                {typeLabel}
               </Typography>
               {required && <Chip label="required" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
               {schema.nullable && <Chip label="nullable" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
@@ -322,6 +340,28 @@ function mergeSchema(base: JsonSchema | undefined, override: JsonSchema | undefi
   if (!base) return override ?? {};
   if (!override) return base;
   return { ...base, ...override, description: override.description ?? base.description };
+}
+
+function typeColor(typeLabel: string): string {
+  const base = typeLabel.split(/[<( ]/)[0];
+  switch (base) {
+    case 'string':
+      return 'success.main';
+    case 'integer':
+    case 'number':
+    case 'int-or-string':
+    case 'date':
+      return 'info.main';
+    case 'boolean':
+      return 'warning.main';
+    case 'object':
+    case 'map':
+      return 'secondary.main';
+    case 'array':
+      return 'primary.main';
+    default:
+      return 'text.secondary';
+  }
 }
 
 function displayType(schema: JsonSchema): string {

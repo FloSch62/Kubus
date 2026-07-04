@@ -38,6 +38,7 @@ import type {
   StopDebugRequest,
   HelmRollbackResult,
   PrinterColumn,
+  AuditReport,
   KubeconfigSettings,
   SetKubeconfigRequest,
   KubeconfigImportRequest,
@@ -291,7 +292,6 @@ export interface WatchedListState {
 
 export interface ResourceListFilters {
   labelSelector?: string;
-  fieldSelector?: string;
 }
 
 /**
@@ -356,7 +356,7 @@ export function useFilteredList(group: string, version: string, plural: string, 
   const selected = useClustersStore((s) => s.selected);
   const namespaces = useClustersStore((s) => s.namespaces);
   const list = useWatchedList(selected, group, version, plural);
-  const hasSelectors = !!filters?.labelSelector?.trim() || !!filters?.fieldSelector?.trim();
+  const hasSelectors = !!filters?.labelSelector?.trim();
   const selectorList = useQuery({
     queryKey: ['selector-list', selected, namespaces, group, version, plural, filters],
     queryFn: async () => {
@@ -368,7 +368,6 @@ export function useFilteredList(group: string, version: string, plural: string, 
               const params = new URLSearchParams();
               if (namespace) params.set('namespace', namespace);
               if (filters?.labelSelector?.trim()) params.set('labelSelector', filters.labelSelector.trim());
-              if (filters?.fieldSelector?.trim()) params.set('fieldSelector', filters.fieldSelector.trim());
               const q = params.toString();
               const response = await apiFetch<ListResponse>(`/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(group)}/${version}/${plural}${q ? `?${q}` : ''}`);
               return response.items.map((obj) => ({ ctx, obj }));
@@ -666,6 +665,31 @@ export function useOverview(ctx: string) {
   });
 }
 
+export interface ClusterAuditResult {
+  ctx: string;
+  report?: AuditReport;
+  error?: string;
+}
+
+/** Security audit per selected cluster — a failed cluster becomes an error entry, not a failed query. */
+export function useAudit(contexts: string[]) {
+  return useQuery({
+    queryKey: ['audit', contexts],
+    queryFn: async (): Promise<ClusterAuditResult[]> =>
+      Promise.all(
+        contexts.map(async (ctx) => {
+          try {
+            return { ctx, report: await apiFetch<AuditReport>(`/api/contexts/${encodeURIComponent(ctx)}/audit`) };
+          } catch (err) {
+            return { ctx, error: err instanceof Error ? err.message : String(err) };
+          }
+        }),
+      ),
+    enabled: contexts.length > 0,
+    staleTime: 60_000,
+  });
+}
+
 // ---- Search / topology ----
 
 export function useGlobalSearch(contexts: string[], query: string) {
@@ -753,6 +777,18 @@ export function useHelmHistory(ctx: string | undefined, ns: string | undefined, 
     queryKey: ['helm-history', ctx, ns, name],
     queryFn: () => apiFetch<HelmRevision[]>(`/api/contexts/${encodeURIComponent(ctx!)}/helm/releases/${encodeURIComponent(ns!)}/${encodeURIComponent(name!)}/history`),
     enabled: !!ctx && !!ns && !!name,
+  });
+}
+
+export function useHelmRevision(ctx: string | undefined, ns: string | undefined, name: string | undefined, revision: number | undefined) {
+  return useQuery({
+    queryKey: ['helm-revision', ctx, ns, name, revision],
+    queryFn: () =>
+      apiFetch<HelmReleaseDetail>(
+        `/api/contexts/${encodeURIComponent(ctx!)}/helm/releases/${encodeURIComponent(ns!)}/${encodeURIComponent(name!)}/revisions/${revision}`,
+      ),
+    enabled: !!ctx && !!ns && !!name && !!revision,
+    staleTime: Infinity, // a helm revision is immutable
   });
 }
 

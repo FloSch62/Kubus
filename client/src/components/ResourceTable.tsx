@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { Box, Chip, IconButton, InputAdornment, Stack, TextField, Typography } from '@mui/material';
-import ClearIcon from '@mui/icons-material/Clear';
-import SearchIcon from '@mui/icons-material/Search';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Autocomplete, Box, Checkbox, Chip, Stack, TextField, Typography, createFilterOptions } from '@mui/material';
 import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
+import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
+import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
+import { SmartFilterInput } from './SmartFilterInput.js';
+import type { MetricsLookup } from './columns.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 
 function isTextEntryTarget(target: EventTarget | null): boolean {
@@ -23,12 +25,14 @@ interface Props {
   columns: GridColDef<ClusterRow>[];
   loading?: boolean;
   statusText?: string;
+  /** Resource kind shown — drives smart-filter status/metrics semantics. */
+  kind?: string;
+  /** Live metrics lookup backing cpu>/mem> filter clauses. */
+  metricsLookup?: MetricsLookup;
   filter?: string;
   labelSelector?: string;
-  fieldSelector?: string;
   onFilterChange?: (value: string) => void;
   onLabelSelectorChange?: (value: string) => void;
-  onFieldSelectorChange?: (value: string) => void;
   onRowClick?: (row: ClusterRow) => void;
   onRowContextMenu?: (row: ClusterRow, event: MouseEvent<HTMLElement>) => void;
   /** Extra toolbar elements (e.g. create button). */
@@ -40,17 +44,32 @@ interface Props {
   hiddenFields?: string[];
 }
 
+const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
+
+/** All `key` and `key=value` selector terms present in the rows. */
+function labelSelectorOptions(rows: ClusterRow[]): { terms: string[]; keys: Set<string> } {
+  const keys = new Set<string>();
+  const values = new Set<string>();
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row.obj.metadata.labels ?? {})) {
+      keys.add(key);
+      values.add(`${key}=${value}`);
+    }
+  }
+  return { terms: [...keys, ...values].sort((a, b) => a.localeCompare(b)), keys };
+}
+
 export function ResourceTable({
   rows,
   columns,
   loading,
   statusText,
+  kind,
+  metricsLookup,
   filter,
   labelSelector,
-  fieldSelector,
   onFilterChange,
   onLabelSelectorChange,
-  onFieldSelectorChange,
   onRowClick,
   onRowContextMenu,
   toolbar,
@@ -59,8 +78,23 @@ export function ResourceTable({
   hiddenFields,
 }: Props) {
   const [localFilter, setLocalFilter] = useState('');
-  const activeFilter = filter ?? localFilter;
+  // The committed value lives in the URL (or localFilter); the input itself is
+  // local state so typing never waits on a router round-trip, and the commit
+  // is debounced so fast typing doesn't spam history/navigation.
+  const committedFilter = filter ?? localFilter;
+  const [inputValue, setInputValue] = useState(committedFilter);
+  const committedRef = useRef(committedFilter);
+  const commitTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // External commits (saved view click, back/forward, clear) reset the input.
+  useEffect(() => {
+    if (committedFilter !== committedRef.current) {
+      committedRef.current = committedFilter;
+      setInputValue(committedFilter);
+    }
+  }, [committedFilter]);
+  useEffect(() => () => clearTimeout(commitTimer.current), []);
 
   const hiddenKey = (hiddenFields ?? []).join(',');
   const [visibility, setVisibility] = useState<GridColumnVisibilityModel>({});
@@ -74,22 +108,34 @@ export function ResourceTable({
     [columns],
   );
 
+  // Filter on the deferred value so keystrokes render before the table does.
+  const deferredFilter = useDeferredValue(inputValue);
   const filtered = useMemo(() => {
-    if (!activeFilter) return rows;
-    const f = activeFilter.toLowerCase();
-    return rows.filter(
-      (r) =>
-        r.obj.metadata.name.toLowerCase().includes(f) ||
-        (r.obj.metadata.namespace ?? '').toLowerCase().includes(f) ||
-        r.ctx.toLowerCase().includes(f),
-    );
-  }, [rows, activeFilter]);
+    const query = deferredFilter.trim();
+    if (!query) return rows;
+    const resourceKind = kind ?? 'Resource';
+    if (query.startsWith('/')) {
+      const clauses = parseSmartFilter(query.slice(1));
+      if (!clauses.length) return rows;
+      const ctx = { kind: resourceKind, metrics: metricsLookup, nowMs: Date.now() };
+      return rows.filter((r) => matchesSmartFilter(r, clauses, ctx));
+    }
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return rows.filter((r) => matchesPlainText(r, words, resourceKind));
+  }, [rows, deferredFilter, kind, metricsLookup]);
 
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
+  const labelOptions = useMemo(() => labelSelectorOptions(rows), [rows]);
+  const labelTerms = useMemo(() => splitLabelSelector(labelSelector ?? ''), [labelSelector]);
 
   const setTextFilter = (value: string) => {
-    if (onFilterChange) onFilterChange(value);
-    else setLocalFilter(value);
+    setInputValue(value);
+    clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      committedRef.current = value;
+      if (onFilterChange) onFilterChange(value);
+      else setLocalFilter(value);
+    }, 250);
   };
 
   const focusSearch = useCallback(() => {
@@ -105,7 +151,7 @@ export function ResourceTable({
       const key = event.key.toLowerCase();
       const shortcutModifier = event.ctrlKey || event.metaKey;
       const isFindShortcut = shortcutModifier && !event.altKey && !event.shiftKey && key === 'f';
-      const isQuickSearchShortcut = !shortcutModifier && !event.altKey && (key === 's' || key === ':');
+      const isQuickSearchShortcut = !shortcutModifier && !event.altKey && (key === 's' || key === ':' || key === '/');
       if (!isFindShortcut && !isQuickSearchShortcut) return;
       event.preventDefault();
       event.stopPropagation();
@@ -118,50 +164,44 @@ export function ResourceTable({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center' }}>
-        <TextField
+        <SmartFilterInput
+          value={inputValue}
+          onChange={setTextFilter}
+          kind={kind ?? 'Resource'}
+          rows={rows}
           inputRef={searchInputRef}
-          placeholder="Search…"
-          value={activeFilter}
-          onChange={(e) => setTextFilter(e.target.value)}
-          sx={{ width: 240 }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ fontSize: 18 }} />
-                </InputAdornment>
-              ),
-              endAdornment: activeFilter ? (
-                <InputAdornment position="end">
-                  <IconButton
-                    aria-label="Clear table search"
-                    edge="end"
-                    size="small"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setTextFilter('')}
-                    sx={{ mr: -0.75 }}
-                  >
-                    <ClearIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </InputAdornment>
-              ) : undefined,
-            },
-          }}
         />
         {onLabelSelectorChange && (
-          <TextField
-            placeholder="Label selector"
-            value={labelSelector ?? ''}
-            onChange={(e) => onLabelSelectorChange(e.target.value)}
-            sx={{ width: 220 }}
-          />
-        )}
-        {onFieldSelectorChange && (
-          <TextField
-            placeholder="Field selector"
-            value={fieldSelector ?? ''}
-            onChange={(e) => onFieldSelectorChange(e.target.value)}
-            sx={{ width: 220 }}
+          <Autocomplete<string, true, false, true>
+            multiple
+            freeSolo
+            disableCloseOnSelect
+            limitTags={2}
+            options={labelOptions.terms}
+            value={labelTerms}
+            filterOptions={labelFilterOptions}
+            onChange={(_event, values) => onLabelSelectorChange(joinLabelSelector(values))}
+            renderOption={({ key, ...props }, option, { selected }) => (
+              <Box component="li" key={key} {...props} sx={{ display: 'flex', gap: 0.75, alignItems: 'center' }}>
+                <Checkbox size="small" checked={selected} disableRipple sx={{ p: 0, mr: 0.25 }} />
+                <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0 }}>
+                  {option}
+                </Typography>
+                {labelOptions.keys.has(option) && (
+                  <Typography variant="caption" color="text.secondary">
+                    key
+                  </Typography>
+                )}
+              </Box>
+            )}
+            renderValue={(values, getItemProps) =>
+              values.map((option, index) => {
+                const { key, ...itemProps } = getItemProps({ index });
+                return <Chip key={key} {...itemProps} label={option} size="small" />;
+              })
+            }
+            renderInput={(params) => <TextField {...params} placeholder={labelTerms.length ? undefined : 'Labels'} />}
+            sx={{ width: 320 }}
           />
         )}
         <Chip label={`${filtered.length} items`} variant="outlined" />

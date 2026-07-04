@@ -193,6 +193,52 @@ export function parseLine(line: string): Seg[] {
   return parseJsonSegs(line) ?? parseLogfmtSegs(line) ?? [{ text: line }];
 }
 
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
+
+export const LOG_LEVELS: LogLevel[] = ['error', 'warn', 'info', 'debug', 'trace'];
+
+const LEVEL_ALIASES: Record<string, LogLevel> = {
+  trace: 'trace',
+  debug: 'debug',
+  dbg: 'debug',
+  info: 'info',
+  inf: 'info',
+  notice: 'info',
+  warn: 'warn',
+  warning: 'warn',
+  wrn: 'warn',
+  error: 'error',
+  err: 'error',
+  fatal: 'error',
+  severe: 'error',
+  critical: 'error',
+  panic: 'error',
+};
+
+// klog/glog prefix: "I0703 12:00:00.000000 ..."
+const KLOG_LEVELS: Record<string, LogLevel> = { I: 'info', W: 'warn', E: 'error', F: 'error' };
+const KLOG_RE = /^([IWEF])\d{4}\s/;
+// JSON `"level":"info"` / logfmt `level=info` (also severity/lvl keys).
+const STRUCTURED_RE = /(?:"(?:level|severity|lvl|log\.level)"\s*:\s*"?|\b(?:level|lvl|severity)=["']?)([a-zA-Z]+)/i;
+// Bare or bracketed level words near the start of the line.
+const WORD_RE = /(?:^|[\s[(<|:])(trace|debug|dbg|info|inf|notice|warn|warning|wrn|error|err|fatal|severe|critical|panic)(?=[\s\])>|:,/-]|$)/i;
+
+/**
+ * Best-effort severity detection for a log line (pass an ANSI-stripped
+ * line). Only the head of the line is scanned — levels live there, and it
+ * avoids false positives from message payloads.
+ */
+export function detectLevel(line: string): LogLevel | undefined {
+  const klog = KLOG_RE.exec(line);
+  if (klog) return KLOG_LEVELS[klog[1]!];
+  const head = line.slice(0, 200);
+  const structured = STRUCTURED_RE.exec(head);
+  if (structured) return LEVEL_ALIASES[structured[1]!.toLowerCase()];
+  const word = WORD_RE.exec(head);
+  if (word) return LEVEL_ALIASES[word[1]!.toLowerCase()];
+  return undefined;
+}
+
 export interface MarkedSeg extends Seg {
   mark?: boolean;
 }

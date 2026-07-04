@@ -43,6 +43,10 @@ Pick how far back to read, from the toolbar:
 
 - **Per-pod colour** — every pod gets a distinct colour, so you can tell who said what in
   an aggregated stream.
+- **Log levels** — Kubus detects each line's severity (JSON, logfmt, klog and plain
+  formats) and shows **E / W / I / D / T count chips** in the toolbar. Click a chip to
+  keep only that level — combine several, and error/warning lines get a subtle tint so
+  they stand out while scrolling.
 - **Regex filter** — type a pattern to keep only matching lines.
 - **Follow** — toggle live following on or off (e.g. to scroll back without the view jumping).
 - **Wrap** — wrap long lines instead of scrolling sideways.

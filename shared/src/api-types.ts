@@ -245,7 +245,6 @@ export interface SavedView {
   path: string;
   textFilter?: string;
   labelSelector?: string;
-  fieldSelector?: string;
 }
 
 // ---- Topology graph ----
@@ -555,6 +554,45 @@ export interface ClusterOverview {
   unavailableWorkloads: OverviewWorkloadIssue[];
   recentRestarts: OverviewRestart[];
   warningEvents: OverviewWarningEvent[];
+}
+
+// ---- Security audit ----
+
+export type AuditSeverity = 'critical' | 'high' | 'medium' | 'low';
+
+export type AuditCategory = 'pod-security' | 'workload-resilience' | 'rbac' | 'network' | 'secrets' | 'nodes';
+
+export interface AuditCheckInfo {
+  id: string;
+  title: string;
+  severity: AuditSeverity;
+  category: AuditCategory;
+  remediation: string;
+}
+
+export interface AuditFinding {
+  checkId: string;
+  severity: AuditSeverity;
+  category: AuditCategory;
+  title: string;
+  /** Instance-specific detail (which container / port / rule). */
+  message: string;
+  remediation: string;
+  resource: ResourceRef;
+}
+
+export interface AuditReport {
+  findings: AuditFinding[];
+  checks: AuditCheckInfo[];
+  stats: {
+    resourcesScanned: number;
+    checksRun: number;
+    durationMs: number;
+  };
+  /** Lists that could not be read (RBAC denied, API unavailable, …). */
+  errors: string[];
+  /** True when findings were capped. */
+  truncated: boolean;
 }
 
 // ---- Helm ----

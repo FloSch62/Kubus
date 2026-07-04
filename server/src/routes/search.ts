@@ -8,6 +8,7 @@ import { sendError } from '../util/errors.js';
 const PAGES: Array<{ title: string; path: string; subtitle: string }> = [
   { title: 'Overview', path: '/', subtitle: 'Cluster health dashboard' },
   { title: 'Topology', path: '/topology', subtitle: 'Resource relationship graph' },
+  { title: 'Security Audit', path: '/audit', subtitle: 'Built-in security checks' },
   { title: 'Helm Releases', path: '/helm', subtitle: 'Installed Helm releases' },
   { title: 'Port Forwards', path: '/forwards', subtitle: 'Active local forwards' },
   { title: 'Diff', path: '/diff', subtitle: 'Compare resources' },

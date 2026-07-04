@@ -29,7 +29,11 @@ ports — and so on. When several clusters are selected, a **Cluster** column is
 automatically.
 
 - **Sort** by clicking a column header.
-- **Filter** within the page using the column controls.
+- **Filter** with the search box — plain text, or start with `/` for
+  [smart filters](smart-filters.md): structured clauses like
+  `/status:crash ns:prod restarts>3`, with autocomplete.
+- **Labels** get their own column — each row shows its first labels as chips with a
+  `+N` overflow; hover to see them all, click a chip to filter by that label.
 - **Secret values are redacted** by default — Kubus never shows secret data in a list.
   [Reveal them deliberately](production-guard.md#secrets-are-redacted-by-default) in the
   details drawer.

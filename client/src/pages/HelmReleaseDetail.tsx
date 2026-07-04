@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react';
 import { Alert, Box, Breadcrumbs, Button, Chip, Link, Snackbar, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, Typography } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import UndoIcon from '@mui/icons-material/Undo';
+import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useNavigate, useParams } from 'react-router';
 import { dump as dumpYaml } from 'js-yaml';
 import { useHelmHistory, useHelmRelease, useHelmRollback, useHelmUninstall } from '../api/queries.js';
 import { YamlEditor } from '../components/YamlEditor.js';
+import { HelmRevisionDiffDialog } from '../components/HelmRevisionDiffDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -22,6 +24,7 @@ export function HelmReleaseDetailPage() {
   const [tab, setTab] = useState('values');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rollbackTo, setRollbackTo] = useState<number | null>(null);
+  const [diffRange, setDiffRange] = useState<{ from: number; to: number } | null>(null);
   const [toast, setToast] = useState<string>();
 
   const valuesYaml = useMemo(() => (release ? dumpYaml(release.values ?? {}, { noRefs: true }) : ''), [release]);
@@ -88,6 +91,15 @@ export function HelmReleaseDetailPage() {
                       <TableCell>{h.updated ? <AgeCell timestamp={h.updated} /> : ''}</TableCell>
                       <TableCell>{h.description ?? ''}</TableCell>
                       <TableCell align="right">
+                        {idx > 0 && (
+                          <Button
+                            size="small"
+                            startIcon={<DifferenceOutlinedIcon />}
+                            onClick={() => setDiffRange({ from: h.revision, to: release.revision })}
+                          >
+                            Diff
+                          </Button>
+                        )}
                         {idx > 0 && (
                           <Button size="small" startIcon={<UndoIcon />} onClick={() => setRollbackTo(h.revision)}>
                             Roll back
@@ -168,6 +180,17 @@ export function HelmReleaseDetailPage() {
           )
         }
       />
+      {diffRange && (
+        <HelmRevisionDiffDialog
+          ctx={ctx!}
+          ns={ns!}
+          name={name!}
+          revisions={history ?? []}
+          from={diffRange.from}
+          to={diffRange.to}
+          onClose={() => setDiffRange(null)}
+        />
+      )}
       <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(undefined)} message={toast} />
     </Box>
   );

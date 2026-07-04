@@ -8,6 +8,7 @@ import { PortForwardsPage } from './pages/PortForwardsPage.js';
 import { DiffPage } from './pages/DiffPage.js';
 import { TopologyPage } from './pages/TopologyPage.js';
 import { EventsPage } from './pages/EventsPage.js';
+import { AuditPage } from './pages/AuditPage.js';
 
 export function AppRouter() {
   return (
@@ -21,6 +22,7 @@ export function AppRouter() {
         <Route path="/diff" element={<DiffPage />} />
         <Route path="/topology" element={<TopologyPage />} />
         <Route path="/events" element={<EventsPage />} />
+        <Route path="/audit" element={<AuditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
