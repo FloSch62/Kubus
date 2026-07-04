@@ -136,29 +136,23 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - run: pip install zensical
+      - run: zensical build --clean --strict
       - name: Build Pages update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mkdir -p site
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json
           node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
-      - name: Build Pages site
-        run: |
-          pages_dir="$(mktemp -d)"
-          cp site/latest.json "$pages_dir/latest.json"
-          cat > "$pages_dir/index.html" <<'HTML'
-          <!doctype html><meta charset="utf-8"><title>Kubus</title><h1>Kubus</h1><p>Release metadata is available at <a href="latest.json">latest.json</a>.</p>
-          HTML
-          cp "$pages_dir/index.html" "$pages_dir/404.html"
-          rm -rf pages-site
-          mv "$pages_dir" pages-site
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v4
         with:
           name: github-pages-${{ github.run_attempt }}
-          path: pages-site
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v5
         with:

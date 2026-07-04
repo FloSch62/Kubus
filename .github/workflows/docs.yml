@@ -20,60 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-release-state:
-    runs-on: ubuntu-latest
-    outputs:
-      deploy: ${{ steps.release-state.outputs.deploy }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Check release state
-        id: release-state
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          package_version="$(node -p "require('./package.json').version")"
-          latest_tag="$(gh release view --repo "$GH_REPO" --json tagName --jq '.tagName' 2>/dev/null || true)"
-
-          if [ -z "$latest_tag" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "No latest release exists; deploying docs without an update manifest."
-            exit 0
-          fi
-
-          if node - "$package_version" "$latest_tag" <<'NODE'
-          const [, , packageVersion, latestTag] = process.argv;
-
-          function parts(version) {
-            const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(version.trim());
-            if (!match) return undefined;
-            return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
-          }
-
-          const next = parts(packageVersion);
-          const latest = parts(latestTag);
-          if (!next || !latest) process.exit(1);
-
-          for (let i = 0; i < next.length; i += 1) {
-            if (next[i] > latest[i]) process.exit(0);
-            if (next[i] < latest[i]) process.exit(1);
-          }
-          process.exit(1);
-          NODE
-          then
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Pages deploy: package.json is $package_version but the latest release is $latest_tag."
-          else
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "Deploying docs with update manifest from $latest_tag."
-          fi
-
   build-and-deploy:
-    needs: check-release-state
-    if: needs.check-release-state.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,21 +50,11 @@ jobs:
             echo "No release metadata available; skipping update manifest."
             rm -f site/latest.json
           fi
-      - name: Build Pages site
-        run: |
-          pages_dir="$(mktemp -d)"
-          cp site/latest.json "$pages_dir/latest.json"
-          cat > "$pages_dir/index.html" <<'HTML'
-          <!doctype html><meta charset="utf-8"><title>Kubus</title><h1>Kubus</h1><p>Release metadata is available at <a href="latest.json">latest.json</a>.</p>
-          HTML
-          cp "$pages_dir/index.html" "$pages_dir/404.html"
-          rm -rf pages-site
-          mv "$pages_dir" pages-site
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v4
         with:
           name: github-pages-${{ github.run_attempt }}
-          path: pages-site
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v5
         with:
