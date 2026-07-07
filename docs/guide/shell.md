@@ -23,7 +23,7 @@ Open a shell into any container:
 
 Kubus runs the Kubernetes `exec` API over a WebSocket. By default it tries **`bash`** and
 falls back to **`sh`**, so it works on minimal images too. The terminal resizes with the
-pane, and the session ends cleanly when you close the tab.
+pane, and the session ends cleanly when you close the tab (++ctrl+w++ / ++cmd+w++ on the desktop app).
 
 You can change the default shell (or set a custom path) in
 [Settings → Logs & terminal](settings.md#logs-terminal).

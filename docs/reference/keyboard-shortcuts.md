@@ -20,6 +20,20 @@ is the hub — almost everything is reachable through it.
 | ++ctrl+f++ / ++cmd+f++ | Focus the table search |
 | `s` / `:` | Focus the table search |
 
+## Bottom dock (logs & terminals)
+
+| Shortcut | Action |
+| --- | --- |
+| ++ctrl+w++ / ++cmd+w++ | Close the focused log or terminal tab |
+
+When the dock is empty, ++ctrl+w++ / ++cmd+w++ closes the Kubus window as usual.
+
+!!! note "Desktop app only"
+
+    Closing a tab with ++ctrl+w++ / ++cmd+w++ is handled by the Kubus desktop app.
+    In a browser tab that shortcut is reserved by the browser and closes the tab
+    instead; use the tab's **×** button there.
+
 ## Inside the command palette
 
 | Key | Action |

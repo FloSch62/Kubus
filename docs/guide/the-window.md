@@ -51,7 +51,8 @@ shell gets its own tab, so you can keep several open at once. You can:
 
 - **resize** the dock by dragging its top edge,
 - **maximise** it to fill the window,
-- **toggle** it with the command *Toggle terminal dock* (++ctrl+k++ → `>`).
+- **toggle** it with the command *Toggle terminal dock* (++ctrl+k++ → `>`),
+- **close** the focused tab with ++ctrl+w++ / ++cmd+w++ (desktop app; with the dock empty this closes the window).
 
 [More on logs](logs.md) · [More on shells](shell.md)
 
