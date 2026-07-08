@@ -23,6 +23,7 @@ separate `kubectl logs -f` windows.
 - **From the palette** — ++ctrl+k++, find the resource, ++tab++ → **Logs**.
 
 Each stream opens as its own **tab** in the dock, so you can watch several at once.
+Close the focused tab with ++ctrl+w++ / ++cmd+w++ (desktop app).
 
 ## Time range
 

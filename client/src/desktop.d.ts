@@ -14,6 +14,10 @@ declare global {
       setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
       getAppInfo(): Promise<AppInfo | undefined>;
       checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult>;
+      /** Subscribe to the OS close-window chord (Cmd/Ctrl+W); returns unsubscribe. */
+      onCloseTab(callback: () => void): () => void;
+      /** Close the main window (fallback when no dock tab is open). */
+      closeWindow(): void;
     };
   }
 }

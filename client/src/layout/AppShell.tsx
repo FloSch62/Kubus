@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import { Outlet } from 'react-router';
 import { TopBar } from './TopBar.js';
@@ -16,6 +16,19 @@ export function AppShell() {
   const back = useDetailStore((s) => s.back);
   const closeDetail = useDetailStore((s) => s.close);
   const dockRef = useRef<HTMLDivElement>(null);
+
+  // Cmd/Ctrl+W closes the focused dock tab (logs/terminal) instead of the whole
+  // window; when nothing is docked it falls back to closing the window.
+  useEffect(() => {
+    const desktop = window.kubusDesktop;
+    if (!desktop?.onCloseTab) return;
+    return desktop.onCloseTab(() => {
+      const dock = useDockStore.getState();
+      if (dock.open && dock.activeId) dock.closeTab(dock.activeId);
+      else desktop.closeWindow();
+    });
+  }, []);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <TopBar />

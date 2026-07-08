@@ -282,8 +282,24 @@ function createWindow(url: string): void {
     void shell.openExternal(external);
     return { action: 'deny' };
   });
+  // Cmd/Ctrl+W is the OS "close window" accelerator. Hand it to the renderer so
+  // it can close the focused dock tab (logs/terminal) first, and only close the
+  // whole window when nothing is docked. preventDefault() stops the native menu
+  // accelerator from firing (and keeps the key out of the page).
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.key.toLowerCase() !== 'w' || input.alt || input.shift) return;
+    const closeChord = isMac ? input.meta && !input.control : input.control && !input.meta;
+    if (!closeChord) return;
+    event.preventDefault();
+    mainWindow?.webContents.send('kubus:close-tab');
+  });
   void mainWindow.loadURL(url);
 }
+
+ipcMain.on('kubus:close-window', (event) => {
+  if (!isMainWindowSender(event)) return;
+  mainWindow?.close();
+});
 
 ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
   if (isMac || !isMainWindowSender(event)) return;
