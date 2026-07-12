@@ -3,6 +3,8 @@ packages:
   - server
   - client
   - electron
+# Keep local lockfile updates aligned with pnpm 11's CI supply-chain policy.
+minimumReleaseAge: 1440
 # monaco-yaml's worker imports path-browserify, which is CJS-only; the Vite dev
 # server serves worker-graph deps as native ESM without CJS interop, so the
 # yaml worker dies with "module is not defined" (prod builds are unaffected).
