@@ -106,6 +106,12 @@ export function servicePorts(svc: KubeObject): string {
   return ports.map((p) => `${p.port}${p.nodePort ? `:${p.nodePort}` : ''}/${p.protocol ?? 'TCP'}`).join(', ');
 }
 
+/** Addresses assigned by the cloud load balancer (IP on most providers, hostname on some). */
+export function serviceLoadBalancerAddresses(svc: KubeObject): string {
+  const ingress = (svc.status as { loadBalancer?: { ingress?: Array<{ ip?: string; hostname?: string }> } } | undefined)?.loadBalancer?.ingress ?? [];
+  return ingress.flatMap((entry) => entry.ip ?? entry.hostname ?? []).join(', ');
+}
+
 export function ingressHosts(ing: KubeObject): string {
   const rules = (ing.spec as { rules?: Array<{ host?: string }> })?.rules ?? [];
   return rules.map((r) => r.host ?? '*').join(', ');

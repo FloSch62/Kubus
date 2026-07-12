@@ -21,12 +21,12 @@
   },
   "devDependencies": {
     "@kubus/server": "workspace:*",
-    "@types/node": "^24.13.2",
-    "electron": "^43.0.0",
+    "@types/node": "^24.13.3",
+    "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
     "fix-path": "^5.0.0",
-    "sharp": "^0.35.2",
+    "sharp": "^0.35.3",
     "typescript": "^6.0.3"
   }
 }

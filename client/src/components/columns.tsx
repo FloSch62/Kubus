@@ -11,7 +11,7 @@ import { AgeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './Sparkline.js';
-import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podSummary, servicePorts, workloadReady } from '../kube-display.js';
+import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podSummary, serviceLoadBalancerAddresses, servicePorts, workloadReady } from '../kube-display.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
 export type NodeAllocationLookup = (ctx: string, nodeName: string) => NodeAllocationSummary;
@@ -332,6 +332,12 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Cluster IP',
     width: 120,
     valueGetter: (_v, row) => (obj(row).spec as { clusterIP?: string })?.clusterIP ?? '',
+  }),
+  svcLoadBalancerIP: () => ({
+    field: 'svcLoadBalancerIP',
+    headerName: 'Load Balancer IP',
+    width: 150,
+    valueGetter: (_v, row) => serviceLoadBalancerAddresses(obj(row)),
   }),
   svcPorts: () => ({
     field: 'svcPorts',

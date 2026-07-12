@@ -14,20 +14,20 @@
     "@emotion/styled": "^11.14.0",
     "@kubus/shared": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
-    "@mui/icons-material": "^9.1.1",
-    "@mui/material": "^9.1.2",
-    "@mui/x-charts": "^9.7.0",
-    "@mui/x-data-grid": "^9.7.0",
+    "@mui/icons-material": "^9.2.0",
+    "@mui/material": "^9.2.0",
+    "@mui/x-charts": "^9.9.0",
+    "@mui/x-data-grid": "^9.9.0",
     "@tanstack/react-query": "^5.101.2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "@xyflow/react": "^12.11.1",
-    "js-yaml": "^5.2.0",
+    "@xyflow/react": "^12.11.2",
+    "js-yaml": "^5.2.1",
     "monaco-editor": "^0.55.1",
     "monaco-yaml": "^5.5.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router": "^8.1.0",
+    "react-router": "^8.2.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -35,6 +35,6 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "typescript": "^6.0.3",
-    "vite": "^8.1.2"
+    "vite": "^8.1.4"
   }
 }

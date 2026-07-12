@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -58,6 +58,7 @@ function TopologyNode({ data, selected }: NodeProps) {
         bgcolor: 'background.paper',
         borderRadius: 1,
         boxShadow: selected ? 5 : 1,
+        cursor: 'pointer',
         px: 1.25,
         py: 0.9,
       }}
@@ -163,6 +164,16 @@ function flowLayout(graphs: RelationshipGraph[] | undefined, hideDisconnected: b
   return { nodes: flowNodes, edges: flowEdges, warnings, problemNodes };
 }
 
+function isFocusedNode(node: GraphNode, focus: NonNullable<TopologyGraphProps['focus']>): boolean {
+  return (
+    node.ref.group === focus.group &&
+    node.ref.version === focus.version &&
+    node.ref.plural === focus.plural &&
+    node.ref.name === focus.name &&
+    node.ref.namespace === focus.namespace
+  );
+}
+
 export default function TopologyGraphImpl({
   contexts,
   namespaces,
@@ -173,7 +184,63 @@ export default function TopologyGraphImpl({
   const theme = useTheme();
   const { data: graphs, isLoading } = useTopologyGraphs(contexts, namespaces, focus);
   const openDetail = useDetailStore((s) => s.open);
-  const { nodes, edges, warnings, problemNodes } = useMemo(() => flowLayout(graphs, hideDisconnected), [graphs, hideDisconnected]);
+  const pushDetail = useDetailStore((s) => s.push);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const layout = useMemo(() => flowLayout(graphs, hideDisconnected), [graphs, hideDisconnected]);
+  const activeSelectedNodeId = layout.nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : undefined;
+
+  const connectedNodeIds = useMemo(() => {
+    if (!activeSelectedNodeId) return undefined;
+    const connected = new Set([activeSelectedNodeId]);
+    for (const edge of layout.edges) {
+      if (edge.source === activeSelectedNodeId) connected.add(edge.target);
+      if (edge.target === activeSelectedNodeId) connected.add(edge.source);
+    }
+    return connected;
+  }, [activeSelectedNodeId, layout.edges]);
+
+  const nodes = useMemo(
+    () =>
+      layout.nodes.map((node) => ({
+        ...node,
+        selected: node.id === activeSelectedNodeId,
+        style: { ...node.style, opacity: !connectedNodeIds || connectedNodeIds.has(node.id) ? 1 : 0.22 },
+      })),
+    [activeSelectedNodeId, connectedNodeIds, layout.nodes],
+  );
+
+  const edges = useMemo(
+    () =>
+      layout.edges.map((edge) => {
+        const connected = !activeSelectedNodeId || edge.source === activeSelectedNodeId || edge.target === activeSelectedNodeId;
+        return {
+          ...edge,
+          selected: !!activeSelectedNodeId && connected,
+          style: { ...edge.style, strokeWidth: activeSelectedNodeId && connected ? 2.8 : edge.style?.strokeWidth, opacity: connected ? 1 : 0.1 },
+          labelStyle: { ...edge.labelStyle, opacity: connected ? 1 : 0.1 },
+        };
+      }),
+    [activeSelectedNodeId, layout.edges],
+  );
+  const { warnings, problemNodes } = layout;
+
+  const inspectNode = (node: Node) => {
+    const graphNode = (node.data as TopologyNodeData).graphNode;
+    const selection = {
+      ctx: graphNode.ref.ctx,
+      group: graphNode.ref.group,
+      version: graphNode.ref.version,
+      plural: graphNode.ref.plural,
+      kind: graphNode.ref.kind,
+      name: graphNode.ref.name,
+      namespace: graphNode.ref.namespace,
+    };
+    if (focus) {
+      if (!isFocusedNode(graphNode, focus)) pushDetail(selection);
+    } else {
+      openDetail(selection);
+    }
+  };
 
   return (
     <Box
@@ -221,18 +288,9 @@ export default function TopologyGraphImpl({
         nodesDraggable
         nodesConnectable={false}
         elementsSelectable
-        onNodeClick={(_event, node) => {
-          const graphNode = (node.data as TopologyNodeData).graphNode;
-          openDetail({
-            ctx: graphNode.ref.ctx,
-            group: graphNode.ref.group,
-            version: graphNode.ref.version,
-            plural: graphNode.ref.plural,
-            kind: graphNode.ref.kind,
-            name: graphNode.ref.name,
-            namespace: graphNode.ref.namespace,
-          });
-        }}
+        onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+        onNodeDoubleClick={(_event, node) => inspectNode(node)}
+        onPaneClick={() => setSelectedNodeId(undefined)}
       >
         <Background color={theme.palette.divider} />
         <Controls />
@@ -270,7 +328,7 @@ export default function TopologyGraphImpl({
         )}
         {problemNodes.length === 0 && warnings.length === 0 && (
           <Typography variant="caption" color="text.secondary">
-            Click any node to inspect details.
+            Click a node to highlight its connections. Double-click to inspect it.
           </Typography>
         )}
       </Box>

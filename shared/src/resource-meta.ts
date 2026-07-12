@@ -27,6 +27,14 @@ const core = (plural: string, kind: string, namespaced = true): GVK => ({
 
 export const BUILTIN_NAV_GROUPS: NavGroup[] = [
   {
+    title: 'Cluster',
+    kinds: [
+      core('nodes', 'Node', false),
+      core('namespaces', 'Namespace', false),
+      core('events', 'Event'),
+    ],
+  },
+  {
     title: 'Workloads',
     kinds: [
       core('pods', 'Pod'),
@@ -67,14 +75,6 @@ export const BUILTIN_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: 'Cluster',
-    kinds: [
-      core('nodes', 'Node', false),
-      core('namespaces', 'Namespace', false),
-      core('events', 'Event'),
-    ],
-  },
-  {
     title: 'Access Control',
     kinds: [
       core('serviceaccounts', 'ServiceAccount'),
@@ -95,7 +95,7 @@ export const KIND_COLUMNS: Record<string, string[]> = {
   ReplicaSet: ['name', 'namespace', 'cluster', 'workloadReady', 'age'],
   Job: ['name', 'namespace', 'cluster', 'jobCompletions', 'jobDuration', 'age'],
   CronJob: ['name', 'namespace', 'cluster', 'cronSchedule', 'cronSuspend', 'cronLastSchedule', 'age'],
-  Service: ['name', 'namespace', 'cluster', 'svcType', 'svcClusterIP', 'svcPorts', 'age'],
+  Service: ['name', 'namespace', 'cluster', 'svcType', 'svcClusterIP', 'svcLoadBalancerIP', 'svcPorts', 'age'],
   Ingress: ['name', 'namespace', 'cluster', 'ingressClass', 'ingressHosts', 'age'],
   ConfigMap: ['name', 'namespace', 'cluster', 'dataKeys', 'age'],
   Secret: ['name', 'namespace', 'cluster', 'secretType', 'dataKeys', 'age'],
