@@ -23,33 +23,43 @@ import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
-import AppsOutlinedIcon from '@mui/icons-material/AppsOutlined';
-import LanOutlinedIcon from '@mui/icons-material/LanOutlined';
-import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
-import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
-import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
-import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
-import { NavLink, useLocation } from 'react-router';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
+import { useTabsStore } from '../state/tabs.js';
+import { GROUP_ICONS } from './tab-meta.js';
 
 const WIDTH = 228;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
 const ITEM_INDENT = '42px';
 
-const GROUP_ICONS: Record<string, React.ReactElement> = {
-  Workloads: <AppsOutlinedIcon />,
-  Network: <LanOutlinedIcon />,
-  Config: <TuneOutlinedIcon />,
-  Storage: <StorageOutlinedIcon />,
-  Cluster: <HubOutlinedIcon />,
-  'Access Control': <AdminPanelSettingsOutlinedIcon />,
-};
+/**
+ * Browser-style modifiers on nav links: Ctrl/Cmd+click opens a background
+ * page tab (+Shift focuses it), middle-click opens a background tab.
+ * Plain clicks keep navigating the active tab via NavLink.
+ */
+function useOpenInNewTab(to: string) {
+  const openTab = useTabsStore((s) => s.openTab);
+  const navigate = useNavigate();
+  const open = (e: React.MouseEvent, foreground: boolean) => {
+    e.preventDefault();
+    openTab(to, { activate: foreground, afterActive: true });
+    if (foreground) navigate(to);
+  };
+  return {
+    onClick: (e: React.MouseEvent) => {
+      if (e.ctrlKey || e.metaKey) open(e, e.shiftKey);
+    },
+    onAuxClick: (e: React.MouseEvent) => {
+      if (e.button === 1) open(e, false);
+    },
+  };
+}
 
 function kindPath(group: string, version: string, plural: string): string {
   return `/r/${groupToPath(group)}/${version}/${plural}`;
@@ -130,8 +140,9 @@ function NavEntry({ to, label, icon, favorite }: { to: string; label: string; ic
   const isFav = useNavigationStore((s) => (favorite ? s.favorites.some((x) => x.id === favorite.id) : false));
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+  const newTabHandlers = useOpenInNewTab(to);
   const button = (
-    <ListItemButton component={NavLink} to={to} dense selected={active} sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: 0.375, pr: favorite ? 4 : undefined }}>
+    <ListItemButton component={NavLink} to={to} dense selected={active} {...newTabHandlers} sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: 0.375, pr: favorite ? 4 : undefined }}>
       {icon && (
         <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
       )}
@@ -159,6 +170,7 @@ function NavEntry({ to, label, icon, favorite }: { to: string; label: string; ic
 function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: string) => void }) {
   const location = useLocation();
   const active = `${location.pathname}${location.search}` === view.path;
+  const newTabHandlers = useOpenInNewTab(view.path);
   return (
     <ListItem
       disablePadding
@@ -180,7 +192,7 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
       }
       sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 } }}
     >
-      <ListItemButton component={NavLink} to={view.path} dense selected={active} sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5 }}>
+      <ListItemButton component={NavLink} to={view.path} dense selected={active} {...newTabHandlers} sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5 }}>
         <ListItemText primary={view.title} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
       </ListItemButton>
     </ListItem>
