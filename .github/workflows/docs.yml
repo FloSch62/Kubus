@@ -51,7 +51,7 @@ jobs:
             rm -f site/latest.json
           fi
       - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           name: github-pages-${{ github.run_attempt }}
           path: site
