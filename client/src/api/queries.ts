@@ -308,14 +308,26 @@ export function useWatchedList(contexts: string[], group: string, version: strin
   useEffect(() => {
     const maps = mapsRef.current;
     maps.clear();
-    setState({ rows: [], status: Object.fromEntries(contexts.map((c) => [c, { state: 'loading' as const }])) });
+    // Keep previous rows and per-ctx status objects: on resubscribe the watch
+    // client usually replays a cached snapshot synchronously (same commit),
+    // and every setter below bails out on identical content, so a kept-alive
+    // tab pane being revealed causes zero state churn (and no grid re-render).
+    // When there is no cache, stale rows beat a blank grid until the fresh
+    // snapshot lands.
+    setState((prev) => ({
+      rows: prev.rows,
+      status: Object.fromEntries(contexts.map((c) => [c, prev.status[c] ?? { state: 'loading' as const }])),
+    }));
 
     const rebuild = () => {
       const rows: ClusterRow[] = [];
       for (const [ctx, objects] of maps) {
         for (const obj of objects.values()) rows.push({ ctx, obj });
       }
-      setState((prev) => ({ rows, status: prev.status }));
+      setState((prev) => {
+        if (prev.rows.length === rows.length && prev.rows.every((r, i) => r.obj === rows[i]!.obj && r.ctx === rows[i]!.ctx)) return prev;
+        return { rows, status: prev.status };
+      });
     };
 
     const unsubs = contexts.map((ctx) => {
@@ -337,7 +349,11 @@ export function useWatchedList(contexts: string[], group: string, version: strin
             rebuild();
           },
           onStatus: (s, message) => {
-            setState((prev) => ({ rows: prev.rows, status: { ...prev.status, [ctx]: { state: s, message } } }));
+            setState((prev) => {
+              const cur = prev.status[ctx];
+              if (cur && cur.state === s && cur.message === message) return prev;
+              return { rows: prev.rows, status: { ...prev.status, [ctx]: { state: s, message } } };
+            });
           },
         },
       );

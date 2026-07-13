@@ -19,5 +19,7 @@ export const useDetailStore = create<DetailState>((set) => ({
   open: (sel) => set({ stack: [sel] }),
   push: (sel) => set((s) => ({ stack: [...s.stack, sel] })),
   back: () => set((s) => ({ stack: s.stack.slice(0, -1) })),
-  close: () => set({ stack: [] }),
+  // Bail when already closed — close() is called liberally (e.g. on page
+  // unmounts), and a fresh [] would re-render every stack subscriber.
+  close: () => set((s) => (s.stack.length ? { stack: [] } : s)),
 }));

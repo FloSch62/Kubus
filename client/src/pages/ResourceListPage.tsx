@@ -24,7 +24,53 @@ import { RowActionMenu, RowActions, type RowActionTarget } from '../components/R
 import { YamlEditor } from '../components/YamlEditor.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { useNavigationStore } from '../state/navigation.js';
+import { usePaneActive } from '../layout/pane-context.js';
 import { addLabelTerm } from '../label-selector.js';
+
+/**
+ * Renderless bridge between this page's URL params and the global detail
+ * drawer. Pages stay mounted (and live) in hidden tab panes, so everything
+ * here gates on pane activity: only the visible pane may drive the drawer or
+ * rewrite the URL. Kept out of ResourceListPage so activation flips re-render
+ * this stub instead of the whole page.
+ */
+function DetailUrlSync({ sel }: { sel: ResourceSelection | undefined }) {
+  const paneActive = usePaneActive();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openDetail = useDetailStore((s) => s.open);
+  const closeDetail = useDetailStore((s) => s.close);
+
+  // Drop the legacy `field` param from deep links.
+  useEffect(() => {
+    if (!paneActive || !searchParams.has('field')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('field');
+    setSearchParams(next, { replace: true });
+  }, [paneActive, searchParams, setSearchParams]);
+
+  // Mirror the URL selection into the drawer. On activation this re-runs and
+  // enforces this tab's drawer state (open its ?sel, or close a leftover).
+  // The reverse direction — user closes the drawer, so ?sel must go — is
+  // handled explicitly by the drawer's onClose in AppShell; inferring it here
+  // from drawer-state transitions races with tab switches.
+  useEffect(() => {
+    if (!paneActive) return;
+    if (sel) openDetail(sel);
+    else closeDetail();
+  }, [paneActive, sel, openDetail, closeDetail]);
+
+  // Close the drawer when the visible page unmounts (in-tab navigation or
+  // closing the active tab); a hidden tab being closed leaves it alone.
+  const paneActiveRef = useRef(paneActive);
+  paneActiveRef.current = paneActive;
+  useEffect(
+    () => () => {
+      if (paneActiveRef.current) closeDetail();
+    },
+    [closeDetail],
+  );
+  return null;
+}
 
 export function ResourceListPage() {
   const params = useParams<{ group: string; version: string; plural: string }>();
@@ -47,13 +93,6 @@ export function ResourceListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const textFilter = searchParams.get('q') ?? '';
   const labelSelector = searchParams.get('label') ?? '';
-
-  useEffect(() => {
-    if (!searchParams.has('field')) return;
-    const next = new URLSearchParams(searchParams);
-    next.delete('field');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
 
   const list = useFilteredList(group, version, plural, namespaced, { labelSelector });
   const isPodOrNode = kind === 'Pod' || kind === 'Node';
@@ -79,28 +118,6 @@ export function ResourceListPage() {
     if (!ctx || !name) return undefined;
     return { ctx, group, version, plural, kind, name, namespace: namespace || undefined, custom: isCustomKind };
   }, [searchParams, group, version, plural, kind, isCustomKind]);
-
-  // Mirror the URL selection into the global detail drawer; close on unmount.
-  const openDetail = useDetailStore((s) => s.open);
-  const closeDetail = useDetailStore((s) => s.close);
-  const detailOpen = useDetailStore((s) => s.stack.length > 0);
-  useEffect(() => {
-    if (sel) openDetail(sel);
-    else closeDetail();
-  }, [sel, openDetail, closeDetail]);
-  useEffect(() => () => closeDetail(), [closeDetail]);
-  // Drawer closed via its X → drop the ?sel deep link. The ref guards
-  // against clearing on mount, before the mirror effect has opened it.
-  const wasDetailOpen = useRef(false);
-  useEffect(() => {
-    if (wasDetailOpen.current && !detailOpen && searchParams.get('sel')) {
-      const next = new URLSearchParams(searchParams);
-      next.delete('sel');
-      setSearchParams(next);
-    }
-    wasDetailOpen.current = detailOpen;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailOpen]);
 
   // `replace` keeps filter typing from flooding the history stack.
   const setQueryParam = (key: string, value: string) => {
@@ -140,6 +157,7 @@ export function ResourceListPage() {
 
   // For CRD-backed kinds the page title links to the defining CRD.
   const pushDetail = useDetailStore((s) => s.push);
+  const openDetail = useDetailStore((s) => s.open);
   const crdSelection: ResourceSelection | undefined =
     isCustomKind && crdCtx && group
       ? {
@@ -224,6 +242,7 @@ export function ResourceListPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <DetailUrlSync sel={sel} />
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {crdSelection ? (
