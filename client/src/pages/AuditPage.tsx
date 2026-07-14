@@ -263,8 +263,11 @@ export function AuditPage() {
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                   {group.remediation}
                 </Typography>
-                {group.findings.map((f, i) => (
-                  <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'baseline', py: 0.25, flexWrap: 'wrap' }}>
+                {group.findings.map((f) => (
+                  <Box
+                    key={`${f.resource.ctx}:${f.resource.uid ?? `${f.resource.namespace ?? ''}/${f.resource.kind}/${f.resource.name}`}:${f.message}`}
+                    sx={{ display: 'flex', gap: 1, alignItems: 'baseline', py: 0.25, flexWrap: 'wrap' }}
+                  >
                     {selected.length > 1 && <Chip label={f.resource.ctx} size="small" variant="outlined" />}
                     <Link
                       component="button"

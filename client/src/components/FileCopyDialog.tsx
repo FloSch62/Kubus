@@ -48,7 +48,7 @@ export function FileCopyDialog({ ctx, obj, onClose }: Props) {
       const res = await apiFetchRaw(filesUrl('download', ctx, { namespace, pod, container, path: remotePath.trim() }));
       const blob = await res.blob();
       const disposition = res.headers.get('content-disposition') ?? '';
-      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? remotePath.split('/').filter(Boolean).pop() ?? 'download';
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? remotePath.split('/').findLast((segment) => segment.length > 0) ?? 'download';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

@@ -381,10 +381,10 @@ function childFields(schema: JsonSchema, definitions: Record<string, JsonSchema>
 function mergedProperties(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): Record<string, JsonSchema> {
   if (!schema) return {};
   const resolved = resolveSchema(schema, definitions);
-  return {
-    ...resolved.allOf?.reduce<Record<string, JsonSchema>>((acc, branch) => ({ ...acc, ...mergedProperties(branch, definitions) }), {}),
-    ...resolved.properties,
-  };
+  const properties: Record<string, JsonSchema> = {};
+  for (const branch of resolved.allOf ?? []) Object.assign(properties, mergedProperties(branch, definitions));
+  if (resolved.properties) Object.assign(properties, resolved.properties);
+  return properties;
 }
 
 function mergedRequired(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): string[] {
