@@ -29,7 +29,8 @@ exports.default = async function afterPack(context) {
     executablePath,
     [
       '#!/bin/sh',
-      'APP_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+      '# Resolve update-alternatives links such as /usr/bin/kubus.',
+      'APP_DIR="$(dirname -- "$(readlink -f -- "$0")")"',
       'if [ -n "$APPIMAGE" ]; then',
       `  exec "$APP_DIR/${executableName}.bin" --ozone-platform=x11 --no-sandbox "$@"`,
       'fi',
