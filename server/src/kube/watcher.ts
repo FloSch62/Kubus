@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubeObject, WatchEventType, WatchStatusState } from '@kubus/shared';
-import { RawClient, resourcePath } from './raw-client.js';
+import { RawClient, isRetryableTransportError, resourcePath } from './raw-client.js';
 
 export interface WatcherDelta {
   type: WatchEventType;
@@ -20,6 +20,7 @@ interface WatchLine {
 
 const MIN_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
+const RETRYABLE_LIST_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 /**
  * Generic list+watch for one (gvr, namespace) on one cluster. Maintains an
@@ -49,15 +50,15 @@ export class ResourceWatcher {
   /** Resolves once the initial LIST populated the cache. */
   ready(): Promise<void> {
     if (!this.running) this.start();
-    this.initialList ??= this.listInto(this.cache)
-      .then(() => undefined)
-      .catch((err) => {
-        if (isUnavailable(err)) {
-          this.markUnavailable(err);
-          return;
-        }
-        throw err;
+    if (!this.initialList) {
+      const pending = this.listUntilReady();
+      this.initialList = pending;
+      // A stop or other terminal failure must not poison a later start with a
+      // permanently rejected cached promise.
+      void pending.catch(() => {
+        if (this.initialList === pending) this.initialList = undefined;
       });
+    }
     return this.initialList;
   }
 
@@ -130,6 +131,32 @@ export class ResourceWatcher {
 
   private path(query: URLSearchParams): string {
     return resourcePath(this.group, this.version, this.plural, { namespace: this.namespace || undefined, query });
+  }
+
+  /**
+   * Keep initial readiness pending across transient LIST failures. This lets
+   * subscribers survive an API connection reset and guarantees every retry is
+   * a fresh request instead of another await of the same rejected promise.
+   */
+  private async listUntilReady(): Promise<void> {
+    let backoff = MIN_BACKOFF_MS;
+    while (this.running) {
+      try {
+        await this.listInto(this.cache);
+        return;
+      } catch (err) {
+        if (!this.running) throw err;
+        if (isUnavailable(err)) {
+          this.markUnavailable(err);
+          return;
+        }
+        if (!isRetryableListError(err)) throw err;
+        this.setState('reconnecting', err instanceof Error ? err.message : String(err));
+        await delay(backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+      }
+    }
+    throw new Error('watcher stopped before its initial list completed');
   }
 
   private async listInto(target: Map<string, KubeObject>): Promise<string> {
@@ -271,6 +298,12 @@ function isGone(err: unknown): boolean {
 function isUnavailable(err: unknown): boolean {
   const code = (err as { code?: number })?.code;
   return code === 404;
+}
+
+function isRetryableListError(err: unknown): boolean {
+  if (isRetryableTransportError(err)) return true;
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === 'number' && RETRYABLE_LIST_STATUS_CODES.has(code);
 }
 
 function missingResourceMessage(group: string, version: string, plural: string, err: unknown): string {

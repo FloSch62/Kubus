@@ -6,6 +6,7 @@ import { ApiException, type KubeConfig } from '@kubernetes/client-node';
 type FetchAgent = Agent & { options: Record<string, unknown> };
 
 const TRAILING_SLASH_RE = /\/$/;
+const RETRYABLE_GET_ERROR_CODES = new Set(['ECONNABORTED', 'ECONNRESET', 'ENETRESET', 'EPIPE', 'ETIMEDOUT']);
 
 /**
  * Authenticated HTTP access to arbitrary API server paths for the things the
@@ -63,7 +64,7 @@ export class RawClient {
     return agent;
   }
 
-  async request(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
+  private async requestOnce(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
     const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
     requestInit.agent = this.pooledAgent(requestInit.agent) as RequestInit['agent'];
     requestInit.method = init?.method ?? 'GET';
@@ -85,24 +86,48 @@ export class RawClient {
     return fetch(this.serverUrl() + path, requestInit);
   }
 
+  /**
+   * Retry one transport failure for a safe GET. A reset keep-alive socket is
+   * removed from the Agent's pool by Node, so the retry opens or borrows a
+   * usable connection. Mutating requests are never replayed.
+   */
+  private async safeGet<T>(init: { method?: string; signal?: AbortSignal } | undefined, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method !== 'GET' || init?.signal?.aborted || !isRetryableTransportError(err)) throw err;
+      return run();
+    }
+  }
+
+  async request(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
+    return this.safeGet(init, () => this.requestOnce(path, init));
+  }
+
   /** GET/mutate a JSON API path; throws ApiException on non-2xx. */
   async json<T = unknown>(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<T> {
-    const res = await this.request(path, init);
-    const text = await res.text();
-    if (!res.ok) {
-      let body: unknown = text;
-      try {
-        body = JSON.parse(text);
-      } catch {
-        /* keep raw text */
+    return this.safeGet(init, async () => {
+      // Keep the response-body read inside the retry boundary: an API server
+      // can reset a pooled connection after sending headers but before the
+      // complete JSON list has arrived.
+      const res = await this.requestOnce(path, init);
+      const text = await res.text();
+      if (!res.ok) {
+        let body: unknown = text;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          /* keep raw text */
+        }
+        const message =
+          body && typeof body === 'object' && 'message' in body
+            ? String((body as { message: unknown }).message)
+            : `${res.status} ${res.statusText} for ${path}`;
+        throw new ApiException(res.status, message, body, {});
       }
-      const message =
-        body && typeof body === 'object' && 'message' in body
-          ? String((body as { message: unknown }).message)
-          : `${res.status} ${res.statusText} for ${path}`;
-      throw new ApiException(res.status, message, body, {});
-    }
-    return (text ? JSON.parse(text) : undefined) as T;
+      return (text ? JSON.parse(text) : undefined) as T;
+    });
   }
 
   /**
@@ -123,6 +148,19 @@ export class RawClient {
     }
     return res;
   }
+}
+
+export function isRetryableTransportError(err: unknown): boolean {
+  let current: unknown = err;
+  // Fetch implementations sometimes wrap the underlying system error in one
+  // or more `cause` objects. Keep this deliberately code-based so certificate,
+  // authentication, HTTP, and JSON errors are not mistaken for transients.
+  for (let depth = 0; current && depth < 4; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && RETRYABLE_GET_ERROR_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 /** Build the REST path for a group/version/plural, optionally namespaced. */
