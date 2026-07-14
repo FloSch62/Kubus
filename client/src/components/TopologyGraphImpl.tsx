@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -6,26 +6,39 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import {
+  applyNodeChanges,
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps,
+  type ReactFlowInstance,
 } from '@xyflow/react';
-import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@kubus/shared';
+import type { GraphEdge, GraphNode, GraphNodeStatus } from '@kubus/shared';
 import { useTopologyGraphs } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
+import { layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
 import type { TopologyGraphProps } from './TopologyGraph.js';
 
 interface TopologyNodeData extends Record<string, unknown> {
   graphNode: GraphNode;
 }
 
-const LAYERS: GraphNode['layer'][] = ['entry', 'route', 'service', 'workload', 'replicaset', 'pod', 'storage', 'node', 'operator', 'other'];
+interface TopologyEdgeData extends Record<string, unknown> {
+  routePoints: RoutePoint[];
+  labelPoint?: RoutePoint;
+}
+
+type TopologyFlowNode = Node<TopologyNodeData>;
+type TopologyFlowEdge = Edge<TopologyEdgeData>;
 
 const STATUS_COLOR: Record<GraphNodeStatus, string> = {
   success: '#2e7d32',
@@ -96,72 +109,190 @@ function TopologyNode({ data, selected }: NodeProps) {
   );
 }
 
-const nodeTypes = { topology: TopologyNode };
-
-function degreeMap(edges: GraphEdge[]): Map<string, number> {
-  const degree = new Map<string, number>();
-  for (const edge of edges) {
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
-  }
-  return degree;
+// The layout pre-routes every edge around the node boxes; this just draws the
+// polyline with rounded corners plus a background-colored halo so crossings
+// stay readable. Endpoints are snapped to the live handle positions so edges
+// stay attached while a node is dragged (routes are recomputed on drag stop).
+function TopologyEdge({ id, sourceX, sourceY, targetX, targetY, data, markerEnd, style, label, labelStyle, interactionWidth }: EdgeProps<TopologyFlowEdge>) {
+  const theme = useTheme();
+  const routePoints =
+    data?.routePoints && data.routePoints.length > 1
+      ? alignRouteEndpoints(data.routePoints, { x: sourceX, y: sourceY }, { x: targetX, y: targetY })
+      : [
+          { x: sourceX, y: sourceY },
+          { x: targetX, y: targetY },
+        ];
+  const path = roundedRoutePath(routePoints);
+  const mid = data?.labelPoint ?? pointAtFraction(routePoints, 0.5);
+  const strokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 1.7;
+  const opacity = typeof style?.opacity === 'number' ? style.opacity : 1;
+  return (
+    <>
+      <path
+        d={path}
+        fill="none"
+        stroke={theme.palette.background.default}
+        strokeWidth={strokeWidth + 4}
+        strokeLinejoin="round"
+        opacity={opacity}
+      />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={interactionWidth ?? 24} />
+      {label && (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${mid.x}px, ${mid.y}px)`,
+              background: theme.palette.background.paper,
+              color: typeof labelStyle?.fill === 'string' ? labelStyle.fill : undefined,
+              opacity,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: 1.2,
+              padding: '1px 4px',
+              borderRadius: 3,
+              pointerEvents: 'none',
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
 }
 
-function flowLayout(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean) {
-  const flowNodes: Array<Node<TopologyNodeData>> = [];
-  const flowEdges: Edge[] = [];
-  const warnings: string[] = [];
-  const problemNodes: GraphNode[] = [];
-  let yOffset = 0;
+function alignRouteEndpoints(routePoints: RoutePoint[], source: RoutePoint, target: RoutePoint): RoutePoint[] {
+  const aligned = routePoints.map((point) => ({ ...point }));
+  const lastIndex = aligned.length - 1;
+  aligned[0] = { x: source.x, y: source.y };
+  aligned[lastIndex] = { x: target.x, y: target.y };
+  if (aligned.length > 2) {
+    aligned[1] = { ...aligned[1]!, y: source.y };
+    aligned[lastIndex - 1] = { ...aligned[lastIndex - 1]!, y: target.y };
+  }
+  return aligned;
+}
 
-  for (const graph of graphs ?? []) {
-    warnings.push(...graph.warnings.map((w) => `${graph.ctx}: ${w}`));
-    const degree = degreeMap(graph.edges);
-    const keep = new Set<string>();
-    const byLayer = new Map<GraphNode['layer'], GraphNode[]>();
-    for (const node of graph.nodes) {
-      const isProblem = node.status === 'warning' || node.status === 'error';
-      if (hideDisconnected && (degree.get(node.id) ?? 0) === 0 && !isProblem) continue;
-      keep.add(node.id);
-      if (isProblem) problemNodes.push(node);
-      const layerNodes = byLayer.get(node.layer);
-      if (layerNodes) layerNodes.push(node);
-      else byLayer.set(node.layer, [node]);
+function roundedRoutePath(points: RoutePoint[], radius = 14): string {
+  if (!points.length) return '';
+  const [start] = points;
+  const commands = [`M ${start!.x} ${start!.y}`];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1]!;
+    const current = points[index]!;
+    const next = points[index + 1];
+
+    if (!next) {
+      commands.push(`L ${current.x} ${current.y}`);
+      continue;
     }
-    const layerHeight = Math.max(1, ...[...byLayer.values()].map((items) => items.length)) * 104;
+    const incomingDistance = Math.hypot(current.x - previous.x, current.y - previous.y);
+    const outgoingDistance = Math.hypot(next.x - current.x, next.y - current.y);
+    if (incomingDistance === 0 || outgoingDistance === 0) {
+      commands.push(`L ${current.x} ${current.y}`);
+      continue;
+    }
+    const cornerRadius = Math.min(radius, incomingDistance / 2, outgoingDistance / 2);
+    const beforeCorner = {
+      x: current.x - ((current.x - previous.x) / incomingDistance) * cornerRadius,
+      y: current.y - ((current.y - previous.y) / incomingDistance) * cornerRadius,
+    };
+    const afterCorner = {
+      x: current.x + ((next.x - current.x) / outgoingDistance) * cornerRadius,
+      y: current.y + ((next.y - current.y) / outgoingDistance) * cornerRadius,
+    };
+    commands.push(
+      `L ${round2(beforeCorner.x)} ${round2(beforeCorner.y)}`,
+      `Q ${current.x} ${current.y} ${round2(afterCorner.x)} ${round2(afterCorner.y)}`,
+    );
+  }
+  return commands.join(' ');
+}
 
-    for (const [layerIdx, layer] of LAYERS.entries()) {
-      const items = [...(byLayer.get(layer) ?? [])].sort((a, b) => `${a.ref.namespace ?? ''}/${a.label}`.localeCompare(`${b.ref.namespace ?? ''}/${b.label}`));
-      for (const [idx, node] of items.entries()) {
-        flowNodes.push({
-          id: node.id,
-          type: 'topology',
-          position: { x: layerIdx * 300, y: yOffset + idx * 104 },
-          data: { graphNode: node },
-          draggable: true,
-        });
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function pointAtFraction(points: RoutePoint[], fraction: number): RoutePoint {
+  let total = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    total += Math.hypot(points[index + 1]!.x - points[index]!.x, points[index + 1]!.y - points[index]!.y);
+  }
+  let remaining = total * fraction;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const from = points[index]!;
+    const to = points[index + 1]!;
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length >= remaining) {
+      const t = length === 0 ? 0 : remaining / length;
+      return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+    }
+    remaining -= length;
+  }
+  return points[points.length - 1] ?? { x: 0, y: 0 };
+}
+
+// Parallel edges of the same kind often share a corridor, which would stack
+// their labels on the exact same midpoint. Slide colliding labels along their
+// own route until they find a free spot.
+function placeEdgeLabels(edges: TopologyFlowEdge[]): TopologyFlowEdge[] {
+  const fractions = [0.5, 0.38, 0.62, 0.26, 0.74, 0.14, 0.86];
+  const occupied: RoutePoint[] = [];
+  return edges.map((edge) => {
+    const points = edge.data?.routePoints ?? [];
+    if (!edge.label || points.length < 2) return edge;
+    let chosen: RoutePoint | undefined;
+    for (const fraction of fractions) {
+      const candidate = pointAtFraction(points, fraction);
+      if (!occupied.some((point) => Math.abs(point.x - candidate.x) < 64 && Math.abs(point.y - candidate.y) < 18)) {
+        chosen = candidate;
+        break;
       }
     }
-    for (const edge of graph.edges) {
-      if (!keep.has(edge.source) || !keep.has(edge.target)) continue;
-      flowEdges.push({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        label: edge.kind === 'owns' ? undefined : (edge.label ?? edge.kind),
-        type: 'smoothstep',
-        animated: edge.kind === 'routes' || edge.kind === 'selects',
-        markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[edge.kind] },
-        style: { strokeWidth: 1.7, stroke: EDGE_COLOR[edge.kind] },
-        labelStyle: { fill: EDGE_COLOR[edge.kind], fontWeight: 700, fontSize: 11 },
-        labelBgPadding: [4, 2],
-        labelBgBorderRadius: 3,
-      });
-    }
-    yOffset += layerHeight + 140;
-  }
+    chosen ??= pointAtFraction(points, 0.5);
+    occupied.push(chosen);
+    return { ...edge, data: { ...edge.data, routePoints: points, labelPoint: chosen } };
+  });
+}
 
-  return { nodes: flowNodes, edges: flowEdges, warnings, problemNodes };
+const nodeTypes = { topology: TopologyNode };
+const edgeTypes = { routed: TopologyEdge };
+
+interface FlowState {
+  nodes: TopologyFlowNode[];
+  edges: TopologyFlowEdge[];
+  warnings: string[];
+  problemNodes: GraphNode[];
+}
+
+const emptyFlow: FlowState = { nodes: [], edges: [], warnings: [], problemNodes: [] };
+
+function toFlowState(layout: TopologyLayout): FlowState {
+  return {
+    nodes: layout.nodes.map(({ node, position }) => ({
+      id: node.id,
+      type: 'topology',
+      position,
+      data: { graphNode: node },
+      draggable: true,
+    })),
+    edges: placeEdgeLabels(layout.edges.map(({ edge, routePoints }) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: 'routed',
+      label: edge.kind === 'owns' ? undefined : (edge.label ?? edge.kind),
+      animated: edge.kind === 'routes' || edge.kind === 'selects',
+      markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[edge.kind] },
+      style: { strokeWidth: 1.7, stroke: EDGE_COLOR[edge.kind] },
+      labelStyle: { fill: EDGE_COLOR[edge.kind], fontWeight: 700, fontSize: 11 },
+      data: { routePoints },
+    }))),
+    warnings: layout.warnings,
+    problemNodes: layout.problemNodes,
+  };
 }
 
 function isFocusedNode(node: GraphNode, focus: NonNullable<TopologyGraphProps['focus']>): boolean {
@@ -186,32 +317,78 @@ export default function TopologyGraphImpl({
   const openDetail = useDetailStore((s) => s.open);
   const pushDetail = useDetailStore((s) => s.push);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
-  const layout = useMemo(() => flowLayout(graphs, hideDisconnected), [graphs, hideDisconnected]);
-  const activeSelectedNodeId = layout.nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : undefined;
+  const [flow, setFlow] = useState<FlowState>(emptyFlow);
+  const [layoutPending, setLayoutPending] = useState(false);
+  const instanceRef = useRef<ReactFlowInstance<TopologyFlowNode, TopologyFlowEdge> | null>(null);
+
+  // ELK layout is async, so positions land in state instead of a useMemo.
+  useEffect(() => {
+    let cancelled = false;
+    setLayoutPending(true);
+    layoutTopology(graphs, hideDisconnected)
+      .then((layout) => {
+        if (cancelled) return;
+        setFlow(toFlowState(layout));
+        setLayoutPending(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('topology layout failed', err);
+        setFlow(emptyFlow);
+        setLayoutPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [graphs, hideDisconnected]);
+
+  // Re-fit the viewport when the set of displayed nodes changes (not on drag).
+  const nodeIdsKey = useMemo(() => flow.nodes.map((node) => node.id).sort().join(), [flow.nodes]);
+  useEffect(() => {
+    if (!nodeIdsKey) return;
+    const frame = requestAnimationFrame(() => {
+      void instanceRef.current?.fitView({ maxZoom: 1 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [nodeIdsKey]);
+
+  const onNodesChange = useCallback((changes: NodeChange<TopologyFlowNode>[]) => {
+    setFlow((f) => ({ ...f, nodes: applyNodeChanges(changes, f.nodes) }));
+  }, []);
+
+  const onNodeDragStop = useCallback(() => {
+    setFlow((f) => {
+      const boxes = f.nodes.map((node) => topologyNodeBox(node.id, node.position, node.data.graphNode));
+      const routes = routeEdges(boxes, f.edges);
+      return { ...f, edges: placeEdgeLabels(f.edges.map((edge) => ({ ...edge, data: { routePoints: routes.get(edge.id) ?? [] } }))) };
+    });
+  }, []);
+
+  const activeSelectedNodeId = flow.nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : undefined;
 
   const connectedNodeIds = useMemo(() => {
     if (!activeSelectedNodeId) return undefined;
     const connected = new Set([activeSelectedNodeId]);
-    for (const edge of layout.edges) {
+    for (const edge of flow.edges) {
       if (edge.source === activeSelectedNodeId) connected.add(edge.target);
       if (edge.target === activeSelectedNodeId) connected.add(edge.source);
     }
     return connected;
-  }, [activeSelectedNodeId, layout.edges]);
+  }, [activeSelectedNodeId, flow.edges]);
 
-  const nodes = useMemo(
+  const nodes = useMemo<TopologyFlowNode[]>(
     () =>
-      layout.nodes.map((node) => ({
+      flow.nodes.map((node) => ({
         ...node,
         selected: node.id === activeSelectedNodeId,
         style: { ...node.style, opacity: !connectedNodeIds || connectedNodeIds.has(node.id) ? 1 : 0.22 },
       })),
-    [activeSelectedNodeId, connectedNodeIds, layout.nodes],
+    [activeSelectedNodeId, connectedNodeIds, flow.nodes],
   );
 
-  const edges = useMemo(
+  const edges = useMemo<TopologyFlowEdge[]>(
     () =>
-      layout.edges.map((edge) => {
+      flow.edges.map((edge) => {
         const connected = !activeSelectedNodeId || edge.source === activeSelectedNodeId || edge.target === activeSelectedNodeId;
         return {
           ...edge,
@@ -220,9 +397,9 @@ export default function TopologyGraphImpl({
           labelStyle: { ...edge.labelStyle, opacity: connected ? 1 : 0.1 },
         };
       }),
-    [activeSelectedNodeId, layout.edges],
+    [activeSelectedNodeId, flow.edges],
   );
-  const { warnings, problemNodes } = layout;
+  const { warnings, problemNodes } = flow;
 
   const inspectNode = (node: Node) => {
     const graphNode = (node.data as TopologyNodeData).graphNode;
@@ -282,12 +459,18 @@ export default function TopologyGraphImpl({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         minZoom={0.12}
         maxZoom={2}
         nodesDraggable
         nodesConnectable={false}
         elementsSelectable
+        onInit={(instance) => {
+          instanceRef.current = instance;
+        }}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
         onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
         onNodeDoubleClick={(_event, node) => inspectNode(node)}
         onPaneClick={() => setSelectedNodeId(undefined)}
@@ -333,7 +516,7 @@ export default function TopologyGraphImpl({
         )}
       </Box>
 
-      {!isLoading && nodes.length === 0 && (
+      {!isLoading && !layoutPending && nodes.length === 0 && (
         <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
           <Box sx={{ textAlign: 'center', px: 2 }}>
             <Typography variant="subtitle2">{emptyTitle}</Typography>

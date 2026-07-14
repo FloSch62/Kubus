@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { groupToPath, type ResourceRef, type SearchResult } from '@kubus/shared';
+import { groupToPath, gvkLabel, type ResourceRef, type SearchResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import type { IndexedResourceSearchEntry } from '../kube/search-index.js';
@@ -120,7 +120,7 @@ async function searchContext(handle: ClusterHandle, query: string, limit: number
       id: `kind:${kind.group}/${kind.version}/${kind.plural}`,
       kind: 'kind',
       title: kind.kind,
-      subtitle: kind.group ? `${kind.group}/${kind.version}` : kind.version,
+      subtitle: gvkLabel(kind),
       // Kinds outrank resource hits of equal match quality: there are few of
       // them and they are usually what a short query like "art" is after.
       score: score + 20,

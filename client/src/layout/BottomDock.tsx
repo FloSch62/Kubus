@@ -94,6 +94,13 @@ export function BottomDock({ containerRef }: { containerRef: React.RefObject<HTM
               key={tab.id}
               value={tab.id}
               sx={{ minHeight: 32, py: 0, textTransform: 'none' }}
+              onMouseDown={(e) => {
+                // Prevent Chromium's middle-click autoscroll so onAuxClick fires cleanly.
+                if (e.button === 1) e.preventDefault();
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1) closeTab(tab.id);
+              }}
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}

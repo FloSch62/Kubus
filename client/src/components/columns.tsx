@@ -74,7 +74,8 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
   labels: (opts) => ({
     field: 'labels',
     headerName: 'Labels',
-    width: 220,
+    flex: 1,
+    minWidth: 220,
     sortable: false,
     valueGetter: (_v, row) =>
       Object.entries(obj(row).metadata.labels ?? {})
@@ -767,6 +768,7 @@ export function makeNodeAllocationLookup(pods: ClusterRow[]): NodeAllocationLook
 export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
   return cols.map((c, i): Col => {
     const numeric = c.type === 'integer' || c.type === 'number';
+    const statusLike = /^(ready|readiness|state|status|phase|health|healthy|available)$/i.test(c.name.trim());
     const value = (row: ClusterRow): unknown => evalPrinterColumnPath(row.obj, c.jsonPath);
     return {
       field: `crd_${i}_${c.name}`,
@@ -781,7 +783,12 @@ export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
         if (typeof v === 'object') return JSON.stringify(v).slice(0, 200);
         return String(v);
       },
-      renderCell: c.type === 'date' ? (params) => <AgeCell timestamp={(value(params.row) as string | undefined) || undefined} /> : undefined,
+      renderCell:
+        c.type === 'date'
+          ? (params) => <AgeCell timestamp={(value(params.row) as string | undefined) || undefined} />
+          : statusLike
+            ? (params) => <StatusChip status={String(params.value ?? '')} />
+            : undefined,
     };
   });
 }

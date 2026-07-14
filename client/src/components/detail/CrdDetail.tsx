@@ -15,6 +15,7 @@ import type { KubeObject } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
 
 interface JsonSchema {
+  $ref?: string;
   type?: string | string[];
   format?: string;
   title?: string;
@@ -29,6 +30,7 @@ interface JsonSchema {
   oneOf?: JsonSchema[];
   anyOf?: JsonSchema[];
   allOf?: JsonSchema[];
+  definitions?: Record<string, JsonSchema>;
   'x-kubernetes-int-or-string'?: boolean;
   'x-kubernetes-preserve-unknown-fields'?: boolean;
   'x-kubernetes-list-type'?: string;
@@ -177,7 +179,7 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
       )}
       <Box>
         {rootFields.map(({ name, fieldSchema, required }) => (
-          <SchemaField key={name} name={name} schema={fieldSchema} required={required} depth={0} />
+          <SchemaField key={name} name={name} schema={fieldSchema} required={required} depth={0} definitions={{}} />
         ))}
       </Box>
       {printerColumns.length > 0 && (
@@ -216,6 +218,28 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
   );
 }
 
+/** Expandable schema tree for the self-contained OpenAPI document returned by /schema. */
+export function OpenApiSchemaDetail({ document }: { document: Record<string, unknown> }) {
+  const schema = document as JsonSchema;
+  const definitions = schema.definitions ?? {};
+  const rootFields = rootSchemaFields(resolveSchema(schema, definitions), definitions);
+
+  return (
+    <Box sx={{ p: 2 }}>
+      {rootFields.map(({ name, fieldSchema, required }) => (
+        <SchemaField
+          key={name}
+          name={name}
+          schema={fieldSchema}
+          required={required}
+          depth={0}
+          definitions={definitions}
+        />
+      ))}
+    </Box>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string | undefined }) {
   if (!value) return null;
   return (
@@ -226,9 +250,9 @@ function InfoRow({ label, value }: { label: string; value: string | undefined })
   );
 }
 
-function rootSchemaFields(schema: JsonSchema | undefined): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
-  const properties = mergedProperties(schema);
-  const required = new Set(mergedRequired(schema));
+function rootSchemaFields(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema> = {}): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
+  const properties = mergedProperties(schema, definitions);
+  const required = new Set(mergedRequired(schema, definitions));
   const names = new Set([...Object.keys(STANDARD_ROOT_FIELDS), ...Object.keys(properties)]);
   return [...names].map((name) => ({
     name,
@@ -237,14 +261,27 @@ function rootSchemaFields(schema: JsonSchema | undefined): Array<{ name: string;
   }));
 }
 
-function SchemaField({ name, schema, required, depth }: { name: string; schema: JsonSchema; required: boolean; depth: number }) {
-  const description = schema.description ?? schema.title;
-  const nestedChildren = childFields(schema);
+function SchemaField({
+  name,
+  schema,
+  required,
+  depth,
+  definitions,
+}: {
+  name: string;
+  schema: JsonSchema;
+  required: boolean;
+  depth: number;
+  definitions: Record<string, JsonSchema>;
+}) {
+  const resolvedSchema = resolveSchema(schema, definitions);
+  const description = resolvedSchema.description ?? resolvedSchema.title;
+  const nestedChildren = childFields(resolvedSchema, definitions);
   const children = depth < MAX_SCHEMA_DEPTH ? nestedChildren : [];
   const canExpand = children.length > 0;
   const [expanded, setExpanded] = useState(false);
-  const meta = schemaMeta(schema);
-  const typeLabel = displayType(schema);
+  const meta = schemaMeta(resolvedSchema);
+  const typeLabel = displayType(resolvedSchema, definitions);
 
   const toggleExpanded = () => {
     // Don't collapse/expand when the user is selecting description text.
@@ -289,8 +326,8 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
                 {typeLabel}
               </Typography>
               {required && <Chip label="required" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
-              {schema.nullable && <Chip label="nullable" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
-              {schema['x-kubernetes-preserve-unknown-fields'] && <Chip label="preserve unknown" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
+              {resolvedSchema.nullable && <Chip label="nullable" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
+              {resolvedSchema['x-kubernetes-preserve-unknown-fields'] && <Chip label="preserve unknown" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}
               {meta.map((m) => (
                 <Chip key={m} label={m} size="small" variant="outlined" sx={{ height: 18, fontSize: 10, maxWidth: 360 }} title={m} />
               ))}
@@ -309,42 +346,57 @@ function SchemaField({ name, schema, required, depth }: { name: string; schema: 
         </Typography>
       )}
       {expanded && children.map((child) => (
-        <SchemaField key={child.name} name={child.name} schema={child.fieldSchema} required={child.required} depth={depth + 1} />
+        <SchemaField
+          key={child.name}
+          name={child.name}
+          schema={child.fieldSchema}
+          required={child.required}
+          depth={depth + 1}
+          definitions={definitions}
+        />
       ))}
     </Box>
   );
 }
 
-function childFields(schema: JsonSchema): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
-  const container = schema.type === 'array' && schema.items ? schema.items : schema;
-  const properties = mergedProperties(container);
-  const required = new Set(mergedRequired(container));
+function childFields(schema: JsonSchema, definitions: Record<string, JsonSchema>): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
+  const container = resolveSchema(schema.type === 'array' && schema.items ? schema.items : schema, definitions);
+  const properties = mergedProperties(container, definitions);
+  const required = new Set(mergedRequired(container, definitions));
   const entries = Object.entries(properties).map(([name, fieldSchema]) => ({ name, fieldSchema, required: required.has(name) }));
 
   if (entries.length > 0) return entries;
   const additional = container.additionalProperties;
   if (typeof additional === 'object' && additional) {
-    const mapChildren = Object.entries(mergedProperties(additional)).map(([name, fieldSchema]) => ({
+    const mapChildren = Object.entries(mergedProperties(additional, definitions)).map(([name, fieldSchema]) => ({
       name: `<value>.${name}`,
       fieldSchema,
-      required: mergedRequired(additional).includes(name),
+      required: mergedRequired(additional, definitions).includes(name),
     }));
     if (mapChildren.length > 0) return mapChildren;
   }
   return [];
 }
 
-function mergedProperties(schema: JsonSchema | undefined): Record<string, JsonSchema> {
+function mergedProperties(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): Record<string, JsonSchema> {
   if (!schema) return {};
+  const resolved = resolveSchema(schema, definitions);
   return {
-    ...schema.allOf?.reduce<Record<string, JsonSchema>>((acc, branch) => ({ ...acc, ...mergedProperties(branch) }), {}),
-    ...(schema.properties ?? {}),
+    ...resolved.allOf?.reduce<Record<string, JsonSchema>>((acc, branch) => ({ ...acc, ...mergedProperties(branch, definitions) }), {}),
+    ...(resolved.properties ?? {}),
   };
 }
 
-function mergedRequired(schema: JsonSchema | undefined): string[] {
+function mergedRequired(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): string[] {
   if (!schema) return [];
-  return [...new Set([...(schema.allOf?.flatMap((branch) => mergedRequired(branch)) ?? []), ...(schema.required ?? [])])];
+  const resolved = resolveSchema(schema, definitions);
+  return [...new Set([...(resolved.allOf?.flatMap((branch) => mergedRequired(branch, definitions)) ?? []), ...(resolved.required ?? [])])];
+}
+
+function resolveSchema(schema: JsonSchema, definitions: Record<string, JsonSchema>): JsonSchema {
+  if (!schema.$ref?.startsWith('#/definitions/')) return schema;
+  const referenced = definitions[schema.$ref.slice('#/definitions/'.length)];
+  return referenced ? { ...referenced, ...schema, $ref: undefined } : schema;
 }
 
 function mergeSchema(base: JsonSchema | undefined, override: JsonSchema | undefined): JsonSchema {
@@ -375,17 +427,18 @@ function typeColor(typeLabel: string): string {
   }
 }
 
-function displayType(schema: JsonSchema): string {
-  if (schema['x-kubernetes-int-or-string']) return 'int-or-string';
-  if (Array.isArray(schema.type)) return schema.type.join(' | ');
-  if (schema.type === 'array') return `array<${displayType(schema.items ?? {})}>`;
-  if (schema.type === 'object' && typeof schema.additionalProperties === 'object') {
-    return `map<${displayType(schema.additionalProperties)}>`;
+function displayType(schema: JsonSchema, definitions: Record<string, JsonSchema> = {}): string {
+  const resolved = resolveSchema(schema, definitions);
+  if (resolved['x-kubernetes-int-or-string']) return 'int-or-string';
+  if (Array.isArray(resolved.type)) return resolved.type.join(' | ');
+  if (resolved.type === 'array') return `array<${displayType(resolved.items ?? {}, definitions)}>`;
+  if (resolved.type === 'object' && typeof resolved.additionalProperties === 'object') {
+    return `map<${displayType(resolved.additionalProperties, definitions)}>`;
   }
-  if (schema.type) return schema.format ? `${schema.type} (${schema.format})` : schema.type;
-  const union = schema.oneOf ?? schema.anyOf;
-  if (union?.length) return union.map((s) => displayType(s)).join(' | ');
-  if (schema.allOf?.length) return schema.allOf.map((s) => displayType(s)).find((t) => t !== 'unknown') ?? 'object';
+  if (resolved.type) return resolved.format ? `${resolved.type} (${resolved.format})` : resolved.type;
+  const union = resolved.oneOf ?? resolved.anyOf;
+  if (union?.length) return union.map((s) => displayType(s, definitions)).join(' | ');
+  if (resolved.allOf?.length) return resolved.allOf.map((s) => displayType(s, definitions)).find((t) => t !== 'unknown') ?? 'object';
   return 'unknown';
 }
 

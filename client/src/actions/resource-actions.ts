@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { KubeObject, ResourceRef } from '@kubus/shared';
+import { gvkForResource, type KubeObject, type ResourceRef } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,
@@ -37,7 +37,8 @@ const CORDON: PaletteAction = { id: 'cordon-toggle', title: 'Cordon / Uncordon',
 const OPEN: PaletteAction = { id: 'open', title: 'Open details', kind: 'detail' };
 const MORE: PaletteAction = { id: 'open-more', title: 'More actions… (delete, scale, forward)', kind: 'detail' };
 
-export function actionsForRef(kind: string): PaletteAction[] {
+export function actionsForRef(ref: ResourceRef): PaletteAction[] {
+  const kind = gvkForResource(ref.group, ref.version, ref.plural)?.kind === ref.kind ? ref.kind : undefined;
   switch (kind) {
     case 'Pod':
       return [OPEN, LOGS, SHELL, MORE];

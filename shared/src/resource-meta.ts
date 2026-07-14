@@ -12,6 +12,11 @@ export interface GVK {
   namespaced: boolean;
 }
 
+/** Compact, unambiguous group/version/kind label for resource UI. */
+export function gvkLabel(gvk: Pick<GVK, 'group' | 'version' | 'kind'>): string {
+  return `${gvk.group || 'core'}/${gvk.version}/${gvk.kind}`;
+}
+
 export interface NavGroup {
   title: string;
   kinds: GVK[];

@@ -117,7 +117,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const rows = useMemo<Row[]>(() => {
     if (stage) {
       const f = deferredQuery.trim().toLowerCase();
-      return actionsForRef(stage.ref.kind)
+      return actionsForRef(stage.ref)
         .filter((a) => !f || a.title.toLowerCase().includes(f))
         .map((action) => ({ type: 'action', action }));
     }

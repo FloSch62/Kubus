@@ -34,7 +34,7 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
-import type { KubeObject, LogTargetKind } from '@kubus/shared';
+import { gvkForResource, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,
@@ -115,6 +115,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const addTab = useDockStore((s) => s.addTab);
 
   const { kind, obj, ctx } = target;
+  const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === kind ? kind : undefined;
   const name = obj.metadata.name;
   const namespace = obj.metadata.namespace;
   const isProtected = useIsProtected(ctx);
@@ -123,30 +124,30 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const ok = (text: string) => setToast({ severity: 'success', text });
   const fail = (err: unknown) => setToast({ severity: 'error', text: err instanceof Error ? err.message : String(err) });
 
-  const scalable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'ReplicaSet';
-  const restartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
-  const isReplicaSet = kind === 'ReplicaSet';
-  const isPod = kind === 'Pod';
-  const isNode = kind === 'Node';
-  const isCronJob = kind === 'CronJob';
-  const isJob = kind === 'Job';
-  const canForward = isPod || kind === 'Service';
-  const canViewLogs = isLogTargetKind(kind);
+  const scalable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'ReplicaSet';
+  const restartable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'DaemonSet';
+  const isReplicaSet = actionKind === 'ReplicaSet';
+  const isPod = actionKind === 'Pod';
+  const isNode = actionKind === 'Node';
+  const isCronJob = actionKind === 'CronJob';
+  const isJob = actionKind === 'Job';
+  const canForward = isPod || actionKind === 'Service';
+  const canViewLogs = isLogTargetKind(actionKind ?? '');
   const unschedulable = isNode && !!(obj.spec as { unschedulable?: boolean })?.unschedulable;
   const cjSuspended = isCronJob && !!(obj.spec as { suspend?: boolean })?.suspend;
-  const isDeployment = kind === 'Deployment';
+  const isDeployment = actionKind === 'Deployment';
   const rolloutPaused = isDeployment && !!(obj.spec as { paused?: boolean })?.paused;
 
   const openLogs = async () => {
-    if (!isLogTargetKind(kind)) return;
+    if (!actionKind || !isLogTargetKind(actionKind)) return;
     if (!namespace) {
       fail(new Error(`${kind} has no namespace`));
       return;
     }
     setLogsBusy(true);
     try {
-      const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind, namespace, name });
-      if (!pods.length) throw new Error(`No pods found for ${kind} ${namespace}/${name}`);
+      const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
+      if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
       const byNamespace = new Map<string, string[]>();
       for (const pod of pods) {
         const names = byNamespace.get(pod.namespace);
@@ -157,7 +158,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         addTab({
           kind: 'logs',
           id: dockTabId(),
-          title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${kind}/${name}`,
+          title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${actionKind}/${name}`,
           ctx,
           namespace: ns,
           pods: podNames,

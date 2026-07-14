@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Drawer from '@mui/material/Drawer';
@@ -26,8 +26,9 @@ import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { NavLink, useLocation, useNavigate } from 'react-router';
-import { BUILTIN_NAV_GROUPS, groupToPath, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
+import { BUILTIN_NAV_GROUPS, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -37,6 +38,7 @@ import { GROUP_ICONS } from './tab-meta.js';
 const WIDTH = 228;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
 const ITEM_INDENT = '42px';
+const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
 
 /**
  * Browser-style modifiers on nav links: Ctrl/Cmd+click opens a background
@@ -71,9 +73,19 @@ function kindFavorite(k: NavKind): FavoriteItem {
   return {
     id: `kind:${k.group}/${k.version}/${k.plural}`,
     title: k.label,
-    subtitle: `${k.group || 'core'}/${k.version}`,
+    subtitle: gvkLabel(k),
     path: kindPath(k.group, k.version, k.plural),
   };
+}
+
+/** Resolve old persisted kind favorites to a full GVK once discovery is available. */
+function favoriteGvk(favorite: FavoriteItem, resources: ResourceKindInfo[]): string | undefined {
+  if (!favorite.id.startsWith('kind:')) return favorite.subtitle;
+  const [group, version, plural] = favorite.id.slice('kind:'.length).split('/');
+  if (group === undefined || !version || !plural) return favorite.subtitle;
+  const discovered = resources.find((r) => r.group === group && r.version === version && r.plural === plural);
+  const resource = discovered ?? gvkForResource(group, version, plural);
+  return resource ? gvkLabel(resource) : favorite.subtitle;
 }
 
 // Star toggle revealed on row hover (always visible once active). Rendered as a
@@ -134,7 +146,21 @@ function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   return [...byKind.values()];
 }
 
-function NavEntry({ to, label, icon, favorite }: { to: string; label: string; icon?: React.ReactElement; favorite?: FavoriteItem }) {
+function NavEntry({
+  to,
+  label,
+  subtitle,
+  icon,
+  favorite,
+  favoriteAction,
+}: {
+  to: string;
+  label: string;
+  subtitle?: string;
+  icon?: React.ReactElement;
+  favorite?: FavoriteItem;
+  favoriteAction?: ReactNode;
+}) {
   const location = useLocation();
   const active = location.pathname === to;
   const isFav = useNavigationStore((s) => (favorite ? s.favorites.some((x) => x.id === favorite.id) : false));
@@ -142,11 +168,26 @@ function NavEntry({ to, label, icon, favorite }: { to: string; label: string; ic
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
   const newTabHandlers = useOpenInNewTab(to);
   const button = (
-    <ListItemButton component={NavLink} to={to} dense selected={active} {...newTabHandlers} sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: 0.375, pr: favorite ? 4 : undefined }}>
+    <ListItemButton
+      component={NavLink}
+      to={to}
+      dense
+      selected={active}
+      {...newTabHandlers}
+      sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: subtitle ? 0.25 : 0.375, pr: favorite ? (favoriteAction ? 7 : 4) : undefined }}
+    >
       {icon && (
         <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
       )}
-      <ListItemText primary={label} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
+      <ListItemText
+        primary={label}
+        secondary={subtitle}
+        sx={{ my: subtitle ? 0.25 : undefined }}
+        slotProps={{
+          primary: { variant: 'body2', noWrap: true, sx: subtitle ? { lineHeight: 1.25 } : undefined },
+          secondary: { noWrap: true, title: subtitle, sx: { fontSize: 10.5, fontStyle: 'italic', lineHeight: 1.1 } },
+        }}
+      />
     </ListItemButton>
   );
   if (!favorite) return button;
@@ -154,11 +195,14 @@ function NavEntry({ to, label, icon, favorite }: { to: string; label: string; ic
     <ListItem
       disablePadding
       secondaryAction={
-        <FavStar
-          active={isFav}
-          label={`${isFav ? 'Remove' : 'Add'} favorite ${label}`}
-          onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+          {favoriteAction}
+          <FavStar
+            active={isFav}
+            label={`${isFav ? 'Remove' : 'Add'} favorite ${label}`}
+            onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
+          />
+        </Box>
       }
       sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 } }}
     >
@@ -205,12 +249,14 @@ function GroupHeader({
   open,
   onClick,
   favorite,
+  favoriteAction,
 }: {
   title: string;
   icon?: React.ReactElement;
   open: boolean;
   onClick: () => void;
   favorite?: { active: boolean; onToggle: () => void };
+  favoriteAction?: ReactNode;
 }) {
   return (
     <ListItemButton
@@ -230,10 +276,106 @@ function GroupHeader({
           label={`${favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
         />
       )}
+      {favoriteAction}
       <ExpandMoreIcon
         sx={{ fontSize: 16, opacity: 0.6, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
       />
     </ListItemButton>
+  );
+}
+
+type FavoriteDropTarget = { id: string; position: 'before' | 'after' };
+
+function favoriteDropPosition(e: DragEvent<HTMLElement>): FavoriteDropTarget['position'] {
+  const rect = e.currentTarget.getBoundingClientRect();
+  return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+}
+
+function FavoriteDragHandle({
+  favorite,
+  onDragStart,
+  onDragEnd,
+}: {
+  favorite: FavoriteItem;
+  onDragStart: (favorite: FavoriteItem, e: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <Tooltip title="Drag to reorder">
+      <IconButton
+        component="span"
+        aria-label={`Reorder favorite ${favorite.title}`}
+        size="small"
+        draggable
+        className="favorite-drag-handle"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDragStart={(e) => onDragStart(favorite, e)}
+        onDragEnd={onDragEnd}
+        sx={{
+          cursor: 'grab',
+          color: 'text.secondary',
+          opacity: 0,
+          transition: 'opacity 120ms ease',
+          '&:active': { cursor: 'grabbing' },
+          '& svg': { fontSize: 17 },
+          '&:focus-visible': { opacity: 1 },
+        }}
+      >
+        <DragIndicatorIcon fontSize="small" />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function FavoriteDragShell({
+  favorite,
+  draggingId,
+  dropTarget,
+  children,
+  onDropTarget,
+  onDropFavorite,
+  onClearDropTarget,
+}: {
+  favorite: FavoriteItem;
+  draggingId: string | null;
+  dropTarget: FavoriteDropTarget | null;
+  children: ReactNode;
+  onDropTarget: (target: FavoriteDropTarget) => void;
+  onDropFavorite: (target: FavoriteDropTarget) => void;
+  onClearDropTarget: (id: string) => void;
+}) {
+  const activeDrop = dropTarget?.id === favorite.id ? dropTarget.position : undefined;
+  const canDrop = !!draggingId && draggingId !== favorite.id;
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        opacity: draggingId === favorite.id ? 0.45 : 1,
+        '&:hover .favorite-drag-handle': { opacity: 1 },
+      }}
+      onDragOver={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        onDropTarget({ id: favorite.id, position: favoriteDropPosition(e) });
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        onClearDropTarget(favorite.id);
+      }}
+      onDrop={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+        onDropFavorite({ id: favorite.id, position: favoriteDropPosition(e) });
+      }}
+    >
+      {activeDrop === 'before' && <Box sx={{ position: 'absolute', top: 0, left: 10, right: 10, height: 2, bgcolor: 'primary.main', zIndex: 2 }} />}
+      {children}
+      {activeDrop === 'after' && <Box sx={{ position: 'absolute', bottom: 0, left: 10, right: 10, height: 2, bgcolor: 'primary.main', zIndex: 2 }} />}
+    </Box>
   );
 }
 
@@ -245,6 +387,7 @@ export function NavDrawer() {
   const removeSavedView = useNavigationStore((s) => s.removeSavedView);
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+  const moveFavorite = useNavigationStore((s) => s.moveFavorite);
   // Favorited categories ('fav:<title>') start collapsed so they show as a
   // single entry rather than flooding Favorites with every kind.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
@@ -255,6 +398,8 @@ export function NavDrawer() {
     return set;
   });
   const [filter, setFilter] = useState('');
+  const [draggingFavoriteId, setDraggingFavoriteId] = useState<string | null>(null);
+  const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
   const deferredFilter = useDeferredValue(filter);
 
   const toggleGroup = (title: string) =>
@@ -308,6 +453,45 @@ export function NavDrawer() {
   const matches = (label: string) => !f || label.toLowerCase().includes(f);
   // While filtering, always expand so matches are visible.
   const isOpen = (title: string) => !!f || !collapsed.has(title);
+  const canReorderFavorites = favorites.length > 1 && !f;
+  const clearFavoriteDrag = () => {
+    setDraggingFavoriteId(null);
+    setFavoriteDropTarget(null);
+  };
+  const favoriteDragHandle = (fav: FavoriteItem) =>
+    canReorderFavorites ? (
+      <FavoriteDragHandle
+        favorite={fav}
+        onDragStart={(favorite, e) => {
+          e.stopPropagation();
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData(FAVORITE_DRAG_TYPE, favorite.id);
+          setDraggingFavoriteId(favorite.id);
+        }}
+        onDragEnd={clearFavoriteDrag}
+      />
+    ) : undefined;
+  const favoriteDragShell = (fav: FavoriteItem, children: ReactNode) =>
+    canReorderFavorites ? (
+      <FavoriteDragShell
+        favorite={fav}
+        draggingId={draggingFavoriteId}
+        dropTarget={favoriteDropTarget}
+        onDropTarget={setFavoriteDropTarget}
+        onClearDropTarget={(id) => {
+          setFavoriteDropTarget((target) => (target?.id === id ? null : target));
+        }}
+        onDropFavorite={({ id, position }) => {
+          const draggedId = draggingFavoriteId;
+          clearFavoriteDrag();
+          if (draggedId) moveFavorite(draggedId, id, position);
+        }}
+      >
+        {children}
+      </FavoriteDragShell>
+    ) : (
+      children
+    );
 
   return (
     <Drawer
@@ -377,13 +561,17 @@ export function NavDrawer() {
                   const key = `fav:${fav.title}`;
                   return (
                     <Box key={fav.id}>
-                      <GroupHeader
-                        title={fav.title}
-                        icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
-                        open={isOpen(key)}
-                        onClick={() => toggleGroup(key)}
-                        favorite={{ active: true, onToggle: () => removeFavorite(fav.id) }}
-                      />
+                      {favoriteDragShell(
+                        fav,
+                        <GroupHeader
+                          title={fav.title}
+                          icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
+                          open={isOpen(key)}
+                          onClick={() => toggleGroup(key)}
+                          favorite={{ active: true, onToggle: () => removeFavorite(fav.id) }}
+                          favoriteAction={favoriteDragHandle(fav)}
+                        />,
+                      )}
                       <Collapse in={isOpen(key)}>
                         {kinds.map((k) => (
                           <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} />
@@ -392,8 +580,22 @@ export function NavDrawer() {
                     </Box>
                   );
                 }
-                if (!matches(fav.title)) return null;
-                return <NavEntry key={fav.id} to={fav.path ?? '/'} label={fav.title} favorite={fav} />;
+                const subtitle = favoriteGvk(fav, apiResources?.resources ?? []);
+                if (!matches(fav.title) && !(subtitle && matches(subtitle))) return null;
+                return (
+                  <Box key={fav.id}>
+                    {favoriteDragShell(
+                      fav,
+                      <NavEntry
+                        to={fav.path ?? '/'}
+                        label={fav.title}
+                        subtitle={subtitle}
+                        favorite={fav}
+                        favoriteAction={favoriteDragHandle(fav)}
+                      />,
+                    )}
+                  </Box>
+                );
               })}
             </Collapse>
           </Box>
