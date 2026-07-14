@@ -40,14 +40,11 @@ jobs:
             ~\AppData\Local\electron-builder\Cache
           key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
-      # Type-aware linting resolves these workspace packages from dist/, which
-      # doesn't exist on a fresh checkout. Build only its type dependencies here.
-      - name: Build lint type dependencies
-        run: |
-          pnpm --filter @kubus/shared build
-          pnpm --filter @kubus/server build
-      - run: pnpm lint
+      # build first: @kubus/shared (and /server for electron) resolve types
+      # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
+      # Type-aware linting also resolves workspace package declarations.
+      - run: pnpm lint
       - run: pnpm typecheck
       # Unpacked desktop build so a broken electron-builder config fails PRs.
       # No platform flag: each runner packages for its own OS.
