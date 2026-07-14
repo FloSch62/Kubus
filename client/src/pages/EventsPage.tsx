@@ -29,10 +29,10 @@ interface EventObj extends KubeObject {
   reason?: string;
   message?: string;
   count?: number;
-  lastTimestamp?: string;
-  firstTimestamp?: string;
-  eventTime?: string;
-  series?: { count?: number; lastObservedTime?: string };
+  lastTimestamp?: string | null;
+  firstTimestamp?: string | null;
+  eventTime?: string | null;
+  series?: { count?: number; lastObservedTime?: string | null };
   involvedObject?: { kind?: string; name?: string; namespace?: string; uid?: string; apiVersion?: string };
 }
 
@@ -45,16 +45,16 @@ interface EventRow {
   lastSeen?: string;
 }
 
-function maxTime(...ts: Array<string | undefined>): string | undefined {
+function maxTime(...ts: Array<string | null | undefined>): string | undefined {
   return ts
-    .filter((t): t is string => t !== undefined)
+    .filter((t): t is string => typeof t === 'string' && t.length > 0)
     .sort((a, b) => a.localeCompare(b))
     .at(-1);
 }
 
-function minTime(...ts: Array<string | undefined>): string | undefined {
+function minTime(...ts: Array<string | null | undefined>): string | undefined {
   return ts
-    .filter((t): t is string => t !== undefined)
+    .filter((t): t is string => typeof t === 'string' && t.length > 0)
     .sort((a, b) => a.localeCompare(b))
     .at(0);
 }
