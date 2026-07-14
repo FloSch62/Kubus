@@ -74,7 +74,8 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
   labels: (opts) => ({
     field: 'labels',
     headerName: 'Labels',
-    width: 220,
+    flex: 1,
+    minWidth: 220,
     sortable: false,
     valueGetter: (_v, row) =>
       Object.entries(obj(row).metadata.labels ?? {})
