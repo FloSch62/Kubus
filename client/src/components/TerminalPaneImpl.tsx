@@ -91,5 +91,23 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
     if (active) requestAnimationFrame(() => fitRef.current?.fit());
   }, [active]);
 
-  return <Box ref={containerRef} sx={{ height: '100%', bgcolor: '#16161e', '& .xterm': { height: '100%', p: theme.spacing(0.5) } }} />;
+  return (
+    <Box sx={{ height: '100%', p: 1, pt: 0.75 }}>
+      <Box
+        ref={containerRef}
+        sx={{
+          height: '100%',
+          bgcolor: '#16161e',
+          border: 1,
+          borderColor: theme.palette.mode === 'dark' ? 'transparent' : theme.palette.divider,
+          borderRadius: 1,
+          overflow: 'hidden',
+          '& .xterm': { height: '100%', p: theme.spacing(0.5) },
+          // xterm.css defaults the viewport to #000, which shows through the
+          // .xterm padding as a black ring around the canvas.
+          '& .xterm .xterm-viewport': { backgroundColor: 'transparent' },
+        }}
+      />
+    </Box>
+  );
 }

@@ -446,30 +446,42 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
           </IconButton>
         </Tooltip>
       </Box>
-      <Box
-        ref={scrollRef}
-        onScroll={onScroll}
-        sx={{ flex: 1, overflow: 'auto', fontFamily: '"JetBrains Mono", monospace', fontSize: monoFontSize, bgcolor: '#151518', color: '#d4d4da' }}
-      >
-        <Box sx={wrap ? undefined : { height: visible.length * rowHeight, position: 'relative' }}>
-          {visible.slice(start, end).map((l, i) => {
-            const idx = start + i;
-            return (
-              <LineRow
-                key={idx}
-                line={l}
-                idx={idx}
-                wrap={wrap}
-                showPod={showPod}
-                podColor={showPod ? (podColor.get(l.pod) ?? '#888') : undefined}
-                tsMode={tsMode}
-                highlight={highlight}
-                find={find}
-                isCurrent={idx === currentMatch}
-                rowHeight={rowHeight}
-              />
-            );
-          })}
+      <Box sx={{ flex: 1, minHeight: 0, p: 1, pt: 0.75 }}>
+        <Box
+          ref={scrollRef}
+          onScroll={onScroll}
+          sx={{
+            height: '100%',
+            overflow: 'auto',
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: monoFontSize,
+            bgcolor: '#151518',
+            color: '#d4d4da',
+            border: 1,
+            borderColor: (theme) => (theme.palette.mode === 'dark' ? 'transparent' : theme.palette.divider),
+            borderRadius: 1,
+          }}
+        >
+          <Box sx={wrap ? undefined : { height: visible.length * rowHeight, position: 'relative' }}>
+            {visible.slice(start, end).map((l, i) => {
+              const idx = start + i;
+              return (
+                <LineRow
+                  key={idx}
+                  line={l}
+                  idx={idx}
+                  wrap={wrap}
+                  showPod={showPod}
+                  podColor={showPod ? (podColor.get(l.pod) ?? '#888') : undefined}
+                  tsMode={tsMode}
+                  highlight={highlight}
+                  find={find}
+                  isCurrent={idx === currentMatch}
+                  rowHeight={rowHeight}
+                />
+              );
+            })}
+          </Box>
         </Box>
       </Box>
     </Box>
