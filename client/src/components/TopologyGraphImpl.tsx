@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
@@ -22,10 +23,10 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from '@xyflow/react';
-import type { GraphEdge, GraphNode, GraphNodeStatus } from '@kubus/shared';
+import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@kubus/shared';
 import { useTopologyGraphs } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
-import { layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
+import { cachedTopologyLayout, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
 import type { TopologyGraphProps } from './TopologyGraph.js';
 
 interface TopologyNodeData extends Record<string, unknown> {
@@ -313,23 +314,39 @@ export default function TopologyGraphImpl({
   emptyTitle = 'No connected topology found',
 }: TopologyGraphProps) {
   const theme = useTheme();
-  const { data: graphs, isLoading } = useTopologyGraphs(contexts, namespaces, focus);
+  const { data: graphs, isLoading, isPlaceholderData } = useTopologyGraphs(contexts, namespaces, focus);
   const openDetail = useDetailStore((s) => s.open);
   const pushDetail = useDetailStore((s) => s.push);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
-  const [flow, setFlow] = useState<FlowState>(emptyFlow);
+  // Remounts (tab switches, drawer reopens) reuse the cached layout for the
+  // current data synchronously, so the finished graph is on screen from the
+  // very first frame instead of after an async layout pass.
+  const laidOut = useRef<{ graphs: RelationshipGraph[] | undefined; hide: boolean } | null>(null);
+  const [flow, setFlow] = useState<FlowState>(() => {
+    const cached = cachedTopologyLayout(graphs, hideDisconnected);
+    if (!cached) return emptyFlow;
+    laidOut.current = { graphs, hide: hideDisconnected };
+    return toFlowState(cached);
+  });
   const [layoutPending, setLayoutPending] = useState(false);
   const instanceRef = useRef<ReactFlowInstance<TopologyFlowNode, TopologyFlowEdge> | null>(null);
 
   // ELK layout is async, so positions land in state instead of a useMemo.
   useEffect(() => {
+    if (laidOut.current && laidOut.current.graphs === graphs && laidOut.current.hide === hideDisconnected) return;
     let cancelled = false;
     setLayoutPending(true);
     layoutTopology(graphs, hideDisconnected)
       .then((layout) => {
         if (cancelled) return;
-        setFlow(toFlowState(layout));
-        setLayoutPending(false);
+        laidOut.current = { graphs, hide: hideDisconnected };
+        // Transition: rendering hundreds of nodes shouldn't block clicks/pans.
+        // layoutPending clears inside it so the loading state holds until the
+        // graph actually commits.
+        startTransition(() => {
+          setFlow(toFlowState(layout));
+          setLayoutPending(false);
+        });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -400,6 +417,14 @@ export default function TopologyGraphImpl({
     [activeSelectedNodeId, flow.edges],
   );
   const { warnings, problemNodes } = flow;
+  // keepPreviousData preserves the prior graph while a new scope is fetched.
+  // Keep it visible for a fast transition, but mark it as stale until both the
+  // request and layout for the current data have completed.
+  const layoutOutOfDate =
+    graphs !== undefined && (laidOut.current?.graphs !== graphs || laidOut.current.hide !== hideDisconnected);
+  const topologyPending = isPlaceholderData || layoutPending || layoutOutOfDate;
+  const loading = nodes.length === 0 && (isLoading || topologyPending);
+  const updating = nodes.length > 0 && topologyPending;
 
   const inspectNode = (node: Node) => {
     const graphNode = (node.data as TopologyNodeData).graphNode;
@@ -454,6 +479,7 @@ export default function TopologyGraphImpl({
           px: 0.5,
         },
       }}
+      aria-busy={loading || updating}
     >
       <ReactFlow
         nodes={nodes}
@@ -479,6 +505,7 @@ export default function TopologyGraphImpl({
         <Controls />
       </ReactFlow>
 
+      {!loading && !updating && (
       <Box
         sx={{
           position: 'absolute',
@@ -515,8 +542,9 @@ export default function TopologyGraphImpl({
           </Typography>
         )}
       </Box>
+      )}
 
-      {!isLoading && !layoutPending && nodes.length === 0 && (
+      {!isLoading && !topologyPending && nodes.length === 0 && (
         <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
           <Box sx={{ textAlign: 'center', px: 2 }}>
             <Typography variant="subtitle2">{emptyTitle}</Typography>
@@ -527,11 +555,40 @@ export default function TopologyGraphImpl({
         </Box>
       )}
 
-      {isLoading && (
-        <Box sx={{ position: 'absolute', left: 12, bottom: 12, bgcolor: 'background.paper', px: 1, py: 0.5, borderRadius: 1, border: 1, borderColor: 'divider', boxShadow: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            Loading topology…
-          </Typography>
+      {(loading || updating) && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 1,
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: updating ? 'auto' : 'none',
+            bgcolor: updating ? 'action.disabledBackground' : undefined,
+          }}
+        >
+          <Stack
+            spacing={1}
+            role="status"
+            aria-live="polite"
+            sx={{
+              alignItems: 'center',
+              ...(updating && {
+                bgcolor: 'background.paper',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                boxShadow: 2,
+                px: 2,
+                py: 1.5,
+              }),
+            }}
+          >
+            <CircularProgress size={24} />
+            <Typography variant="body2" color="text.secondary">
+              {updating ? 'Updating topology…' : 'Loading topology…'}
+            </Typography>
+          </Stack>
         </Box>
       )}
     </Box>

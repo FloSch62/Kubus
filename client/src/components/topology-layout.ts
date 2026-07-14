@@ -1,11 +1,14 @@
-import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js';
+import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk-api.js';
+import ElkWorker from 'elkjs/lib/elk-worker.min.js?worker';
 import type { GraphEdge, GraphNode, RelationshipGraph } from '@kubus/shared';
 
 export const NODE_WIDTH = 236;
 
 export const LAYERS: GraphNode['layer'][] = ['entry', 'route', 'service', 'workload', 'replicaset', 'pod', 'storage', 'node', 'operator', 'other'];
 
-const elk = new ELK();
+// The ELK engine is ~1.4MB of generated code; running it in a worker keeps
+// both its parse cost and the layout computation off the main thread.
+const elk = new ELK({ workerFactory: () => new ElkWorker() });
 
 const layerSpacing = 150;
 const nodeSpacing = 48;
@@ -65,11 +68,23 @@ function degreeMap(edges: GraphEdge[]): Map<string, number> {
   return degree;
 }
 
+// React Query's structural sharing keeps the graphs array reference stable
+// across refetches with identical data and across remounts, so keying on the
+// reference lets remounts (tab switches, drawer reopens) reuse the finished
+// layout instead of re-running ELK and the edge router.
+const layoutCache = new WeakMap<RelationshipGraph[], Map<boolean, TopologyLayout>>();
+
+export function cachedTopologyLayout(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean): TopologyLayout | undefined {
+  return graphs ? layoutCache.get(graphs)?.get(hideDisconnected) : undefined;
+}
+
 // Lays out each graph with ELK (layered, semantic layers pinned via
 // partitioning so columns keep their entry→…→other order), stacks the graphs
 // vertically, then routes every edge orthogonally around the node boxes so
 // lines never run underneath panels.
 export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean): Promise<TopologyLayout> {
+  const cached = cachedTopologyLayout(graphs, hideDisconnected);
+  if (cached) return cached;
   const placed: PlacedNode[] = [];
   const keptEdges: GraphEdge[] = [];
   const warnings: string[] = [];
@@ -137,12 +152,21 @@ export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hi
 
   const boxes = placed.map((p) => topologyNodeBox(p.node.id, p.position, p.node));
   const routes = routeEdges(boxes, keptEdges);
-  return {
+  const layout: TopologyLayout = {
     nodes: placed,
     edges: keptEdges.map((edge) => ({ edge, routePoints: routes.get(edge.id) ?? [] })),
     warnings,
     problemNodes,
   };
+  if (graphs) {
+    let byMode = layoutCache.get(graphs);
+    if (!byMode) {
+      byMode = new Map();
+      layoutCache.set(graphs, byMode);
+    }
+    byMode.set(hideDisconnected, layout);
+  }
+  return layout;
 }
 
 // Routes every edge from the right side of its source box to the left side of
