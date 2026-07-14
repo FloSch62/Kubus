@@ -49,15 +49,15 @@ export class ResourceWatcher {
   /** Resolves once the initial LIST populated the cache. */
   ready(): Promise<void> {
     if (!this.running) this.start();
-    this.initialList ??= this.listInto(this.cache)
-      .then(() => undefined)
-      .catch((err) => {
-        if (isUnavailable(err)) {
-          this.markUnavailable(err);
-          return;
-        }
-        throw err;
+    if (!this.initialList) {
+      const pending = this.listUntilReady();
+      this.initialList = pending;
+      // A stop or other terminal failure must not poison a later start with a
+      // permanently rejected cached promise.
+      void pending.catch(() => {
+        if (this.initialList === pending) this.initialList = undefined;
       });
+    }
     return this.initialList;
   }
 
@@ -130,6 +130,31 @@ export class ResourceWatcher {
 
   private path(query: URLSearchParams): string {
     return resourcePath(this.group, this.version, this.plural, { namespace: this.namespace || undefined, query });
+  }
+
+  /**
+   * Keep initial readiness pending across transient LIST failures. This lets
+   * subscribers survive an API connection reset and guarantees every retry is
+   * a fresh request instead of another await of the same rejected promise.
+   */
+  private async listUntilReady(): Promise<void> {
+    let backoff = MIN_BACKOFF_MS;
+    while (this.running) {
+      try {
+        await this.listInto(this.cache);
+        return;
+      } catch (err) {
+        if (!this.running) throw err;
+        if (isUnavailable(err)) {
+          this.markUnavailable(err);
+          return;
+        }
+        this.setState('reconnecting', err instanceof Error ? err.message : String(err));
+        await delay(backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+      }
+    }
+    throw new Error('watcher stopped before its initial list completed');
   }
 
   private async listInto(target: Map<string, KubeObject>): Promise<string> {
