@@ -1,14 +1,15 @@
 import Box from '@mui/material/Box';
 import CircleIcon from '@mui/icons-material/Circle';
 
-const GOOD = new Set(['Running', 'Succeeded', 'Active', 'Bound', 'Ready', 'Available', 'Completed', 'deployed', 'True']);
-const BAD = new Set(['Failed', 'CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'Error', 'Evicted', 'Lost', 'NotReady', 'failed', 'OOMKilled']);
-const WARN = new Set(['Pending', 'Terminating', 'ContainerCreating', 'PodInitializing', 'Released', 'Unknown', 'SchedulingDisabled', 'pending-install', 'pending-upgrade', 'superseded', 'uninstalling']);
+const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'completed', 'deployed', 'true', 'healthy', 'synced']);
+const BAD = new Set(['failed', 'crashloopbackoff', 'imagepullbackoff', 'errimagepull', 'error', 'evicted', 'lost', 'notready', 'oomkilled', 'false', 'unhealthy', 'degraded', 'stopped']);
+const WARN = new Set(['pending', 'terminating', 'containercreating', 'podinitializing', 'released', 'unknown', 'schedulingdisabled', 'pending-install', 'pending-upgrade', 'superseded', 'uninstalling']);
 
 export function statusColor(status: string): 'success' | 'error' | 'warning' | 'default' {
-  if (GOOD.has(status)) return 'success';
-  if (BAD.has(status)) return 'error';
-  if (WARN.has(status)) return 'warning';
+  const normalized = status.trim().toLowerCase();
+  if (GOOD.has(normalized)) return 'success';
+  if (BAD.has(normalized)) return 'error';
+  if (WARN.has(normalized)) return 'warning';
   return 'default';
 }
 
