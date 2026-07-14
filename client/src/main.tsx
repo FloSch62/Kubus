@@ -9,7 +9,10 @@ initAuthToken();
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    // staleTime keeps remounts (tab switches, pane reveals) from refetching
+    // data that a polled query refreshed moments ago; polling intervals are
+    // unaffected. Queries that need different freshness override it locally.
+    queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 },
   },
 });
 

@@ -83,7 +83,11 @@ function isLogTargetKind(kind: string): kind is LogTargetKind {
 
 export function RowActions({ target }: { target: RowActionTarget }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
 
+  // The menu wires up a dozen mutation hooks and store subscriptions, and one
+  // of these cells renders per visible row — mount it only once actually
+  // opened (anchor stays set through close so the fade-out still plays).
   return (
     <>
       <IconButton
@@ -91,11 +95,12 @@ export function RowActions({ target }: { target: RowActionTarget }) {
         onClick={(e) => {
           e.stopPropagation();
           setAnchor(e.currentTarget);
+          setOpen(true);
         }}
       >
         <MoreVertIcon fontSize="small" />
       </IconButton>
-      <RowActionMenu target={target} anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} />
+      {anchor && <RowActionMenu target={target} anchorEl={anchor} open={open} onClose={() => setOpen(false)} />}
     </>
   );
 }

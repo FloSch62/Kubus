@@ -58,9 +58,9 @@ async function restartReplicaSet(handle: ClusterHandle, namespace: string, name:
   if (selector) query.set('labelSelector', selector);
   const pods = await handle.raw.json<{ items: KubeObject[] }>(resourcePath('', 'v1', 'pods', { namespace, query }));
   const owned = pods.items.filter((p) => (p.metadata.ownerReferences ?? []).some((o) => o.uid === rsUid && o.controller));
-  for (const pod of owned) {
-    await handle.raw.json(resourcePath('', 'v1', 'pods', { namespace, name: pod.metadata.name }), { method: 'DELETE' });
-  }
+  const results = await Promise.allSettled(owned.map((pod) => handle.raw.json(resourcePath('', 'v1', 'pods', { namespace, name: pod.metadata.name }), { method: 'DELETE' })));
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 export async function setCronJobSuspend(handle: ClusterHandle, namespace: string, name: string, suspend: boolean): Promise<void> {

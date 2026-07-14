@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
@@ -17,7 +17,7 @@ import { tabMeta } from './tab-meta.js';
 // left active. Module-scoped so StrictMode's double effect doesn't re-restore.
 let sessionRestored = false;
 
-export function TabsBar() {
+export const TabsBar = memo(function TabsBar() {
   const tabs = useTabsStore((s) => s.tabs);
   const activeId = useTabsStore((s) => s.activeId);
   const selected = useClustersStore((s) => s.selected);
@@ -231,4 +231,4 @@ export function TabsBar() {
       </Menu>
     </Box>
   );
-}
+});

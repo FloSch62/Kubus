@@ -245,13 +245,36 @@ function globRegExp(want: string): RegExp {
   return re;
 }
 
+const creationMsCache = new WeakMap<KubeObject, number>();
+
+/** `Date.parse(creationTimestamp)`, cached per object (the timestamp is immutable). */
+function creationMs(obj: KubeObject): number {
+  let ms = creationMsCache.get(obj);
+  if (ms === undefined) {
+    ms = Date.parse(obj.metadata.creationTimestamp ?? '');
+    creationMsCache.set(obj, ms);
+  }
+  return ms;
+}
+
+const lowerKeysCache = new WeakMap<Record<string, string>, string[]>();
+
+function lowerKeys(map: Record<string, string>): string[] {
+  let keys = lowerKeysCache.get(map);
+  if (!keys) {
+    keys = Object.keys(map).map((k) => k.toLowerCase());
+    lowerKeysCache.set(map, keys);
+  }
+  return keys;
+}
+
 /** Match `label:key=value`, `label:key` (presence) with `*` globs in values. */
 function matchKeyValueMap(map: Record<string, string> | undefined, raw: string): boolean {
   if (!map) return false;
   const eq = raw.indexOf('=');
   if (eq === -1) {
     const rawLower = raw.toLowerCase();
-    return Object.keys(map).some((k) => k.toLowerCase().includes(rawLower));
+    return lowerKeys(map).some((k) => k.includes(rawLower));
   }
   const key = raw.slice(0, eq);
   const want = raw.slice(eq + 1);
@@ -370,7 +393,7 @@ function matchClauseValue(clause: FilterClause, value: string, row: ClusterRow, 
       const seconds = parseDuration(value);
       const created = obj.metadata.creationTimestamp;
       if (seconds === undefined || !created) return false;
-      const ageSeconds = (ctx.nowMs - Date.parse(created)) / 1000;
+      const ageSeconds = (ctx.nowMs - creationMs(obj)) / 1000;
       return compare(clause.op, ageSeconds, seconds);
     }
     case 'cpu':

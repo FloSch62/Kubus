@@ -30,7 +30,7 @@ import { useClustersStore } from '../state/clusters.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { StatusChip } from '../components/StatusChip.js';
-import { formatBytes, formatCpu } from '../components/Sparkline.js';
+import { formatBytes, formatCpu } from '../components/format.js';
 
 export function OverviewPage() {
   const selected = useClustersStore((s) => s.selected);

@@ -27,6 +27,6 @@ export const useLogPrefsStore = create<LogPrefsState>()(
       setTsMode: (tsMode) => set({ tsMode }),
       setHighlight: (highlight) => set({ highlight }),
     }),
-    { name: 'kubus-log-prefs', storage: createJSONStorage(() => kubusStateStorage) },
+    { name: 'kubus-log-prefs', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );

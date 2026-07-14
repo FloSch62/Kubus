@@ -14,6 +14,7 @@ import { SmartFilterInput } from './SmartFilterInput.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
 import type { MetricsLookup } from './columns.js';
 import { useUiPrefsStore } from '../state/prefs.js';
+import { usePaneActive } from '../layout/pane-context.js';
 
 function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -110,52 +111,66 @@ export function ResourceTable({
   useEffect(() => () => clearTimeout(commitTimer.current), []);
 
   const hiddenKey = (hiddenFields ?? []).join(',');
-  const [visibility, setVisibility] = useState<GridColumnVisibilityModel>({});
+  const visibilityFromHidden = () => Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []);
+  const [visibility, setVisibility] = useState<GridColumnVisibilityModel>(visibilityFromHidden);
+  // Reset user-edited visibility when the default-hidden set changes, without
+  // paying an extra effect-driven render pass.
+  const [prevHiddenKey, setPrevHiddenKey] = useState(hiddenKey);
+  if (prevHiddenKey !== hiddenKey) {
+    setPrevHiddenKey(hiddenKey);
+    setVisibility(visibilityFromHidden());
+  }
   const tableDensity = useUiPrefsStore((s) => s.tableDensity);
   // Retrieve this table's saved column widths (if any)
   const storedWidths = useUiPrefsStore((s) => (tableId ? s.columnWidths[tableId] : undefined));
   // Retrieve the action used to persist a column width
   const setColumnWidth = useUiPrefsStore((s) => s.setColumnWidth);
-  useEffect(() => {
-    setVisibility(Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []));
-  }, [hiddenKey]);
 
-  // Check the watchlist and rebuild the columns upon detected changes
+  // The copy-button wrapper is cached per column def so columns whose def did
+  // not change keep their identity across rebuilds (metrics polls swap only
+  // the metric columns) — the grid then skips re-rendering unchanged cells.
+  const wrappedColumnsRef = useRef(new WeakMap<GridColDef<ClusterRow>, { width: number | undefined; wrapped: GridColDef<ClusterRow> }>());
   const gridColumns = useMemo(() => {
-    const result: GridColDef<ClusterRow>[] = [];
-    for (const column of columns) {
-      let next = column;
-      let stored;
-      if (storedWidths) {
-        stored = storedWidths[column.field];
+    const cache = wrappedColumnsRef.current;
+    return columns.map((column) => {
+      const stored = storedWidths?.[column.field];
+      let entry = cache.get(column);
+      if (!entry || entry.width !== stored) {
+        // If a saved width exists, apply it on a copy of the column.
+        const base = stored !== undefined ? { ...column, width: stored, flex: undefined } : column;
+        // Adds the hover copy button and sets flex display on every column.
+        entry = { width: stored, wrapped: withCellCopy(base) };
+        cache.set(column, entry);
       }
-      // If a saved width exists, make a copy of the column with that width applied
-      if (stored !== undefined) {
-        next = { ...next, width: stored, flex: undefined };
-      }
-      // Adds the hover copy button and sets flex display on every column
-      result.push(withCellCopy(next));
-    }
-
-    // Hand back the whole adjusted list.
-    return result;
-  }, [columns, storedWidths]); // watch list
+      return entry.wrapped;
+    });
+  }, [columns, storedWidths]);
 
   // Filter on the deferred value so keystrokes render before the table does.
   const deferredFilter = useDeferredValue(inputValue);
-  const filtered = useMemo(() => {
+  const parsedFilter = useMemo(() => {
     const query = deferredFilter.trim();
-    if (!query) return rows;
-    const resourceKind = kind ?? 'Resource';
+    if (!query) return undefined;
     if (query.startsWith('/')) {
       const clauses = parseSmartFilter(query.slice(1));
-      if (!clauses.length) return rows;
-      const ctx = { kind: resourceKind, metrics: metricsLookup, nowMs: Date.now() };
+      if (!clauses.length) return undefined;
+      return { clauses, usesMetrics: clauses.some((c) => c.key === 'cpu' || c.key === 'mem' || c.key === 'memory') };
+    }
+    return { words: query.toLowerCase().split(/\s+/).filter(Boolean) };
+  }, [deferredFilter]);
+  // Metrics snapshots refresh on a poll; only re-filter for them when a
+  // cpu/mem clause actually reads metrics.
+  const metricsForFilter = parsedFilter?.usesMetrics ? metricsLookup : undefined;
+  const filtered = useMemo(() => {
+    if (!parsedFilter) return rows;
+    const resourceKind = kind ?? 'Resource';
+    const { clauses, words } = parsedFilter;
+    if (clauses) {
+      const ctx = { kind: resourceKind, metrics: metricsForFilter, nowMs: Date.now() };
       return rows.filter((r) => matchesSmartFilter(r, clauses, ctx));
     }
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return rows.filter((r) => matchesPlainText(r, words, resourceKind));
-  }, [rows, deferredFilter, kind, metricsLookup]);
+    return rows.filter((r) => matchesPlainText(r, words ?? [], resourceKind));
+  }, [rows, parsedFilter, kind, metricsForFilter]);
 
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
   const labelOptions = useMemo(() => labelSelectorOptions(rows), [rows]);
@@ -178,7 +193,11 @@ export function ResourceTable({
     });
   }, []);
 
+  // Tables in hidden tab panes stay mounted; only the visible one may own the
+  // global find/quick-search shortcuts (N listeners would also race focus).
+  const paneActive = usePaneActive();
   useEffect(() => {
+    if (!paneActive) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isTextEntryTarget(event.target)) return;
       const key = event.key.toLowerCase();
@@ -192,7 +211,7 @@ export function ResourceTable({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [focusSearch]);
+  }, [focusSearch, paneActive]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>

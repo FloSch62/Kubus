@@ -16,6 +16,6 @@ export const useAuditPrefsStore = create<AuditPrefsState>()(
       dismissCheck: (id) => set((s) => ({ dismissedChecks: s.dismissedChecks.includes(id) ? s.dismissedChecks : [...s.dismissedChecks, id] })),
       restoreCheck: (id) => set((s) => ({ dismissedChecks: s.dismissedChecks.filter((c) => c !== id) })),
     }),
-    { name: 'kubus-audit', storage: createJSONStorage(() => kubusStateStorage) },
+    { name: 'kubus-audit', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );

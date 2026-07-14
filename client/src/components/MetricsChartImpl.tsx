@@ -3,7 +3,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { useMetricsHistory } from '../api/queries.js';
-import { formatBytes, formatCpu } from './Sparkline.js';
+import { formatBytes, formatCpu } from './format.js';
 
 import type { MetricsChartProps } from './MetricsChart.js';
 

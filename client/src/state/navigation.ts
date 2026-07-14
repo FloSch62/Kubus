@@ -43,6 +43,6 @@ export const useNavigationStore = create<NavigationState>()(
         })),
       removeSavedView: (id) => set((s) => ({ savedViews: s.savedViews.filter((v) => v.id !== id) })),
     }),
-    { name: 'kubus-navigation', storage: createJSONStorage(() => kubusStateStorage) },
+    { name: 'kubus-navigation', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import { useLocation, useNavigate } from 'react-router';
 import { TopBar } from './TopBar.js';
@@ -9,19 +9,26 @@ import { BottomDock } from './BottomDock.js';
 import { useDockStore } from '../state/dock.js';
 import { useDetailStore } from '../state/detail.js';
 import { useTabsStore } from '../state/tabs.js';
-import { ResourceDetailDrawer } from '../components/ResourceDetailDrawer.js';
+
+// Lazy so the drawer's heavy deps (js-yaml, editors, charts) stay out of the
+// first paint; list pages pull the same module as a dependency anyway.
+const ResourceDetailDrawer = lazy(() => import('../components/ResourceDetailDrawer.js').then((m) => ({ default: m.ResourceDetailDrawer })));
 
 export function AppShell() {
   const dockOpen = useDockStore((s) => s.open);
   const dockHeight = useDockStore((s) => s.height);
   const maximized = useDockStore((s) => s.maximized);
-  const stack = useDetailStore((s) => s.stack);
+  const sel = useDetailStore((s) => s.stack.at(-1));
+  const hasParent = useDetailStore((s) => s.stack.length > 1);
   const back = useDetailStore((s) => s.back);
   const closeDetail = useDetailStore((s) => s.close);
+  // Mounted on first open, kept mounted after so close animations still play.
+  const [drawerMounted, setDrawerMounted] = useState(false);
   const dockRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const detailIsEmbedded = location.pathname.startsWith('/r/');
+  if (!drawerMounted && sel && !detailIsEmbedded) setDrawerMounted(true);
 
   // Closing the drawer via X/Escape/backdrop also drops the ?sel deep link
   // from the current tab's URL, so the tab doesn't reopen the drawer on its
@@ -77,7 +84,11 @@ export function AppShell() {
           </Box>
         </Box>
       </Box>
-      <ResourceDetailDrawer sel={detailIsEmbedded ? undefined : stack.at(-1)} onClose={handleDrawerClose} onBack={stack.length > 1 ? back : undefined} />
+      {drawerMounted && (
+        <Suspense fallback={null}>
+          <ResourceDetailDrawer sel={detailIsEmbedded ? undefined : sel} onClose={handleDrawerClose} onBack={hasParent ? back : undefined} />
+        </Suspense>
+      )}
     </Box>
   );
 }

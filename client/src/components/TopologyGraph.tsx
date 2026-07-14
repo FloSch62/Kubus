@@ -17,15 +17,6 @@ export interface TopologyGraphProps {
 const loadImpl = () => import('./TopologyGraphImpl.js');
 const TopologyGraphImpl = lazy(loadImpl);
 
-// This module ships in the main bundle (AppShell -> ResourceDetailDrawer), but
-// the implementation chunk is heavy (@xyflow/react + elkjs). Warm it during
-// browser idle time so opening Topology or a Map tab doesn't pay the download
-// and parse cost on the click path.
-if (typeof window !== 'undefined') {
-  const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1500));
-  idle(() => void loadImpl());
-}
-
 const graphLoading = (
   <Box sx={{ height: '100%', minHeight: 360, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'background.default', display: 'grid', placeItems: 'center' }}>
     <Stack spacing={1} sx={{ alignItems: 'center' }}>

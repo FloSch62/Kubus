@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Tab from '@mui/material/Tab';
@@ -14,7 +14,7 @@ import { clampDockHeight, useDockStore } from '../state/dock.js';
 import { TerminalPane } from '../components/TerminalPane.js';
 import { LogViewer } from '../components/LogViewer.js';
 
-export function BottomDock({ containerRef }: { containerRef: React.RefObject<HTMLDivElement | null> }) {
+export const BottomDock = memo(function BottomDock({ containerRef }: { containerRef: React.RefObject<HTMLDivElement | null> }) {
   const tabs = useDockStore((s) => s.tabs);
   const activeId = useDockStore((s) => s.activeId);
   const open = useDockStore((s) => s.open);
@@ -141,4 +141,4 @@ export function BottomDock({ containerRef }: { containerRef: React.RefObject<HTM
       </Box>
     </Box>
   );
-}
+});

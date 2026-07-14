@@ -1,9 +1,55 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { groupFromPath, type WatchServerMessage } from '@kubus/shared';
+import { groupFromPath, type KubeObject, type WatchServerMessage } from '@kubus/shared';
 import { watchClientMessageSchema } from '@kubus/shared/ws-protocol';
 import type { AppContext } from '../app.js';
 import { isSecretGVR, redactSecretData } from '../kube/redact.js';
+import type { ResourceWatcher, WatcherDelta } from '../kube/watcher.js';
+
+/**
+ * Per-watcher memo of serialized payload bodies, so redaction and
+ * JSON.stringify happen once per delta batch (or snapshot) instead of once
+ * per subscribed client — subscribers only differ in the envelope `id`.
+ */
+class SharedWatchJson {
+  private lastDeltas?: WatcherDelta[];
+  private lastEventsJson = '';
+  private snapshotRv?: string;
+  private snapshotJson = '';
+
+  constructor(private secrets: boolean) {}
+
+  /** emitDeltas hands every subscriber the same array, synchronously. */
+  eventsJson(deltas: WatcherDelta[]): string {
+    if (this.lastDeltas !== deltas) {
+      this.lastDeltas = deltas;
+      this.lastEventsJson = JSON.stringify(deltas.map((d) => ({ type: d.type, object: this.secrets ? redactSecretData(d.object) : d.object })));
+    }
+    return this.lastEventsJson;
+  }
+
+  /** Snapshot items keyed by resourceVersion; an empty rv is never reused. */
+  itemsJson(snap: { items: KubeObject[]; resourceVersion: string }): string {
+    if (!snap.resourceVersion || this.snapshotRv !== snap.resourceVersion) {
+      this.snapshotRv = snap.resourceVersion || undefined;
+      this.snapshotJson = JSON.stringify(this.secrets ? snap.items.map(redactSecretData) : snap.items);
+    }
+    return this.snapshotJson;
+  }
+}
+
+// Keyed by watcher identity so the memo dies with the watcher. The secrets
+// flag is a property of the watcher's GVR, so first-caller-wins is safe.
+const sharedJsonByWatcher = new WeakMap<ResourceWatcher, SharedWatchJson>();
+
+function sharedJsonFor(watcher: ResourceWatcher, secrets: boolean): SharedWatchJson {
+  let shared = sharedJsonByWatcher.get(watcher);
+  if (!shared) {
+    shared = new SharedWatchJson(secrets);
+    sharedJsonByWatcher.set(watcher, shared);
+  }
+  return shared;
+}
 
 // All open watch sockets — broadcast channel for drain/pf/context events.
 const openSockets = new Set<WebSocket>();
@@ -26,6 +72,9 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
 
     const send = (msg: WatchServerMessage) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
+    };
+    const sendRaw = (payload: string) => {
+      if (socket.readyState === socket.OPEN) socket.send(payload);
     };
 
     socket.on('message', (data: Buffer) => {
@@ -59,6 +108,8 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
         return;
       }
       const { watcher, release } = handle.watchers.acquire(group, msg.version, msg.plural, msg.namespace || undefined);
+      const shared = sharedJsonFor(watcher, secrets);
+      const idJson = JSON.stringify(msg.id);
 
       let unsubscribe: (() => void) | undefined;
       let stopped = false;
@@ -75,19 +126,10 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
         .then(() => {
           if (stopped) return;
           const snap = watcher.snapshot();
-          send({
-            op: 'snapshot',
-            id: msg.id,
-            resourceVersion: snap.resourceVersion,
-            items: secrets ? snap.items.map(redactSecretData) : snap.items,
-          });
+          sendRaw(`{"op":"snapshot","id":${idJson},"resourceVersion":${JSON.stringify(snap.resourceVersion)},"items":${shared.itemsJson(snap)}}`);
           unsubscribe = watcher.subscribe({
             onDeltas: (deltas) => {
-              send({
-                op: 'events',
-                id: msg.id,
-                events: deltas.map((d) => ({ type: d.type, object: secrets ? redactSecretData(d.object) : d.object })),
-              });
+              sendRaw(`{"op":"events","id":${idJson},"events":${shared.eventsJson(deltas)}}`);
             },
             onStatus: (state, message) => send({ op: 'status', id: msg.id, state, message }),
           });

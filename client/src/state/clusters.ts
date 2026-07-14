@@ -51,7 +51,7 @@ export const useClustersStore = create<ClustersState>()(
           contextSettings: { ...s.contextSettings, [ctx]: { ...s.contextSettings[ctx], ...patch } },
         })),
     }),
-    { name: 'kubus-clusters', storage: createJSONStorage(() => kubusStateStorage) },
+    { name: 'kubus-clusters', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );
 

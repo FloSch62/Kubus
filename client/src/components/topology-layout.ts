@@ -264,8 +264,12 @@ function buildRouteAdjacency(points: RoutePoint[], obstacles: LayoutBox[]): numb
   const columns = new Map<number, number[]>();
 
   points.forEach((point, index) => {
-    rows.set(point.y, [...(rows.get(point.y) ?? []), index]);
-    columns.set(point.x, [...(columns.get(point.x) ?? []), index]);
+    const row = rows.get(point.y);
+    if (row) row.push(index);
+    else rows.set(point.y, [index]);
+    const column = columns.get(point.x);
+    if (column) column.push(index);
+    else columns.set(point.x, [index]);
   });
 
   for (const row of rows.values()) {
@@ -416,18 +420,32 @@ function expandedBox(box: LayoutBox, padding: number): LayoutBox {
 
 function boxesBounds(boxes: LayoutBox[]): LayoutBox {
   if (!boxes.length) return { id: 'bounds', x: 0, y: 0, width: 0, height: 0 };
-  const minX = Math.min(...boxes.map((box) => box.x));
-  const minY = Math.min(...boxes.map((box) => box.y));
-  const maxX = Math.max(...boxes.map((box) => box.x + box.width));
-  const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+  // Single pass, no spread: Math.min(...arr) both re-iterates per extent and
+  // hits the engine argument limit on very large graphs.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    if (box.x < minX) minX = box.x;
+    if (box.y < minY) minY = box.y;
+    if (box.x + box.width > maxX) maxX = box.x + box.width;
+    if (box.y + box.height > maxY) maxY = box.y + box.height;
+  }
   return { id: 'bounds', x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 function pointsBounds(points: RoutePoint[]): LayoutBox {
-  const minX = Math.min(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxX = Math.max(...points.map((point) => point.x));
-  const maxY = Math.max(...points.map((point) => point.y));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
   return { id: 'bounds', x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 

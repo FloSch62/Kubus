@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { memo, useDeferredValue, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Drawer from '@mui/material/Drawer';
@@ -115,6 +115,10 @@ function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () =>
   );
 }
 
+// The topology impl chunk (@xyflow/react + elkjs) is heavy; warm it when the
+// user shows intent instead of unconditionally at idle for every session.
+const preloadTopology = () => void import('../components/TopologyGraphImpl.js');
+
 const VERSION_RE = /^v(\d+)(?:(alpha|beta)(\d+))?$/;
 
 function versionScore(version: string): [number, number, number] {
@@ -150,6 +154,7 @@ function NavEntry({
   icon,
   favorite,
   favoriteAction,
+  onIntent,
 }: {
   to: string;
   label: string;
@@ -157,6 +162,8 @@ function NavEntry({
   icon?: React.ReactElement;
   favorite?: FavoriteItem;
   favoriteAction?: ReactNode;
+  /** Fired on hover/focus — used to preload the target's heavy chunks. */
+  onIntent?: () => void;
 }) {
   const location = useLocation();
   const active = location.pathname === to;
@@ -170,6 +177,8 @@ function NavEntry({
       to={to}
       dense
       selected={active}
+      onMouseEnter={onIntent}
+      onFocus={onIntent}
       {...newTabHandlers}
       sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: subtitle ? 0.25 : 0.375, pr: favorite ? (favoriteAction ? 7 : 4) : undefined }}
     >
@@ -386,7 +395,7 @@ function FavoriteDragShell({
   );
 }
 
-export function NavDrawer() {
+export const NavDrawer = memo(function NavDrawer() {
   const selected = useClustersStore((s) => s.selected);
   const { data: apiResources } = useApiResourcesForContexts(selected);
   const favorites = useNavigationStore((s) => s.favorites);
@@ -552,7 +561,7 @@ export function NavDrawer() {
         <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
         <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
         <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
-        <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} />
+        <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
         <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
         <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
         <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
@@ -699,4 +708,4 @@ export function NavDrawer() {
       </List>
     </Drawer>
   );
-}
+});

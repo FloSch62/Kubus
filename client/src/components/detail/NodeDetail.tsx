@@ -12,7 +12,7 @@ import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, ConditionsTable } from './GenericDetail.js';
 import { PodMiniList } from './PodMiniList.js';
 import { StatusChip } from '../StatusChip.js';
-import { formatBytes } from '../Sparkline.js';
+import { formatBytes } from '../format.js';
 import { nodeRoles, nodeStatus, parseQuantity } from '../../kube-display.js';
 import { useResourceList } from '../../api/queries.js';
 

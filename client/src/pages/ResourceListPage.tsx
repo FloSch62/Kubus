@@ -22,7 +22,7 @@ import { useClustersStore } from '../state/clusters.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
-import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, METRIC_COLUMN_IDS } from '../components/columns.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
 import { RowActionMenu, RowActions, type RowActionTarget } from '../components/RowActions.js';
@@ -82,6 +82,9 @@ function DetailUrlSync({ sel }: { sel: ResourceSelection | undefined }) {
  * the selection.
  */
 function EmbeddedResourceDetail() {
+  // The detail stack is global and pages stay live in hidden panes — only the
+  // visible pane may render the (expensive) embedded panel.
+  const paneActive = usePaneActive();
   const stack = useDetailStore((s) => s.stack);
   const back = useDetailStore((s) => s.back);
   const close = useDetailStore((s) => s.close);
@@ -100,7 +103,7 @@ function EmbeddedResourceDetail() {
   }, [width, collapsed]);
 
   const sel = stack.at(-1);
-  if (!sel) return null;
+  if (!sel || !paneActive) return null;
 
   const handleClose = () => {
     close();
@@ -343,9 +346,14 @@ export function ResourceListPage() {
 
   const metricsLookup = useMemo(() => makeMetricsLookup(behaviorKind ?? 'Resource', podMetrics), [behaviorKind, podMetrics]);
 
-  const columns = useMemo(() => {
-    const ids = columnsForKind(behaviorKind ?? 'Resource', namespaced);
-    const opts = { multiCluster: selected.length > 1, metrics: metricsLookup, nodeAllocation, onLabelClick: addLabelFilter };
+  const columnIds = useMemo(() => columnsForKind(behaviorKind ?? 'Resource', namespaced), [behaviorKind, namespaced]);
+
+  // Static columns are built without the metrics/allocation lookups so the
+  // 20 s metrics poll (or, on Node lists, any pod churn) doesn't hand the
+  // grid a full set of fresh defs — that re-renders every visible cell.
+  const staticColumns = useMemo(() => {
+    const ids = columnIds.filter((id) => !METRIC_COLUMN_IDS.has(id));
+    const opts = { multiCluster: selected.length > 1, onLabelClick: addLabelFilter };
     const cols = buildColumns(ids, opts);
     if (isCustomKind && printerCols?.length) {
       const crdIdx = cols.findIndex((c) => c.field === 'age');
@@ -363,7 +371,35 @@ export function ResourceListPage() {
       renderCell: (p) => <RowActions target={rowActionTarget(p.row)} />,
     });
     return cols;
-  }, [behaviorKind, namespaced, selected.length, metricsLookup, nodeAllocation, isCustomKind, printerCols, rowActionTarget, addLabelFilter]);
+  }, [columnIds, selected.length, addLabelFilter, isCustomKind, printerCols, rowActionTarget]);
+
+  const metricColumns = useMemo(() => {
+    const ids = columnIds.filter((id) => METRIC_COLUMN_IDS.has(id));
+    if (!ids.length) return [];
+    return buildColumns(ids, { multiCluster: false, metrics: metricsLookup, nodeAllocation });
+  }, [columnIds, metricsLookup, nodeAllocation]);
+
+  const columns = useMemo(() => {
+    if (!metricColumns.length) return staticColumns;
+    const merged = [...staticColumns];
+    for (const col of metricColumns) {
+      // Insert before the first following non-metric column present in the
+      // merged list, falling back to just before the actions column.
+      const at = columnIds.indexOf(col.field);
+      let insertAt = merged.length - 1;
+      for (let i = at + 1; i < columnIds.length; i++) {
+        const id = columnIds[i]!;
+        if (METRIC_COLUMN_IDS.has(id)) continue;
+        const idx = merged.findIndex((c) => c.field === id);
+        if (idx !== -1) {
+          insertAt = idx;
+          break;
+        }
+      }
+      merged.splice(insertAt, 0, col);
+    }
+    return merged;
+  }, [staticColumns, metricColumns, columnIds]);
   const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
 
   const discoveryMissing = useMemo(() => {

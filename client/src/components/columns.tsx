@@ -10,7 +10,7 @@ import type { ClusterRow } from '../api/queries.js';
 import { AgeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
-import { formatBytes, formatCpu } from './Sparkline.js';
+import { formatBytes, formatCpu } from './format.js';
 import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podSummary, serviceLoadBalancerAddresses, servicePorts, workloadReady } from '../kube-display.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
@@ -37,27 +37,12 @@ function obj(row: ClusterRow): KubeObject {
   return row.obj;
 }
 
-const podSummaryCache = new WeakMap<KubeObject, ReturnType<typeof podSummary>>();
-
-function cachedPodSummary(o: KubeObject): ReturnType<typeof podSummary> {
-  let summary = podSummaryCache.get(o);
-  if (!summary) {
-    summary = podSummary(o);
-    podSummaryCache.set(o, summary);
-  }
-  return summary;
-}
-
-const eventFieldsCache = new WeakMap<KubeObject, ReturnType<typeof eventFields>>();
-
-function cachedEventFields(o: KubeObject): ReturnType<typeof eventFields> {
-  let fields = eventFieldsCache.get(o);
-  if (!fields) {
-    fields = eventFields(o);
-    eventFieldsCache.set(o, fields);
-  }
-  return fields;
-}
+/**
+ * Column ids whose defs close over the live metrics/allocation lookups.
+ * Callers build these separately from the static columns so a metrics poll
+ * swaps only these defs instead of invalidating the whole column set.
+ */
+export const METRIC_COLUMN_IDS = new Set(['cpu', 'memory', 'nodePods', 'nodeCpuUsage', 'nodeMemoryUsage', 'nodeCpuAllocation', 'nodeMemoryAllocation']);
 
 /** Build DataGrid column definitions from semantic column ids. */
 export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col[] {
@@ -113,17 +98,17 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     field: 'ready',
     headerName: 'Ready',
     width: 75,
-    valueGetter: (_v, row) => cachedPodSummary(obj(row)).ready,
+    valueGetter: (_v, row) => podSummary(obj(row)).ready,
     renderCell: (params) => <ReadyCounter value={String(params.value ?? '')} />,
   }),
   podStatus: () => ({
     field: 'podStatus',
     headerName: 'Status',
     width: 150,
-    valueGetter: (_v, row) => cachedPodSummary(obj(row)).status,
+    valueGetter: (_v, row) => podSummary(obj(row)).status,
     renderCell: (params) => (
       <>
-        <StatusChip status={cachedPodSummary(obj(params.row)).status} />
+        <StatusChip status={podSummary(obj(params.row)).status} />
         {hasRunningDebugContainer(obj(params.row)) && (
           <Tooltip title="A debug container is running in this pod">
             <BugReportOutlinedIcon color="warning" sx={{ fontSize: 15, ml: 0.5, verticalAlign: 'middle' }} />
@@ -137,13 +122,13 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Restarts',
     width: 80,
     type: 'number',
-    valueGetter: (_v, row) => cachedPodSummary(obj(row)).restarts,
+    valueGetter: (_v, row) => podSummary(obj(row)).restarts,
   }),
   node: () => ({
     field: 'node',
     headerName: 'Node',
     width: 150,
-    valueGetter: (_v, row) => cachedPodSummary(obj(row)).node ?? '',
+    valueGetter: (_v, row) => podSummary(obj(row)).node ?? '',
   }),
   cpu: (opts) => ({
     field: 'cpu',
@@ -494,41 +479,41 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     field: 'eventType',
     headerName: 'Type',
     width: 90,
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).type,
-    renderCell: (params) => <StatusChip status={cachedEventFields(obj(params.row)).type === 'Warning' ? 'Error' : 'Ready'} />,
+    valueGetter: (_v, row) => eventFields(obj(row)).type,
+    renderCell: (params) => <StatusChip status={eventFields(obj(params.row)).type === 'Warning' ? 'Error' : 'Ready'} />,
   }),
   eventReason: () => ({
     field: 'eventReason',
     headerName: 'Reason',
     width: 140,
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).reason,
+    valueGetter: (_v, row) => eventFields(obj(row)).reason,
   }),
   eventObject: () => ({
     field: 'eventObject',
     headerName: 'Object',
     width: 220,
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).object,
+    valueGetter: (_v, row) => eventFields(obj(row)).object,
   }),
   eventMessage: () => ({
     field: 'eventMessage',
     headerName: 'Message',
     flex: 2,
     minWidth: 240,
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).message,
+    valueGetter: (_v, row) => eventFields(obj(row)).message,
   }),
   eventCount: () => ({
     field: 'eventCount',
     headerName: 'Count',
     width: 70,
     type: 'number',
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).count,
+    valueGetter: (_v, row) => eventFields(obj(row)).count,
   }),
   eventLastSeen: () => ({
     field: 'eventLastSeen',
     headerName: 'Last seen',
     width: 95,
-    valueGetter: (_v, row) => cachedEventFields(obj(row)).lastSeen ?? '',
-    renderCell: (params) => <AgeCell timestamp={cachedEventFields(obj(params.row)).lastSeen} />,
+    valueGetter: (_v, row) => eventFields(obj(row)).lastSeen ?? '',
+    renderCell: (params) => <AgeCell timestamp={eventFields(obj(params.row)).lastSeen} />,
   }),
   hpaTarget: () => ({
     field: 'hpaTarget',
@@ -659,20 +644,40 @@ function RatioBarCell({ value, label }: { value?: number; label?: string }) {
   );
 }
 
-function nodeAllocatable(node: KubeObject, key: string): string | undefined {
-  return (node.status as { allocatable?: Record<string, string> } | undefined)?.allocatable?.[key];
+interface NodeAllocatable {
+  cpuMilli: number;
+  memoryBytes: number;
+  pods: number;
+}
+
+// Five node columns each parse allocatable quantities in both valueGetter and
+// renderCell; cache per object so a row parses its quantities once.
+const nodeAllocatableCache = new WeakMap<KubeObject, NodeAllocatable>();
+
+function nodeAllocatable(node: KubeObject): NodeAllocatable {
+  let alloc = nodeAllocatableCache.get(node);
+  if (!alloc) {
+    const raw = (node.status as { allocatable?: Record<string, string> } | undefined)?.allocatable;
+    alloc = {
+      cpuMilli: Math.round(parseQuantity(raw?.cpu) * 1000),
+      memoryBytes: Math.round(parseQuantity(raw?.memory)),
+      pods: Math.round(parseQuantity(raw?.pods)),
+    };
+    nodeAllocatableCache.set(node, alloc);
+  }
+  return alloc;
 }
 
 function nodeAllocatableCpuMilli(node: KubeObject): number {
-  return Math.round(parseQuantity(nodeAllocatable(node, 'cpu')) * 1000);
+  return nodeAllocatable(node).cpuMilli;
 }
 
 function nodeAllocatableMemoryBytes(node: KubeObject): number {
-  return Math.round(parseQuantity(nodeAllocatable(node, 'memory')));
+  return nodeAllocatable(node).memoryBytes;
 }
 
 function nodeAllocatablePods(node: KubeObject): number {
-  return Math.round(parseQuantity(nodeAllocatable(node, 'pods')));
+  return nodeAllocatable(node).pods;
 }
 
 function podNodeName(pod: KubeObject): string | undefined {
@@ -769,7 +774,15 @@ export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
   return cols.map((c, i): Col => {
     const numeric = c.type === 'integer' || c.type === 'number';
     const statusLike = /^(ready|readiness|state|status|phase|health|healthy|available)$/i.test(c.name.trim());
-    const value = (row: ClusterRow): unknown => evalPrinterColumnPath(row.obj, c.jsonPath);
+    // The JSONPath walk runs in valueGetter and again in renderCell, per row
+    // per grid pass; cache per object identity (watch updates replace objects).
+    const valueCache = new WeakMap<KubeObject, unknown>();
+    const value = (row: ClusterRow): unknown => {
+      if (valueCache.has(row.obj)) return valueCache.get(row.obj);
+      const v = evalPrinterColumnPath(row.obj, c.jsonPath);
+      valueCache.set(row.obj, v);
+      return v;
+    };
     return {
       field: `crd_${i}_${c.name}`,
       headerName: c.name,

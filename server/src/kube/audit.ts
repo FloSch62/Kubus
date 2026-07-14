@@ -437,6 +437,9 @@ export async function runAudit(handle: ClusterHandle): Promise<AuditReport> {
   const entries = await Promise.all(
     (Object.entries(KINDS) as Array<[keyof typeof KINDS, KindSpec]>).map(async ([key, spec]) => {
       try {
+        // Reuse a warm watcher cache when one is live instead of a fresh LIST.
+        const watcher = handle.watchers.peek(spec.group, spec.version, spec.plural);
+        if (watcher?.currentState() === 'live') return [key, watcher.items()] as const;
         const query = new URLSearchParams({ limit: '2000' });
         const list = await handle.raw.json<{ items?: KubeObject[] }>(resourcePath(spec.group, spec.version, spec.plural, { query }));
         return [key, list.items ?? []] as const;

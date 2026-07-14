@@ -134,6 +134,6 @@ export const useTabsStore = create<TabsState>()(
           return { activeId: active.id, tabs: s.tabs.map((t) => (t.id === active.id ? { ...t, path } : t)) };
         }),
     }),
-    { name: 'kubus-tabs', storage: createJSONStorage(() => debouncedStorage(kubusStateStorage, 250)) },
+    { name: 'kubus-tabs', version: 0, storage: createJSONStorage(() => debouncedStorage(kubusStateStorage, 250)) },
   ),
 );

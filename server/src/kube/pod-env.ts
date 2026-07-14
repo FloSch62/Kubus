@@ -37,15 +37,17 @@ export async function resolvePodEnv(handle: ClusterHandle, namespace: string, po
   const pod = await handle.raw.json<KubeObject>(resourcePath('', 'v1', 'pods', { namespace, name: podName }));
   const spec = (pod.spec ?? {}) as PodSpec;
 
-  // Each referenced ConfigMap/Secret is fetched once per call.
-  const cache = new Map<string, KubeObject | null>();
-  const fetchRef = async (plural: 'configmaps' | 'secrets', name: string): Promise<KubeObject | null> => {
+  // Each referenced ConfigMap/Secret is fetched once per call. The cache holds
+  // promises so concurrent resolvers share one in-flight fetch per ref.
+  const cache = new Map<string, Promise<KubeObject | null>>();
+  const fetchRef = (plural: 'configmaps' | 'secrets', name: string): Promise<KubeObject | null> => {
     const key = `${plural}/${name}`;
-    if (!cache.has(key)) {
-      const obj = await handle.raw.json<KubeObject>(resourcePath('', 'v1', plural, { namespace, name })).catch(() => null);
-      cache.set(key, obj);
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = handle.raw.json<KubeObject>(resourcePath('', 'v1', plural, { namespace, name })).catch(() => null);
+      cache.set(key, pending);
     }
-    return cache.get(key)!;
+    return pending;
   };
 
   const secretValue = (raw: string): string => (reveal ? Buffer.from(raw, 'base64').toString('utf8') : REDACTED);
@@ -90,75 +92,74 @@ export async function resolvePodEnv(handle: ClusterHandle, namespace: string, po
     return { value: String(Number.isInteger(value) ? value : Math.ceil(value)) };
   };
 
+  // Entries resolve concurrently into per-entry ordered slots, so the output
+  // order matches the spec exactly as the sequential version did.
   const resolveContainer = async (container: ContainerSpec): Promise<PodEnvVar[]> => {
-    const out: PodEnvVar[] = [];
-
-    for (const from of container.envFrom ?? []) {
-      const isSecret = !!from.secretRef;
-      const refName = from.configMapRef?.name ?? from.secretRef?.name;
-      if (!refName) continue;
-      const sourceType = isSecret ? 'secretRef' : 'configMapRef';
-      const obj = await fetchRef(isSecret ? 'secrets' : 'configmaps', refName);
-      if (!obj) {
-        const optional = from.configMapRef?.optional ?? from.secretRef?.optional;
-        if (!optional) out.push({ name: `${from.prefix ?? ''}*`, source: { type: sourceType, ref: refName }, error: `${isSecret ? 'secret' : 'configmap'} ${refName} not found` });
-        continue;
-      }
-      const data = (obj.data ?? {}) as Record<string, string>;
-      for (const [key, raw] of Object.entries(data)) {
-        out.push({
+    const fromSlots = await Promise.all(
+      (container.envFrom ?? []).map(async (from): Promise<PodEnvVar[]> => {
+        const isSecret = !!from.secretRef;
+        const refName = from.configMapRef?.name ?? from.secretRef?.name;
+        if (!refName) return [];
+        const sourceType = isSecret ? 'secretRef' : 'configMapRef';
+        const obj = await fetchRef(isSecret ? 'secrets' : 'configmaps', refName);
+        if (!obj) {
+          const optional = from.configMapRef?.optional ?? from.secretRef?.optional;
+          if (!optional) return [{ name: `${from.prefix ?? ''}*`, source: { type: sourceType, ref: refName }, error: `${isSecret ? 'secret' : 'configmap'} ${refName} not found` }];
+          return [];
+        }
+        const data = (obj.data ?? {}) as Record<string, string>;
+        return Object.entries(data).map(([key, raw]) => ({
           name: `${from.prefix ?? ''}${key}`,
           value: isSecret ? secretValue(raw) : raw,
           source: { type: sourceType, ref: refName, key },
           redacted: isSecret || undefined,
-        });
-      }
-    }
+        }));
+      }),
+    );
 
-    for (const env of container.env ?? []) {
-      if (env.value !== undefined) {
-        out.push({ name: env.name, value: env.value, source: { type: 'literal' } });
-        continue;
-      }
-      const vf = env.valueFrom;
-      if (vf?.configMapKeyRef) {
-        const { name: refName, key, optional } = vf.configMapKeyRef;
-        const obj = await fetchRef('configmaps', refName);
-        const raw = (obj?.data as Record<string, string> | undefined)?.[key];
-        if (raw === undefined) {
-          if (!optional) out.push({ name: env.name, source: { type: 'configMapKeyRef', ref: refName, key }, error: `configmap key ${refName}/${key} not found` });
-        } else {
-          out.push({ name: env.name, value: raw, source: { type: 'configMapKeyRef', ref: refName, key } });
+    const envSlots = await Promise.all(
+      (container.env ?? []).map(async (env): Promise<PodEnvVar[]> => {
+        if (env.value !== undefined) {
+          return [{ name: env.name, value: env.value, source: { type: 'literal' } }];
         }
-      } else if (vf?.secretKeyRef) {
-        const { name: refName, key, optional } = vf.secretKeyRef;
-        const obj = await fetchRef('secrets', refName);
-        const raw = (obj?.data as Record<string, string> | undefined)?.[key];
-        if (raw === undefined) {
-          if (!optional) out.push({ name: env.name, source: { type: 'secretKeyRef', ref: refName, key }, error: `secret key ${refName}/${key} not found` });
-        } else {
-          out.push({ name: env.name, value: secretValue(raw), source: { type: 'secretKeyRef', ref: refName, key }, redacted: true });
+        const vf = env.valueFrom;
+        if (vf?.configMapKeyRef) {
+          const { name: refName, key, optional } = vf.configMapKeyRef;
+          const obj = await fetchRef('configmaps', refName);
+          const raw = (obj?.data as Record<string, string> | undefined)?.[key];
+          if (raw === undefined) {
+            return optional ? [] : [{ name: env.name, source: { type: 'configMapKeyRef', ref: refName, key }, error: `configmap key ${refName}/${key} not found` }];
+          }
+          return [{ name: env.name, value: raw, source: { type: 'configMapKeyRef', ref: refName, key } }];
         }
-      } else if (vf?.fieldRef) {
-        const value = resolveFieldRef(vf.fieldRef.fieldPath);
-        out.push({ name: env.name, value, source: { type: 'fieldRef', key: vf.fieldRef.fieldPath }, error: value === undefined ? 'unresolvable fieldPath' : undefined });
-      } else if (vf?.resourceFieldRef) {
-        const { value, error } = resolveResourceFieldRef(container, vf.resourceFieldRef);
-        out.push({ name: env.name, value, source: { type: 'resourceFieldRef', key: vf.resourceFieldRef.resource }, error });
-      } else {
-        out.push({ name: env.name, error: 'unknown valueFrom source' });
-      }
-    }
+        if (vf?.secretKeyRef) {
+          const { name: refName, key, optional } = vf.secretKeyRef;
+          const obj = await fetchRef('secrets', refName);
+          const raw = (obj?.data as Record<string, string> | undefined)?.[key];
+          if (raw === undefined) {
+            return optional ? [] : [{ name: env.name, source: { type: 'secretKeyRef', ref: refName, key }, error: `secret key ${refName}/${key} not found` }];
+          }
+          return [{ name: env.name, value: secretValue(raw), source: { type: 'secretKeyRef', ref: refName, key }, redacted: true }];
+        }
+        if (vf?.fieldRef) {
+          const value = resolveFieldRef(vf.fieldRef.fieldPath);
+          return [{ name: env.name, value, source: { type: 'fieldRef', key: vf.fieldRef.fieldPath }, error: value === undefined ? 'unresolvable fieldPath' : undefined }];
+        }
+        if (vf?.resourceFieldRef) {
+          const { value, error } = resolveResourceFieldRef(container, vf.resourceFieldRef);
+          return [{ name: env.name, value, source: { type: 'resourceFieldRef', key: vf.resourceFieldRef.resource }, error }];
+        }
+        return [{ name: env.name, error: 'unknown valueFrom source' }];
+      }),
+    );
 
-    return out;
+    return [...fromSlots.flat(), ...envSlots.flat()];
   };
 
-  const containers: PodEnvResponse['containers'] = [];
-  for (const c of spec.initContainers ?? []) {
-    containers.push({ name: c.name, init: true, env: await resolveContainer(c) });
-  }
-  for (const c of spec.containers ?? []) {
-    containers.push({ name: c.name, env: await resolveContainer(c) });
-  }
+  const [initContainers, mainContainers] = await Promise.all([
+    Promise.all((spec.initContainers ?? []).map(async (c) => ({ name: c.name, init: true, env: await resolveContainer(c) }))),
+    Promise.all((spec.containers ?? []).map(async (c) => ({ name: c.name, env: await resolveContainer(c) }))),
+  ]);
+  const containers: PodEnvResponse['containers'] = [...initContainers, ...mainContainers];
   return { containers };
 }

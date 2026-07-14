@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { kubusStateStorage } from './persist-storage.js';
@@ -42,12 +43,18 @@ export const useUiPrefsStore = create<UiPrefsState>()(
           columnWidths: { ...state.columnWidths, [tableId]: { ...state.columnWidths[tableId], [field]: width } },
         })),
     }),
-    { name: 'kubus-prefs', storage: createJSONStorage(() => kubusStateStorage) },
+    { name: 'kubus-prefs', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),
 );
 
-/** Scale a polled query's base interval by the user's refresh-rate preset. */
+/**
+ * Scale a polled query's base interval by the user's refresh-rate preset.
+ * A stable per-mount ±10% jitter decorrelates the timers of components that
+ * poll with the same base (e.g. one overview section per cluster), so many
+ * clusters don't fire synchronized request bursts.
+ */
 export function useRefetchInterval(base: number): number | false {
   const rate = useUiPrefsStore((s) => s.refreshRate);
-  return rate === 'off' ? false : base * REFRESH_FACTOR[rate];
+  const [jitter] = useState(() => 0.9 + Math.random() * 0.2);
+  return rate === 'off' ? false : Math.round(base * REFRESH_FACTOR[rate] * jitter);
 }

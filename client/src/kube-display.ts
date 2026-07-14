@@ -14,7 +14,23 @@ export interface PodSummary {
   node?: string;
 }
 
+const podSummaryCache = new WeakMap<KubeObject, PodSummary>();
+
+/**
+ * Summarize a pod for display. Cached per object identity: watch updates
+ * replace the object, so a given instance's summary never changes. Callers
+ * must treat the result as read-only.
+ */
 export function podSummary(pod: KubeObject): PodSummary {
+  let summary = podSummaryCache.get(pod);
+  if (!summary) {
+    summary = computePodSummary(pod);
+    podSummaryCache.set(pod, summary);
+  }
+  return summary;
+}
+
+function computePodSummary(pod: KubeObject): PodSummary {
   const status = pod.status as
     | {
         phase?: string;
@@ -134,7 +150,28 @@ export function jobStatus(job: KubeObject): { completions: string; duration: str
   return { completions, duration };
 }
 
-export function eventFields(e: KubeObject): { type: string; reason: string; object: string; message: string; count: number; lastSeen?: string } {
+export interface EventFields {
+  type: string;
+  reason: string;
+  object: string;
+  message: string;
+  count: number;
+  lastSeen?: string;
+}
+
+const eventFieldsCache = new WeakMap<KubeObject, EventFields>();
+
+/** Extract display fields from an Event. Cached per object identity; treat the result as read-only. */
+export function eventFields(e: KubeObject): EventFields {
+  let fields = eventFieldsCache.get(e);
+  if (!fields) {
+    fields = computeEventFields(e);
+    eventFieldsCache.set(e, fields);
+  }
+  return fields;
+}
+
+function computeEventFields(e: KubeObject): EventFields {
   const ev = e as KubeObject & {
     type?: string;
     reason?: string;

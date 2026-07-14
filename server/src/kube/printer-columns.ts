@@ -11,6 +11,7 @@ interface Crd {
 }
 
 const TTL_MS = 5 * 60_000;
+const CACHE_MAX = 500;
 const cache = new Map<string, { at: number; columns: PrinterColumn[] }>();
 const COLUMN_TYPES = new Set(['string', 'integer', 'number', 'boolean', 'date']);
 
@@ -22,7 +23,13 @@ const COLUMN_TYPES = new Set(['string', 'integer', 'number', 'boolean', 'date'])
 export async function getPrinterColumns(handle: ClusterHandle, group: string, version: string, plural: string): Promise<PrinterColumn[]> {
   const key = `${handle.contextName}|${group}/${version}/${plural}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.columns;
+  if (hit) {
+    cache.delete(key);
+    if (Date.now() - hit.at < TTL_MS) {
+      cache.set(key, hit); // refresh LRU position
+      return hit.columns;
+    }
+  }
 
   let columns: PrinterColumn[] = [];
   try {
@@ -39,6 +46,10 @@ export async function getPrinterColumns(handle: ClusterHandle, group: string, ve
       }));
   } catch {
     // 404 (builtin kind / no CRD access) → no extra columns
+  }
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
   }
   cache.set(key, { at: Date.now(), columns });
   return columns;

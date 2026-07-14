@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePaneActive } from '../layout/pane-context.js';
 import type {
   ClusterOverview,
   ContextInfo,
@@ -302,8 +303,42 @@ export function useWatchedList(contexts: string[], group: string, version: strin
   const [state, setState] = useState<WatchedListState>({ rows: [], status: {} });
   // Per-ctx object maps live in a ref; state is derived on each change.
   const mapsRef = useRef(new Map<string, Map<string, KubeObject>>());
+  // Hidden panes keep their subscriptions (the maps stay current) but defer
+  // the React commit: at scale every 100 ms watch flush would otherwise
+  // re-render a full DataGrid per hidden pane. On reveal the pending rebuild
+  // runs once, so revealed tabs are fresh within one commit.
+  const paneActive = usePaneActive();
+  const paneActiveRef = useRef(paneActive);
+  paneActiveRef.current = paneActive;
+  const pendingRef = useRef(false);
 
   const key = `${contexts.join(',')}|${group}/${version}/${plural}`;
+
+  const rebuild = useCallback(() => {
+    const rows: ClusterRow[] = [];
+    for (const [ctx, objects] of mapsRef.current) {
+      for (const obj of objects.values()) rows.push({ ctx, obj });
+    }
+    setState((prev) => {
+      if (prev.rows.length === rows.length && prev.rows.every((r, i) => r.obj === rows[i]!.obj && r.ctx === rows[i]!.ctx)) return prev;
+      return { rows, status: prev.status };
+    });
+  }, []);
+
+  const commit = useCallback(() => {
+    if (!paneActiveRef.current) {
+      pendingRef.current = true;
+      return;
+    }
+    rebuild();
+  }, [rebuild]);
+
+  useEffect(() => {
+    if (paneActive && pendingRef.current) {
+      pendingRef.current = false;
+      rebuild();
+    }
+  }, [paneActive, rebuild]);
 
   useEffect(() => {
     const maps = mapsRef.current;
@@ -319,17 +354,6 @@ export function useWatchedList(contexts: string[], group: string, version: strin
       status: Object.fromEntries(contexts.map((c) => [c, prev.status[c] ?? { state: 'loading' as const }])),
     }));
 
-    const rebuild = () => {
-      const rows: ClusterRow[] = [];
-      for (const [ctx, objects] of maps) {
-        for (const obj of objects.values()) rows.push({ ctx, obj });
-      }
-      setState((prev) => {
-        if (prev.rows.length === rows.length && prev.rows.every((r, i) => r.obj === rows[i]!.obj && r.ctx === rows[i]!.ctx)) return prev;
-        return { rows, status: prev.status };
-      });
-    };
-
     const unsubs = contexts.map((ctx) => {
       const objects = new Map<string, KubeObject>();
       maps.set(ctx, objects);
@@ -339,14 +363,14 @@ export function useWatchedList(contexts: string[], group: string, version: strin
           onSnapshot: (items) => {
             objects.clear();
             for (const item of items) objects.set(item.metadata.uid, item);
-            rebuild();
+            commit();
           },
           onEvents: (events) => {
             for (const ev of events) {
               if (ev.type === 'DELETED') objects.delete(ev.object.metadata.uid);
               else objects.set(ev.object.metadata.uid, ev.object);
             }
-            rebuild();
+            commit();
           },
           onStatus: (s, message) => {
             setState((prev) => {
@@ -362,7 +386,7 @@ export function useWatchedList(contexts: string[], group: string, version: strin
       for (const unsub of unsubs) unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, commit]);
 
   return state;
 }
