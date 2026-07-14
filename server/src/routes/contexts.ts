@@ -10,7 +10,7 @@ const setSshHostSchema = z.object({
     .string()
     .trim()
     .max(256)
-    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
+    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
     .nullable()
     .or(z.literal('')),
 });
@@ -28,7 +28,7 @@ const editClusterSchema = z.object({
     .string()
     .trim()
     .max(256)
-    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
+    .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port')
     .nullable()
     .or(z.literal(''))
     .optional(),

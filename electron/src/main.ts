@@ -370,7 +370,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(async () => {
+  void app.whenReady().then(async () => {
     try {
       server = await startServer({
         port: 0,

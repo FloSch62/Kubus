@@ -162,7 +162,7 @@ export class PortForwardManager extends EventEmitter {
   }
 
   stopAll(): void {
-    for (const id of [...this.forwards.keys()]) {
+    for (const id of this.forwards.keys()) {
       try {
         this.stop(id);
       } catch {

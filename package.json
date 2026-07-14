@@ -15,11 +15,14 @@
     "dist": "pnpm build && pnpm --filter @kubus/electron dist",
     "typecheck": "pnpm -r typecheck",
     "smoke": "node hack/smoke-server.mjs",
-    "lint": "pnpm -r lint",
+    "lint": "oxlint . --deny-warnings",
+    "lint:perf": "oxlint client/src -W perf",
     "serve-docs": "uvx --native-tls zensical serve --open",
     "build-docs": "uvx --native-tls zensical build --clean"
   },
   "devDependencies": {
+    "oxlint": "^1.73.0",
+    "oxlint-tsgolint": "^0.24.0",
     "playwright-core": "^1.61.1",
     "typescript": "^6.0.3"
   }

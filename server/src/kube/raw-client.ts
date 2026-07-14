@@ -40,8 +40,10 @@ export class RawClient {
     hash.update(agent.constructor?.name ?? '');
     hash.update('\0').update(cluster?.server ?? '');
     hash.update('\0').update(cluster?.proxyUrl ?? '');
-    hash.update('\0').update(String(agent.options.rejectUnauthorized ?? ''));
-    hash.update('\0').update(String(agent.options.servername ?? ''));
+    const rejectUnauthorized = agent.options.rejectUnauthorized;
+    hash.update('\0').update(typeof rejectUnauthorized === 'boolean' ? String(rejectUnauthorized) : '');
+    const servername = agent.options.servername;
+    hash.update('\0').update(typeof servername === 'string' ? servername : '');
     for (const field of ['ca', 'cert', 'key', 'pfx'] as const) {
       hash.update('\0');
       const value = agent.options[field];
@@ -82,7 +84,7 @@ export class RawClient {
     } else if (applied) {
       Object.assign(baseHeaders, applied as Record<string, string>);
     }
-    requestInit.headers = { ...baseHeaders, ...(init?.headers ?? {}) };
+    requestInit.headers = { ...baseHeaders, ...init?.headers };
     return fetch(this.serverUrl() + path, requestInit);
   }
 

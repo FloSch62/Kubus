@@ -195,8 +195,11 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
           {data.warningEvents.length > 0 && (
             <ProblemCard title="Warning events (1h)">
               <Stack spacing={0.5}>
-                {data.warningEvents.slice(0, 15).map((e, i) => (
-                  <Typography key={i} variant="body2">
+                {data.warningEvents.slice(0, 15).map((e) => (
+                  <Typography
+                    key={`${e.namespace}/${e.involvedKind}/${e.involvedName}/${e.reason}/${e.lastTimestamp ?? ''}/${e.message}`}
+                    variant="body2"
+                  >
                     <Typography component="span" variant="body2" sx={{ color: 'warning.main', fontWeight: 600 }}>
                       {e.reason}
                     </Typography>

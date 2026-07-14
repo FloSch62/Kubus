@@ -568,8 +568,8 @@ export default function TopologyGraphImpl({
           }}
         >
           <Stack
+            component="output"
             spacing={1}
-            role="status"
             aria-live="polite"
             sx={{
               alignItems: 'center',
@@ -585,7 +585,7 @@ export default function TopologyGraphImpl({
             }}
           >
             <CircularProgress size={24} />
-            <Typography variant="body2" color="text.secondary">
+            <Typography component="span" variant="body2" color="text.secondary">
               {updating ? 'Updating topology…' : 'Loading topology…'}
             </Typography>
           </Stack>

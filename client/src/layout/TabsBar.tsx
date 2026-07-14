@@ -40,7 +40,7 @@ export function TabsBar() {
       sessionRestored = true;
       const active = store.tabs.find((t) => t.id === store.activeId);
       if (active && current === '/' && active.path !== '/') {
-        navigate(active.path, { replace: true });
+        void navigate(active.path, { replace: true });
         return;
       }
     }
@@ -56,7 +56,7 @@ export function TabsBar() {
     mutate();
     const s = useTabsStore.getState();
     const active = s.tabs.find((t) => t.id === s.activeId);
-    if (active && active.path !== current) navigate(active.path);
+    if (active && active.path !== current) void navigate(active.path);
   };
 
   const metas = useMemo(() => new Map(tabs.map((t) => [t.id, tabMeta(t.path, apiResources?.resources)])), [tabs, apiResources]);
@@ -93,6 +93,7 @@ export function TabsBar() {
               ref={active ? activeTabRef : undefined}
               role="tab"
               aria-selected={active}
+              tabIndex={active ? 0 : -1}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move';
@@ -114,6 +115,12 @@ export function TabsBar() {
                 setDragId(null);
               }}
               onClick={() => act(() => useTabsStore.getState().setActive(tab.id))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  act(() => useTabsStore.getState().setActive(tab.id));
+                }
+              }}
               onAuxClick={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();

@@ -28,13 +28,16 @@ export class ApiError extends Error {
   }
 }
 
+function authHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init);
+  if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`);
+  return headers;
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {}),
-    },
+    headers: authHeaders(init?.headers),
   });
   const text = await res.text();
   let body: unknown;
@@ -54,10 +57,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(path, {
     ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {}),
-    },
+    headers: authHeaders(init?.headers),
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;

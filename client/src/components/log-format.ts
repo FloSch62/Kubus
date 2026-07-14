@@ -13,7 +13,9 @@ export interface Seg {
   cls?: 'key' | 'str' | 'num' | 'bool' | 'punct';
 }
 
+// oxlint-disable-next-line no-control-regex -- ESC is intentional: this expression parses ANSI sequences.
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/;
+// oxlint-disable-next-line no-control-regex -- ESC is intentional: this expression parses ANSI sequences.
 const ANSI_RE_G = /\x1b\[[0-9;]*[A-Za-z]/g;
 
 export function stripAnsi(line: string): string {
@@ -90,6 +92,7 @@ function applySgr(state: SgrState, params: number[]): void {
   }
 }
 
+// oxlint-disable-next-line no-control-regex -- ESC is intentional: this expression parses ANSI sequences.
 const CSI_RE = /\x1b\[([0-9;]*)([A-Za-z])/g;
 
 function parseAnsi(line: string): Seg[] {

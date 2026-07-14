@@ -21,7 +21,7 @@ const FAILURE_HOLDOFF_MS = 20_000;
 const STDERR_KEEP_LINES = 12;
 
 /** SSH destinations we accept: an ssh_config alias, [user@]host or ssh://user@host:port — no options smuggling. */
-const SSH_DESTINATION_RE = /^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/;
+const SSH_DESTINATION_RE = /^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:[\]-]*$/;
 
 export function isValidSshDestination(dest: string): boolean {
   return dest.length > 0 && dest.length <= 256 && SSH_DESTINATION_RE.test(dest);

@@ -35,7 +35,7 @@ export function AppShell() {
     const params = new URLSearchParams(search);
     if (params.has('sel')) {
       params.delete('sel');
-      navigate({ pathname, search: params.toString() }, { replace: true });
+      void navigate({ pathname, search: params.toString() }, { replace: true });
     }
   }, [closeDetail, navigate]);
 
@@ -55,7 +55,7 @@ export function AppShell() {
         pages.closeTab(pages.activeId);
         const next = useTabsStore.getState();
         const active = next.tabs.find((t) => t.id === next.activeId);
-        if (active) navigate(active.path);
+        if (active) void navigate(active.path);
         return;
       }
       desktop.closeWindow();

@@ -51,7 +51,7 @@ function useOpenInNewTab(to: string) {
   const open = (e: React.MouseEvent, foreground: boolean) => {
     e.preventDefault();
     openTab(to, { activate: foreground, afterActive: true });
-    if (foreground) navigate(to);
+    if (foreground) void navigate(to);
   };
   return {
     onClick: (e: React.MouseEvent) => {
@@ -88,14 +88,11 @@ function favoriteGvk(favorite: FavoriteItem, resources: ResourceKindInfo[]): str
   return resource ? gvkLabel(resource) : favorite.subtitle;
 }
 
-// Star toggle revealed on row hover (always visible once active). Rendered as a
-// <span> so it can sit inside a ListItemButton (group header) without nesting buttons.
+// Star toggle revealed on row hover (always visible once active).
 function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () => void; label: string }) {
   return (
     <Tooltip title={active ? 'Remove favorite' : 'Add favorite'}>
       <IconButton
-        component="span"
-        role="button"
         aria-label={label}
         size="small"
         className="fav-star"
@@ -259,28 +256,39 @@ function GroupHeader({
   favoriteAction?: ReactNode;
 }) {
   return (
-    <ListItemButton
-      dense
-      onClick={onClick}
-      sx={{ mt: 1.25, py: 0.25, color: 'text.secondary', pr: favorite ? 5.5 : undefined, '&:hover .fav-star': { opacity: 1 } }}
+    <ListItem
+      disablePadding
+      secondaryAction={
+        favorite || favoriteAction ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+            {favoriteAction}
+            {favorite && (
+              <FavStar
+                active={favorite.active}
+                onToggle={favorite.onToggle}
+                label={`${favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
+              />
+            )}
+          </Box>
+        ) : undefined
+      }
+      sx={{ mt: 1.25, '&:hover .fav-star': { opacity: 1 }, '& .MuiListItemSecondaryAction-root': { right: 4 } }}
     >
-      <ListItemIcon sx={{ minWidth: 26, color: 'inherit', '& svg': { fontSize: 16 } }}>{icon}</ListItemIcon>
-      <ListItemText
-        primary={title}
-        slotProps={{ primary: { variant: 'body2', sx: { fontWeight: 600, fontSize: 12.5, color: 'text.secondary' } } }}
-      />
-      {favorite && (
-        <FavStar
-          active={favorite.active}
-          onToggle={favorite.onToggle}
-          label={`${favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
+      <ListItemButton
+        dense
+        onClick={onClick}
+        sx={{ py: 0.25, color: 'text.secondary', pr: favoriteAction ? 8 : favorite ? 5.5 : undefined }}
+      >
+        <ListItemIcon sx={{ minWidth: 26, color: 'inherit', '& svg': { fontSize: 16 } }}>{icon}</ListItemIcon>
+        <ListItemText
+          primary={title}
+          slotProps={{ primary: { variant: 'body2', sx: { fontWeight: 600, fontSize: 12.5, color: 'text.secondary' } } }}
         />
-      )}
-      {favoriteAction}
-      <ExpandMoreIcon
-        sx={{ fontSize: 16, opacity: 0.6, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
-      />
-    </ListItemButton>
+        <ExpandMoreIcon
+          sx={{ fontSize: 16, opacity: 0.6, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
+        />
+      </ListItemButton>
+    </ListItem>
   );
 }
 
@@ -303,7 +311,6 @@ function FavoriteDragHandle({
   return (
     <Tooltip title="Drag to reorder">
       <IconButton
-        component="span"
         aria-label={`Reorder favorite ${favorite.title}`}
         size="small"
         draggable

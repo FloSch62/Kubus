@@ -46,11 +46,17 @@ interface EventRow {
 }
 
 function maxTime(...ts: Array<string | undefined>): string | undefined {
-  return ts.filter(Boolean).sort().at(-1);
+  return ts
+    .filter((t): t is string => t !== undefined)
+    .sort((a, b) => a.localeCompare(b))
+    .at(-1);
 }
 
 function minTime(...ts: Array<string | undefined>): string | undefined {
-  return ts.filter(Boolean).sort().at(0);
+  return ts
+    .filter((t): t is string => t !== undefined)
+    .sort((a, b) => a.localeCompare(b))
+    .at(0);
 }
 
 /** Merge repeated events: same cluster, involved object, reason and message. */

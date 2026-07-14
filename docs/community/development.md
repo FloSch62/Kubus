@@ -53,6 +53,7 @@ pnpm dist           # packages installers for the current platform → electron/
 ```bash
 pnpm typecheck
 pnpm lint
+pnpm lint:perf     # optional performance audit; reports suggestions without failing
 ```
 
 ## See also

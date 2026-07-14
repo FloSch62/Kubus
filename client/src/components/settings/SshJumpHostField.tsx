@@ -9,7 +9,7 @@ import type { SshConfigHost } from '@kubus/shared';
 import { useSshInfo } from '../../api/queries.js';
 
 /** Mirrors the server-side check: an ssh config alias, user@host or ssh://user@host:port — nothing option-like. */
-export const SSH_DESTINATION_RE = /^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:\[\]-]*$/;
+export const SSH_DESTINATION_RE = /^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:[\]-]*$/;
 
 function sshUnavailableHint(platform: string): string {
   if (platform === 'win32') return 'Install it via Settings → System → Optional features → "OpenSSH Client", then restart Kubus.';

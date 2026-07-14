@@ -781,7 +781,9 @@ export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
         if (v === undefined) return numeric ? null : '';
         if (numeric) return typeof v === 'number' ? v : Number(v);
         if (typeof v === 'object') return JSON.stringify(v).slice(0, 200);
-        return String(v);
+        if (typeof v === 'string') return v;
+        if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+        return '';
       },
       renderCell:
         c.type === 'date'

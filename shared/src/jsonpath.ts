@@ -31,10 +31,17 @@ export function evalPrinterColumnPath(obj: unknown, jsonPath: string): unknown {
   const defined = values.filter((v) => v !== undefined && v !== null);
   if (defined.length === 0) return undefined;
   if (defined.length === 1) return defined[0];
-  return defined.map((v) => (typeof v === 'object' ? JSON.stringify(v) : String(v))).join(',');
+  return defined
+    .map((v) => {
+      if (typeof v === 'object') return JSON.stringify(v);
+      if (typeof v === 'string') return v;
+      if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+      return '';
+    })
+    .join(',');
 }
 
-type Segment = string | number | '*';
+type Segment = string | number;
 
 const parsedPathCache = new Map<string, Segment[] | undefined>();
 const INDEX_RE = /^-?\d+$/;

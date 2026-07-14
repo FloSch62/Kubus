@@ -9,7 +9,16 @@ import { copyToClipboard } from '../clipboard.js';
 export function cellCopyText(value: unknown): string {
   if (value == null) return '';
   if (value instanceof Date) return value.toISOString();
-  return String(value).trim();
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)?.trim() ?? '';
+    } catch {
+      return '';
+    }
+  }
+  return '';
 }
 
 const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) {

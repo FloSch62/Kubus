@@ -366,12 +366,11 @@ export function ResourceListPage() {
   }, [behaviorKind, namespaced, selected.length, metricsLookup, nodeAllocation, isCustomKind, printerCols, rowActionTarget, addLabelFilter]);
   const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
 
-  const supportsGvr = (r: ResourceKindInfo) => r.group === group && r.version === version && r.plural === plural;
   const discoveryMissing = useMemo(() => {
     if (!apiResources) return [];
     return selected.filter((ctx) => {
       if (apiResources.errors[ctx]) return false;
-      return !(apiResources.byContext[ctx] ?? []).some(supportsGvr);
+      return !(apiResources.byContext[ctx] ?? []).some((r) => r.group === group && r.version === version && r.plural === plural);
     });
   }, [apiResources, selected, group, version, plural]);
   const unavailable = Object.entries(list.status).filter(([, s]) => s.state === 'unavailable');

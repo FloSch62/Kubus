@@ -163,21 +163,21 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     if (row.type === 'action') {
       if (!stage) return;
       if (row.action.kind === 'detail') {
-        navigate(detailPathForRef(stage.ref));
+        void navigate(detailPathForRef(stage.ref));
         closeAll();
         return;
       }
       const { action } = row;
       const { ref } = stage;
       closeAll();
-      runAction(action, ref)
+      void runAction(action, ref)
         .then((text) => setToast({ severity: 'success', text }))
         .catch((err: unknown) => setToast({ severity: 'error', text: err instanceof Error ? err.message : String(err) }));
       return;
     }
     const item = row.result;
     const path = item.ref ? detailPathForRef(item.ref) : item.path ?? '/';
-    navigate(path);
+    void navigate(path);
     closeAll();
   };
 

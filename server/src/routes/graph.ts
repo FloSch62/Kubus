@@ -42,10 +42,6 @@ interface RelationHint {
   selector?: Record<string, string>;
 }
 
-interface LabelSelector {
-  matchLabels?: Record<string, string>;
-}
-
 interface FocusQuery {
   namespace?: string;
   focusGroup?: string;
@@ -105,7 +101,8 @@ function statusFor(kind: string, obj: KubeObject): { status: GraphNodeStatus; re
     return ready >= desired ? { status: 'success' } : { status: 'warning', reason: `${ready}/${desired} ready` };
   }
   if (kind === 'Job') {
-    if ((st.failed as number | undefined) && !st.active) return { status: 'error', reason: `${st.failed} failed` };
+    const failed = st.failed as number | undefined;
+    if (failed && !st.active) return { status: 'error', reason: `${failed} failed` };
     if ((st.succeeded as number | undefined) && !st.active) return { status: 'success' };
     return { status: 'unknown' };
   }

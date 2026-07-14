@@ -17,7 +17,7 @@ import { PageHeader } from '../components/PageHeader.js';
 
 export function PortForwardsPage() {
   const { data, isLoading } = usePortForwards();
-  const stop = useStopPortForward();
+  const { mutate: stop } = useStopPortForward();
 
   const columns: GridColDef<PortForwardInfo>[] = useMemo(() => {
     const defs: GridColDef<PortForwardInfo>[] = [
@@ -55,7 +55,7 @@ export function PortForwardsPage() {
         sortable: false,
         renderCell: (p) => (
           <Tooltip title="Stop forward">
-            <IconButton size="small" color="error" onClick={() => stop.mutate(p.row.id)}>
+            <IconButton size="small" color="error" onClick={() => stop(p.row.id)}>
               <StopIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -63,7 +63,7 @@ export function PortForwardsPage() {
       },
     ];
     return defs.map(withCellCopy);
-  }, [stop.mutate]);
+  }, [stop]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>

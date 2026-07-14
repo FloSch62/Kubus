@@ -135,8 +135,8 @@ export async function rerunJob(handle: ClusterHandle, namespace: string, name: s
   if (!src.spec) throw new HttpProblem(422, 'job has no spec');
   const jobName = `${name}-rerun-${Math.floor(Date.now() / 1000)}`.slice(0, 63);
   const spec = JSON.parse(JSON.stringify(src.spec)) as typeof src.spec;
-  const labels = { ...(src.metadata?.labels ?? {}) };
-  const annotations = { ...(src.metadata?.annotations ?? {}) };
+  const labels = { ...src.metadata?.labels };
+  const annotations = { ...src.metadata?.annotations };
   delete annotations['kubectl.kubernetes.io/last-applied-configuration'];
   delete annotations['batch.kubernetes.io/job-tracking'];
   if (!spec.manualSelector) {
