@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ClusterOverview,
   ContextInfo,
@@ -749,8 +749,12 @@ export interface TopologyFocus {
   depth?: number;
 }
 
-export function useTopologyGraphs(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
-  return useQuery({
+/**
+ * Shared between useTopologyGraphs and the prefetch in TopologyGraph, which
+ * starts this fetch while the heavy graph chunk is still downloading.
+ */
+export function topologyGraphsOptions(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+  return queryOptions({
     queryKey: ['topology-graphs', contexts, namespaces, focus],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -770,8 +774,16 @@ export function useTopologyGraphs(contexts: string[], namespaces: string[], focu
       );
       return graphs;
     },
+    staleTime: 15_000,
+  });
+}
+
+export function useTopologyGraphs(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+  return useQuery({
+    ...topologyGraphsOptions(contexts, namespaces, focus),
     enabled: contexts.length > 0,
     refetchInterval: useRefetchInterval(20_000),
+    placeholderData: keepPreviousData,
   });
 }
 
