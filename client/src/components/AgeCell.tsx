@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import type { TypographyProps } from '@mui/material/Typography';
 
 const tickListeners = new Set<() => void>();
 let tickTimer: number | undefined;
@@ -41,12 +42,12 @@ export function formatAge(timestamp: string | undefined): string {
 }
 
 /** Live-ticking relative age. */
-export function AgeCell({ timestamp }: { timestamp?: string }) {
+export function AgeCell({ timestamp, variant = 'body2' }: { timestamp?: string; variant?: TypographyProps['variant'] }) {
   useSyncExternalStore(subscribeTick, getTick);
   if (!timestamp) return null;
   return (
     <Tooltip title={new Date(timestamp).toLocaleString()}>
-      <Typography variant="body2" component="span">
+      <Typography variant={variant} component="span">
         {formatAge(timestamp)}
       </Typography>
     </Tooltip>

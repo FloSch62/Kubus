@@ -162,7 +162,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack }: Props) {
                 {obj && (
                   <>
                     {' · '}
-                    <AgeCell timestamp={obj.metadata.creationTimestamp} /> old
+                    <AgeCell timestamp={obj.metadata.creationTimestamp} variant="caption" /> old
                   </>
                 )}
               </Typography>

@@ -8,6 +8,7 @@ interface NavigationState {
   savedViews: SavedView[];
   addFavorite: (item: FavoriteItem) => void;
   removeFavorite: (id: string) => void;
+  moveFavorite: (id: string, targetId: string, position: 'before' | 'after') => void;
   isFavorite: (id: string) => boolean;
   addSavedView: (view: SavedView) => void;
   removeSavedView: (id: string) => void;
@@ -23,6 +24,18 @@ export const useNavigationStore = create<NavigationState>()(
           favorites: [item, ...s.favorites.filter((f) => f.id !== item.id)].slice(0, 40),
         })),
       removeFavorite: (id) => set((s) => ({ favorites: s.favorites.filter((f) => f.id !== id) })),
+      moveFavorite: (id, targetId, position) =>
+        set((s) => {
+          if (id === targetId) return s;
+          const moving = s.favorites.find((f) => f.id === id);
+          if (!moving) return s;
+          const withoutMoving = s.favorites.filter((f) => f.id !== id);
+          const targetIndex = withoutMoving.findIndex((f) => f.id === targetId);
+          if (targetIndex === -1) return s;
+          const next = [...withoutMoving];
+          next.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, moving);
+          return { favorites: next };
+        }),
       isFavorite: (id) => get().favorites.some((f) => f.id === id),
       addSavedView: (view) =>
         set((s) => ({
