@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubeObject, WatchEventType, WatchStatusState } from '@kubus/shared';
-import { RawClient, resourcePath } from './raw-client.js';
+import { RawClient, isRetryableTransportError, resourcePath } from './raw-client.js';
 
 export interface WatcherDelta {
   type: WatchEventType;
@@ -20,6 +20,7 @@ interface WatchLine {
 
 const MIN_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
+const RETRYABLE_LIST_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 /**
  * Generic list+watch for one (gvr, namespace) on one cluster. Maintains an
@@ -149,6 +150,7 @@ export class ResourceWatcher {
           this.markUnavailable(err);
           return;
         }
+        if (!isRetryableListError(err)) throw err;
         this.setState('reconnecting', err instanceof Error ? err.message : String(err));
         await delay(backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
@@ -296,6 +298,12 @@ function isGone(err: unknown): boolean {
 function isUnavailable(err: unknown): boolean {
   const code = (err as { code?: number })?.code;
   return code === 404;
+}
+
+function isRetryableListError(err: unknown): boolean {
+  if (isRetryableTransportError(err)) return true;
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === 'number' && RETRYABLE_LIST_STATUS_CODES.has(code);
 }
 
 function missingResourceMessage(group: string, version: string, plural: string, err: unknown): string {

@@ -150,7 +150,7 @@ export class RawClient {
   }
 }
 
-function isRetryableTransportError(err: unknown): boolean {
+export function isRetryableTransportError(err: unknown): boolean {
   let current: unknown = err;
   // Fetch implementations sometimes wrap the underlying system error in one
   // or more `cause` objects. Keep this deliberately code-based so certificate,
