@@ -65,7 +65,19 @@ const TabPane = memo(function TabPane({ id, path, active }: { id: string; path: 
     [value],
   );
   return (
-    <Box aria-hidden={active ? undefined : true} sx={{ position: 'absolute', inset: 0, visibility: active ? 'visible' : 'hidden' }}>
+    <Box
+      aria-hidden={active ? undefined : true}
+      sx={{
+        position: 'absolute',
+        inset: 0,
+        visibility: active ? 'visible' : 'hidden',
+        // visibility is overridable by descendants: DataGrid re-shows a sorted
+        // column's sort arrow (`.columnHeader--sorted .iconButtonContainer`),
+        // which would paint through the active pane. Pin the whole hidden
+        // subtree down; !important outbids MUI's more specific selector.
+        ...(active ? null : { '& *': { visibility: 'hidden !important' } }),
+      }}
+    >
       <PaneActiveContext.Provider value={active}>{children}</PaneActiveContext.Provider>
     </Box>
   );
