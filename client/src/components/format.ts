@@ -8,3 +8,8 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 2 ** 10) return `${(bytes / 2 ** 10).toFixed(0)}Ki`;
   return `${bytes}B`;
 }
+
+export function formatBps(bytesPerSec: number): string {
+  if (bytesPerSec > 0 && bytesPerSec < 1) return '<1B/s';
+  return `${formatBytes(Math.round(bytesPerSec))}/s`;
+}

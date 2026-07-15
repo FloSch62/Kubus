@@ -43,6 +43,7 @@ nav = [
     { "Port forwarding" = "guide/port-forwarding.md" },
     { "Copying files" = "guide/copying-files.md" },
     { "Metrics & health" = "guide/metrics.md" },
+    { "Network metrics" = "guide/network-metrics.md" },
     { "Events" = "guide/events.md" },
     { "Security audit" = "guide/security-audit.md" },
     { "Helm releases" = "guide/helm.md" },

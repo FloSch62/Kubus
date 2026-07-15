@@ -18,6 +18,7 @@ import { registerActionRoutes } from './routes/actions.js';
 import { registerDetailRoutes } from './routes/detail.js';
 import { registerSchemaRoutes } from './routes/schema.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
+import { registerNetworkMetricsRoutes } from './routes/network-metrics.js';
 import { registerHelmRoutes } from './routes/helm.js';
 import { registerPortForwardRoutes } from './routes/portforward.js';
 import { registerGraphRoutes } from './routes/graph.js';
@@ -99,6 +100,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerDetailRoutes(app, ctx);
   registerSchemaRoutes(app, ctx);
   registerMetricsRoutes(app, ctx);
+  registerNetworkMetricsRoutes(app, ctx);
   registerHelmRoutes(app, ctx);
   registerPortForwardRoutes(app, ctx);
   registerGraphRoutes(app, ctx);

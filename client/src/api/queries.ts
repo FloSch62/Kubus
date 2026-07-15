@@ -17,6 +17,10 @@ import type {
   MetricsServerStatus,
   MetricsServerUninstallResult,
   MetricsSnapshot,
+  ClusterNetworkSummary,
+  NetworkAgentInstallResult,
+  NetworkAgentStatus,
+  NetworkAgentUninstallResult,
   PortForwardInfo,
   PortForwardRequest,
   ResourceKindInfo,
@@ -762,6 +766,49 @@ export function useUninstallMetricsServer() {
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<MetricsServerUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`, { method: 'DELETE' }),
     onSuccess: () => invalidateMetricsServer(qc),
+  });
+}
+
+// ---- network metrics / network-agent install / uninstall ----
+
+export function useNetworkSummary(ctx: string) {
+  return useQuery({
+    queryKey: ['network-summary', ctx],
+    queryFn: () => apiFetch<ClusterNetworkSummary>(`/api/contexts/${encodeURIComponent(ctx)}/network-metrics/summary`),
+    refetchInterval: useRefetchInterval(20_000),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useNetworkAgentStatus(ctx: string, opts?: { refetchMs?: number }) {
+  return useQuery({
+    queryKey: ['network-agent-status', ctx],
+    queryFn: () => apiFetch<NetworkAgentStatus>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent`),
+    refetchInterval: useRefetchInterval(opts?.refetchMs ?? 30_000),
+    retry: false,
+  });
+}
+
+function invalidateNetworkAgent(qc: ReturnType<typeof useQueryClient>): void {
+  void qc.invalidateQueries({ queryKey: ['network-agent-status'] });
+  void qc.invalidateQueries({ queryKey: ['network-summary'] });
+}
+
+export function useInstallNetworkAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx }: { ctx: string }) =>
+      apiFetch<NetworkAgentInstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent/install`, { method: 'POST' }),
+    onSuccess: () => invalidateNetworkAgent(qc),
+  });
+}
+
+export function useUninstallNetworkAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx }: { ctx: string }) =>
+      apiFetch<NetworkAgentUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent`, { method: 'DELETE' }),
+    onSuccess: () => invalidateNetworkAgent(qc),
   });
 }
 

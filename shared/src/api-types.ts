@@ -560,6 +560,94 @@ export interface ClusterMetricsSummary {
   podCount: number;
 }
 
+// ---- Network metrics (network agent) ----
+
+export interface NetworkAgentStatus {
+  /** The kubus-network-agent DaemonSet exists in the cluster. */
+  installed: boolean;
+  /** The DaemonSet carries the Kubus managed-by label. */
+  managedByKubus: boolean;
+  /** At least one agent pod is ready. */
+  ready: boolean;
+  /** Image tag of the agent container, when the DaemonSet exists. */
+  version?: string;
+  nodesReady: number;
+  nodesDesired: number;
+  /** The network poller is currently getting traffic data. */
+  metricsAvailable: boolean;
+}
+
+export interface NetworkAgentInstallResult {
+  applied: string[];
+}
+
+export interface NetworkAgentUninstallResult {
+  deleted: string[];
+  failed: Array<{ resource: string; error: string }>;
+}
+
+export interface NetworkSample {
+  /** epoch millis */
+  t: number;
+  /** bytes per second leaving this pod */
+  sentBps: number;
+  /** bytes per second arriving at this pod */
+  recvBps: number;
+}
+
+export interface NetworkThroughputSample {
+  /** epoch millis */
+  t: number;
+  /** total observed bytes per second, each flow counted once */
+  bps: number;
+}
+
+export interface NetworkSeriesEntry {
+  name: string;
+  namespace?: string;
+  series: NetworkSample[];
+}
+
+export type NetworkPeerKind = 'pod' | 'service' | 'node' | 'external';
+
+export interface NetworkPeer {
+  kind: NetworkPeerKind;
+  namespace?: string;
+  /** Pod/service/node name, or the raw IP for external peers. */
+  name: string;
+}
+
+/**
+ * Observed traffic between two endpoints, direction-neutral (the agent sees
+ * packets, not who connected to whom). Rates are per-second deltas between
+ * the last two agent scrapes. Pod endpoints sort before non-pod ones.
+ */
+export interface NetworkLink {
+  a: NetworkPeer;
+  b: NetworkPeer;
+  /** bytes per second a→b */
+  abBps: number;
+  /** bytes per second b→a */
+  baBps: number;
+  retransmitsPerSec: number;
+  /** dropped bytes per second (network policy denies, conntrack, …) */
+  droppedBps: number;
+}
+
+export interface ClusterNetworkSummary {
+  available: boolean;
+  agentsReady: number;
+  agentsDesired: number;
+  /** All link rates summed per poll tick — the cluster-wide series. */
+  clusterSeries: NetworkThroughputSample[];
+  topPodsSent: NetworkSeriesEntry[];
+  topPodsRecv: NetworkSeriesEntry[];
+  /** Busiest links by total rate (capped); linkCount is the uncapped total. */
+  links: NetworkLink[];
+  linkCount: number;
+  podCount: number;
+}
+
 // ---- Overview ----
 
 export interface OverviewProblemPod {

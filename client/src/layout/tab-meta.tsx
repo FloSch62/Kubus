@@ -5,6 +5,7 @@ import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined';
+import NetworkCheckOutlinedIcon from '@mui/icons-material/NetworkCheckOutlined';
 import AppsOutlinedIcon from '@mui/icons-material/AppsOutlined';
 import LanOutlinedIcon from '@mui/icons-material/LanOutlined';
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
@@ -31,6 +32,7 @@ const STATIC_PAGES: Record<string, { title: string; icon: React.ReactElement }> 
   '/audit': { title: 'Security Audit', icon: <GppMaybeOutlinedIcon /> },
   '/topology': { title: 'Topology', icon: <AccountTreeOutlinedIcon /> },
   '/metrics': { title: 'Metrics', icon: <QueryStatsOutlinedIcon /> },
+  '/network': { title: 'Network Metrics', icon: <NetworkCheckOutlinedIcon /> },
   '/helm': { title: 'Helm Releases', icon: <SailingOutlinedIcon /> },
   '/forwards': { title: 'Port Forwards', icon: <CableOutlinedIcon /> },
   '/diff': { title: 'Diff', icon: <DifferenceOutlinedIcon /> },

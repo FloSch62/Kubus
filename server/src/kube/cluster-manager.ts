@@ -21,6 +21,7 @@ import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
+import { NetworkMetricsPoller } from './network-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
@@ -42,6 +43,7 @@ export class ClusterHandle {
   readonly discovery: DiscoveryCache;
   readonly watchers: WatcherRegistry;
   readonly metricsPoller: MetricsPoller;
+  readonly networkPoller: NetworkMetricsPoller;
   readonly searchIndex: ResourceSearchIndex;
   health: ContextInfo['health'] = 'connecting';
   healthMessage?: string;
@@ -69,6 +71,8 @@ export class ClusterHandle {
     this.discovery = new DiscoveryCache(this.raw);
     this.watchers = new WatcherRegistry(this.raw, log);
     this.metricsPoller = new MetricsPoller(new Metrics(this.kc), log);
+    this.networkPoller = new NetworkMetricsPoller(this.raw, this.watchers, log);
+    this.networkPoller.handle = this;
     this.searchIndex = new ResourceSearchIndex(this.discovery, this.raw, log);
   }
 
@@ -126,6 +130,7 @@ export class ClusterHandle {
     if (this.activated) return;
     this.activated = true;
     this.metricsPoller.start();
+    this.networkPoller.start();
     // Pin overview watchers (never released; cheap and shared with the UI).
     this.watchers.acquire('', 'v1', 'pods');
     this.watchers.acquire('apps', 'v1', 'deployments');
@@ -139,6 +144,7 @@ export class ClusterHandle {
   dispose(): void {
     if (this.searchIndexWarmup) clearTimeout(this.searchIndexWarmup);
     this.metricsPoller.stop();
+    this.networkPoller.stop();
     this.watchers.stopAll();
     this.searchIndex.dispose();
   }

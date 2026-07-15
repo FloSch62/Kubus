@@ -14,6 +14,7 @@ const PortForwardsPage = lazy(() => import('./pages/PortForwardsPage.js').then((
 const DiffPage = lazy(() => import('./pages/DiffPage.js').then((m) => ({ default: m.DiffPage })));
 const TopologyPage = lazy(() => import('./pages/TopologyPage.js').then((m) => ({ default: m.TopologyPage })));
 const MetricsPage = lazy(() => import('./pages/MetricsPage.js').then((m) => ({ default: m.MetricsPage })));
+const NetworkMetricsPage = lazy(() => import('./pages/NetworkMetricsPage.js').then((m) => ({ default: m.NetworkMetricsPage })));
 const EventsPage = lazy(() => import('./pages/EventsPage.js').then((m) => ({ default: m.EventsPage })));
 const AuditPage = lazy(() => import('./pages/AuditPage.js').then((m) => ({ default: m.AuditPage })));
 
@@ -47,6 +48,7 @@ export function PageRoutes() {
       <Route path="/diff" element={page(<DiffPage />)} />
       <Route path="/topology" element={page(<TopologyPage />)} />
       <Route path="/metrics" element={page(<MetricsPage />)} />
+      <Route path="/network" element={page(<NetworkMetricsPage />)} />
       <Route path="/events" element={page(<EventsPage />)} />
       <Route path="/audit" element={page(<AuditPage />)} />
       <Route path="*" element={<PaneCatchAll />} />
