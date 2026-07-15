@@ -15,6 +15,9 @@ you get little trend charts rather than a single instantaneous number.
 
 ## Where you'll see metrics
 
+- **Metrics page** — the sidebar entry below Topology: cluster-wide CPU/memory trends,
+  per-node lines, top pods, and a per-namespace breakdown for every selected cluster.
+  If a cluster has no metrics-server yet, the page offers a one-click install instead.
 - **Details drawer → Metrics tab** — for **Pods** and **Nodes**, live CPU/memory charts
   with the current value called out.
 - **Resource lists** — CPU and memory columns on the Pods list.
@@ -23,20 +26,32 @@ you get little trend charts rather than a single instantaneous number.
 History accumulates while Kubus is open, so the first samples appear within ~20 seconds of
 opening a chart and fill in from there.
 
-## Enabling metrics-server
+## Installing metrics-server from Kubus
 
-Metrics need the cluster add-on installed:
+If a cluster has no metrics-server, Kubus can install it for you — no `kubectl` or
+Helm required:
+
+- On the **Overview** page, the *Node usage* card shows an **Install metrics-server**
+  button whenever usage data is unavailable.
+- The install dialog has one option: **Skip kubelet TLS verification**
+  (`--kubelet-insecure-tls`). Enable it on local/dev clusters — kind, minikube,
+  docker-desktop — whose kubelets serve self-signed certificates.
+
+Kubus applies the official pinned `components.yaml` (Deployment, Service, RBAC and the
+`metrics.k8s.io` APIService in `kube-system`) via server-side apply, and labels the
+resources as managed by Kubus. Graphs appear within a minute of the pod becoming ready.
+Re-running the install is safe — it re-applies the same manifest, which also repairs a
+broken install.
+
+To remove it again, use the **Uninstall** button in the Metrics page header. If the
+metrics-server wasn't installed by Kubus (k3s bundles one; cloud distributions often
+manage their own), Kubus warns you first — your distribution may recreate it or expect
+removal through its own tooling.
+
+Prefer the CLI? The equivalent manual install:
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-```
-
-On kind (and some self-managed clusters) the kubelet serves its metrics with a
-self-signed cert, so metrics-server needs to skip verification:
-
-```bash
-kubectl -n kube-system patch deploy metrics-server --type=json \
-  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 ```
 
 !!! note "No metrics-server? No problem."

@@ -22,6 +22,7 @@ import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
@@ -562,6 +563,7 @@ export const NavDrawer = memo(function NavDrawer() {
         <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
         <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
         <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
+        <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
         <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
         <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
         <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />

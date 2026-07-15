@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import type { MetricsHistoryResponse, MetricsSnapshot } from '@kubus/shared';
+import type { MetricsHistoryResponse, MetricsServerInstallRequest, MetricsSnapshot } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { computeOverview } from '../kube/overview.js';
+import { installMetricsServer, metricsServerStatus, uninstallMetricsServer } from '../kube/metrics-server.js';
+import { computeMetricsSummary } from '../kube/metrics-summary.js';
 import { cpuToMilli, memToBytes } from '../kube/quantity.js';
 import { sendError } from '../util/errors.js';
 
@@ -59,6 +61,46 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
         series: handle.metricsPoller.history(kind, name, namespace || undefined),
       };
       return response;
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/metrics/summary', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return computeMetricsSummary(handle);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/metrics-server', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await metricsServerStatus(handle);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.post<{ Params: { ctx: string }; Body: MetricsServerInstallRequest | undefined }>('/api/contexts/:ctx/metrics-server/install', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await installMetricsServer(handle, { insecureTls: !!req.body?.insecureTls });
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.delete<{ Params: { ctx: string } }>('/api/contexts/:ctx/metrics-server', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await uninstallMetricsServer(handle, app.log);
     } catch (err) {
       sendError(reply, err);
       return reply;

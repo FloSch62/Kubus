@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
+  ClusterMetricsSummary,
   ClusterOverview,
   ContextInfo,
   HelmReleaseDetail,
@@ -11,6 +12,10 @@ import type {
   LogTargetKind,
   LogTargetPodsResponse,
   MetricsHistoryResponse,
+  MetricsServerInstallRequest,
+  MetricsServerInstallResult,
+  MetricsServerStatus,
+  MetricsServerUninstallResult,
   MetricsSnapshot,
   PortForwardInfo,
   PortForwardRequest,
@@ -708,6 +713,55 @@ export function useMetricsHistory(sel: { ctx: string; kind: 'pod' | 'node'; name
     },
     enabled: !!sel,
     refetchInterval: useRefetchInterval(20_000),
+  });
+}
+
+export function useMetricsSummary(ctx: string) {
+  return useQuery({
+    queryKey: ['metrics-summary', ctx],
+    queryFn: () => apiFetch<ClusterMetricsSummary>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/summary`),
+    refetchInterval: useRefetchInterval(20_000),
+    placeholderData: keepPreviousData,
+  });
+}
+
+// ---- metrics-server install / uninstall ----
+
+export function useMetricsServerStatus(ctx: string, opts?: { refetchMs?: number }) {
+  return useQuery({
+    queryKey: ['metrics-server-status', ctx],
+    queryFn: () => apiFetch<MetricsServerStatus>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`),
+    refetchInterval: useRefetchInterval(opts?.refetchMs ?? 30_000),
+    retry: false,
+  });
+}
+
+function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
+  void qc.invalidateQueries({ queryKey: ['metrics-server-status'] });
+  void qc.invalidateQueries({ queryKey: ['metrics-summary'] });
+  void qc.invalidateQueries({ queryKey: ['metrics-nodes'] });
+  void qc.invalidateQueries({ queryKey: ['metrics-snapshot'] });
+}
+
+export function useInstallMetricsServer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx, body }: { ctx: string; body: MetricsServerInstallRequest }) =>
+      apiFetch<MetricsServerInstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server/install`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateMetricsServer(qc),
+  });
+}
+
+export function useUninstallMetricsServer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx }: { ctx: string }) =>
+      apiFetch<MetricsServerUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`, { method: 'DELETE' }),
+    onSuccess: () => invalidateMetricsServer(qc),
   });
 }
 

@@ -497,6 +497,69 @@ export interface MetricsHistoryResponse {
   series: MetricsSample[];
 }
 
+// ---- metrics-server install / uninstall ----
+
+export interface MetricsServerStatus {
+  /** metrics-server Deployment or metrics.k8s.io APIService found in the cluster. */
+  installed: boolean;
+  /** The kube-system Deployment carries the Kubus managed-by label. */
+  managedByKubus: boolean;
+  /** Deployment reports at least one ready replica. */
+  ready: boolean;
+  /** Image tag of the metrics-server container, when the Deployment exists. */
+  version?: string;
+  /** The metrics poller is currently getting usage data. */
+  metricsAvailable: boolean;
+}
+
+export interface MetricsServerInstallRequest {
+  /**
+   * Pass --kubelet-insecure-tls. Needed on most local/dev clusters (kind,
+   * minikube, docker-desktop) whose kubelets serve self-signed certs.
+   */
+  insecureTls?: boolean;
+}
+
+export interface MetricsServerInstallResult {
+  applied: string[];
+}
+
+export interface MetricsServerUninstallResult {
+  deleted: string[];
+  failed: Array<{ resource: string; error: string }>;
+}
+
+// ---- Metrics summary (Metrics page) ----
+
+export interface MetricsSeriesEntry {
+  name: string;
+  namespace?: string;
+  series: MetricsSample[];
+  /** Nodes only: allocatable totals for utilization %. */
+  cpuCapacityMilli?: number;
+  memCapacityBytes?: number;
+}
+
+export interface NamespaceUsage {
+  namespace: string;
+  cpuMilli: number;
+  memBytes: number;
+  pods: number;
+}
+
+export interface ClusterMetricsSummary {
+  available: boolean;
+  /** Node usage summed per poll tick — the cluster-wide series. */
+  clusterSeries: MetricsSample[];
+  cpuCapacityMilli?: number;
+  memCapacityBytes?: number;
+  nodes: MetricsSeriesEntry[];
+  topPodsCpu: MetricsSeriesEntry[];
+  topPodsMem: MetricsSeriesEntry[];
+  namespaces: NamespaceUsage[];
+  podCount: number;
+}
+
 // ---- Overview ----
 
 export interface OverviewProblemPod {

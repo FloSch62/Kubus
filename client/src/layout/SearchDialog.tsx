@@ -59,6 +59,7 @@ const STATIC_COMMANDS: StaticCommand[] = [
   { id: 'cmd:overview', title: 'Go to Overview', run: (d) => d.navigate('/') },
   { id: 'cmd:events', title: 'Go to Events', run: (d) => d.navigate('/events') },
   { id: 'cmd:topology', title: 'Go to Topology', run: (d) => d.navigate('/topology') },
+  { id: 'cmd:metrics', title: 'Go to Metrics', run: (d) => d.navigate('/metrics') },
   { id: 'cmd:helm', title: 'Go to Helm Releases', run: (d) => d.navigate('/helm') },
   { id: 'cmd:forwards', title: 'Go to Port Forwards', run: (d) => d.navigate('/forwards') },
   { id: 'cmd:diff', title: 'Go to Diff', run: (d) => d.navigate('/diff') },

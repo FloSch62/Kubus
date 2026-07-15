@@ -29,6 +29,7 @@ import { useNodeMetrics, useOverview } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { EmptyState } from '../components/EmptyState.js';
+import { InstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { formatBytes, formatCpu } from '../components/format.js';
 
@@ -133,7 +134,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
             />
           </Grid>
 
-          {data.counts.nodes > 0 && <NodeUsageCard nodeMetrics={nodeMetrics} />}
+          {data.counts.nodes > 0 && <NodeUsageCard ctx={ctx} nodeMetrics={nodeMetrics} />}
 
           {data.failingPods.length > 0 && (
             <ProblemCard title="Failing pods">
@@ -229,7 +230,7 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
   );
 }
 
-function NodeUsageCard({ nodeMetrics }: { nodeMetrics: ReturnType<typeof useNodeMetrics>['data'] }) {
+function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnType<typeof useNodeMetrics>['data'] }) {
   const total = useMemo(() => {
     if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return undefined;
     return nodeMetrics.items.reduce(
@@ -251,8 +252,8 @@ function NodeUsageCard({ nodeMetrics }: { nodeMetrics: ReturnType<typeof useNode
         </Typography>
         {!nodeMetrics && <LinearProgress />}
         {nodeMetrics && !nodeMetrics.available && (
-          <Alert severity="info" variant="outlined">
-            CPU and memory usage are unavailable. Install or repair metrics-server for this cluster.
+          <Alert severity="info" variant="outlined" sx={{ alignItems: 'center' }} action={<InstallMetricsServerButton ctx={ctx} />}>
+            CPU and memory usage are unavailable — metrics-server is not serving data in this cluster.
           </Alert>
         )}
         {nodeMetrics?.available && nodeMetrics.items.length === 0 && (
