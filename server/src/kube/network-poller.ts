@@ -133,6 +133,11 @@ export class NetworkMetricsPoller {
     this.prevCounters.clear();
     this.prevT = 0;
     this.appliedNamespaces = '';
+    // Also drop the histories: after a reinstall the first tick has no rates
+    // yet (dtSec 0 short-circuits ingest), so anything left here would be
+    // served as if it were current.
+    this.cluster = [];
+    this.pods.clear();
     if (this.timer) clearTimeout(this.timer);
     if (this.stopped) return;
     this.timer = setTimeout(() => void this.poll(), UNAVAILABLE_POLL_MS);
@@ -333,11 +338,13 @@ export class NetworkMetricsPoller {
  * Aggregate the agents' exposition bodies into cumulative per-pair counters.
  * The same flow can be exported from both its endpoints' nodes (and as both
  * INGRESS and EGRESS on one node), so per src→dst direction the MAX across
- * all series is taken — summing would double-count.
+ * all series is taken — summing would double-count. Drop series additionally
+ * carry a reason label: maxima are kept per reason, then summed, so links
+ * dropping for several reasons aren't underreported.
  */
 function collectCounters(bodies: string[]): Map<string, PairCounters> {
   // Directed maxima per `${srcKey}>${dstKey}` per family.
-  const directed = new Map<string, { src: RawPeer; dst: RawPeer; forward: number; retrans: number; drop: number }>();
+  const directed = new Map<string, { src: RawPeer; dst: RawPeer; forward: number; retrans: number; drops: Map<string, number> }>();
   for (const body of bodies) {
     for (const sample of parsePrometheusText(body, FAMILIES)) {
       const src = peerOf(sample.labels, 'source');
@@ -346,18 +353,23 @@ function collectCounters(bodies: string[]): Map<string, PairCounters> {
       const key = `${src.key}>${dst.key}`;
       let acc = directed.get(key);
       if (!acc) {
-        acc = { src, dst, forward: 0, retrans: 0, drop: 0 };
+        acc = { src, dst, forward: 0, retrans: 0, drops: new Map() };
         directed.set(key, acc);
       }
-      if (sample.name === FORWARD_FAMILY) acc.forward = Math.max(acc.forward, sample.value);
-      else if (sample.name === DROP_FAMILY) acc.drop = Math.max(acc.drop, sample.value);
-      else acc.retrans = Math.max(acc.retrans, sample.value);
+      if (sample.name === FORWARD_FAMILY) {
+        acc.forward = Math.max(acc.forward, sample.value);
+      } else if (sample.name === DROP_FAMILY) {
+        const reason = sample.labels.reason ?? '';
+        acc.drops.set(reason, Math.max(acc.drops.get(reason) ?? 0, sample.value));
+      } else {
+        acc.retrans = Math.max(acc.retrans, sample.value);
+      }
     }
   }
 
   // Fold the two directions into one unordered pair record.
   const pairs = new Map<string, PairCounters>();
-  for (const { src, dst, forward, retrans, drop } of directed.values()) {
+  for (const { src, dst, forward, retrans, drops } of directed.values()) {
     const ordered = src.key <= dst.key;
     const [a, b] = ordered ? [src, dst] : [dst, src];
     const key = `${a.key}|${b.key}`;
@@ -369,7 +381,7 @@ function collectCounters(bodies: string[]): Map<string, PairCounters> {
     if (ordered) pair.ab += forward;
     else pair.ba += forward;
     pair.retrans += retrans;
-    pair.drop += drop;
+    for (const value of drops.values()) pair.drop += value;
   }
   return pairs;
 }

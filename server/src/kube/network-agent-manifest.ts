@@ -7,7 +7,7 @@
  *     --version <ver> --namespace kube-system --include-crds \
  *     --set image.tag=<ver> --set operator.enabled=true --set operator.tag=<ver> \
  *     --set logLevel=info --set enablePodLevel=true --set remoteContext=true \
- *     --set enabledPlugin_linux='["dropreason","packetforward","linuxutil","dns","packetparser"]'
+ *     --set enabledPlugin_linux='["dropreason","packetforward","linuxutil","dns","packetparser","tcpretrans"]'
  *
  * Deviations from the render, re-apply when bumping:
  * - dropped: helm test Pod, Services, Windows DaemonSet/ConfigMap, captures +
@@ -351,7 +351,7 @@ data:
       host: 0.0.0.0
       port: 10093
     logLevel: info
-    enabledPlugin: ["dropreason","packetforward","linuxutil","dns","packetparser"]
+    enabledPlugin: ["dropreason","packetforward","linuxutil","dns","packetparser","tcpretrans"]
     metricsInterval: 10s
     metricsIntervalDuration: 10s
     enableTCX: 
@@ -686,7 +686,7 @@ spec:
       annotations:
         prometheus.io/port: "10093"
         prometheus.io/scrape: "true"
-        checksum/config: 3898e3f46fca1cba3a2e0c21c91768111adbb5d160a13135977e3a11dd21a3ee
+        checksum/config: 1f694071dd0f5a242397656a5db7472c38a6692fa47299112e1728f38a3ee1a7
     spec:
       hostNetwork: true
       serviceAccountName: retina-agent
