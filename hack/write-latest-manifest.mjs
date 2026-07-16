@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [sourcePath = '', outPath = 'site/latest.json'] = process.argv.slice(2);
+const [sourcePath = '', outPath = 'latest.json'] = process.argv.slice(2);
 
 function readJson(file) {
   if (!file) return undefined;

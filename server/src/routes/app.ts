@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 
-const UPDATE_MANIFEST_URL = 'https://flosch62.github.io/Kubus/latest.json';
+const UPDATE_MANIFEST_URL = 'https://github.com/FloSch62/Kubus/releases/latest/download/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 
 interface UpdateManifest {

@@ -30,7 +30,7 @@ const isLinux = process.platform === 'linux';
 
 // Must match the client TopBar height: its toolbar doubles as the titlebar.
 const TITLEBAR_HEIGHT = 52;
-const UPDATE_MANIFEST_URL = 'https://flosch62.github.io/Kubus/latest.json';
+const UPDATE_MANIFEST_URL = 'https://github.com/FloSch62/Kubus/releases/latest/download/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 
 let mainWindow: BrowserWindow | undefined;

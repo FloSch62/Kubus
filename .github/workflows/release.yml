@@ -87,6 +87,10 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
@@ -105,6 +109,10 @@ jobs:
             gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
           fi
 
+          gh release view "$RELEASE_TAG" --json tagName,name,url,publishedAt > /tmp/kubus-release.json
+          node hack/write-latest-manifest.mjs /tmp/kubus-release.json /tmp/latest.json
+          artifacts+=(/tmp/latest.json)
+
           while IFS= read -r asset_name; do
             case "$asset_name" in
               kubus-*-mac-x64.*|kubus-*-mac-arm64.*|kubus-*.blockmap|latest*.yml)
@@ -114,46 +122,3 @@ jobs:
           done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
 
           gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
-
-  deploy-update-manifest:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '') }}
-    needs: publish
-    runs-on: ubuntu-latest
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - run: pip install zensical
-      - run: zensical build --clean --strict
-      - name: Build Pages update manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,publishedAt > /tmp/kubus-latest-release.json
-          node hack/write-latest-manifest.mjs /tmp/kubus-latest-release.json site/latest.json
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          name: github-pages-${{ github.run_attempt }}
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v5
-        with:
-          artifact_name: github-pages-${{ github.run_attempt }}
