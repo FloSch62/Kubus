@@ -1,6 +1,6 @@
 {
   "name": "kubus",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Free, open-source Kubernetes GUI — multi-cluster browsing, logs, exec, port-forward, metrics, Helm",
   "license": "MIT",
