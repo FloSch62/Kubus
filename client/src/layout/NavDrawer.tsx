@@ -90,7 +90,7 @@ function favoriteGvk(favorite: FavoriteItem, resources: ResourceKindInfo[]): str
   return resource ? gvkLabel(resource) : favorite.subtitle;
 }
 
-// Star toggle revealed on row hover (always visible once active).
+// Star toggle revealed on row hover; filled vs outlined shows favorite state.
 function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () => void; label: string }) {
   return (
     <Tooltip title={active ? 'Remove favorite' : 'Add favorite'}>
@@ -104,8 +104,8 @@ function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () =>
           onToggle();
         }}
         sx={{
-          opacity: active ? 1 : 0,
-          color: active ? 'warning.main' : 'text.secondary',
+          opacity: 0,
+          color: 'text.secondary',
           transition: 'opacity 120ms ease',
           '& svg': { fontSize: 16 },
           '&:focus-visible': { opacity: 1 },
