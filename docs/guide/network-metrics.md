@@ -7,6 +7,12 @@ icon: lucide/network
 Kubus can show **live traffic between your pods** — who talks to whom, at what rate —
 without Prometheus, a service mesh, or a specific CNI.
 
+<figure markdown="span">
+  ![Cluster traffic, top pods and busiest links](../assets/screenshots/network-metrics.png#only-light){ .shadow }
+  ![Cluster traffic, top pods and busiest links](../assets/screenshots/network-metrics-dark.png#only-dark){ .shadow }
+  <figcaption>Live pod-to-pod traffic — no Prometheus or service mesh required.</figcaption>
+</figure>
+
 The data comes from [Microsoft Retina](https://github.com/microsoft/retina) (open
 source, Apache-2.0), an eBPF network-observability agent that Kubus deploys on demand.
 Kubus scrapes each agent through the Kubernetes API-server pod proxy, so no extra

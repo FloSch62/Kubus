@@ -23,6 +23,12 @@ you get little trend charts rather than a single instantaneous number.
 - **Resource lists** — CPU and memory columns on the Pods list.
 - **Overview dashboard** — a per-node usage table. [More →](overview.md)
 
+<figure markdown="span">
+  ![The cluster-wide Metrics page](../assets/screenshots/cluster-metrics.png#only-light){ .shadow }
+  ![The cluster-wide Metrics page](../assets/screenshots/cluster-metrics-dark.png#only-dark){ .shadow }
+  <figcaption>The Metrics page: cluster trends, per-node lines and top pods.</figcaption>
+</figure>
+
 History accumulates while Kubus is open, so the first samples appear within ~20 seconds of
 opening a chart and fill in from there.
 

@@ -88,6 +88,22 @@ add('metrics', async () => {
   await page.context().close();
 });
 
+add('cluster-metrics', async () => {
+  const page = await newPage(['kind-kubus-a'], []);
+  await nav(page, 'Metrics');
+  await page.waitForTimeout(3500);
+  await shot(page, 'cluster-metrics');
+  await page.context().close();
+});
+
+add('network-metrics', async () => {
+  const page = await newPage(['kind-kubus-a'], []);
+  await nav(page, 'Network Metrics');
+  await page.waitForTimeout(3500);
+  await shot(page, 'network-metrics');
+  await page.context().close();
+});
+
 add('rollout-history', async () => {
   const page = await newPage(['kind-kubus-a'], ['demo']);
   await nav(page, 'Deployments');
@@ -266,7 +282,7 @@ add('production-guard', async () => {
   await page.waitForTimeout(2000);
   await page.keyboard.press('Escape'); // close the auto-opened detail drawer so row actions are reachable
   await page.waitForTimeout(900);
-  const row = page.locator('[role="row"]', { hasText: 'bravo' }).first();
+  const row = page.locator('[role="row"]', { hasText: 'canary' }).first();
   await row.hover();
   await row.getByRole('button').last().click();
   await page.waitForTimeout(600);
