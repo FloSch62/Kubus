@@ -23,6 +23,7 @@ import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
+import { CrdTracker } from './crd-tracker.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
@@ -45,10 +46,13 @@ export class ClusterHandle {
   readonly metricsPoller: MetricsPoller;
   readonly networkPoller: NetworkMetricsPoller;
   readonly searchIndex: ResourceSearchIndex;
+  readonly crdTracker: CrdTracker;
   health: ContextInfo['health'] = 'connecting';
   healthMessage?: string;
   kubernetesVersion?: string;
   activated = false;
+  /** Set by ClusterManager: fires when the cluster's CRD set changed. */
+  onDiscoveryChanged?: () => void;
 
   private clients = new Map<string, unknown>();
   private searchIndexWarmup?: NodeJS.Timeout;
@@ -74,6 +78,10 @@ export class ClusterHandle {
     this.networkPoller = new NetworkMetricsPoller(this.raw, this.watchers, log);
     this.networkPoller.handle = this;
     this.searchIndex = new ResourceSearchIndex(this.discovery, this.raw, log);
+    this.crdTracker = new CrdTracker(this.raw, log, () => {
+      this.discovery.invalidate();
+      this.onDiscoveryChanged?.();
+    });
   }
 
   client<T extends ApiType>(ctor: ApiConstructor<T>): T {
@@ -131,6 +139,7 @@ export class ClusterHandle {
     this.activated = true;
     this.metricsPoller.start();
     this.networkPoller.start();
+    this.crdTracker.start();
     // Pin overview watchers (never released; cheap and shared with the UI).
     this.watchers.acquire('', 'v1', 'pods');
     this.watchers.acquire('apps', 'v1', 'deployments');
@@ -145,6 +154,7 @@ export class ClusterHandle {
     if (this.searchIndexWarmup) clearTimeout(this.searchIndexWarmup);
     this.metricsPoller.stop();
     this.networkPoller.stop();
+    this.crdTracker.stop();
     this.watchers.stopAll();
     this.searchIndex.dispose();
   }
@@ -664,6 +674,7 @@ export class ClusterManager extends EventEmitter {
       throw new HttpProblem(502, err instanceof Error ? err.message : String(err), 'SshTunnelFailed');
     }
     const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
+    handle.onDiscoveryChanged = () => this.emit('discovery-changed', contextName);
     this.handles.set(contextName, handle);
     await handle.probe();
     // The context may have been removed (or the kubeconfig reloaded) while the

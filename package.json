@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "pnpm -r --parallel --stream dev",
     "build": "pnpm -r build",
+    "build:helm-engine": "node helm-engine/build.mjs",
     "start": "node server/dist/index.js",
     "electron": "pnpm build && pnpm --filter @kubus/electron start",
     "dist": "pnpm build && pnpm --filter @kubus/electron dist",

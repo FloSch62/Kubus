@@ -47,6 +47,18 @@ import type {
   DebugPodResponse,
   StopDebugRequest,
   HelmRollbackResult,
+  HelmRepo,
+  HelmChartSummary,
+  HelmChartVersion,
+  HelmChartDetail,
+  HelmChartHit,
+  HelmChartSourceRef,
+  HelmHubChart,
+  HelmInstallRequest,
+  HelmUpgradeRequest,
+  HelmActionResult,
+  HelmDryRunResult,
+  AppInfo,
   PrinterColumn,
   AuditReport,
   KubeconfigSettings,
@@ -75,6 +87,13 @@ export function useContexts() {
         if (msg.op === 'contexts-changed') {
           void qc.invalidateQueries({ queryKey: ['contexts'] });
           void qc.invalidateQueries({ queryKey: ['kubeconfig-settings'] });
+        }
+        // The cluster's CRD set changed (helm install, operator, kubectl …) —
+        // refresh everything derived from API discovery so new kinds appear live.
+        if (msg.op === 'discovery-update') {
+          void qc.invalidateQueries({ queryKey: ['api-resources', msg.ctx] });
+          void qc.invalidateQueries({ queryKey: ['api-resources-multi'] });
+          void qc.invalidateQueries({ queryKey: ['crd-columns'] });
         }
       }),
     [qc],
@@ -975,8 +994,16 @@ export function useHelmRevision(ctx: string | undefined, ns: string | undefined,
 export function useHelmUninstall() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ctx, ns, name }: { ctx: string; ns: string; name: string }) =>
-      apiFetch<{ deleted: string[]; failed: Array<{ resource: string; error: string }> }>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    mutationFn: ({ ctx, ns, name, skipHooks, deleteCrds }: { ctx: string; ns: string; name: string; skipHooks?: boolean; deleteCrds?: boolean }) => {
+      const q = new URLSearchParams();
+      if (skipHooks) q.set('skipHooks', 'true');
+      if (deleteCrds) q.set('deleteCrds', 'true');
+      const qs = q.size ? `?${q.toString()}` : '';
+      return apiFetch<{ deleted: string[]; failed: Array<{ resource: string; error: string }>; hooksRan: string[]; crdsDeleted: string[] }>(
+        `/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}${qs}`,
+        { method: 'DELETE' },
+      );
+    },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-releases'] }),
   });
 }
@@ -984,17 +1011,208 @@ export function useHelmUninstall() {
 export function useHelmRollback() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ctx, ns, name, revision }: { ctx: string; ns: string; name: string; revision: number }) =>
+    mutationFn: ({ ctx, ns, name, revision, skipHooks }: { ctx: string; ns: string; name: string; revision: number; skipHooks?: boolean }) =>
       apiFetch<HelmRollbackResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/rollback`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ revision }),
+        body: JSON.stringify({ revision, skipHooks }),
       }),
     onSuccess: (_r, { ctx, ns, name }) => {
       void qc.invalidateQueries({ queryKey: ['helm-releases'] });
       void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
       void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
     },
+  });
+}
+
+export function useAppInfo() {
+  return useQuery({
+    queryKey: ['app-info'],
+    queryFn: () => apiFetch<AppInfo>('/api/app/info'),
+    staleTime: Infinity,
+  });
+}
+
+// ---- Helm repos & charts ----
+
+export function useHelmRepos() {
+  return useQuery({
+    queryKey: ['helm-repos'],
+    queryFn: () => apiFetch<HelmRepo[]>('/api/helm/repos'),
+  });
+}
+
+// Adding/removing a repo changes which charts and versions are discoverable,
+// so refresh the catalog and the cross-repo chart-find (upgrade version list).
+function invalidateHelmRepoData(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ['helm-repos'] });
+  void qc.invalidateQueries({ queryKey: ['helm-repo-charts'] });
+  void qc.invalidateQueries({ queryKey: ['helm-chart-find'] });
+}
+
+export function useAddHelmRepo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (repo: HelmRepo) =>
+      apiFetch<HelmRepo>('/api/helm/repos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(repo) }),
+    onSuccess: () => invalidateHelmRepoData(qc),
+  });
+}
+
+export function useRemoveHelmRepo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch(`/api/helm/repos/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => invalidateHelmRepoData(qc),
+  });
+}
+
+export function useHelmRepoCharts(repo: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-repo-charts', repo],
+    queryFn: () => apiFetch<HelmChartSummary[]>(`/api/helm/repos/${encodeURIComponent(repo!)}/charts`),
+    enabled: !!repo,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useHelmChartVersions(repo: string | undefined, chart: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-chart-versions', repo, chart],
+    queryFn: () => apiFetch<HelmChartVersion[]>(`/api/helm/repos/${encodeURIComponent(repo!)}/charts/${encodeURIComponent(chart!)}/versions`),
+    enabled: !!repo && !!chart,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useHelmChartDetail(repo: string | undefined, chart: string | undefined, version: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-chart-detail', repo, chart, version],
+    queryFn: () =>
+      apiFetch<HelmChartDetail>(
+        `/api/helm/repos/${encodeURIComponent(repo!)}/charts/${encodeURIComponent(chart!)}/versions/${encodeURIComponent(version!)}/detail`,
+      ),
+    enabled: !!repo && !!chart && !!version,
+    staleTime: Infinity, // a published chart version is immutable
+  });
+}
+
+/** Exact-name search across all configured repos (upgrade-source discovery). */
+export function useHelmChartFind(chart: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-chart-find', chart],
+    queryFn: () => apiFetch<HelmChartHit[]>(`/api/helm/charts/find?name=${encodeURIComponent(chart!)}`),
+    enabled: !!chart,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Free-text chart search on Artifact Hub. */
+export function useHelmHubSearch(query: string) {
+  return useQuery({
+    queryKey: ['helm-hub-search', query],
+    queryFn: () => apiFetch<HelmHubChart[]>(`/api/helm/hub/search?q=${encodeURIComponent(query)}`),
+    enabled: query.trim().length >= 2,
+    staleTime: 10 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** All published versions of an Artifact Hub package. */
+export function useHelmHubVersions(repoName: string | undefined, chart: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-hub-versions', repoName, chart],
+    queryFn: () => apiFetch<{ repoUrl: string; versions: HelmChartVersion[] }>(`/api/helm/hub/versions?repo=${encodeURIComponent(repoName!)}&chart=${encodeURIComponent(chart!)}`),
+    enabled: !!repoName && !!chart,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Chart metadata + default values by repository URL (Artifact Hub discoveries). */
+export function useHelmChartDetailByUrl(repoUrl: string | undefined, chart: string | undefined, version: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-chart-detail-url', repoUrl, chart, version],
+    queryFn: () =>
+      apiFetch<HelmChartDetail>(
+        `/api/helm/charts/detail?repoUrl=${encodeURIComponent(repoUrl!)}&chart=${encodeURIComponent(chart!)}&version=${encodeURIComponent(version!)}`,
+      ),
+    enabled: !!repoUrl && !!chart && !!version,
+    staleTime: Infinity, // a published chart version is immutable
+  });
+}
+
+export function useHelmOciDetail(ref: string | undefined, version: string | undefined) {
+  return useQuery({
+    queryKey: ['helm-oci-detail', ref, version],
+    queryFn: () => apiFetch<HelmChartDetail>(`/api/helm/oci/detail?ref=${encodeURIComponent(ref!)}&version=${encodeURIComponent(version!)}`),
+    enabled: !!ref && !!version,
+    staleTime: Infinity,
+  });
+}
+
+export interface HelmUpgradeVars {
+  ctx: string;
+  ns: string;
+  name: string;
+  values: Record<string, unknown>;
+  chart?: HelmChartSourceRef;
+  skipHooks?: boolean;
+}
+
+export function useHelmUpgrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx, ns, name, ...body }: HelmUpgradeVars) =>
+      apiFetch<HelmActionResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body satisfies HelmUpgradeRequest),
+      }),
+    onSuccess: (_r, { ctx, ns, name }) => {
+      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
+      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
+      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
+    },
+  });
+}
+
+/** Server-side render without applying — backs the upgrade preview diff. */
+export function useHelmUpgradeDryRun() {
+  return useMutation({
+    mutationFn: ({ ctx, ns, name, ...body }: HelmUpgradeVars) =>
+      apiFetch<HelmDryRunResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...body, dryRun: true } satisfies HelmUpgradeRequest),
+      }),
+  });
+}
+
+export interface HelmInstallVars extends Omit<HelmInstallRequest, 'dryRun'> {
+  ctx: string;
+}
+
+export function useHelmInstall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ctx, ...body }: HelmInstallVars) =>
+      apiFetch<HelmActionResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body satisfies HelmInstallRequest),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-releases'] }),
+  });
+}
+
+export function useHelmInstallDryRun() {
+  return useMutation({
+    mutationFn: ({ ctx, ...body }: HelmInstallVars) =>
+      apiFetch<HelmDryRunResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...body, dryRun: true } satisfies HelmInstallRequest),
+      }),
   });
 }
 

@@ -1,12 +1,15 @@
-import { useMemo } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import Tooltip from '@mui/material/Tooltip';
+import AddIcon from '@mui/icons-material/Add';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import { useNavigate } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { HelmReleaseSummary } from '@kubus/shared';
-import { useHelmReleases } from '../api/queries.js';
+import { useAppInfo, useHelmReleases } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
@@ -14,6 +17,8 @@ import { StatusChip } from '../components/StatusChip.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { PageHeader } from '../components/PageHeader.js';
+
+const HelmInstallDialog = lazy(() => import('../components/HelmInstallDialog.js'));
 
 interface Row {
   ctx: string;
@@ -25,6 +30,8 @@ export function HelmPage() {
   const namespaces = useClustersStore((s) => s.namespaces);
   const { data, isLoading } = useHelmReleases(selected);
   const navigate = useNavigate();
+  const [installOpen, setInstallOpen] = useState(false);
+  const helmEngine = useAppInfo().data?.helmEngine ?? false;
 
   const rows = useMemo(() => {
     const all = data ?? [];
@@ -69,6 +76,14 @@ export function HelmPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5, pt: 1.5 }}>
       <PageHeader title="Helm Releases" icon={<SailingOutlinedIcon />}>
         <Chip label={`${rows.length} releases`} variant="outlined" />
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title={helmEngine ? '' : 'Helm engine not built — run node helm-engine/build.mjs (requires Go)'}>
+          <span>
+            <Button startIcon={<AddIcon />} variant="contained" size="small" disabled={!helmEngine} onClick={() => setInstallOpen(true)}>
+              Install chart
+            </Button>
+          </span>
+        </Tooltip>
       </PageHeader>
       <DataGrid
         rows={rows}
@@ -82,6 +97,11 @@ export function HelmPage() {
         sx={{ border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx }}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
       />
+      {installOpen && (
+        <Suspense fallback={null}>
+          <HelmInstallDialog contexts={selected} onClose={() => setInstallOpen(false)} />
+        </Suspense>
+      )}
     </Box>
   );
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -72,6 +72,7 @@ type UpdateCheckResult =
 interface AppInfo {
   name: string;
   version: string;
+  helmEngine: boolean;
 }
 
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
@@ -348,7 +349,8 @@ ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
 
 ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
   if (!isMainWindowSender(event)) return undefined;
-  return { name: app.getName(), version: app.getVersion() };
+  const enginePath = process.env.KUBUS_HELM_ENGINE;
+  return { name: app.getName(), version: app.getVersion(), helmEngine: !!enginePath && existsSync(enginePath) };
 });
 
 ipcMain.handle('kubus:check-for-update', async (event, options?: { force?: unknown }): Promise<UpdateCheckResult> => {
@@ -371,6 +373,11 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(async () => {
+    // The esbuild bundle breaks the server's import.meta.url asset lookup, so
+    // point it at the packaged (or repo) helm engine explicitly.
+    process.env.KUBUS_HELM_ENGINE ??= app.isPackaged
+      ? path.join(process.resourcesPath, 'helm-engine.wasm.gz')
+      : path.resolve(__dirname, '../../server/assets/helm-engine.wasm.gz');
     try {
       server = await startServer({
         port: 0,

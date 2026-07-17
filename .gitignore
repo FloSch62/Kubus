@@ -1,6 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# built helm rendering engine (node helm-engine/build.mjs, requires Go)
+server/assets/helm-engine.wasm.gz
+helm-engine/helm-engine.wasm
 electron/build/
 electron/release/
 .env

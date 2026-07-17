@@ -3,6 +3,8 @@
 export interface AppInfo {
   name: string;
   version: string;
+  /** True when the wasm helm rendering engine is available (install/upgrade enabled). */
+  helmEngine: boolean;
 }
 
 export type UpdateCheckResult =
@@ -407,6 +409,7 @@ export interface HelmRollbackResult {
   applied: string[];
   pruned: string[];
   failed: Array<{ resource: string; error: string }>;
+  hooksRan: string[];
 }
 
 /** A CRD additionalPrinterColumns entry (apiextensions.k8s.io/v1). */
@@ -765,6 +768,8 @@ export interface HelmReleaseSummary {
   chartVersion: string;
   appVersion?: string;
   updated?: string;
+  /** Helm storage backend the release records live in. */
+  driver?: 'secret' | 'configmap';
 }
 
 export interface HelmReleaseDetail extends HelmReleaseSummary {
@@ -776,6 +781,12 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   manifest: string;
   firstDeployed?: string;
   description?: string;
+  /** Number of dependencies the chart declares — values-only upgrades need a repo chart when > 0. */
+  chartDependencies: number;
+  /** Number of hooks stored in the release record. */
+  hookCount: number;
+  /** CRDs shipped in the chart's crds/ directory — offered for optional cleanup on uninstall. */
+  chartCrds: string[];
 }
 
 export interface HelmRevision {
@@ -786,6 +797,119 @@ export interface HelmRevision {
   appVersion?: string;
   updated?: string;
   description?: string;
+}
+
+// ---- Helm repos, install & upgrade ----
+
+export interface HelmRepo {
+  name: string;
+  /** Classic http(s) chart repository base URL (serves /index.yaml). */
+  url: string;
+}
+
+export interface HelmChartSummary {
+  repo: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  /** Latest available version. */
+  version: string;
+  appVersion?: string;
+  deprecated?: boolean;
+  keywords?: string[];
+}
+
+export interface HelmChartVersion {
+  version: string;
+  appVersion?: string;
+  description?: string;
+  created?: string;
+  deprecated?: boolean;
+}
+
+/** Chart metadata + default values for the install form. */
+export interface HelmChartDetail {
+  name: string;
+  version: string;
+  appVersion?: string;
+  description?: string;
+  icon?: string;
+  home?: string;
+  valuesYaml: string;
+  readme: string;
+  dependencies?: Array<{ name: string; version: string; repository?: string }>;
+}
+
+/** Where to get a chart archive from. Exactly one source form. */
+export interface HelmChartSourceRef {
+  /** Configured repo name + chart + version. */
+  repo?: string;
+  chart?: string;
+  version?: string;
+  /** Repository base URL (http(s) index repo or oci:// base) + chart + version — used for Artifact Hub discoveries. */
+  repoUrl?: string;
+  /** Direct oci://registry/repo ref (version above selects the tag). */
+  ociRef?: string;
+  /** Direct .tgz URL. */
+  url?: string;
+}
+
+export interface HelmInstallRequest {
+  namespace: string;
+  name: string;
+  values: Record<string, unknown>;
+  chart: HelmChartSourceRef;
+  createNamespace?: boolean;
+  skipHooks?: boolean;
+  dryRun?: boolean;
+}
+
+export interface HelmUpgradeRequest {
+  /** Complete user-supplied values for the new revision (helm -f semantics). */
+  values: Record<string, unknown>;
+  /** Omitted → re-render the chart stored in the release record. */
+  chart?: HelmChartSourceRef;
+  skipHooks?: boolean;
+  dryRun?: boolean;
+}
+
+export interface HelmActionResult {
+  revision: number;
+  applied: string[];
+  pruned: string[];
+  failed: Array<{ resource: string; error: string }>;
+  hooksRan: string[];
+  notes?: string;
+}
+
+export interface HelmDryRunResult {
+  manifest: string;
+  notes: string;
+  hooks: Array<{ name: string; kind: string; events: string[] }>;
+  chart: string;
+  chartVersion: string;
+}
+
+/** A chart found by exact name in a configured repo or on Artifact Hub (upgrade-source discovery). */
+export interface HelmChartHit {
+  repo: string;
+  versions: HelmChartVersion[];
+  /** Set for Artifact Hub discoveries: the publisher's repository URL (http(s) or oci://). */
+  repoUrl?: string;
+  fromHub?: boolean;
+}
+
+/** An Artifact Hub search result. */
+export interface HelmHubChart {
+  name: string;
+  repoName: string;
+  repoUrl: string;
+  description?: string;
+  icon?: string;
+  version: string;
+  appVersion?: string;
+  official?: boolean;
+  verifiedPublisher?: boolean;
 }
 
 // ---- Port forward ----
