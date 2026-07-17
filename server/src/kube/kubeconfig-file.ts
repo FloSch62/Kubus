@@ -217,6 +217,19 @@ export function removeKubeconfigEntry(existingYaml: string, section: 'contexts' 
 }
 
 /**
+ * Drop a file's current-context when it points at the given context. Returns
+ * the new YAML, or null when the file doesn't reference that context. With a
+ * multi-file $KUBECONFIG, current-context can live in a different file than
+ * the context entry itself, so removal has to sweep every file.
+ */
+export function clearCurrentContext(existingYaml: string, contextName: string): string | null {
+  const doc = loadDoc(existingYaml);
+  if (doc['current-context'] !== contextName) return null;
+  delete doc['current-context'];
+  return dumpDoc(doc);
+}
+
+/**
  * Write the merged kubeconfig: rolling backup of the previous file, then an
  * atomic tmp+rename write. Returns the backup path (null if nothing existed).
  */

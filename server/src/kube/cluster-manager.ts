@@ -24,7 +24,7 @@ import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
-import { patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
+import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
 import { HttpProblem } from '../util/errors.js';
 import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
@@ -535,6 +535,17 @@ export class ClusterManager extends EventEmitter {
     const userFile = this.findEntryFile('user', userName);
     if (userName && userFile) pendingWrites.set(userFile, removeKubeconfigEntry(readPending(userFile), 'users', userName));
 
+    // current-context can live in a different file than the context entry
+    // (multi-file $KUBECONFIG) — clear it wherever it would dangle.
+    for (const p of this.kubeconfigPaths()) {
+      try {
+        const cleared = clearCurrentContext(readPending(p), contextName);
+        if (cleared !== null) pendingWrites.set(p, cleared);
+      } catch {
+        // unreadable / invalid file — skip
+      }
+    }
+
     for (const [file, content] of pendingWrites) {
       writeKubeconfig(file, content);
     }
@@ -655,6 +666,19 @@ export class ClusterManager extends EventEmitter {
     const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
     this.handles.set(contextName, handle);
     await handle.probe();
+    // The context may have been removed (or the kubeconfig reloaded) while the
+    // probe was in flight — don't resurrect a session for a gone context.
+    if (!this.kc.getContexts().some((c) => c.name === contextName)) {
+      handle.dispose();
+      if (this.handles.get(contextName) === handle) this.handles.delete(contextName);
+      throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    }
+    if (this.handles.get(contextName) !== handle) {
+      // A reload/disconnect dropped this handle mid-probe: it was built from the
+      // old entry definition, so fail the connect instead of activating a zombie.
+      handle.dispose();
+      throw new HttpProblem(409, `context "${contextName}" changed while connecting — retry`, 'NotConnected');
+    }
     if (handle.health === 'connected') {
       handle.activate();
     }
