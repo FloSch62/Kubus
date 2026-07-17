@@ -82,15 +82,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: write
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
@@ -109,10 +105,6 @@ jobs:
             gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
           fi
 
-          gh release view "$RELEASE_TAG" --json tagName,name,url,publishedAt > /tmp/kubus-release.json
-          node hack/write-latest-manifest.mjs /tmp/kubus-release.json /tmp/latest.json
-          artifacts+=(/tmp/latest.json)
-
           while IFS= read -r asset_name; do
             case "$asset_name" in
               kubus-*-mac-x64.*|kubus-*-mac-arm64.*|kubus-*.blockmap|latest*.yml)
@@ -122,3 +114,10 @@ jobs:
           done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
 
           gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
+      # The docs deploy writes site/latest.json from the latest GitHub release,
+      # which powers the in-app update check for all installed versions.
+      - name: Refresh Pages update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run docs.yml --ref main
