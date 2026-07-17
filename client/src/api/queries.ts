@@ -147,6 +147,19 @@ export function useEditCluster() {
   });
 }
 
+/** Remove a context (and its unshared cluster/user entries) from the kubeconfig. */
+export function useDeleteCluster() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ctx: string) => apiFetch<ContextInfo[]>(`/api/contexts/${encodeURIComponent(ctx)}`, { method: 'DELETE' }),
+    onSuccess: (contexts, ctx) => {
+      useClustersStore.getState().removeContext(ctx);
+      qc.setQueryData(['contexts'], contexts);
+      void qc.invalidateQueries({ queryKey: ['kubeconfig-settings'] });
+    },
+  });
+}
+
 /** Set/clear the Kubus-managed SSH jump host for a context (used by the Add-cluster flow). */
 export function useSetSshHost() {
   const qc = useQueryClient();

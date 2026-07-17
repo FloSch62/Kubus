@@ -103,6 +103,16 @@ export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): vo
     }
   });
 
+  app.delete<{ Params: { ctx: string } }>('/api/contexts/:ctx', async (req, reply) => {
+    try {
+      ctx.clusters.removeContext(req.params.ctx);
+      return ctx.clusters.listContexts();
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
   app.post<{ Params: { ctx: string } }>('/api/contexts/:ctx/connect', async (req, reply) => {
     try {
       await ctx.clusters.connect(req.params.ctx);

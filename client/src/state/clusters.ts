@@ -28,6 +28,8 @@ interface ClustersState {
   // setTheme directly sets the theme mode to any valid value ('light', 'dark', 'os')
   setTheme: (mode: 'light' | 'dark' | 'os') => void;
   setContextSetting: (ctx: string, patch: ContextSettings) => void;
+  /** Forget all client-side state for a context (after it was removed from the kubeconfig). */
+  removeContext: (name: string) => void;
 }
 
 export const useClustersStore = create<ClustersState>()(
@@ -50,6 +52,12 @@ export const useClustersStore = create<ClustersState>()(
         set((s) => ({
           contextSettings: { ...s.contextSettings, [ctx]: { ...s.contextSettings[ctx], ...patch } },
         })),
+      removeContext: (name) =>
+        set((s) => {
+          const contextSettings = { ...s.contextSettings };
+          delete contextSettings[name];
+          return { selected: s.selected.filter((n) => n !== name), contextSettings };
+        }),
     }),
     { name: 'kubus-clusters', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
   ),

@@ -54,7 +54,7 @@ The filter applies **across all selected clusters** — handy when the same name
 (say, `ingress-nginx`) exists in several of them. Clusters that don't have a matching
 namespace simply contribute nothing to the list.
 
-## Adding & editing clusters
+## Adding, editing & removing clusters
 
 Open **Settings → Clusters** to manage the entries in your kubeconfig:
 
@@ -66,6 +66,10 @@ Open **Settings → Clusters** to manage the entries in your kubeconfig:
   proxy). Cloud-provider clusters that
   authenticate with an exec plugin (EKS/GKE/AKS) keep their existing login — leave
   **Credentials** on *Keep current* and only the other fields change.
+- **Remove** (:material-delete-outline: on any row) — delete the context from your
+  kubeconfig, along with its cluster and user entries when no other context still uses
+  them. The cluster itself is untouched, and [protected clusters](#protecting-risky-clusters)
+  require typing the cluster name first.
 
 Every change is written straight to your kubeconfig file (with a `.kubus.bak` backup), so
 `kubectl` and other tools see the same settings.

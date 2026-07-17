@@ -24,7 +24,7 @@ import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
-import { patchClusterEntry, patchUserEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
+import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
 import { HttpProblem } from '../util/errors.js';
 import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
@@ -510,6 +510,55 @@ export class ClusterManager extends EventEmitter {
   }
 
   /**
+   * Remove a context from the kubeconfig files (atomic write + backup). The
+   * referenced cluster and user entries are removed too — but only when no
+   * other context still references them. Any Kubus-managed SSH tunnel mapping
+   * for the context is cleared, and its session torn down.
+   */
+  removeContext(contextName: string): void {
+    const ctxObj = this.kc.getContexts().find((c) => c.name === contextName);
+    if (!ctxObj) throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    const contextFile = this.findEntryFile('context', contextName);
+    if (!contextFile) throw new HttpProblem(400, `could not find a kubeconfig file defining context "${contextName}"`, 'BadRequest');
+
+    // Shared entries survive: only delete the cluster/user when this was the
+    // last context pointing at them (judged across all loaded kubeconfigs).
+    const others = this.kc.getContexts().filter((c) => c.name !== contextName);
+    const clusterName = ctxObj.cluster && !others.some((c) => c.cluster === ctxObj.cluster) ? ctxObj.cluster : undefined;
+    const userName = ctxObj.user && !others.some((c) => c.user === ctxObj.user) ? ctxObj.user : undefined;
+
+    const pendingWrites = new Map<string, string>();
+    const readPending = (file: string) => pendingWrites.get(file) ?? fs.readFileSync(file, 'utf8');
+    pendingWrites.set(contextFile, removeKubeconfigEntry(readPending(contextFile), 'contexts', contextName));
+    const clusterFile = this.findEntryFile('cluster', clusterName);
+    if (clusterName && clusterFile) pendingWrites.set(clusterFile, removeKubeconfigEntry(readPending(clusterFile), 'clusters', clusterName));
+    const userFile = this.findEntryFile('user', userName);
+    if (userName && userFile) pendingWrites.set(userFile, removeKubeconfigEntry(readPending(userFile), 'users', userName));
+
+    // current-context can live in a different file than the context entry
+    // (multi-file $KUBECONFIG) — clear it wherever it would dangle.
+    for (const p of this.kubeconfigPaths()) {
+      try {
+        const cleared = clearCurrentContext(readPending(p), contextName);
+        if (cleared !== null) pendingWrites.set(p, cleared);
+      } catch {
+        // unreadable / invalid file — skip
+      }
+    }
+
+    for (const [file, content] of pendingWrites) {
+      writeKubeconfig(file, content);
+    }
+
+    const sshTunnelKey = sshTunnelKeyFor(contextFile, contextName);
+    if (this.sshTunnels?.hostForContextKey(sshTunnelKey)) this.sshTunnels.setHostForContextKey(sshTunnelKey, null);
+
+    this.disconnect(contextName);
+    this.probeClients.delete(contextName);
+    this.reload();
+  }
+
+  /**
    * Set or clear the Kubus-managed SSH jump host for a context's cluster.
    * Persisted in Kubus settings (not the kubeconfig); affected sessions are
    * dropped so the next connect goes through (or stops using) the tunnel.
@@ -617,6 +666,19 @@ export class ClusterManager extends EventEmitter {
     const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
     this.handles.set(contextName, handle);
     await handle.probe();
+    // The context may have been removed (or the kubeconfig reloaded) while the
+    // probe was in flight — don't resurrect a session for a gone context.
+    if (!this.kc.getContexts().some((c) => c.name === contextName)) {
+      handle.dispose();
+      if (this.handles.get(contextName) === handle) this.handles.delete(contextName);
+      throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    }
+    if (this.handles.get(contextName) !== handle) {
+      // A reload/disconnect dropped this handle mid-probe: it was built from the
+      // old entry definition, so fail the connect instead of activating a zombie.
+      handle.dispose();
+      throw new HttpProblem(409, `context "${contextName}" changed while connecting — retry`, 'NotConnected');
+    }
     if (handle.health === 'connected') {
       handle.activate();
     }

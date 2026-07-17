@@ -33,9 +33,11 @@ import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import type { AppInfo, ContextInfo, UpdateCheckResult } from '@kubus/shared';
-import { useContexts, useKubeconfigSettings } from '../../api/queries.js';
+import { useContexts, useDeleteCluster, useKubeconfigSettings } from '../../api/queries.js';
+import { ConfirmDialog } from '../ConfirmDialog.js';
 import { checkForUpdate, getAppInfo } from '../../api/app.js';
 import { AddClusterDialog } from './AddClusterDialog.js';
 import { EditClusterDialog } from './EditClusterDialog.js';
@@ -73,6 +75,8 @@ function looksLikeAuthError(msg?: string): boolean {
 
 function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isProtected: boolean; onToggleProtected: () => void }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const del = useDeleteCluster();
   // One hint at a time, most actionable first: a proactive credential warning
   // (plugin missing, legacy stanza), then the probe's auth failure, then the
   // "maybe it needs a tunnel" nudge.
@@ -93,6 +97,17 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
             <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
               <IconButton size="small" onClick={onToggleProtected}>
                 {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 18 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 18 }} />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Remove from kubeconfig">
+              <IconButton
+                size="small"
+                onClick={() => {
+                  del.reset();
+                  setDeleteOpen(true);
+                }}
+              >
+                <DeleteOutlinedIcon color="error" sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
           </Stack>
@@ -130,6 +145,27 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
         </Alert>
       )}
       {editOpen && <EditClusterDialog context={c} onClose={() => setEditOpen(false)} />}
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Remove cluster"
+        message={
+          <>
+            Remove <b>{c.name}</b> from the kubeconfig? This deletes the context and any cluster/user entries no other context uses. The cluster
+            itself is not touched, and a <code>.kubus.bak</code> backup of the file is kept.
+            {del.error instanceof Error && (
+              <Alert severity="error" sx={{ mt: 1.5 }}>
+                {del.error.message}
+              </Alert>
+            )}
+          </>
+        }
+        confirmLabel="Remove"
+        danger
+        busy={del.isPending}
+        confirmText={isProtected ? c.name : undefined}
+        onConfirm={() => del.mutate(c.name, { onSuccess: () => setDeleteOpen(false) })}
+        onClose={() => setDeleteOpen(false)}
+      />
     </Box>
   );
 }

@@ -201,6 +201,35 @@ export function patchUserEntry(existingYaml: string, userName: string | undefine
 }
 
 /**
+ * Remove a named entry from one section of a kubeconfig. When the removed
+ * context was the file's current-context, the reference is dropped rather than
+ * silently re-pointed at another context. Returns the new YAML.
+ */
+export function removeKubeconfigEntry(existingYaml: string, section: 'contexts' | 'clusters' | 'users', name: string): string {
+  const doc = loadDoc(existingYaml);
+  const entries = asEntries(doc[section]);
+  const idx = entries.findIndex((e) => e.name === name);
+  if (idx === -1) throw new HttpProblem(404, `${section.slice(0, -1)} "${name}" not found in kubeconfig`, 'NotFound');
+  entries.splice(idx, 1);
+  doc[section] = entries;
+  if (section === 'contexts' && doc['current-context'] === name) delete doc['current-context'];
+  return dumpDoc(doc);
+}
+
+/**
+ * Drop a file's current-context when it points at the given context. Returns
+ * the new YAML, or null when the file doesn't reference that context. With a
+ * multi-file $KUBECONFIG, current-context can live in a different file than
+ * the context entry itself, so removal has to sweep every file.
+ */
+export function clearCurrentContext(existingYaml: string, contextName: string): string | null {
+  const doc = loadDoc(existingYaml);
+  if (doc['current-context'] !== contextName) return null;
+  delete doc['current-context'];
+  return dumpDoc(doc);
+}
+
+/**
  * Write the merged kubeconfig: rolling backup of the previous file, then an
  * atomic tmp+rename write. Returns the backup path (null if nothing existed).
  */
