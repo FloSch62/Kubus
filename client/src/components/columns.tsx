@@ -813,6 +813,48 @@ export function crdHiddenFields(cols: PrinterColumn[]): string[] {
   return cols.flatMap((c, i) => ((c.priority ?? 0) > 0 ? [`crd_${i}_${c.name}`] : []));
 }
 
+/** Kinds whose list CPU/Memory columns aggregate the usage of their pods. */
+export const WORKLOAD_METRIC_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet']);
+
+/**
+ * Aggregate per-pod usage up to the owning workload so Deployment/StatefulSet/
+ * DaemonSet/ReplicaSet lists can show CPU/Memory. Pods are attributed via
+ * their controller ownerReference; Deployment pods are owned by a ReplicaSet
+ * named `<deployment>-<pod-template-hash>`, so the Deployment name is
+ * recovered by stripping that suffix.
+ */
+export function makeWorkloadMetricsLookup(kind: string, pods: ClusterRow[], metrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {
+  const podMetrics = makeMetricsLookup('Pod', metrics);
+  if (!podMetrics || !WORKLOAD_METRIC_KINDS.has(kind)) return undefined;
+  const totals = new Map<string, { cpuMilli: number; memBytes: number }>();
+  for (const row of pods) {
+    const owner = workloadOwnerName(kind, row.obj);
+    if (!owner) continue;
+    const usage = podMetrics(row.ctx, row.obj.metadata.namespace, row.obj.metadata.name);
+    if (!usage) continue;
+    const key = `${row.ctx}\0${row.obj.metadata.namespace ?? ''}\0${owner}`;
+    const prev = totals.get(key);
+    if (prev) {
+      prev.cpuMilli += usage.cpuMilli;
+      prev.memBytes += usage.memBytes;
+    } else {
+      totals.set(key, { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes });
+    }
+  }
+  return (ctx, namespace, name) => totals.get(`${ctx}\0${namespace ?? ''}\0${name}`);
+}
+
+function workloadOwnerName(kind: string, pod: KubeObject): string | undefined {
+  const owner = (pod.metadata.ownerReferences ?? []).find((o) => o.controller);
+  if (!owner) return undefined;
+  if (kind === 'Deployment') {
+    if (owner.kind !== 'ReplicaSet') return undefined;
+    const hash = pod.metadata.labels?.['pod-template-hash'];
+    return hash && owner.name.endsWith(`-${hash}`) ? owner.name.slice(0, -(hash.length + 1)) : undefined;
+  }
+  return owner.kind === kind ? owner.name : undefined;
+}
+
 /** Lookup helper bridging pod/node metrics snapshots into the column defs. */
 export function makeMetricsLookup(kind: string, metrics: Map<string, MetricsSnapshot> | undefined): MetricsLookup | undefined {
   if (!metrics || (kind !== 'Pod' && kind !== 'Node')) return undefined;

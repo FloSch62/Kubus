@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Drawer from '@mui/material/Drawer';
@@ -11,6 +11,7 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -41,6 +42,18 @@ const WIDTH = 228;
 const ITEM_INDENT = '42px';
 const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
 const CUSTOM_GROUP_PREFIX = 'custom:';
+
+const IS_MAC = window.kubusDesktop ? window.kubusDesktop.platform === 'darwin' : /Mac|iP(hone|ad|od)/.test(navigator.platform);
+const HOTKEY_MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl+';
+
+/**
+ * The first nine navigable favorites, in sidebar order, get Cmd/Ctrl+1–9.
+ * Category favorites expand in place rather than navigating, so they are
+ * skipped without consuming a slot.
+ */
+function hotkeyFavorites(favorites: FavoriteItem[]): FavoriteItem[] {
+  return favorites.filter((fav) => !!fav.path).slice(0, 9);
+}
 
 /**
  * Browser-style modifiers on nav links: Ctrl/Cmd+click opens a background
@@ -156,6 +169,7 @@ function NavEntry({
   icon,
   favorite,
   favoriteAction,
+  hotkey,
   onIntent,
 }: {
   to: string;
@@ -164,6 +178,8 @@ function NavEntry({
   icon?: React.ReactElement;
   favorite?: FavoriteItem;
   favoriteAction?: ReactNode;
+  /** Shortcut hint (e.g. ⌘1) shown at rest; hover swaps it for the row actions. */
+  hotkey?: string;
   /** Fired on hover/focus — used to preload the target's heavy chunks. */
   onIntent?: () => void;
 }) {
@@ -203,16 +219,34 @@ function NavEntry({
     <ListItem
       disablePadding
       secondaryAction={
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, position: 'relative' }}>
           {favoriteAction}
           <FavStar
             active={isFav}
             label={`${isFav ? 'Remove' : 'Add'} favorite ${label}`}
             onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
           />
+          {hotkey && (
+            <Typography
+              className="fav-hotkey"
+              variant="caption"
+              aria-hidden
+              sx={{
+                position: 'absolute',
+                right: 6,
+                color: 'text.disabled',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                transition: 'opacity 120ms ease',
+              }}
+            >
+              {hotkey}
+            </Typography>
+          )}
         </Box>
       }
-      sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 } }}
+      sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 }, '&:hover .fav-hotkey': { opacity: 0 } }}
     >
       {button}
     </ListItem>
@@ -419,6 +453,31 @@ export const NavDrawer = memo(function NavDrawer() {
   const [draggingFavoriteId, setDraggingFavoriteId] = useState<string | null>(null);
   const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
   const deferredFilter = useDeferredValue(filter);
+  const navigate = useNavigate();
+
+  // Cmd/Ctrl+1–9 jumps to the corresponding favorite. Digits come from
+  // e.code so the physical number row works on any keyboard layout. Note the
+  // browser may reserve Ctrl/Cmd+1–8 for its own tab switching; the desktop
+  // app always receives them.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
+      if (!digit) return;
+      const fav = hotkeyFavorites(useNavigationStore.getState().favorites)[Number(digit) - 1];
+      if (!fav?.path) return;
+      e.preventDefault();
+      void navigate(fav.path);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate]);
+
+  const hotkeyByFavorite = useMemo(() => {
+    const map = new Map<string, string>();
+    hotkeyFavorites(favorites).forEach((fav, i) => map.set(fav.id, `${HOTKEY_MOD_LABEL}${i + 1}`));
+    return map;
+  }, [favorites]);
 
   const toggleGroup = (title: string) =>
     setCollapsed((prev) => {
@@ -613,6 +672,7 @@ export const NavDrawer = memo(function NavDrawer() {
                         subtitle={subtitle}
                         favorite={fav}
                         favoriteAction={favoriteDragHandle(fav)}
+                        hotkey={hotkeyByFavorite.get(fav.id)}
                       />,
                     )}
                   </Box>

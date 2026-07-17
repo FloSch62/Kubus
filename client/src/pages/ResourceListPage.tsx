@@ -22,10 +22,10 @@ import { useClustersStore } from '../state/clusters.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
-import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, METRIC_COLUMN_IDS } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
-import { RowActionMenu, RowActions, type RowActionTarget } from '../components/RowActions.js';
+import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -263,11 +263,14 @@ export function ResourceListPage() {
   const labelSelector = searchParams.get('label') ?? '';
 
   const list = useFilteredList(group, version, plural, namespaced, { labelSelector });
-  const isPodOrNode = behaviorKind === 'Pod' || behaviorKind === 'Node';
-  const { data: podMetrics } = useResourceMetrics(isPodOrNode ? selected : [], behaviorKind === 'Node' ? 'nodes' : 'pods');
-  const metricsUnavailable = isPodOrNode ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false) : [];
-  const nodePods = useWatchedList(behaviorKind === 'Node' ? selected : [], '', 'v1', 'pods');
-  const nodeAllocation = useMemo(() => (behaviorKind === 'Node' ? makeNodeAllocationLookup(nodePods.rows) : undefined), [behaviorKind, nodePods.rows]);
+  const isWorkloadMetricsKind = !!behaviorKind && WORKLOAD_METRIC_KINDS.has(behaviorKind);
+  const wantsMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node' || isWorkloadMetricsKind;
+  const { data: podMetrics } = useResourceMetrics(wantsMetrics ? selected : [], behaviorKind === 'Node' ? 'nodes' : 'pods');
+  const metricsUnavailable = wantsMetrics ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false) : [];
+  // Node lists watch all pods for allocation totals; workload lists watch them
+  // to attribute per-pod usage to the owning workload.
+  const auxPods = useWatchedList(behaviorKind === 'Node' || isWorkloadMetricsKind ? selected : [], '', 'v1', 'pods');
+  const nodeAllocation = useMemo(() => (behaviorKind === 'Node' ? makeNodeAllocationLookup(auxPods.rows) : undefined), [behaviorKind, auxPods.rows]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
@@ -346,7 +349,13 @@ export function ResourceListPage() {
     [group, version, plural, kind],
   );
 
-  const metricsLookup = useMemo(() => makeMetricsLookup(behaviorKind ?? 'Resource', podMetrics), [behaviorKind, podMetrics]);
+  const metricsLookup = useMemo(
+    () =>
+      isWorkloadMetricsKind
+        ? makeWorkloadMetricsLookup(behaviorKind ?? '', auxPods.rows, podMetrics)
+        : makeMetricsLookup(behaviorKind ?? 'Resource', podMetrics),
+    [isWorkloadMetricsKind, behaviorKind, auxPods.rows, podMetrics],
+  );
 
   const columnIds = useMemo(() => columnsForKind(behaviorKind ?? 'Resource', namespaced), [behaviorKind, namespaced]);
 
@@ -364,16 +373,22 @@ export function ResourceListPage() {
     // Labels for every kind, right before Age.
     const ageIdx = cols.findIndex((c) => c.field === 'age');
     cols.splice(ageIdx === -1 ? cols.length : ageIdx, 0, ...buildColumns(['labels'], opts));
+    const quickLogs = !!behaviorKind && isLogTargetKind(behaviorKind);
     cols.push({
       field: '_actions',
       headerName: '',
-      width: 50,
+      width: quickLogs ? 84 : 50,
       sortable: false,
       filterable: false,
-      renderCell: (p) => <RowActions target={rowActionTarget(p.row)} />,
+      renderCell: (p) => (
+        <>
+          {quickLogs && <RowLogsButton target={rowActionTarget(p.row)} />}
+          <RowActions target={rowActionTarget(p.row)} />
+        </>
+      ),
     });
     return cols;
-  }, [columnIds, selected.length, addLabelFilter, isCustomKind, printerCols, rowActionTarget]);
+  }, [columnIds, selected.length, addLabelFilter, isCustomKind, printerCols, rowActionTarget, behaviorKind]);
 
   const metricColumns = useMemo(() => {
     const ids = columnIds.filter((id) => METRIC_COLUMN_IDS.has(id));

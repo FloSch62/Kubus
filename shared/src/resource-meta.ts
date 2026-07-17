@@ -94,10 +94,10 @@ export const BUILTIN_NAV_GROUPS: NavGroup[] = [
 /** Semantic column ids per kind; the client maps these to renderers. */
 export const KIND_COLUMNS: Record<string, string[]> = {
   Pod: ['name', 'namespace', 'cluster', 'ready', 'podStatus', 'restarts', 'cpu', 'memory', 'node', 'age'],
-  Deployment: ['name', 'namespace', 'cluster', 'workloadReady', 'upToDate', 'available', 'age'],
-  StatefulSet: ['name', 'namespace', 'cluster', 'workloadReady', 'age'],
-  DaemonSet: ['name', 'namespace', 'cluster', 'dsDesired', 'dsReady', 'age'],
-  ReplicaSet: ['name', 'namespace', 'cluster', 'workloadReady', 'age'],
+  Deployment: ['name', 'namespace', 'cluster', 'workloadReady', 'upToDate', 'available', 'cpu', 'memory', 'age'],
+  StatefulSet: ['name', 'namespace', 'cluster', 'workloadReady', 'cpu', 'memory', 'age'],
+  DaemonSet: ['name', 'namespace', 'cluster', 'dsDesired', 'dsReady', 'cpu', 'memory', 'age'],
+  ReplicaSet: ['name', 'namespace', 'cluster', 'workloadReady', 'cpu', 'memory', 'age'],
   Job: ['name', 'namespace', 'cluster', 'jobCompletions', 'jobDuration', 'age'],
   CronJob: ['name', 'namespace', 'cluster', 'cronSchedule', 'cronSuspend', 'cronLastSchedule', 'age'],
   Service: ['name', 'namespace', 'cluster', 'svcType', 'svcClusterIP', 'svcLoadBalancerIP', 'svcPorts', 'age'],

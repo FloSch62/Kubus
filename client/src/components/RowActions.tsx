@@ -17,6 +17,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Snackbar from '@mui/material/Snackbar';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -52,7 +53,7 @@ import {
   useTriggerCronJob,
 } from '../api/queries.js';
 import { watchClient } from '../api/ws/watch-client.js';
-import { useDockStore, dockTabId } from '../state/dock.js';
+import { useDockStore, dockTabId, type DockTab } from '../state/dock.js';
 import { useIsProtected } from '../state/clusters.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
@@ -77,8 +78,73 @@ export interface RowActionMenuProps {
 
 const LOG_TARGET_KINDS = new Set<string>(['Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service']);
 
-function isLogTargetKind(kind: string): kind is LogTargetKind {
+export function isLogTargetKind(kind: string): kind is LogTargetKind {
   return LOG_TARGET_KINDS.has(kind);
+}
+
+/** Resolve a pod/workload/service to its pods and open one logs dock tab per namespace. */
+async function openLogsForTarget(target: RowActionTarget, addTab: (tab: DockTab) => void): Promise<void> {
+  const { ctx, kind, obj } = target;
+  const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === kind ? kind : undefined;
+  if (!actionKind || !isLogTargetKind(actionKind)) return;
+  const name = obj.metadata.name;
+  const namespace = obj.metadata.namespace;
+  if (!namespace) throw new Error(`${kind} has no namespace`);
+  const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
+  if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
+  const byNamespace = new Map<string, string[]>();
+  for (const pod of pods) {
+    const names = byNamespace.get(pod.namespace);
+    if (names) names.push(pod.name);
+    else byNamespace.set(pod.namespace, [pod.name]);
+  }
+  for (const [ns, podNames] of byNamespace) {
+    addTab({
+      kind: 'logs',
+      id: dockTabId(),
+      title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${actionKind}/${name}`,
+      ctx,
+      namespace: ns,
+      pods: podNames,
+      follow: true,
+    });
+  }
+}
+
+/** Inline row quick action: stream logs without opening the row menu. */
+export function RowLogsButton({ target }: { target: RowActionTarget }) {
+  const addTab = useDockStore((s) => s.addTab);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <Tooltip title="Logs">
+        <span>
+          <IconButton
+            size="small"
+            aria-label={`Logs for ${target.obj.metadata.name}`}
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              setBusy(true);
+              openLogsForTarget(target, addTab)
+                .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            <SubjectIcon fontSize="small" />
+          </IconButton>
+        </span>
+      </Tooltip>
+      {error !== null && (
+        <Snackbar open autoHideDuration={5000} onClose={() => setError(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+          <Alert severity="error" variant="filled" onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        </Snackbar>
+      )}
+    </>
+  );
 }
 
 export function RowActions({ target }: { target: RowActionTarget }) {
@@ -144,32 +210,9 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const rolloutPaused = isDeployment && !!(obj.spec as { paused?: boolean })?.paused;
 
   const openLogs = async () => {
-    if (!actionKind || !isLogTargetKind(actionKind)) return;
-    if (!namespace) {
-      fail(new Error(`${kind} has no namespace`));
-      return;
-    }
     setLogsBusy(true);
     try {
-      const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
-      if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
-      const byNamespace = new Map<string, string[]>();
-      for (const pod of pods) {
-        const names = byNamespace.get(pod.namespace);
-        if (names) names.push(pod.name);
-        else byNamespace.set(pod.namespace, [pod.name]);
-      }
-      for (const [ns, podNames] of byNamespace) {
-        addTab({
-          kind: 'logs',
-          id: dockTabId(),
-          title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${actionKind}/${name}`,
-          ctx,
-          namespace: ns,
-          pods: podNames,
-          follow: true,
-        });
-      }
+      await openLogsForTarget(target, addTab);
     } catch (err) {
       fail(err);
     } finally {
