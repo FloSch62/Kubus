@@ -14,3 +14,6 @@ site/
 .agents/
 .claude/skills
 skills-lock.json
+
+# promo video project (HyperFrames, local-only)
+/promo/

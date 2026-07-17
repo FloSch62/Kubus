@@ -7,7 +7,7 @@ releases, and more.
 
 **The docs are the main entry point:** [flosch62.github.io/Kubus](https://flosch62.github.io/Kubus/)
 
-![The Kubus overview dashboard](docs/assets/screenshots/overview.png)
+[![vid](docs/assets/overview-play.png)](https://www.youtube.com/watch?v=b86yKodD5Mw)
 
 ## Start Here
 
@@ -17,6 +17,7 @@ releases, and more.
 - [Reference](https://flosch62.github.io/Kubus/reference/)
 - [Contributing and development](https://flosch62.github.io/Kubus/community/)
 - [Desktop releases](https://github.com/FloSch62/Kubus/releases)
+
 
 ## Run From Source
 

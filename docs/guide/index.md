@@ -8,6 +8,34 @@ Welcome to the Kubus guide. Each page here covers one part of the app, with scre
 and step-by-step instructions. You don't have to read it in order — jump to whatever
 you're trying to do.
 
+## Browse, inspect, act
+
+The whole app in three moves:
+
+=== "Browse"
+
+    Pick your clusters, pick a kind, and you get a live list that updates over a
+    WebSocket watch — no refresh button. CRDs show their own `additionalPrinterColumns`.
+
+    ![Pods list with live status](../assets/screenshots/pods.png#only-light){ .shadow }
+    ![Pods list with live status](../assets/screenshots/pods-dark.png#only-dark){ .shadow }
+
+=== "Inspect"
+
+    Click any resource to slide open a details drawer with a human overview, a
+    Monaco-powered YAML editor, events, a relationship map and (for pods/nodes) metrics.
+
+    ![Resource details drawer](../assets/screenshots/pod-detail.png#only-light){ .shadow }
+    ![Resource details drawer](../assets/screenshots/pod-detail-dark.png#only-dark){ .shadow }
+
+=== "Act"
+
+    Scale, restart, roll back, trigger a CronJob, cordon or drain a node, open a shell,
+    forward a port — all from a row menu, the detail drawer or the command palette.
+
+    ![Resource diff across clusters](../assets/screenshots/diff.png#only-light){ .shadow }
+    ![Resource diff across clusters](../assets/screenshots/diff-dark.png#only-dark){ .shadow }
+
 ## Start here
 
 <div class="grid cards" markdown>

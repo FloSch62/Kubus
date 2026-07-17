@@ -182,7 +182,9 @@ add('shell', async () => {
   await page.waitForTimeout(600);
   await page.keyboard.type('podinfo', { delay: 45 });
   await page.waitForTimeout(1200);
-  await page.keyboard.press('ArrowDown'); // move to a pod
+  // results order: Deployment, Service, then the pods — two steps to the first Pod
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
   await page.waitForTimeout(700);
   await page.keyboard.type('shell', { delay: 45 });

@@ -25,6 +25,27 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
+/* Responsive 16:9 video embed, framed like the screenshots */
+.md-typeset .kubus-video {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .kubus-video {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.md-typeset .kubus-video iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 /* Show the screenshot variant that matches the active theme.
    Pages reference both <name>.png#only-light and <name>-dark.png#only-dark. */
 [data-md-color-scheme="default"] .md-typeset img[src$="#only-dark"],
