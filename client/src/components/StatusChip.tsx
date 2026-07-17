@@ -1,8 +1,8 @@
 import Box from '@mui/material/Box';
 import CircleIcon from '@mui/icons-material/Circle';
 
-const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'completed', 'deployed', 'true', 'healthy', 'synced']);
-const BAD = new Set(['failed', 'crashloopbackoff', 'imagepullbackoff', 'errimagepull', 'error', 'evicted', 'lost', 'notready', 'oomkilled', 'false', 'unhealthy', 'degraded', 'stopped']);
+const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
+const BAD = new Set(['failed', 'crashloopbackoff', 'imagepullbackoff', 'errimagepull', 'error', 'evicted', 'lost', 'notready', 'oomkilled', 'false', 'unhealthy', 'degraded', 'stopped', 'down']);
 const WARN = new Set(['pending', 'terminating', 'containercreating', 'podinitializing', 'released', 'unknown', 'schedulingdisabled', 'pending-install', 'pending-upgrade', 'superseded', 'uninstalling']);
 
 export function statusColor(status: string): 'success' | 'error' | 'warning' | 'default' {

@@ -11,7 +11,7 @@ import { AgeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './format.js';
-import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, workloadReady } from '../kube-display.js';
+import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
 import { UsageMeter } from './UsageMeter.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
@@ -732,7 +732,7 @@ export function makeNodeAllocationLookup(pods: ClusterRow[]): NodeAllocationLook
 export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
   return cols.map((c, i): Col => {
     const numeric = c.type === 'integer' || c.type === 'number';
-    const statusLike = /^(ready|readiness|state|status|phase|health|healthy|available)$/i.test(c.name.trim());
+    const statusLike = statusLikeName(c.name);
     // The JSONPath walk runs in valueGetter and again in renderCell, per row
     // per grid pass; cache per object identity (watch updates replace objects).
     const valueCache = new WeakMap<KubeObject, unknown>();

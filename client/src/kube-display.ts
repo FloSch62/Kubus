@@ -252,6 +252,24 @@ export function parseQuantity(q: string | undefined): number {
   return value * (QUANTITY_BINARY[m[2] ?? ''] ?? QUANTITY_DECIMAL[m[2] ?? ''] ?? 1);
 }
 
+/**
+ * Whether a printer-column or status-field name likely carries a health-like
+ * value ("Ready", "Operational State", "operationalState", "npp-state"…) —
+ * such values render as colored StatusChips.
+ */
+export function statusLikeName(name: string): boolean {
+  const last = name
+    .replace(/[-_]/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim()
+    .split(/\s+/)
+    .pop()
+    ?.toLowerCase();
+  return !!last && STATUS_LIKE_WORDS.has(last);
+}
+
+const STATUS_LIKE_WORDS = new Set(['ready', 'readiness', 'state', 'status', 'phase', 'health', 'healthy', 'available', 'robustness']);
+
 interface ContainerWithResources {
   restartPolicy?: string;
   resources?: { requests?: Record<string, string>; limits?: Record<string, string> };

@@ -27,6 +27,7 @@ import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
+import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { MetricsChart } from './MetricsChart.js';
@@ -240,7 +241,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
           </Tabs>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} />}
+            {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
             {tab.startsWith('crd:') && schemaSource && <CrdSchemaDetail obj={schemaSource} versionName={tab.slice('crd:'.length)} />}
             {showMap && tab === 'map' && (
               <Box sx={{ height: '100%', p: 1.25 }}>
@@ -296,7 +297,7 @@ export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
   return <ResourceDetailDrawer {...props} inline />;
 }
 
-function OverviewForKind({ kind, obj, ctx }: { kind: string | undefined; obj: KubeObject; ctx: string }) {
+function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | undefined; obj: KubeObject; ctx: string; crd?: KubeObject; version: string }) {
   switch (kind) {
     case 'Deployment':
       return <DeploymentDetail obj={obj} ctx={ctx} />;
@@ -311,7 +312,9 @@ function OverviewForKind({ kind, obj, ctx }: { kind: string | undefined; obj: Ku
     case 'CustomResourceDefinition':
       return <CrdDetail obj={obj} ctx={ctx} />;
     default:
-      return <GenericDetail obj={obj} ctx={ctx} />;
+      // Custom resources with their backing CRD loaded get a status-aware
+      // overview driven by the CRD's printer columns.
+      return crd ? <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} /> : <GenericDetail obj={obj} ctx={ctx} />;
   }
 }
 
