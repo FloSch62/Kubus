@@ -77,15 +77,18 @@ function TopologyNode({ data, selected }: NodeProps) {
         py: 0.9,
       }}
     >
+      {/* xyflow anchors handles to the padding box, so the asymmetric borders
+          (5px status stripe left, 1px right) need compensating offsets to put
+          both dots on the outer edge. */}
       <Handle
         type="target"
         position={Position.Left}
-        style={{ width: 8, height: 8, border: 0, background: color }}
+        style={{ width: 8, height: 8, border: 0, background: color, left: -5 }}
       />
       <Handle
         type="source"
         position={Position.Right}
-        style={{ width: 8, height: 8, border: 0, background: color }}
+        style={{ width: 8, height: 8, border: 0, background: color, right: -1 }}
       />
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
         <Chip label={node.ref.kind} size="small" sx={{ height: 18, fontSize: 10, maxWidth: 120 }} />
@@ -360,14 +363,23 @@ export default function TopologyGraphImpl({
   }, [graphs, hideDisconnected]);
 
   // Re-fit the viewport when the set of displayed nodes changes (not on drag).
+  // Focused graphs (opened from a resource drawer) center on the focused
+  // resource instead of fitting the whole topology.
   const nodeIdsKey = useMemo(() => flow.nodes.map((node) => node.id).sort().join(), [flow.nodes]);
+  const focusedNodeId = useMemo(
+    () => (focus ? flow.nodes.find((node) => isFocusedNode(node.data.graphNode, focus))?.id : undefined),
+    [flow.nodes, focus],
+  );
   useEffect(() => {
     if (!nodeIdsKey) return;
     const frame = requestAnimationFrame(() => {
-      void instanceRef.current?.fitView({ maxZoom: 1 });
+      void instanceRef.current?.fitView({
+        maxZoom: 1,
+        ...(focusedNodeId ? { nodes: [{ id: focusedNodeId }] } : {}),
+      });
     });
     return () => cancelAnimationFrame(frame);
-  }, [nodeIdsKey]);
+  }, [nodeIdsKey, focusedNodeId]);
 
   const onNodesChange = useCallback((changes: NodeChange<TopologyFlowNode>[]) => {
     setFlow((f) => ({ ...f, nodes: applyNodeChanges(changes, f.nodes) }));
