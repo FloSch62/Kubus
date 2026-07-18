@@ -1,4 +1,9 @@
-import { loadAll } from 'js-yaml';
+import { dump, loadAll } from 'js-yaml';
+
+/** Stable, comment-free YAML for semantic values comparisons. */
+export function canonicalValuesYaml(values: Record<string, unknown>): string {
+  return dump(values, { noRefs: true, sortKeys: true, lineWidth: -1 });
+}
 
 /**
  * Parse user-supplied helm values YAML. Empty, whitespace-only and

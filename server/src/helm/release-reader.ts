@@ -24,6 +24,8 @@ export interface HelmReleasePayload {
       name?: string;
       version?: string;
       appVersion?: string;
+      home?: string;
+      sources?: string[];
       dependencies?: Array<{ name?: string; version?: string; repository?: string }>;
     };
     values?: Record<string, unknown>;
@@ -170,6 +172,8 @@ function toDetail(payload: HelmReleasePayload, driver: StorageDriver): HelmRelea
     values: payload.config ?? {},
     computedValues: payload.kubus?.computedValues ?? deepMerge(payload.chart?.values ?? {}, payload.config ?? {}),
     defaultValues: payload.chart?.values ?? {},
+    chartHome: payload.chart?.metadata?.home,
+    chartSources: payload.chart?.metadata?.sources ?? [],
     manifest: payload.manifest ?? '',
     firstDeployed: payload.info?.first_deployed,
     description: payload.info?.description,

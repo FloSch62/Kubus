@@ -57,6 +57,7 @@ import { parseValues, valuesOverrides } from './helm-values.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { ChartMarkdown } from './ChartMarkdown.js';
+import { ChartSourceLink, preferredChartSource } from './ChartSourceLink.js';
 
 interface Props {
   /** Candidate target clusters (the ones selected in the sidebar). */
@@ -399,7 +400,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
   };
 
   const title = pick.chart ?? pick.customRef ?? '';
-  const readmeSource = detail?.sources?.findLast((source) => source.startsWith('https://github.com/')) ?? detail?.sources?.[0] ?? detail?.home;
+  const readmeSource = preferredChartSource(detail?.sources, detail?.home);
 
   return (
     <>
@@ -413,6 +414,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
           {pick.repo && <Chip size="small" label={pick.repo} variant="outlined" />}
           {pick.hubRepo && <Chip size="small" label={`${pick.hubRepo} · Artifact Hub`} variant="outlined" />}
           {detail?.appVersion && <Chip size="small" label={`app ${detail.appVersion}`} variant="outlined" />}
+          <ChartSourceLink url={readmeSource} />
         </Stack>
         <Typography variant="caption" color="text.secondary">
           Kubus checks workload readiness in the background. You can leave this dialog and follow the operation from the releases page.

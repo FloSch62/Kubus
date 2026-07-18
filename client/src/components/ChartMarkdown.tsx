@@ -15,6 +15,79 @@ function isAbsoluteUrl(value: string): boolean {
   return /^(?:https?:|mailto:)/i.test(value);
 }
 
+interface MarkdownNode {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, unknown>;
+  };
+}
+
+const GITHUB_ALERT_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:[ \t]*\n?[ \t]*)?/i;
+const GITHUB_ALERT_TITLES: Record<string, string> = {
+  note: 'Note',
+  tip: 'Tip',
+  important: 'Important',
+  warning: 'Warning',
+  caution: 'Caution',
+};
+
+/** Convert GitHub's > [!TIP] blockquote convention into styled alert nodes. */
+function remarkGithubAlerts() {
+  return (tree: MarkdownNode) => {
+    const visit = (node: MarkdownNode) => {
+      if (node.type === 'blockquote') {
+        const firstParagraph = node.children?.[0];
+        const firstText = firstParagraph?.type === 'paragraph' ? firstParagraph.children?.[0] : undefined;
+        const match = firstText?.type === 'text' ? GITHUB_ALERT_RE.exec(firstText.value ?? '') : undefined;
+        if (match && firstParagraph && firstText) {
+          const kind = match[1]!.toLowerCase();
+          firstText.value = (firstText.value ?? '').slice(match[0].length);
+          if (!firstText.value) firstParagraph.children?.shift();
+          if (!firstParagraph.children?.length) node.children?.shift();
+          node.data = {
+            ...node.data,
+            hName: 'div',
+            hProperties: { ...node.data?.hProperties, className: [`markdown-alert`, `markdown-alert-${kind}`] },
+          };
+          node.children?.unshift({
+            type: 'paragraph',
+            data: { hName: 'div', hProperties: { className: ['markdown-alert-title'] } },
+            children: [{ type: 'text', value: GITHUB_ALERT_TITLES[kind] ?? kind }],
+          });
+        }
+      }
+      for (const child of node.children ?? []) visit(child);
+    };
+    visit(tree);
+  };
+}
+
+const markdownPlugins = [remarkGfm, remarkGithubAlerts];
+
+function githubRelativeUrl(value: string, sourceUrl: string, raw: boolean): string | undefined {
+  try {
+    const source = new URL(sourceUrl);
+    if (source.hostname !== 'github.com') return undefined;
+    const segments = source.pathname.split('/').filter(Boolean);
+    if (segments.length < 2) return undefined;
+    const [owner, repository] = segments;
+    const mode = segments[2];
+    const revision = mode === 'tree' || mode === 'blob' ? segments[3] : 'HEAD';
+    if (!owner || !repository || !revision) return undefined;
+    const directorySegments = mode === 'tree' ? segments.slice(4) : mode === 'blob' ? segments.slice(4, -1) : [];
+    const directory = directorySegments.join('/');
+    const base = raw
+      ? `https://raw.githubusercontent.com/${owner}/${repository}/${revision}/${directory ? `${directory}/` : ''}`
+      : `https://github.com/${owner}/${repository}/blob/${revision}/${directory ? `${directory}/` : ''}`;
+    return new URL(value, base).toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveRelative(value: string | undefined, sourceUrl: string | undefined, raw = false): string | undefined {
   if (!value || value.startsWith('#') || isAbsoluteUrl(value)) return value;
   // Reject non-web schemes before URL resolution. React Markdown also
@@ -22,13 +95,10 @@ function resolveRelative(value: string | undefined, sourceUrl: string | undefine
   // chart README from turning javascript:/data: links into clickable URLs.
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return undefined;
   if (!sourceUrl) return undefined;
-  const source = sourceUrl.replace(/\/+$/, '');
-  if (/^https:\/\/github\.com\/[^/]+\/[^/]+$/i.test(source)) {
-    const path = value.replace(/^\.?\//, '');
-    return `${source}/${raw ? 'raw' : 'blob'}/HEAD/${path}`;
-  }
+  const githubUrl = githubRelativeUrl(value, sourceUrl, raw);
+  if (githubUrl) return githubUrl;
   try {
-    return new URL(value, `${source}/`).toString();
+    return new URL(value, `${sourceUrl.replace(/\/+$/, '')}/`).toString();
   } catch {
     return undefined;
   }
@@ -83,7 +153,28 @@ export function ChartMarkdown({ markdown, sourceUrl }: Props) {
         '& p': { my: 1 },
         '& ul, & ol': { my: 1, pl: 3.5 },
         '& li': { my: 0.25 },
-        '& blockquote': { mx: 0, my: 1.5, px: 1.5, py: 0.25, borderLeft: 4, borderColor: 'info.main', bgcolor: 'action.hover' },
+        '& blockquote': {
+          mx: 0,
+          my: 1.5,
+          px: 1.5,
+          py: 0.25,
+          borderLeft: 4,
+          borderColor: 'info.main',
+          bgcolor: 'action.hover',
+        },
+        '& .markdown-alert': { my: 1.5, px: 1.5, py: 1, borderLeft: 4, borderRadius: 0.75, bgcolor: 'action.hover' },
+        '& .markdown-alert > :last-child': { mb: 0 },
+        '& .markdown-alert-title': { mb: 0.5, fontWeight: 700 },
+        '& .markdown-alert-note': { borderColor: 'info.main' },
+        '& .markdown-alert-note .markdown-alert-title': { color: 'info.main' },
+        '& .markdown-alert-tip': { borderColor: 'success.main' },
+        '& .markdown-alert-tip .markdown-alert-title': { color: 'success.main' },
+        '& .markdown-alert-important': { borderColor: 'secondary.main' },
+        '& .markdown-alert-important .markdown-alert-title': { color: 'secondary.main' },
+        '& .markdown-alert-warning': { borderColor: 'warning.main' },
+        '& .markdown-alert-warning .markdown-alert-title': { color: 'warning.main' },
+        '& .markdown-alert-caution': { borderColor: 'error.main' },
+        '& .markdown-alert-caution .markdown-alert-title': { color: 'error.main' },
         '& code': { px: 0.45, py: 0.1, borderRadius: 0.5, bgcolor: 'action.hover', fontFamily: 'monospace', fontSize: '0.9em' },
         '& pre': { overflowX: 'auto', p: 1.5, borderRadius: 1, bgcolor: 'action.hover' },
         '& pre code': { p: 0, bgcolor: 'transparent' },
@@ -96,7 +187,7 @@ export function ChartMarkdown({ markdown, sourceUrl }: Props) {
       }}
     >
       <MarkdownSourceContext.Provider value={sourceUrl}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        <ReactMarkdown skipHtml remarkPlugins={markdownPlugins} components={markdownComponents}>
           {markdown}
         </ReactMarkdown>
       </MarkdownSourceContext.Provider>

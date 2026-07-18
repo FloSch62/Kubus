@@ -42,6 +42,7 @@ import { useIsProtected } from '../state/clusters.js';
 import { showToast } from '../state/toast.js';
 import { HelmOperationErrorAlert } from '../components/HelmOperationErrorAlert.js';
 import { HelmOperationStatus } from '../components/HelmOperationStatus.js';
+import { ChartSourceLink, preferredChartSource } from '../components/ChartSourceLink.js';
 
 const HelmUpgradeDialog = lazy(() => import('../components/HelmUpgradeDialog.js'));
 
@@ -78,6 +79,7 @@ export function HelmReleaseDetailPage() {
   );
   const updates = useHelmUpdates(updateItems);
   const availableUpdate = updates.data?.find((update) => update.available);
+  const chartSource = preferredChartSource(release?.chartSources, release?.chartHome);
   const lastGoodRevision = history?.find(
     (revision) => revision.revision < (release?.revision ?? 0) && ['deployed', 'superseded'].includes(revision.status),
   );
@@ -135,6 +137,7 @@ export function HelmReleaseDetailPage() {
             <StatusChip status={release.status} />
             <Chip label={`${release.chart}-${release.chartVersion}`} variant="outlined" />
             {release.appVersion && <Chip label={`app ${release.appVersion}`} variant="outlined" />}
+            <ChartSourceLink url={chartSource} />
             {availableUpdate ? (
               <Tooltip title={`Found in ${availableUpdate.repo ?? 'a matching chart source'}${availableUpdate.latestAppVersion ? ` · app ${availableUpdate.latestAppVersion}` : ''}`}>
                 <Chip label={`${availableUpdate.latestVersion} available`} color="primary" />

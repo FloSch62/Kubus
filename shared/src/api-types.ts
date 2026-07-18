@@ -782,6 +782,9 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   computedValues: Record<string, unknown>;
   /** Unmodified defaults embedded in this revision's chart. */
   defaultValues: Record<string, unknown>;
+  /** Upstream chart homepage and source repositories stored in Chart.yaml. */
+  chartHome?: string;
+  chartSources: string[];
   manifest: string;
   firstDeployed?: string;
   description?: string;

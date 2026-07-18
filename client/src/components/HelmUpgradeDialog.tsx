@@ -27,9 +27,10 @@ import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { DiffViewer } from './DiffViewer.js';
 import { HelmAddRepoDialog } from './HelmAddRepoDialog.js';
-import { parseValues, unknownValuePaths } from './helm-values.js';
+import { canonicalValuesYaml, parseValues, unknownValuePaths } from './helm-values.js';
 import { compareHelmVersions } from './helm-version.js';
 import { ChartMarkdown } from './ChartMarkdown.js';
+import { ChartSourceLink, preferredChartSource } from './ChartSourceLink.js';
 import { HelmOperationErrorAlert } from './HelmOperationErrorAlert.js';
 
 interface Props {
@@ -43,6 +44,44 @@ interface Props {
 
 /** Reuse the chart stored in the release record (values-only upgrade). */
 const CURRENT_CHART = '__current__';
+
+function DefaultValuesDiff({
+  left,
+  right,
+  installedVersion,
+  targetVersion,
+}: {
+  left: string;
+  right: string;
+  installedVersion: string;
+  targetVersion: string;
+}) {
+  const unchanged = left === right;
+  return (
+    <Box sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Stack direction="row" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+        <Typography variant="caption" sx={{ width: '50%', px: 1.5, py: 0.5, fontWeight: 600 }}>
+          {installedVersion} · installed
+        </Typography>
+        <Typography variant="caption" sx={{ width: '50%', px: 1.5, py: 0.5, borderLeft: 1, borderColor: 'divider', fontWeight: 600 }}>
+          {targetVersion} · selected
+        </Typography>
+      </Stack>
+      <Box sx={{ flex: 1, minHeight: 0 }}>
+        {unchanged ? (
+          <Alert severity="info" sx={{ m: 1.5 }}>
+            The chart’s default values are identical in these versions.
+          </Alert>
+        ) : (
+          <DiffViewer left={left} right={right} />
+        )}
+      </Box>
+      <Typography variant="caption" color="text.secondary" sx={{ px: 1.5, py: 0.5, borderTop: 1, borderColor: 'divider' }}>
+        Comments, formatting, and key order are normalized so this diff shows value changes only.
+      </Typography>
+    </Box>
+  );
+}
 
 /**
  * Edit values and/or bump the chart version of an installed release, with a
@@ -121,16 +160,17 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
   const versionDelta = targetVersion ? compareHelmVersions(targetVersion, release.chartVersion) : 0;
   const isDowngrade = versionDelta < 0;
   const isVersionUpgrade = versionDelta > 0;
-  const targetDefaultsYaml = targetDetail.data?.valuesYaml ?? dumpYaml(release.defaultValues, { noRefs: true });
-  const currentDefaultsYaml = useMemo(() => dumpYaml(release.defaultValues, { noRefs: true }), [release.defaultValues]);
+  const targetDefaultValues = targetDetail.data?.values ?? release.defaultValues;
+  const targetDefaultsYaml = useMemo(() => canonicalValuesYaml(targetDefaultValues), [targetDefaultValues]);
+  const currentDefaultsYaml = useMemo(() => canonicalValuesYaml(release.defaultValues), [release.defaultValues]);
   const possiblyRemovedValues = useMemo(
     () => (targetDetail.data ? unknownValuePaths(release.values, targetDetail.data.values) : []),
     [release.values, targetDetail.data],
   );
-  const readmeSource =
-    targetDetail.data?.sources?.findLast((source) => source.startsWith('https://github.com/')) ??
-    targetDetail.data?.sources?.[0] ??
-    targetDetail.data?.home;
+  const readmeSource = preferredChartSource(
+    targetDetail.data?.sources?.length ? targetDetail.data.sources : release.chartSources,
+    targetDetail.data?.home ?? release.chartHome,
+  );
 
   const chartRef = (): HelmChartSourceRef | undefined => {
     if (customRef.trim()) return selectedSource;
@@ -201,6 +241,7 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
           ) : null}
           <Chip size="small" label={`rev ${release.revision}`} variant="outlined" />
           <Chip size="small" label={`${ns} @ ${ctx}`} variant="outlined" />
+          <ChartSourceLink url={readmeSource} />
         </Stack>
         <Typography variant="caption" color="text.secondary">
           Kubus checks workload readiness in the background. You can leave this dialog; live status and recovery guidance remain on the release page.
@@ -317,7 +358,12 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
                 Loading selected chart defaults…
               </Typography>
             ) : (
-              <DiffViewer left={currentDefaultsYaml} right={targetDefaultsYaml} />
+              <DefaultValuesDiff
+                left={currentDefaultsYaml}
+                right={targetDefaultsYaml}
+                installedVersion={release.chartVersion}
+                targetVersion={targetVersion ?? release.chartVersion}
+              />
             )
           ) : (
             <ChartMarkdown markdown={targetDetail.data?.readme ?? ''} sourceUrl={readmeSource} />
@@ -392,7 +438,12 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
                   right={dumpYaml(preview.computedValues, { noRefs: true })}
                 />
               ) : previewTab === 'defaults' ? (
-                <DiffViewer left={currentDefaultsYaml} right={targetDefaultsYaml} />
+                <DefaultValuesDiff
+                  left={currentDefaultsYaml}
+                  right={targetDefaultsYaml}
+                  installedVersion={release.chartVersion}
+                  targetVersion={preview.chartVersion}
+                />
               ) : (
                 <DiffViewer left={initialValues} right={dumpYaml(parseValues(valuesText).values ?? {}, { noRefs: true })} />
               )}
