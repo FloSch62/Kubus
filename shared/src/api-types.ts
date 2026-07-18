@@ -298,6 +298,8 @@ export interface ApiErrorBody {
   reason?: string;
   code?: number;
   k8sStatus?: unknown;
+  /** Structured, operation-specific context for actionable recovery UI. */
+  details?: unknown;
 }
 
 // ---- Actions ----
@@ -778,6 +780,8 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   values: Record<string, unknown>;
   /** chart defaults deep-merged with user values. */
   computedValues: Record<string, unknown>;
+  /** Unmodified defaults embedded in this revision's chart. */
+  defaultValues: Record<string, unknown>;
   manifest: string;
   firstDeployed?: string;
   description?: string;
@@ -835,6 +839,9 @@ export interface HelmChartDetail {
   description?: string;
   icon?: string;
   home?: string;
+  sources?: string[];
+  /** Parsed chart defaults. valuesYaml preserves comments for the editor. */
+  values: Record<string, unknown>;
   valuesYaml: string;
   readme: string;
   dependencies?: Array<{ name: string; version: string; repository?: string }>;
@@ -861,6 +868,10 @@ export interface HelmInstallRequest {
   chart: HelmChartSourceRef;
   createNamespace?: boolean;
   skipHooks?: boolean;
+  /** Wait for workloads to become ready before marking the revision deployed. */
+  wait?: boolean;
+  /** Readiness timeout; only used when wait is true. */
+  timeoutSeconds?: number;
   dryRun?: boolean;
 }
 
@@ -870,6 +881,10 @@ export interface HelmUpgradeRequest {
   /** Omitted → re-render the chart stored in the release record. */
   chart?: HelmChartSourceRef;
   skipHooks?: boolean;
+  /** Wait for workloads to become ready before marking the revision deployed. */
+  wait?: boolean;
+  /** Readiness timeout; only used when wait is true. */
+  timeoutSeconds?: number;
   dryRun?: boolean;
 }
 
@@ -888,6 +903,84 @@ export interface HelmDryRunResult {
   hooks: Array<{ name: string; kind: string; events: string[] }>;
   chart: string;
   chartVersion: string;
+  /** Fully coalesced values for the candidate revision. */
+  computedValues: Record<string, unknown>;
+  /** Kubernetes API server-side dry-run findings. */
+  validation: HelmResourceValidation[];
+  /** Important limits of the preview validation. */
+  warnings: string[];
+}
+
+export interface HelmResourceValidation {
+  resource: string;
+  status: 'valid' | 'warning' | 'error';
+  message?: string;
+}
+
+export type HelmOperationPhase = 'pre-hook' | 'apply' | 'readiness' | 'prune' | 'post-hook' | 'record';
+
+/** Returned in ApiErrorBody.details when a mutating Helm operation fails. */
+export interface HelmOperationFailure {
+  operation: 'install' | 'upgrade' | 'rollback';
+  phase: HelmOperationPhase;
+  revision?: number;
+  /** Last revision known to have completed successfully, when one exists. */
+  recoveryRevision?: number;
+  applied: string[];
+  pruned: string[];
+  failed: Array<{ resource: string; error: string }>;
+  hooksRan: string[];
+  suggestions: string[];
+}
+
+export type HelmOperationKind = 'install' | 'upgrade' | 'downgrade' | 'rollback';
+export type HelmOperationStatus = 'running' | 'succeeded' | 'failed';
+export type HelmOperationProgressPhase =
+  | 'queued'
+  | 'resolving-chart'
+  | 'rendering'
+  | 'pre-hook'
+  | 'applying'
+  | 'pruning'
+  | 'readiness'
+  | 'post-hook'
+  | 'recording'
+  | 'completed';
+
+export interface HelmOperationWaitingResource {
+  resource: string;
+  message: string;
+}
+
+/**
+ * Live, non-secret progress for a Helm mutation. Values and rendered
+ * manifests are deliberately excluded because this is broadcast to the UI.
+ */
+export interface HelmOperation {
+  id: string;
+  kind: HelmOperationKind;
+  ctx: string;
+  namespace: string;
+  releaseName: string;
+  status: HelmOperationStatus;
+  phase: HelmOperationProgressPhase;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+  targetVersion?: string;
+  targetRevision?: number;
+  revision?: number;
+  completedResources?: number;
+  totalResources?: number;
+  currentResource?: string;
+  waitingFor?: HelmOperationWaitingResource[];
+  result?: HelmActionResult | HelmRollbackResult;
+  error?: string;
+  failure?: HelmOperationFailure;
+}
+
+export interface HelmOperationStarted {
+  operationId: string;
 }
 
 /** A chart found by exact name in a configured repo or on Artifact Hub (upgrade-source discovery). */
@@ -910,6 +1003,29 @@ export interface HelmHubChart {
   appVersion?: string;
   official?: boolean;
   verifiedPublisher?: boolean;
+}
+
+export interface HelmUpdateCheck {
+  /** Caller-stable release identity; echoed by the response. */
+  id: string;
+  chart: string;
+  currentVersion: string;
+  /** Narrows same-name/same-version source collisions when metadata provides it. */
+  currentAppVersion?: string;
+}
+
+export interface HelmChartUpdate {
+  id: string;
+  chart: string;
+  currentVersion: string;
+  currentAppVersion?: string;
+  available: boolean;
+  latestVersion?: string;
+  latestAppVersion?: string;
+  repo?: string;
+  repoUrl?: string;
+  /** Why no safe update could be selected. */
+  reason?: 'up-to-date' | 'chart-not-found' | 'current-version-not-found';
 }
 
 // ---- Port forward ----

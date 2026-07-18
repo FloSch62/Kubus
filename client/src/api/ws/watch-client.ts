@@ -7,7 +7,9 @@ export interface WatchHandlers {
   onStatus(state: WatchStatusState, message?: string): void;
 }
 
-export type BroadcastHandler = (msg: Extract<WatchServerMessage, { op: 'drain-progress' | 'pf-update' | 'contexts-changed' | 'discovery-update' }>) => void;
+export type BroadcastHandler = (
+  msg: Extract<WatchServerMessage, { op: 'drain-progress' | 'helm-operation' | 'pf-update' | 'contexts-changed' | 'discovery-update' }>,
+) => void;
 
 type SubParams = Omit<WatchSubMessage, 'op' | 'id'>;
 
@@ -157,6 +159,7 @@ class WatchClient {
           break;
         }
         case 'drain-progress':
+        case 'helm-operation':
         case 'pf-update':
         case 'contexts-changed':
         case 'discovery-update': {

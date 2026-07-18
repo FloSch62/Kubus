@@ -1,4 +1,4 @@
-import type { HelmChartHit, HelmChartSummary, HelmChartVersion, HelmHubChart, HelmRepo } from '@kubus/shared';
+import type { HelmChartHit, HelmChartSummary, HelmChartUpdate, HelmChartVersion, HelmHubChart, HelmRepo, HelmUpdateCheck } from '@kubus/shared';
 import type { SettingsStore } from '../settings-store.js';
 import { HttpProblem } from '../util/errors.js';
 import { loadYaml } from '../util/yaml.js';
@@ -121,6 +121,10 @@ function parseSemver(v: string): { nums: number[]; pre?: string } | undefined {
   return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] };
 }
 
+function isPrerelease(v: string): boolean {
+  return !!parseSemver(v)?.pre;
+}
+
 function toChartVersion(e: IndexVersionEntry): HelmChartVersion {
   return {
     version: e.version ?? '',
@@ -192,6 +196,64 @@ export async function findChartInRepos(settings: SettingsStore, chart: string): 
     results.push(hit);
   }
   return results;
+}
+
+/**
+ * Resolve safe update hints in a bounded number of parallel lookups. A source
+ * is only trusted when it also publishes the installed version; this avoids
+ * suggesting an unrelated chart that happens to share the same name.
+ */
+export async function checkChartUpdates(settings: SettingsStore, checks: HelmUpdateCheck[]): Promise<HelmChartUpdate[]> {
+  const uniqueCharts = [...new Set(checks.map((item) => item.chart).filter(Boolean))];
+  const hitsByChart = new Map<string, HelmChartHit[]>();
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(4, uniqueCharts.length) }, async () => {
+    while (cursor < uniqueCharts.length) {
+      const chart = uniqueCharts[cursor++]!;
+      hitsByChart.set(chart, await findChartInRepos(settings, chart).catch(() => []));
+    }
+  });
+  await Promise.all(workers);
+
+  return checks.map((item) => {
+    const hits = hitsByChart.get(item.chart) ?? [];
+    if (!hits.length) {
+      return { ...item, available: false, reason: 'chart-not-found' };
+    }
+    const versionMatches = hits.filter((hit) => hit.versions.some((version) => version.version === item.currentVersion));
+    const source =
+      (item.currentAppVersion
+        ? versionMatches.find((hit) =>
+            hit.versions.some((version) => version.version === item.currentVersion && version.appVersion === item.currentAppVersion),
+          )
+        : undefined) ?? versionMatches[0];
+    if (!source) {
+      return { ...item, available: false, reason: 'current-version-not-found' };
+    }
+    const allowPrerelease = isPrerelease(item.currentVersion);
+    const latest = source.versions
+      .filter((version) => !version.deprecated && (allowPrerelease || !isPrerelease(version.version)))
+      .toSorted((a, b) => compareVersionsDesc(a.version, b.version))[0];
+    if (!latest || compareVersionsDesc(latest.version, item.currentVersion) >= 0) {
+      return {
+        ...item,
+        available: false,
+        latestVersion: latest?.version,
+        latestAppVersion: latest?.appVersion,
+        repo: source.repo,
+        repoUrl: source.repoUrl,
+        reason: 'up-to-date',
+      };
+    }
+    return {
+      ...item,
+      available: true,
+      latestVersion: latest.version,
+      latestAppVersion: latest.appVersion,
+      repo: source.repo,
+      repoUrl: source.repoUrl,
+    };
+  });
 }
 
 /** Download a chart .tgz given its repository base URL (classic http(s) index repo or oci:// base). */

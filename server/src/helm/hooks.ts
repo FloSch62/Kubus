@@ -16,6 +16,8 @@ export type HelmHookEvent =
   | 'pre-delete'
   | 'post-delete';
 
+export type HelmHookProgress = (message: string, resource: string) => void;
+
 const HOOK_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_MS = 2000;
 
@@ -81,6 +83,7 @@ export async function execHooks(
   namespace: string,
   log: FastifyBaseLogger,
   ran: string[],
+  report?: HelmHookProgress,
 ): Promise<void> {
   const matching = (hooks ?? [])
     .filter((h) => h.events?.includes(event))
@@ -91,6 +94,7 @@ export async function execHooks(
     if (!doc) continue;
     const label = docLabel(doc);
     const policies = hook.delete_policies?.length ? hook.delete_policies : ['before-hook-creation'];
+    report?.(`Preparing ${event} hook`, label);
 
     if (policies.includes('before-hook-creation')) {
       try {
@@ -103,6 +107,7 @@ export async function execHooks(
     try {
       await applyDoc(handle, doc);
       ran.push(`${event}: ${label}`);
+      report?.(doc.kind === 'Job' || doc.kind === 'Pod' ? `Waiting for ${event} hook` : `Ran ${event} hook`, label);
       await waitHookCompletion(handle, doc);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import AppBar from '@mui/material/AppBar';
+import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
@@ -13,8 +14,11 @@ import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SearchIcon from '@mui/icons-material/Search';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import PendingActionsOutlinedIcon from '@mui/icons-material/PendingActionsOutlined';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore } from '../state/dock.js';
+import { useHelmOperationsStore } from '../state/helm-operations.js';
+import { useHelmOperations } from '../api/queries.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { ShortcutHelpDialog } from '../components/ShortcutHelpDialog.js';
 import { ClusterSwitcher } from './ClusterSwitcher.js';
@@ -24,8 +28,10 @@ import { NamespaceFilter } from './NamespaceFilter.js';
 // dialogs' js-yaml dependency) out of the first paint.
 const loadSearchDialog = () => import('./SearchDialog.js');
 const loadSettingsDialog = () => import('../components/settings/SettingsDialog.js');
+const loadHelmOperationsDrawer = () => import('../components/HelmOperationsDrawer.js');
 const SearchDialog = lazy(() => loadSearchDialog().then((m) => ({ default: m.SearchDialog })));
 const SettingsDialog = lazy(() => loadSettingsDialog().then((m) => ({ default: m.SettingsDialog })));
+const HelmOperationsDrawer = lazy(() => loadHelmOperationsDrawer());
 
 export const TopBar = memo(function TopBar() {
   const mode = useClustersStore((s) => s.themeMode);
@@ -33,14 +39,21 @@ export const TopBar = memo(function TopBar() {
   const dockOpen = useDockStore((s) => s.open);
   const dockTabCount = useDockStore((s) => s.tabs.length);
   const setDockOpen = useDockStore((s) => s.setOpen);
+  const helmOperationsOpen = useHelmOperationsStore((state) => state.open);
+  const setHelmOperationsOpen = useHelmOperationsStore((state) => state.setOpen);
+  const helmOperations = useHelmOperations();
+  const runningHelmOperations = helmOperations.data?.filter((operation) => operation.status === 'running').length ?? 0;
+  const latestHelmOperationFailed = helmOperations.data?.[0]?.status === 'failed';
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Mounted on first open, kept mounted after so close animations still play.
   const [searchMounted, setSearchMounted] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
+  const [helmOperationsMounted, setHelmOperationsMounted] = useState(false);
   if (searchOpen && !searchMounted) setSearchMounted(true);
   if (settingsOpen && !settingsMounted) setSettingsMounted(true);
+  if (helmOperationsOpen && !helmOperationsMounted) setHelmOperationsMounted(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,6 +120,34 @@ export const TopBar = memo(function TopBar() {
               <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Tooltip
+            title={
+              runningHelmOperations
+                ? `${runningHelmOperations} Helm operation${runningHelmOperations === 1 ? '' : 's'} running`
+                : latestHelmOperationFailed
+                  ? 'Latest Helm operation failed'
+                  : 'Helm operations'
+            }
+          >
+            <IconButton
+              size="small"
+              aria-label="Helm operations"
+              color={runningHelmOperations ? 'primary' : latestHelmOperationFailed ? 'error' : 'default'}
+              onClick={() => setHelmOperationsOpen(true)}
+              onMouseEnter={() => void loadHelmOperationsDrawer()}
+              onFocus={() => void loadHelmOperationsDrawer()}
+            >
+              <Badge
+                color={latestHelmOperationFailed && !runningHelmOperations ? 'error' : 'primary'}
+                badgeContent={runningHelmOperations}
+                variant={!runningHelmOperations && latestHelmOperationFailed ? 'dot' : 'standard'}
+                invisible={!runningHelmOperations && !latestHelmOperationFailed}
+                max={9}
+              >
+                <PendingActionsOutlinedIcon fontSize="small" />
+              </Badge>
+            </IconButton>
+          </Tooltip>
           {dockTabCount > 0 && (
             <Tooltip title={dockOpen ? 'Hide dock' : `Show dock (${dockTabCount} tabs)`}>
               <IconButton size="small" onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
@@ -141,6 +182,11 @@ export const TopBar = memo(function TopBar() {
           <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         </Suspense>
       )}
+      {helmOperationsMounted ? (
+        <Suspense fallback={null}>
+          <HelmOperationsDrawer />
+        </Suspense>
+      ) : null}
       <ShortcutHelpDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </>
   );

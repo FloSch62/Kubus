@@ -1,4 +1,5 @@
 import type { KubernetesObject } from '@kubernetes/client-node';
+import type { Response } from 'node-fetch';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';
@@ -44,11 +45,27 @@ export async function pathForDoc(handle: ClusterHandle, obj: KubernetesObject, f
   const all = await handle.discovery.getResources();
   const info = all.find((r) => r.group === group && r.version === version && r.kind === obj.kind);
   if (!info) throw new HttpProblem(422, `unknown kind ${apiVersion}/${obj.kind}`);
+  // manifestDocs gives unqualified resources the release namespace. Strip it
+  // again for cluster-scoped kinds: Kubernetes rejects metadata.namespace on
+  // ClusterRoles, Namespaces, CRDs, and other cluster-wide objects.
+  if (!info.namespaced && obj.metadata?.namespace) delete obj.metadata.namespace;
   return resourcePath(group, version, info.plural, {
     namespace: info.namespaced ? obj.metadata?.namespace : undefined,
     name: obj.metadata?.name,
     query: forApply ? new URLSearchParams({ fieldManager: 'kubus', force: 'true' }) : undefined,
   });
+}
+
+/** Server-side apply in Kubernetes dry-run mode; nothing is persisted. */
+export async function validateDoc(handle: ClusterHandle, doc: KubernetesObject): Promise<void> {
+  const path = await pathForDoc(handle, doc);
+  const separator = path.includes('?') ? '&' : '?';
+  const res = await handle.raw.request(`${path}${separator}dryRun=All`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/apply-patch+yaml' },
+    body: dumpYaml(doc, { noRefs: true }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await responseMessage(res)}`.trim());
 }
 
 /** Server-side apply one manifest doc; throws with the API server's message on failure. */
@@ -59,18 +76,29 @@ export async function applyDoc(handle: ClusterHandle, doc: KubernetesObject): Pr
     headers: { 'content-type': 'application/apply-patch+yaml' },
     body: dumpYaml(doc, { noRefs: true }),
   });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.trim());
+  if (!res.ok) throw new Error(`${res.status} ${await responseMessage(res)}`.trim());
+}
+
+async function responseMessage(res: Response): Promise<string> {
+  const text = await res.text().catch(() => '');
+  try {
+    const body = JSON.parse(text) as { message?: string };
+    return body.message ?? text;
+  } catch {
+    return text;
+  }
 }
 
 /** Delete one manifest doc; 404 counts as success. Returns false when it was already gone. */
 export async function deleteDoc(handle: ClusterHandle, doc: KubernetesObject): Promise<boolean> {
-  try {
-    await handle.objects.delete(doc);
-    return true;
-  } catch (err) {
-    if ((err as { code?: number }).code === 404) return false;
-    throw err;
-  }
+  // Resolve scope through discovery just like apply does. manifestDocs assigns
+  // the release namespace to unqualified objects; pathForDoc removes it again
+  // for ClusterRoles, CRDs, Namespaces, and all other cluster-scoped kinds.
+  const path = await pathForDoc(handle, doc, false);
+  const res = await handle.raw.request(path, { method: 'DELETE' });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`${res.status} ${await responseMessage(res)}`.trim());
+  return true;
 }
 
 /** Update a release record's payload and status label in place. */

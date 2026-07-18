@@ -33,6 +33,11 @@ export interface HelmReleasePayload {
   config?: Record<string, unknown>;
   manifest?: string;
   hooks?: HelmHookPayload[];
+  /** Kubus-only metadata; unknown JSON fields are ignored by the Helm CLI. */
+  kubus?: {
+    /** Exact values coalesced by Helm's renderer, including subcharts. */
+    computedValues?: Record<string, unknown>;
+  };
 }
 
 /** Helm storage backend a release record lives in. */
@@ -163,7 +168,8 @@ function toDetail(payload: HelmReleasePayload, driver: StorageDriver): HelmRelea
     ...summarize(payload, driver),
     notes: payload.info?.notes,
     values: payload.config ?? {},
-    computedValues: deepMerge(payload.chart?.values ?? {}, payload.config ?? {}),
+    computedValues: payload.kubus?.computedValues ?? deepMerge(payload.chart?.values ?? {}, payload.config ?? {}),
+    defaultValues: payload.chart?.values ?? {},
     manifest: payload.manifest ?? '',
     firstDeployed: payload.info?.first_deployed,
     description: payload.info?.description,
@@ -237,7 +243,12 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(override)) {
     const existing = out[key];
-    if (isPlainObject(existing) && isPlainObject(value)) {
+    // Helm's coalescing removes a default when the user explicitly supplies
+    // null; retaining it here would make the release detail disagree with the
+    // values used during template rendering.
+    if (value === null) {
+      delete out[key];
+    } else if (isPlainObject(existing) && isPlainObject(value)) {
       out[key] = deepMerge(existing, value);
     } else {
       out[key] = value;

@@ -65,6 +65,7 @@ export interface EngineRenderResult {
   /** Chart object in release-payload form — goes into the new release record. */
   chartJSON: Record<string, unknown>;
   metadata: ChartMetadata;
+  computedValues: Record<string, unknown>;
 }
 
 export interface EngineInspectResult {
@@ -128,6 +129,7 @@ export async function renderChart(req: EngineRenderRequest): Promise<EngineRende
   // Go marshals empty slices it never appended to as null.
   out.hooks ??= [];
   out.crds ??= [];
+  out.computedValues ??= {};
   return out;
 }
 

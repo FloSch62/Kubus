@@ -10,12 +10,14 @@ import { ErrorBoundary } from '../components/ErrorBoundary.js';
 import { useDockStore } from '../state/dock.js';
 import { useDetailStore } from '../state/detail.js';
 import { useTabsStore } from '../state/tabs.js';
+import { useHelmOperationEvents } from '../api/queries.js';
 
 // Lazy so the drawer's heavy deps (js-yaml, editors, charts) stay out of the
 // first paint; list pages pull the same module as a dependency anyway.
 const ResourceDetailDrawer = lazy(() => import('../components/ResourceDetailDrawer.js').then((m) => ({ default: m.ResourceDetailDrawer })));
 
 export function AppShell() {
+  useHelmOperationEvents();
   const dockOpen = useDockStore((s) => s.open);
   const dockHeight = useDockStore((s) => s.height);
   const maximized = useDockStore((s) => s.maximized);

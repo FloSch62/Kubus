@@ -1,11 +1,20 @@
 import type { FastifyInstance } from 'fastify';
-import type { HelmChartDetail, HelmChartSourceRef, HelmInstallRequest, HelmUpgradeRequest } from '@kubus/shared';
+import type {
+  HelmActionResult,
+  HelmChartDetail,
+  HelmChartSourceRef,
+  HelmInstallRequest,
+  HelmOperationStarted,
+  HelmUpdateCheck,
+  HelmUpgradeRequest,
+} from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { inspectChart } from '../helm/engine.js';
 import { installRelease } from '../helm/install.js';
 import { getHistory, getRelease, getRevisionDetail, listReleases } from '../helm/release-reader.js';
 import {
   addRepo,
+  checkChartUpdates,
   fetchChartArchive,
   fetchChartArchiveByRepoUrl,
   fetchChartByUrl,
@@ -19,6 +28,7 @@ import {
   pullOciChart,
   removeRepo,
   searchHub,
+  compareVersionsDesc,
 } from '../helm/repo.js';
 import { rollbackRelease } from '../helm/rollback.js';
 import { uninstallRelease } from '../helm/uninstall.js';
@@ -45,6 +55,14 @@ async function resolveChartArchive(ctx: AppContext, ref: HelmChartSourceRef | un
 const detailCache = new Map<string, HelmChartDetail>();
 const DETAIL_CACHE_MAX = 30;
 
+function timeoutSeconds(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 10 || value > 1_800) {
+    throw new HttpProblem(422, 'timeoutSeconds must be an integer between 10 and 1800');
+  }
+  return value;
+}
+
 async function chartDetail(ctx: AppContext, key: string, archive: () => Promise<Buffer>): Promise<HelmChartDetail> {
   const cached = detailCache.get(key);
   if (cached) return cached;
@@ -57,6 +75,8 @@ async function chartDetail(ctx: AppContext, key: string, archive: () => Promise<
     description: inspected.metadata.description,
     icon: inspected.metadata.icon,
     home: inspected.metadata.home,
+    sources: inspected.metadata.sources,
+    values: inspected.values,
     valuesYaml: inspected.valuesYaml,
     readme: inspected.readme,
     dependencies: inspected.metadata.dependencies?.map((d) => ({ name: d.name, version: d.version, repository: d.repository })),
@@ -70,6 +90,8 @@ async function chartDetail(ctx: AppContext, key: string, archive: () => Promise<
 }
 
 export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void {
+  app.get('/api/helm/operations', async () => ctx.helmOperations.list());
+
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string } }>('/api/contexts/:ctx/helm/releases', async (req, reply) => {
     try {
       const handle = ctx.clusters.get(req.params.ctx);
@@ -115,16 +137,37 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
     },
   );
 
-  app.post<{ Params: { ctx: string; ns: string; name: string }; Body: { revision?: number; skipHooks?: boolean } }>(
+  app.post<{
+    Params: { ctx: string; ns: string; name: string };
+    Body: { revision?: number; skipHooks?: boolean; wait?: boolean; timeoutSeconds?: number };
+  }>(
     '/api/contexts/:ctx/helm/releases/:ns/:name/rollback',
     async (req, reply) => {
       try {
         const handle = ctx.clusters.get(req.params.ctx);
         const revision = req.body?.revision;
         if (!revision || !Number.isInteger(revision) || revision < 1) throw new HttpProblem(422, 'revision must be a positive integer');
-        const result = await rollbackRelease(handle, req.params.ns, req.params.name, revision, app.log, req.body?.skipHooks ?? false);
-        handle.crdTracker.checkNow();
-        return result;
+        const timeout = timeoutSeconds(req.body?.timeoutSeconds);
+        const started = ctx.helmOperations.start(
+          {
+            kind: 'rollback',
+            ctx: req.params.ctx,
+            namespace: req.params.ns,
+            releaseName: req.params.name,
+            targetRevision: revision,
+          },
+          async (report) => {
+            const result = await rollbackRelease(handle, req.params.ns, req.params.name, revision, app.log, {
+              skipHooks: req.body?.skipHooks,
+              wait: req.body?.wait,
+              timeoutSeconds: timeout,
+              report,
+            });
+            handle.crdTracker.checkNow();
+            return result;
+          },
+        );
+        return reply.code(202).send(started satisfies HelmOperationStarted);
       } catch (err) {
         sendError(reply, err);
         return reply;
@@ -156,21 +199,61 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
       try {
         const handle = ctx.clusters.get(req.params.ctx);
         const body = req.body ?? ({} as HelmUpgradeRequest);
-        const chartArchive = await resolveChartArchive(ctx, body.chart);
-        const result = await upgradeRelease(
-          handle,
+        const timeout = timeoutSeconds(body.timeoutSeconds);
+        if (body.dryRun) {
+          const chartArchive = await resolveChartArchive(ctx, body.chart);
+          return await upgradeRelease(
+            handle,
+            {
+              namespace: req.params.ns,
+              name: req.params.name,
+              values: body.values ?? {},
+              chartArchive,
+              skipHooks: body.skipHooks,
+              wait: body.wait,
+              timeoutSeconds: timeout,
+              dryRun: true,
+            },
+            app.log,
+          );
+        }
+
+        const currentRelease = body.chart?.version ? await getRelease(handle, req.params.ns, req.params.name) : undefined;
+        const operationKind =
+          currentRelease && body.chart?.version && compareVersionsDesc(body.chart.version, currentRelease.chartVersion) > 0 ? 'downgrade' : 'upgrade';
+        const started = ctx.helmOperations.start(
           {
+            kind: operationKind,
+            ctx: req.params.ctx,
             namespace: req.params.ns,
-            name: req.params.name,
-            values: body.values ?? {},
-            chartArchive,
-            skipHooks: body.skipHooks,
-            dryRun: body.dryRun,
+            releaseName: req.params.name,
+            targetVersion: body.chart?.version,
           },
-          app.log,
+          async (report) => {
+            report({
+              phase: 'resolving-chart',
+              message: body.chart ? 'Downloading the target chart' : 'Using the chart stored with the current release',
+            });
+            const chartArchive = await resolveChartArchive(ctx, body.chart);
+            const result = await upgradeRelease(
+              handle,
+              {
+                namespace: req.params.ns,
+                name: req.params.name,
+                values: body.values ?? {},
+                chartArchive,
+                skipHooks: body.skipHooks,
+                wait: body.wait,
+                timeoutSeconds: timeout,
+                report,
+              },
+              app.log,
+            );
+            handle.crdTracker.checkNow();
+            return result as HelmActionResult;
+          },
         );
-        if (!body.dryRun) handle.crdTracker.checkNow();
-        return result;
+        return reply.code(202).send(started satisfies HelmOperationStarted);
       } catch (err) {
         sendError(reply, err);
         return reply;
@@ -183,23 +266,60 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
       const handle = ctx.clusters.get(req.params.ctx);
       const body = req.body;
       if (!body?.name || !body.namespace) throw new HttpProblem(422, 'name and namespace are required');
-      const chartArchive = await resolveChartArchive(ctx, body.chart);
-      if (!chartArchive) throw new HttpProblem(422, 'chart source is required');
-      const result = await installRelease(
-        handle,
+      if (!body.chart) throw new HttpProblem(422, 'chart source is required');
+      const timeout = timeoutSeconds(body.timeoutSeconds);
+      if (body.dryRun) {
+        const chartArchive = await resolveChartArchive(ctx, body.chart);
+        if (!chartArchive) throw new HttpProblem(422, 'chart source is required');
+        return await installRelease(
+          handle,
+          {
+            namespace: body.namespace,
+            name: body.name,
+            values: body.values ?? {},
+            chartArchive,
+            createNamespace: body.createNamespace,
+            skipHooks: body.skipHooks,
+            wait: body.wait,
+            timeoutSeconds: timeout,
+            dryRun: true,
+          },
+          app.log,
+        );
+      }
+
+      const started = ctx.helmOperations.start(
         {
+          kind: 'install',
+          ctx: req.params.ctx,
           namespace: body.namespace,
-          name: body.name,
-          values: body.values ?? {},
-          chartArchive,
-          createNamespace: body.createNamespace,
-          skipHooks: body.skipHooks,
-          dryRun: body.dryRun,
+          releaseName: body.name,
+          targetVersion: body.chart.version,
         },
-        app.log,
+        async (report) => {
+          report({ phase: 'resolving-chart', message: 'Downloading the chart' });
+          const chartArchive = await resolveChartArchive(ctx, body.chart);
+          if (!chartArchive) throw new HttpProblem(422, 'chart source is required');
+          const result = await installRelease(
+            handle,
+            {
+              namespace: body.namespace,
+              name: body.name,
+              values: body.values ?? {},
+              chartArchive,
+              createNamespace: body.createNamespace,
+              skipHooks: body.skipHooks,
+              wait: body.wait,
+              timeoutSeconds: timeout,
+              report,
+            },
+            app.log,
+          );
+          handle.crdTracker.checkNow();
+          return result as HelmActionResult;
+        },
       );
-      if (!body.dryRun) handle.crdTracker.checkNow();
-      return result;
+      return reply.code(202).send(started satisfies HelmOperationStarted);
     } catch (err) {
       sendError(reply, err);
       return reply;
@@ -274,6 +394,35 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
     }
   });
 
+  /** Batched update hints for the releases list. */
+  app.post<{ Body: { items?: HelmUpdateCheck[] } }>('/api/helm/updates', async (req, reply) => {
+    try {
+      const items = req.body?.items;
+      if (!Array.isArray(items)) throw new HttpProblem(422, 'items must be an array');
+      if (items.length > 100) throw new HttpProblem(422, 'at most 100 releases can be checked at once');
+      if (
+        items.some(
+          (item) =>
+            !item ||
+            typeof item.id !== 'string' ||
+            typeof item.chart !== 'string' ||
+            typeof item.currentVersion !== 'string' ||
+            (item.currentAppVersion !== undefined && typeof item.currentAppVersion !== 'string') ||
+            item.id.length > 500 ||
+            item.chart.length > 200 ||
+            item.currentVersion.length > 100 ||
+            (item.currentAppVersion?.length ?? 0) > 100,
+        )
+      ) {
+        throw new HttpProblem(422, 'each item needs valid id, chart and currentVersion strings');
+      }
+      return await checkChartUpdates(ctx.settings, items);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
   // ---- Artifact Hub ----
 
   app.get<{ Querystring: { q?: string } }>('/api/helm/hub/search', async (req, reply) => {
@@ -303,6 +452,19 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
       const { repoUrl, chart, version } = req.query;
       if (!repoUrl || !chart || !version) throw new HttpProblem(422, 'repoUrl, chart and version query parameters are required');
       return await chartDetail(ctx, `${repoUrl}|${chart}|${version}`, () => fetchChartArchiveByRepoUrl(repoUrl, chart, version));
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  /** Chart metadata from any source form, including direct OCI and .tgz refs. */
+  app.post<{ Body: HelmChartSourceRef }>('/api/helm/charts/detail', async (req, reply) => {
+    try {
+      const ref = req.body;
+      const encoded = await resolveChartArchive(ctx, ref);
+      if (!encoded) throw new HttpProblem(422, 'chart source is required');
+      return await chartDetail(ctx, JSON.stringify(ref), async () => Buffer.from(encoded, 'base64'));
     } catch (err) {
       sendError(reply, err);
       return reply;

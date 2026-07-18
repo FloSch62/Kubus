@@ -32,10 +32,12 @@ import SearchIcon from '@mui/icons-material/Search';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
+import { dump as dumpYaml } from 'js-yaml';
 import type { HelmChartSourceRef, HelmChartSummary, HelmDryRunResult, HelmHubChart } from '@kubus/shared';
 import {
   useHelmChartDetail,
   useHelmChartDetailByUrl,
+  useHelmChartSourceDetail,
   useHelmChartVersions,
   useHelmHubSearch,
   useHelmHubVersions,
@@ -49,10 +51,12 @@ import {
 } from '../api/queries.js';
 import { useIsProtected } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
+import { useHelmOperationsStore } from '../state/helm-operations.js';
 import { HelmAddRepoDialog } from './HelmAddRepoDialog.js';
-import { parseValues } from './helm-values.js';
+import { parseValues, valuesOverrides } from './helm-values.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { ChartMarkdown } from './ChartMarkdown.js';
 
 interface Props {
   /** Candidate target clusters (the ones selected in the sidebar). */
@@ -300,6 +304,7 @@ function ChartRow({ chart, onSelect }: { chart: HelmChartSummary; onSelect: () =
 function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]; pick: ChartPick; onBack: () => void; onClose: () => void }) {
   const theme = useTheme();
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
+  const setHelmOperationsOpen = useHelmOperationsStore((state) => state.setOpen);
 
   const isOci = !!pick.customRef?.startsWith('oci://');
   const isUrl = !!pick.customRef && !isOci;
@@ -316,8 +321,9 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
   const repoDetail = useHelmChartDetail(pick.repo, pick.chart, effectiveVersion);
   const urlDetail = useHelmChartDetailByUrl(repoUrl, isHub ? pick.chart : undefined, isHub ? effectiveVersion : undefined);
   const ociDetail = useHelmOciDetail(isOci ? pick.customRef : undefined, isOci ? ociVersion || undefined : undefined);
-  const detail = isOci ? ociDetail.data : isUrl ? undefined : isHub ? urlDetail.data : repoDetail.data;
-  const detailLoading = isOci ? ociDetail.isLoading : isHub ? hubInfo.isLoading || urlDetail.isLoading : repoDetail.isLoading;
+  const directDetail = useHelmChartSourceDetail(isUrl ? { url: pick.customRef } : undefined);
+  const detail = isOci ? ociDetail.data : isUrl ? directDetail.data : isHub ? urlDetail.data : repoDetail.data;
+  const detailLoading = isOci ? ociDetail.isLoading : isUrl ? directDetail.isLoading : isHub ? hubInfo.isLoading || urlDetail.isLoading : repoDetail.isLoading;
 
   const [ctx, setCtx] = useState(contexts[0] ?? '');
   const isProtected = useIsProtected(ctx);
@@ -329,12 +335,14 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
   // Values start from the chart's defaults once they arrive; edits stick.
   const [valuesText, setValuesText] = useState<string>();
   const [loadedDefaults, setLoadedDefaults] = useState<string>();
-  if (detail && detail.valuesYaml !== loadedDefaults) {
+  useEffect(() => {
+    if (!detail || detail.valuesYaml === loadedDefaults) return;
+    setValuesText((current) => (current === undefined || current === loadedDefaults ? detail.valuesYaml : current));
     setLoadedDefaults(detail.valuesYaml);
-    if (valuesText === undefined || valuesText === loadedDefaults) setValuesText(detail.valuesYaml);
-  }
+  }, [detail, loadedDefaults]);
 
   const [tab, setTab] = useState<'values' | 'readme'>('values');
+  const [previewTab, setPreviewTab] = useState<'manifest' | 'computed'>('manifest');
   const [formError, setFormError] = useState<string>();
   const [preview, setPreview] = useState<HelmDryRunResult>();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -366,7 +374,8 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
       return undefined;
     }
     setFormError(undefined);
-    return { ctx, name: releaseName.trim(), namespace: namespace.trim(), values: values!, chart: ref, createNamespace };
+    const overrides = detail ? valuesOverrides(detail.values, values!) : values!;
+    return { ctx, name: releaseName.trim(), namespace: namespace.trim(), values: overrides, chart: ref, createNamespace };
   };
 
   const runPreview = () => {
@@ -380,18 +389,17 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
     if (!vars) return;
     setConfirmOpen(false);
     install.mutate(vars, {
-      onSuccess: (r) => {
-        showToast(
-          'success',
-          `Installed ${vars.name} (${r.applied.length} resources${r.hooksRan.length ? `, ${r.hooksRan.length} hooks` : ''}${r.failed.length ? `, ${r.failed.length} failed` : ''})`,
-        );
+      onSuccess: () => {
         onClose();
+        setHelmOperationsOpen(true);
+        showToast('info', `Install started for ${vars.namespace}/${vars.name}. Progress continues in Helm operations.`);
       },
       onError: (e) => setFormError(e.message),
     });
   };
 
   const title = pick.chart ?? pick.customRef ?? '';
+  const readmeSource = detail?.sources?.findLast((source) => source.startsWith('https://github.com/')) ?? detail?.sources?.[0] ?? detail?.home;
 
   return (
     <>
@@ -406,6 +414,9 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
           {pick.hubRepo && <Chip size="small" label={`${pick.hubRepo} · Artifact Hub`} variant="outlined" />}
           {detail?.appVersion && <Chip size="small" label={`app ${detail.appVersion}`} variant="outlined" />}
         </Stack>
+        <Typography variant="caption" color="text.secondary">
+          Kubus checks workload readiness in the background. You can leave this dialog and follow the operation from the releases page.
+        </Typography>
       </DialogTitle>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, pt: 1, gap: 1 }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', mt: 1 }}>
@@ -467,6 +478,11 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
           <Tab value="values" label="Values" sx={{ minHeight: 32, py: 0 }} />
           {detail?.readme && <Tab value="readme" label="README" sx={{ minHeight: 32, py: 0 }} />}
         </Tabs>
+        {tab === 'values' && detail ? (
+          <Typography variant="caption" color="text.secondary">
+            Edit the chart defaults below. Kubus stores only your changes as release overrides, so future chart defaults can still evolve.
+          </Typography>
+        ) : null}
         <Box sx={{ flex: 1, minHeight: 0, border: 1, borderColor: 'divider' }}>
           {tab === 'values' ? (
             detailLoading && valuesText === undefined ? (
@@ -483,9 +499,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
               />
             )
           ) : (
-            <Box component="pre" sx={{ m: 0, p: 1.5, fontSize: 12.5, whiteSpace: 'pre-wrap', overflowY: 'auto', height: '100%', fontFamily: 'inherit' }}>
-              {detail?.readme}
-            </Box>
+            <ChartMarkdown markdown={detail?.readme ?? ''} sourceUrl={readmeSource} />
           )}
         </Box>
       </DialogContent>
@@ -498,7 +512,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
           {dryRunMut.isPending ? 'Rendering…' : 'Preview manifest'}
         </Button>
         <Button variant="contained" disabled={busy} onClick={() => (isProtected ? setConfirmOpen(true) : runInstall())}>
-          {install.isPending ? 'Installing…' : 'Install'}
+          {install.isPending ? 'Starting…' : 'Install'}
         </Button>
       </DialogActions>
       {preview && (
@@ -508,13 +522,42 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
               <Typography variant="h6">Rendered manifest</Typography>
               <Chip size="small" label={`${preview.chart}-${preview.chartVersion}`} variant="outlined" />
               {preview.hooks.length > 0 && <Chip size="small" label={`${preview.hooks.length} hooks`} variant="outlined" />}
+              <Box sx={{ flex: 1 }} />
+              <Tabs value={previewTab} onChange={(_event, value) => setPreviewTab(value as 'manifest' | 'computed')} sx={{ minHeight: 32 }}>
+                <Tab value="manifest" label="Manifest" sx={{ minHeight: 32, py: 0 }} />
+                <Tab value="computed" label="Computed values" sx={{ minHeight: 32, py: 0 }} />
+              </Tabs>
             </Stack>
           </DialogTitle>
           <DialogContent sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, pt: 1 }}>
+            {preview.warnings.map((warning) => (
+              <Alert key={warning} severity="warning" sx={{ mb: 1 }}>
+                {warning}
+              </Alert>
+            ))}
+            {preview.validation.some((item) => item.status === 'error') ? (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                Kubernetes rejected {preview.validation.filter((item) => item.status === 'error').length} rendered resource(s) in server-side dry-run. Expand the
+                manifest and fix these before installing:{' '}
+                {preview.validation
+                  .filter((item) => item.status === 'error')
+                  .slice(0, 3)
+                  .map((item) => `${item.resource}: ${item.message}`)
+                  .join('; ')}
+              </Alert>
+            ) : (
+              <Alert severity="success" sx={{ mb: 1 }}>
+                Rendered successfully; {preview.validation.filter((item) => item.status === 'valid').length} resources passed Kubernetes server-side dry-run
+                {preview.validation.some((item) => item.status === 'warning')
+                  ? ` (${preview.validation.filter((item) => item.status === 'warning').length} could not be fully validated)`
+                  : ''}
+                .
+              </Alert>
+            )}
             <Box sx={{ flex: 1, minHeight: 0, border: 1, borderColor: 'divider' }}>
               <Editor
                 language="yaml"
-                value={preview.manifest}
+                value={previewTab === 'manifest' ? preview.manifest : dumpYaml(preview.computedValues, { noRefs: true })}
                 theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
                 options={{ readOnly: true, minimap: { enabled: false }, fontSize: monoFontSize, scrollBeyondLastLine: false }}
               />
@@ -522,7 +565,11 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setPreview(undefined)}>Back</Button>
-            <Button variant="contained" disabled={busy} onClick={() => (isProtected ? setConfirmOpen(true) : runInstall())}>
+            <Button
+              variant="contained"
+              disabled={busy || preview.validation.some((item) => item.status === 'error')}
+              onClick={() => (isProtected ? setConfirmOpen(true) : runInstall())}
+            >
               Install
             </Button>
           </DialogActions>

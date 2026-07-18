@@ -1,11 +1,13 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { HelmActionResult, HelmDryRunResult } from '@kubus/shared';
+import type { HelmActionResult, HelmDryRunResult, HelmOperationFailure, HelmOperationPhase } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { HttpProblem } from '../util/errors.js';
 import { applyDoc, clusterCapabilities, createReleaseRecord, deleteDoc, docKey, docLabel, manifestDocs, patchReleaseRecord, rfc3339Local } from './common.js';
 import { renderChart } from './engine.js';
 import { execHooks } from './hooks.js';
+import { HelmReadinessError, rolloutSafetyWarnings, validateResources, waitForResources } from './readiness.js';
 import { decodeReleaseRecord, listReleaseRecords, revOf, type HelmReleasePayload } from './release-reader.js';
+import type { HelmProgressReporter } from './operations.js';
 
 export interface UpgradeOptions {
   namespace: string;
@@ -15,10 +17,14 @@ export interface UpgradeOptions {
   /** base64 chart .tgz — omitted to reuse the chart stored in the release. */
   chartArchive?: string;
   skipHooks?: boolean;
+  wait?: boolean;
+  timeoutSeconds?: number;
   dryRun?: boolean;
+  report?: HelmProgressReporter;
 }
 
 export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions, log: FastifyBaseLogger): Promise<HelmActionResult | HelmDryRunResult> {
+  opts.report?.({ phase: 'rendering', message: 'Loading the current release and rendering the target chart' });
   const records = await listReleaseRecords(handle, opts.namespace, opts.name);
   if (!records.length) throw new HttpProblem(404, `helm release "${opts.namespace}/${opts.name}" not found`);
   records.sort((a, b) => revOf(b) - revOf(a));
@@ -56,14 +62,25 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
     kubeVersion: caps.kubeVersion,
     apiVersions: caps.apiVersions,
   });
+  opts.report?.({
+    phase: 'rendering',
+    message: `Rendered ${rendered.metadata.name}-${rendered.metadata.version}`,
+    targetVersion: rendered.metadata.version,
+    revision: newRev,
+  });
 
   if (opts.dryRun) {
+    const manifest = manifestDocs(rendered.manifest, opts.namespace);
+    const docs = [...manifest, ...rendered.hooks.flatMap((hook) => manifestDocs(hook.manifest, opts.namespace))];
     return {
       manifest: rendered.manifest,
       notes: rendered.notes,
       hooks: rendered.hooks.map((h) => ({ name: h.name, kind: h.kind, events: h.events ?? [] })),
       chart: rendered.metadata.name,
       chartVersion: rendered.metadata.version,
+      computedValues: rendered.computedValues,
+      validation: await validateResources(handle, docs),
+      warnings: rolloutSafetyWarnings(manifest),
     };
   }
 
@@ -83,27 +100,64 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
     config: opts.values,
     manifest: rendered.manifest,
     hooks: rendered.hooks,
+    kubus: { computedValues: rendered.computedValues },
   };
   const recordName = await createReleaseRecord(handle, payload, driver);
+  opts.report?.({
+    phase: opts.skipHooks ? 'applying' : 'pre-hook',
+    message: 'Created pending upgrade revision',
+    revision: newRev,
+    currentResource: undefined,
+  });
 
   const result: HelmActionResult = { revision: newRev, applied: [], pruned: [], failed: [], hooksRan: [], notes: rendered.notes };
-  const fail = async (description: string): Promise<never> => {
+  const recoveryRevision = records
+    .filter((record) => ['deployed', 'superseded'].includes(decodeReleaseRecord(record).info?.status ?? ''))
+    .map(revOf)
+    .sort((a, b) => b - a)[0];
+  const fail = async (description: string, phase: HelmOperationPhase): Promise<never> => {
     payload.info = { ...payload.info, status: 'failed', description };
     await patchReleaseRecord(handle, opts.namespace, recordName, payload, driver).catch(() => {});
-    throw new HttpProblem(500, description);
+    const details: HelmOperationFailure = {
+      operation: 'upgrade',
+      phase,
+      revision: newRev,
+      recoveryRevision,
+      applied: result.applied,
+      pruned: result.pruned,
+      failed: result.failed,
+      hooksRan: result.hooksRan,
+      suggestions: [
+        'Inspect the failed workload, pod logs, and namespace events before retrying.',
+        'Compare the failed revision with the last successful revision.',
+        'Roll back only when the chart and application documentation say data and schema downgrades are supported.',
+      ],
+    };
+    throw new HttpProblem(500, description, 'HelmUpgradeFailed', details);
   };
 
   if (!opts.skipHooks) {
     try {
-      await execHooks(handle, rendered.hooks, 'pre-upgrade', opts.namespace, log, result.hooksRan);
+      await execHooks(handle, rendered.hooks, 'pre-upgrade', opts.namespace, log, result.hooksRan, (message, resource) =>
+        opts.report?.({ phase: 'pre-hook', message, currentResource: resource }),
+      );
     } catch (err) {
-      return fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
+      return fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`, 'pre-hook');
     }
   }
 
   const newDocs = manifestDocs(rendered.manifest, opts.namespace);
-  for (const doc of newDocs) {
+  for (let index = 0; index < newDocs.length; index++) {
+    const doc = newDocs[index]!;
     const label = docLabel(doc);
+    opts.report?.({
+      phase: 'applying',
+      message: `Applying resources (${index + 1}/${newDocs.length})`,
+      currentResource: label,
+      completedResources: index,
+      totalResources: newDocs.length,
+      waitingFor: undefined,
+    });
     try {
       await applyDoc(handle, doc);
       result.applied.push(label);
@@ -111,15 +165,32 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ label, err: message }, 'helm upgrade: apply failed');
       result.failed.push({ resource: label, error: message });
-      return fail(`Upgrade failed: could not apply ${label}: ${message}`);
+      return fail(`Upgrade failed: could not apply ${label}: ${message}`, 'apply');
     }
   }
+  opts.report?.({
+    phase: 'applying',
+    message: `Applied ${newDocs.length} resources`,
+    completedResources: newDocs.length,
+    totalResources: newDocs.length,
+    currentResource: undefined,
+  });
 
   // Prune resources that were in the previous revision but not in this one.
   const newKeys = new Set(newDocs.map(docKey));
   const pruneDocs = manifestDocs(current.manifest, opts.namespace).filter((d) => !newKeys.has(docKey(d)));
-  for (const doc of pruneDocs.reverse()) {
+  const reversedPruneDocs = pruneDocs.reverse();
+  for (let index = 0; index < reversedPruneDocs.length; index++) {
+    const doc = reversedPruneDocs[index]!;
     const label = docLabel(doc);
+    opts.report?.({
+      phase: 'pruning',
+      message: `Removing obsolete resources (${index + 1}/${reversedPruneDocs.length})`,
+      currentResource: label,
+      completedResources: index,
+      totalResources: reversedPruneDocs.length,
+      waitingFor: undefined,
+    });
     try {
       await deleteDoc(handle, doc);
       result.pruned.push(label);
@@ -127,18 +198,76 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ label, err: message }, 'helm upgrade: prune failed');
       result.failed.push({ resource: label, error: message });
+      return fail(`Upgrade failed: could not remove obsolete ${label}: ${message}`, 'prune');
+    }
+  }
+  if (reversedPruneDocs.length) {
+    opts.report?.({
+      phase: 'pruning',
+      message: `Removed ${reversedPruneDocs.length} obsolete resources`,
+      completedResources: reversedPruneDocs.length,
+      totalResources: reversedPruneDocs.length,
+      currentResource: undefined,
+    });
+  }
+
+  if (opts.wait ?? true) {
+    try {
+      await waitForResources(
+        handle,
+        newDocs,
+        opts.timeoutSeconds ?? 300,
+        (progress) =>
+          opts.report?.({
+            phase: 'readiness',
+            message: progress.recovering.length
+              ? `Resolving ${progress.recovering.length} ReadWriteOnce volume rollout deadlock${progress.recovering.length === 1 ? '' : 's'} with brief downtime`
+              : progress.pending.length
+                ? `Waiting for ${progress.pending.length} of ${progress.total} workloads`
+                : `All ${progress.total} workloads are ready`,
+            completedResources: progress.ready,
+            totalResources: progress.total,
+            currentResource: progress.pending[0]?.resource,
+            waitingFor: progress.pending,
+          }),
+        { recoverMultiAttach: true },
+      );
+    } catch (err) {
+      if (err instanceof HelmReadinessError) {
+        result.failed.push(...err.issues.map((issue) => ({ resource: issue.resource, error: issue.message })));
+      }
+      return fail(`Upgrade failed while waiting for workloads: ${err instanceof Error ? err.message : String(err)}`, 'readiness');
     }
   }
 
   if (!opts.skipHooks) {
     try {
-      await execHooks(handle, rendered.hooks, 'post-upgrade', opts.namespace, log, result.hooksRan);
+      await execHooks(handle, rendered.hooks, 'post-upgrade', opts.namespace, log, result.hooksRan, (message, resource) =>
+        opts.report?.({ phase: 'post-hook', message, currentResource: resource, waitingFor: undefined }),
+      );
     } catch (err) {
-      return fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
+      return fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`, 'post-hook');
     }
   }
 
-  // Mark previously deployed records superseded, then flip the new one live.
+  // Flip the new revision live before superseding old records so a storage
+  // patch failure never leaves the release with no deployed revision.
+  payload.info = { ...payload.info, status: 'deployed', description: 'Upgrade complete' };
+  opts.report?.({
+    phase: 'recording',
+    message: 'Finalizing Helm release history',
+    currentResource: undefined,
+    completedResources: undefined,
+    totalResources: undefined,
+    waitingFor: undefined,
+  });
+  try {
+    await patchReleaseRecord(handle, opts.namespace, recordName, payload, driver);
+  } catch (err) {
+    return fail(`Upgrade applied, but the release record could not be finalized: ${err instanceof Error ? err.message : String(err)}`, 'record');
+  }
+
+  // Mark previously deployed records superseded.
   for (const record of records) {
     const prev = decodeReleaseRecord(record);
     if (prev.info?.status !== 'deployed') continue;
@@ -148,7 +277,5 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
       log.warn({ record: record.metadata.name, err: String(err) }, 'helm upgrade: superseded update failed'),
     );
   }
-  payload.info = { ...payload.info, status: 'deployed', description: 'Upgrade complete' };
-  await patchReleaseRecord(handle, opts.namespace, recordName, payload, driver);
   return result;
 }

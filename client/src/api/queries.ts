@@ -46,18 +46,20 @@ import type {
   DebugPodRequest,
   DebugPodResponse,
   StopDebugRequest,
-  HelmRollbackResult,
   HelmRepo,
   HelmChartSummary,
   HelmChartVersion,
   HelmChartDetail,
   HelmChartHit,
   HelmChartSourceRef,
+  HelmChartUpdate,
+  HelmUpdateCheck,
   HelmHubChart,
   HelmInstallRequest,
   HelmUpgradeRequest,
-  HelmActionResult,
   HelmDryRunResult,
+  HelmOperation,
+  HelmOperationStarted,
   AppInfo,
   PrinterColumn,
   AuditReport,
@@ -75,6 +77,7 @@ import { apiFetch } from './http.js';
 import { watchClient } from './ws/watch-client.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useRefetchInterval } from '../state/prefs.js';
+import { showToast } from '../state/toast.js';
 
 // ---- Contexts ----
 
@@ -979,6 +982,54 @@ export function useHelmHistory(ctx: string | undefined, ns: string | undefined, 
   });
 }
 
+export function useHelmOperations() {
+  return useQuery({
+    queryKey: ['helm-operations'],
+    queryFn: () => apiFetch<HelmOperation[]>('/api/helm/operations'),
+    refetchInterval: (query) => (query.state.data?.some((operation) => operation.status === 'running') ? 2_000 : 30_000),
+  });
+}
+
+/**
+ * One app-wide bridge from Helm progress broadcasts into React Query. The
+ * HTTP list remains the reconnect/reload source of truth.
+ */
+export function useHelmOperationEvents(): void {
+  const qc = useQueryClient();
+  useEffect(
+    () =>
+      watchClient.onBroadcast((message) => {
+        if (message.op !== 'helm-operation') return;
+        const operation = message.operation;
+        let previous: HelmOperation | undefined;
+        qc.setQueryData<HelmOperation[]>(['helm-operations'], (current) => {
+          previous = current?.find((item) => item.id === operation.id);
+          return [operation, ...(current ?? []).filter((item) => item.id !== operation.id)].toSorted((left, right) =>
+            right.startedAt.localeCompare(left.startedAt),
+          );
+        });
+
+        const revisionBecameVisible = !previous?.revision && !!operation.revision;
+        const pendingRecordBecameVisible =
+          previous?.phase !== operation.phase && !!operation.revision && (operation.phase === 'pre-hook' || operation.phase === 'applying');
+        const becameTerminal = previous?.status === 'running' && operation.status !== 'running';
+        if (revisionBecameVisible || pendingRecordBecameVisible || becameTerminal) {
+          void qc.invalidateQueries({ queryKey: ['helm-releases'] });
+          void qc.invalidateQueries({ queryKey: ['helm-release', operation.ctx, operation.namespace, operation.releaseName] });
+          void qc.invalidateQueries({ queryKey: ['helm-history', operation.ctx, operation.namespace, operation.releaseName] });
+        }
+        if (becameTerminal) {
+          if (operation.status === 'succeeded') {
+            showToast('success', `${operation.kind} completed for ${operation.namespace}/${operation.releaseName}`);
+          } else {
+            showToast('error', `${operation.kind} failed for ${operation.namespace}/${operation.releaseName} — review Helm operations for recovery guidance`);
+          }
+        }
+      }),
+    [qc],
+  );
+}
+
 export function useHelmRevision(ctx: string | undefined, ns: string | undefined, name: string | undefined, revision: number | undefined) {
   return useQuery({
     queryKey: ['helm-revision', ctx, ns, name, revision],
@@ -999,29 +1050,51 @@ export function useHelmUninstall() {
       if (skipHooks) q.set('skipHooks', 'true');
       if (deleteCrds) q.set('deleteCrds', 'true');
       const qs = q.size ? `?${q.toString()}` : '';
-      return apiFetch<{ deleted: string[]; failed: Array<{ resource: string; error: string }>; hooksRan: string[]; crdsDeleted: string[] }>(
+      return apiFetch<{
+        deleted: string[];
+        failed: Array<{ resource: string; error: string }>;
+        hooksRan: string[];
+        crdsDeleted: string[];
+        recordsRetained: boolean;
+      }>(
         `/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}${qs}`,
         { method: 'DELETE' },
       );
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-releases'] }),
+    onSettled: (_result, _error, { ctx, ns, name }) => {
+      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
+      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
+      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
+    },
   });
 }
 
 export function useHelmRollback() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ctx, ns, name, revision, skipHooks }: { ctx: string; ns: string; name: string; revision: number; skipHooks?: boolean }) =>
-      apiFetch<HelmRollbackResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/rollback`, {
+    mutationFn: ({
+      ctx,
+      ns,
+      name,
+      revision,
+      skipHooks,
+      wait,
+      timeoutSeconds,
+    }: {
+      ctx: string;
+      ns: string;
+      name: string;
+      revision: number;
+      skipHooks?: boolean;
+      wait?: boolean;
+      timeoutSeconds?: number;
+    }) =>
+      apiFetch<HelmOperationStarted>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/rollback`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ revision, skipHooks }),
+        body: JSON.stringify({ revision, skipHooks, wait, timeoutSeconds }),
       }),
-    onSuccess: (_r, { ctx, ns, name }) => {
-      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
-      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
-      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
-    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-operations'] }),
   });
 }
 
@@ -1107,6 +1180,21 @@ export function useHelmChartFind(chart: string | undefined) {
   });
 }
 
+/** Batched, source-safe update hints for installed releases. */
+export function useHelmUpdates(items: HelmUpdateCheck[]) {
+  return useQuery({
+    queryKey: ['helm-updates', items],
+    queryFn: () =>
+      apiFetch<HelmChartUpdate[]>('/api/helm/updates', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items }),
+      }),
+    enabled: items.length > 0,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
 /** Free-text chart search on Artifact Hub. */
 export function useHelmHubSearch(query: string) {
   return useQuery({
@@ -1150,6 +1238,21 @@ export function useHelmOciDetail(ref: string | undefined, version: string | unde
   });
 }
 
+/** Chart metadata/defaults from any supported source form. */
+export function useHelmChartSourceDetail(source: HelmChartSourceRef | undefined) {
+  return useQuery({
+    queryKey: ['helm-chart-source-detail', source],
+    queryFn: () =>
+      apiFetch<HelmChartDetail>('/api/helm/charts/detail', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(source),
+      }),
+    enabled: !!source,
+    staleTime: Infinity,
+  });
+}
+
 export interface HelmUpgradeVars {
   ctx: string;
   ns: string;
@@ -1157,22 +1260,20 @@ export interface HelmUpgradeVars {
   values: Record<string, unknown>;
   chart?: HelmChartSourceRef;
   skipHooks?: boolean;
+  wait?: boolean;
+  timeoutSeconds?: number;
 }
 
 export function useHelmUpgrade() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ ctx, ns, name, ...body }: HelmUpgradeVars) =>
-      apiFetch<HelmActionResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
+      apiFetch<HelmOperationStarted>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body satisfies HelmUpgradeRequest),
       }),
-    onSuccess: (_r, { ctx, ns, name }) => {
-      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
-      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
-      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
-    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-operations'] }),
   });
 }
 
@@ -1196,12 +1297,12 @@ export function useHelmInstall() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ ctx, ...body }: HelmInstallVars) =>
-      apiFetch<HelmActionResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
+      apiFetch<HelmOperationStarted>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body satisfies HelmInstallRequest),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-releases'] }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['helm-operations'] }),
   });
 }
 

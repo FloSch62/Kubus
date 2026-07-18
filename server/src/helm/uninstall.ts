@@ -1,16 +1,17 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { KubernetesObject } from '@kubernetes/client-node';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
-import { loadAllYaml } from '../util/yaml.js';
+import { deleteDoc, docLabel, manifestDocs } from './common.js';
 import { execHooks } from './hooks.js';
-import { chartCrdNames, getLatestPayload, listReleaseRecords } from './release-reader.js';
+import { chartCrdNames, getLatestPayload, listReleaseRecords, revOf } from './release-reader.js';
 
 export interface UninstallResult {
   deleted: string[];
   failed: Array<{ resource: string; error: string }>;
   hooksRan: string[];
   crdsDeleted: string[];
+  /** True when records remain so the incomplete operation can be inspected/retried. */
+  recordsRetained: boolean;
 }
 
 export interface UninstallOptions {
@@ -31,37 +32,33 @@ export interface UninstallOptions {
 export async function uninstallRelease(handle: ClusterHandle, namespace: string, name: string, log: FastifyBaseLogger, opts: UninstallOptions = {}): Promise<UninstallResult> {
   const { skipHooks = false, deleteCrds = false } = opts;
   const payload = await getLatestPayload(handle, namespace, name);
-  const docs = loadAllYaml(payload.manifest ?? '').filter((d): d is Record<string, unknown> => !!d && typeof d === 'object');
+  const docs = manifestDocs(payload.manifest, namespace);
 
-  const result: UninstallResult = { deleted: [], failed: [], hooksRan: [], crdsDeleted: [] };
+  const result: UninstallResult = { deleted: [], failed: [], hooksRan: [], crdsDeleted: [], recordsRetained: false };
 
   if (!skipHooks) {
     await execHooks(handle, payload.hooks, 'pre-delete', namespace, log, result.hooksRan);
   }
 
   for (const doc of docs.reverse()) {
-    const obj = doc as unknown as KubernetesObject;
-    if (!obj.kind || !obj.metadata?.name) continue;
-    obj.metadata.namespace ??= namespace;
-    const label = `${obj.kind}/${obj.metadata.namespace ?? ''}/${obj.metadata.name}`;
+    let label = docLabel(doc);
     try {
-      await handle.objects.delete(obj);
+      await deleteDoc(handle, doc);
+      // Scope resolution may remove an erroneous default namespace from
+      // cluster-scoped resources, so report the canonical label afterward.
+      label = docLabel(doc);
       result.deleted.push(label);
     } catch (err) {
-      const code = (err as { code?: number }).code;
-      if (code === 404) {
-        result.deleted.push(label);
-      } else {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn({ label, err: message }, 'helm uninstall: resource delete failed');
-        result.failed.push({ resource: label, error: message });
-      }
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ label, err: message }, 'helm uninstall: resource delete failed');
+      result.failed.push({ resource: label, error: message });
     }
   }
 
   if (!skipHooks) {
     await execHooks(handle, payload.hooks, 'post-delete', namespace, log, result.hooksRan).catch((err: unknown) => {
       log.warn({ err: String(err) }, 'helm uninstall: post-delete hooks failed');
+      result.failed.push({ resource: 'Hook/post-delete', error: err instanceof Error ? err.message : String(err) });
     });
   }
 
@@ -84,13 +81,28 @@ export async function uninstallRelease(handle: ClusterHandle, namespace: string,
     if (result.crdsDeleted.length) handle.discovery.invalidate();
   }
 
-  for (const record of await listReleaseRecords(handle, namespace, name)) {
-    try {
-      await handle.raw.request(resourcePath('', 'v1', record.driver === 'secret' ? 'secrets' : 'configmaps', { namespace, name: record.metadata.name }), {
-        method: 'DELETE',
-      });
-    } catch {
-      // best-effort
+  // Preserve release history when cleanup was incomplete so users can inspect
+  // the manifest and retry. When cleanup succeeded, delete oldest-to-newest;
+  // keeping the latest record until last avoids making a partial record cleanup
+  // disappear from the releases list.
+  if (result.failed.length) {
+    result.recordsRetained = true;
+  } else {
+    const records = (await listReleaseRecords(handle, namespace, name)).sort((a, b) => revOf(a) - revOf(b));
+    for (const record of records) {
+      const label = `${record.driver === 'secret' ? 'Secret' : 'ConfigMap'}/${namespace}/${record.metadata.name}`;
+      try {
+        const res = await handle.raw.request(
+          resourcePath('', 'v1', record.driver === 'secret' ? 'secrets' : 'configmaps', { namespace, name: record.metadata.name }),
+          { method: 'DELETE' },
+        );
+        if (!res.ok && res.status !== 404) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.trim());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        result.failed.push({ resource: label, error: message });
+        result.recordsRetained = true;
+        break;
+      }
     }
   }
   return result;

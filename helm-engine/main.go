@@ -48,12 +48,13 @@ type crdFile struct {
 }
 
 type renderOutput struct {
-	Manifest  string          `json:"manifest"`
-	Hooks     []*release.Hook `json:"hooks"`
-	Notes     string          `json:"notes"`
-	CRDs      []crdFile       `json:"crds"`
-	ChartJSON json.RawMessage `json:"chartJSON"`
-	Metadata  *chart.Metadata `json:"metadata"`
+	Manifest       string          `json:"manifest"`
+	Hooks          []*release.Hook `json:"hooks"`
+	Notes          string          `json:"notes"`
+	CRDs           []crdFile       `json:"crds"`
+	ChartJSON      json.RawMessage `json:"chartJSON"`
+	Metadata       *chart.Metadata `json:"metadata"`
+	ComputedValues interface{}     `json:"computedValues"`
 }
 
 type inspectOutput struct {
@@ -163,7 +164,9 @@ func renderChart(ch *chart.Chart, in *input) error {
 		IsInstall: in.Release.IsInstall,
 		IsUpgrade: in.Release.IsUpgrade,
 	}
-	valuesToRender, err := chartutil.ToRenderValues(ch, in.Values, opts, caps)
+	// Match Helm's install/upgrade path: coalesce chart defaults and user values,
+	// then validate the result against values.schema.json when the chart ships one.
+	valuesToRender, err := chartutil.ToRenderValuesWithSchemaValidation(ch, in.Values, opts, caps, false)
 	if err != nil {
 		return err
 	}
@@ -205,12 +208,13 @@ func renderChart(ch *chart.Chart, in *input) error {
 	}
 
 	out := renderOutput{
-		Manifest:  b.String(),
-		Hooks:     hooks,
-		Notes:     notesBuf.String(),
-		CRDs:      []crdFile{},
-		ChartJSON: chartJSON,
-		Metadata:  ch.Metadata,
+		Manifest:       b.String(),
+		Hooks:          hooks,
+		Notes:          notesBuf.String(),
+		CRDs:           []crdFile{},
+		ChartJSON:      chartJSON,
+		Metadata:       ch.Metadata,
+		ComputedValues: valuesToRender["Values"],
 	}
 	for _, crd := range ch.CRDObjects() {
 		out.CRDs = append(out.CRDs, crdFile{Name: crd.Name, Content: string(crd.File.Data)})

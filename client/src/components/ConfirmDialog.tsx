@@ -37,7 +37,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', 
         {confirmText && (
           <>
             <Typography variant="body2" sx={{ mt: 2, mb: 1 }}>
-              This cluster is protected. Type <b>{confirmText}</b> to confirm.
+              Type <b>{confirmText}</b> to confirm.
             </Typography>
             <TextField
               autoFocus
