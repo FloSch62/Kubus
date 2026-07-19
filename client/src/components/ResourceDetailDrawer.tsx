@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -19,6 +20,7 @@ import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { withoutManagedFields } from '../kube-display.js';
+import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
 import { GenericDetail } from './detail/GenericDetail.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
@@ -86,7 +88,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
     if (!hasSel) setFullScreen(false);
   }, [hasSel]);
 
-  const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
+  // Live-refresh the object while Overview is showing so stuck pods, rollouts
+  // and conditions update in place; other tabs (YAML editing!) keep the
+  // snapshot they opened with.
+  const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
+    liveMs: tab === 'overview' ? 5000 : undefined,
+  });
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
@@ -106,7 +113,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const hasMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node';
   const hasRolloutHistory = behaviorKind === 'Deployment' || behaviorKind === 'StatefulSet';
   const showMap = !isCrd;
-  const drawerTopOffset = 52;
+  const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
     top: `${drawerTopOffset}px`,
     height: `calc(100% - ${drawerTopOffset}px)`,
@@ -168,7 +175,18 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
       }}
     >
       {sel && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Box
+          onKeyDown={(e) => {
+            // Alt+← steps back through the related-resource stack — but not
+            // while typing (macOS Option+← moves the caret by word).
+            if (e.key === 'ArrowLeft' && e.altKey && !e.ctrlKey && !e.metaKey && onBack && !isTextEntryTarget(e.target)) {
+              e.preventDefault();
+              e.stopPropagation();
+              onBack();
+            }
+          }}
+          sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+        >
           <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
             {onBack && (
               <IconButton onClick={onBack} sx={{ mr: 1 }}>

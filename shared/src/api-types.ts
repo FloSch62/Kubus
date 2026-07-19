@@ -241,12 +241,23 @@ export interface FavoriteItem {
   ref?: ResourceRef;
 }
 
+/** Grid state snapshotted with a saved view so restoring brings back the exact table. */
+export interface SavedViewGridState {
+  /** Global namespace filter at save time (empty = all namespaces). */
+  namespaces?: string[];
+  sort?: ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
+  columnVisibility?: Record<string, boolean>;
+  columnWidths?: Record<string, number>;
+}
+
 export interface SavedView {
   id: string;
   title: string;
   path: string;
   textFilter?: string;
   labelSelector?: string;
+  /** Absent on views saved before grid capture existed — those restore the query only. */
+  grid?: SavedViewGridState;
 }
 
 // ---- Topology graph ----

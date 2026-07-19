@@ -18,6 +18,7 @@ import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { ContainerUsage, KubeObject, PodEnvVar } from '@kubus/shared';
 import { gvkForKind } from '@kubus/shared';
 import { ConditionChips, KeyValueChips, KeyValueSection, MetadataSection } from './GenericDetail.js';
+import { PodProblems } from './PodProblems.js';
 import { Section } from './Section.js';
 import { ContainerCards, type ContainerCardData } from './ContainerCards.js';
 import { ReadyCounter } from '../ReadyCounter.js';
@@ -42,7 +43,7 @@ interface ContainerStatus {
   name: string;
   ready?: boolean;
   restartCount?: number;
-  state?: Record<string, { reason?: string }>;
+  state?: Record<string, { reason?: string; message?: string }>;
   lastState?: { terminated?: { reason?: string; finishedAt?: string } };
 }
 
@@ -80,6 +81,7 @@ function containerCard(c: ContainerSpec, st: ContainerStatus | undefined, usage:
     image: c.image,
     kind,
     state: reason ? (reason === 'running' ? 'Running' : reason === 'waiting' ? 'Waiting' : reason === 'terminated' ? 'Terminated' : reason) : undefined,
+    stateMessage: stateKey && stateKey !== 'running' ? st!.state![stateKey]?.message : undefined,
     restarts: st?.restartCount,
     lastRestart: last ? { reason: last.reason, at: last.finishedAt } : undefined,
     ports: (c.ports ?? []).map((p) => `${p.containerPort}/${p.protocol ?? 'TCP'}`).join(', ') || undefined,
@@ -139,6 +141,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         )}
         {!terminal && <ConditionChips obj={obj} />}
       </Stack>
+      <PodProblems obj={obj} ctx={ctx} />
       <Section title="Containers" count={mainCards.length}>
         <ContainerCards items={mainCards} />
       </Section>

@@ -12,12 +12,15 @@ interface DetailState {
   collapsed: boolean;
   /** Embedded panel width in px; user-resizable via the divider. */
   width: number;
+  /** Bumped when keyboard flows want focus moved into the panel. */
+  focusSeq: number;
   open: (sel: ResourceSelection) => void;
   push: (sel: ResourceSelection) => void;
   back: () => void;
   close: () => void;
   setCollapsed: (collapsed: boolean) => void;
   setWidth: (width: number) => void;
+  requestFocus: () => void;
 }
 
 export const DEFAULT_DETAIL_WIDTH = 640;
@@ -30,6 +33,7 @@ export const useDetailStore = create<DetailState>((set) => ({
   stack: [],
   collapsed: false,
   width: DEFAULT_DETAIL_WIDTH,
+  focusSeq: 0,
   open: (sel) => set({ stack: [sel] }),
   // Pushes can come from outside the panel (e.g. the API-resource drawer's
   // CRD link), so surface the result even if the panel was collapsed.
@@ -40,4 +44,5 @@ export const useDetailStore = create<DetailState>((set) => ({
   close: () => set((s) => (s.stack.length ? { stack: [] } : s)),
   setCollapsed: (collapsed) => set({ collapsed }),
   setWidth: (width) => set({ width: clampDetailWidth(width) }),
+  requestFocus: () => set((s) => ({ focusSeq: s.focusSeq + 1, collapsed: false })),
 }));

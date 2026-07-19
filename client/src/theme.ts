@@ -2,6 +2,29 @@ import type { ElementType } from 'react';
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
 import type {} from '@mui/x-data-grid/themeAugmentation';
 
+/**
+ * Shared layout dimensions. Several of these are cross-file contracts:
+ * anything that changes one side must keep the other in sync, so both sides
+ * read the same token instead of repeating the number.
+ */
+export const layout = {
+  /** TopBar toolbar height; drawers/panels below it offset by the same value. */
+  topBarHeight: 52,
+  navDrawerWidth: 228,
+  /** Fixed tab width so the shrink-to-fit tablist sizes to n×tabs. */
+  tabWidth: 190,
+  /** Themed scrollbar thickness; grids reserve the same explicit gutter. */
+  scrollbarSize: 10,
+  /**
+   * The embedded detail panel's resize handle and collapse button overhang
+   * the grid, whose floating scrollbars are MUI-internal zIndex 60 (70 on
+   * hover) in the same stacking context — these must stay above both, and
+   * the button above the handle.
+   */
+  zDetailResizeHandle: 71,
+  zDetailCollapseButton: 72,
+} as const;
+
 const modalBackdropAlpha = 0.5;
 
 const darkColors = {
@@ -114,7 +137,7 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
             scrollbarWidth: 'thin',
             scrollbarColor: `${c.scrollThumb} transparent`,
           },
-          '*::-webkit-scrollbar': { width: 10, height: 10 },
+          '*::-webkit-scrollbar': { width: layout.scrollbarSize, height: layout.scrollbarSize },
           '*::-webkit-scrollbar-track': { background: 'transparent' },
           '*::-webkit-scrollbar-thumb': {
             backgroundColor: c.scrollThumb,
@@ -246,6 +269,13 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
               color: c.textSecondary,
             },
             '& .MuiDataGrid-columnSeparator': { color: 'transparent' },
+            // No outline for mouse focus, but keyboard navigation must show
+            // which cell is focused (source order: focus-visible wins).
+            '& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus': { outline: 'none' },
+            '& .MuiDataGrid-cell:focus-visible, & .MuiDataGrid-columnHeader:focus-visible': {
+              outline: `2px solid ${alpha(c.primary, 0.8)}`,
+              outlineOffset: '-2px',
+            },
             '& .MuiDataGrid-row:hover': { backgroundColor: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' },
             '& .MuiDataGrid-row.Mui-selected': {
               backgroundColor: c.selectedPill,

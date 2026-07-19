@@ -1,4 +1,5 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Drawer from '@mui/material/Drawer';
@@ -36,9 +37,10 @@ import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { useTabsStore } from '../state/tabs.js';
+import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
 
-const WIDTH = 228;
+const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
 const ITEM_INDENT = '42px';
 const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
@@ -59,12 +61,13 @@ function hotkeyFavorites(favorites: FavoriteItem[]): FavoriteItem[] {
  * page tab (+Shift focuses it), middle-click opens a background tab.
  * Plain clicks keep navigating the active tab via NavLink.
  */
-function useOpenInNewTab(to: string) {
+function useOpenInNewTab(to: string, pendingSavedView?: SavedView['grid']) {
   const openTab = useTabsStore((s) => s.openTab);
   const navigate = useNavigate();
   const open = (e: React.MouseEvent, foreground: boolean) => {
     e.preventDefault();
-    openTab(to, { activate: foreground, afterActive: true });
+    if (foreground && pendingSavedView) applySavedViewGridState(to, pendingSavedView);
+    openTab(to, { activate: foreground, afterActive: true, pendingSavedView: foreground ? undefined : pendingSavedView });
     if (foreground) void navigate(to);
   };
   return {
@@ -255,7 +258,15 @@ function NavEntry({
 function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: string) => void }) {
   const location = useLocation();
   const active = `${location.pathname}${location.search}` === view.path;
-  const newTabHandlers = useOpenInNewTab(view.path);
+  const newTabHandlers = useOpenInNewTab(view.path, view.grid);
+  // Views saved with a grid snapshot restore the whole table — namespaces,
+  // sort, column visibility and widths — not just the query in the path.
+  // Older views without one restore the query only.
+  const applyGridState = () => {
+    const grid = view.grid;
+    if (!grid) return;
+    applySavedViewGridState(view.path, grid);
+  };
   return (
     <ListItem
       disablePadding
@@ -277,7 +288,20 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
       }
       sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 } }}
     >
-      <ListItemButton component={NavLink} to={view.path} dense selected={active} {...newTabHandlers} sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5 }}>
+      <ListItemButton
+        component={NavLink}
+        to={view.path}
+        dense
+        selected={active}
+        onClick={(e) => {
+          if (!e.ctrlKey && !e.metaKey) applyGridState();
+          newTabHandlers.onClick(e);
+        }}
+        onAuxClick={(e) => {
+          newTabHandlers.onAuxClick(e);
+        }}
+        sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5 }}
+      >
         <ListItemText primary={view.title} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
       </ListItemButton>
     </ListItem>
@@ -430,7 +454,16 @@ function FavoriteDragShell({
   );
 }
 
-export const NavDrawer = memo(function NavDrawer() {
+interface NavDrawerProps {
+  /** Render as a temporary overlay (narrow viewports) instead of a pinned rail. */
+  overlay: boolean;
+  /** Pinned rail collapsed to zero width; content stays mounted for hotkeys. */
+  hidden: boolean;
+  open: boolean;
+  onClose: () => void;
+}
+
+export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClose }: NavDrawerProps) {
   const selected = useClustersStore((s) => s.selected);
   const { data: apiResources } = useApiResourcesForContexts(selected);
   const favorites = useNavigationStore((s) => s.favorites);
@@ -453,6 +486,14 @@ export const NavDrawer = memo(function NavDrawer() {
   const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
   const deferredFilter = useDeferredValue(filter);
   const navigate = useNavigate();
+
+  // The overlay covers content — dismiss it once a nav click lands.
+  const location = useLocation();
+  const currentPath = location.pathname + location.search;
+  useEffect(() => {
+    if (overlay) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close on navigation only
+  }, [currentPath]);
 
   // Cmd/Ctrl+1–9 jumps to the corresponding favorite. Digits come from
   // e.code so the physical number row works on any keyboard layout. Note the
@@ -570,19 +611,26 @@ export const NavDrawer = memo(function NavDrawer() {
       children
     );
 
+  const railHidden = !overlay && hidden;
   return (
     <Drawer
-      variant="permanent"
+      variant={overlay ? 'temporary' : 'permanent'}
+      open={overlay ? open : true}
+      onClose={onClose}
       sx={{
-        width: WIDTH,
+        width: overlay || railHidden ? 0 : WIDTH,
         flexShrink: 0,
+        transition: 'width 150ms ease',
         '& .MuiDrawer-paper': {
-          width: WIDTH,
-          position: 'relative',
-          borderRight: 1,
+          width: railHidden ? 0 : WIDTH,
+          borderRight: railHidden ? 0 : 1,
           borderColor: 'divider',
           overflowY: 'auto',
+          overflowX: 'hidden',
           bgcolor: (theme) => (theme.palette.mode === 'dark' ? '#151518' : '#f4f4f5'),
+          ...(overlay
+            ? { top: `${layout.topBarHeight}px`, height: `calc(100% - ${layout.topBarHeight}px)` }
+            : { position: 'relative', transition: 'width 150ms ease' }),
         },
       }}
     >
@@ -592,6 +640,12 @@ export const NavDrawer = memo(function NavDrawer() {
           placeholder="Filter resources…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            if (filter) setFilter('');
+            else (e.target as HTMLElement).blur();
+          }}
           slotProps={{
             input: {
               startAdornment: (

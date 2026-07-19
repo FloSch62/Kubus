@@ -21,13 +21,32 @@ interface UiPrefsState {
   defaultShell: string;
   /** Treat contexts without an explicit protected flag as protected. */
   protectByDefault: boolean;
+  /** Nav rail collapsed to reclaim width (wide viewports only). */
+  navCollapsed: boolean;
   /** User-resized column widths, keyed by table id then column field. */
   columnWidths: Record<string, Record<string, number>>;
   /** User-toggled column visibility models, keyed by table id then column field. */
   columnVisibility: Record<string, Record<string, boolean>>;
+  /** User-chosen sort, keyed by table id. */
+  sortModels: Record<string, TableSortModel>;
   set: (patch: Partial<Omit<UiPrefsState, 'set'>>) => void;
   setColumnWidth: (tableId: string, field: string, width: number) => void;
   setColumnVisibility: (tableId: string, model: Record<string, boolean>) => void;
+  setSortModel: (tableId: string, model: TableSortModel) => void;
+  /** Replace a table with a saved snapshot; absent parts restore implicit defaults. */
+  applyTableState: (
+    tableId: string,
+    state: { columnWidths?: Record<string, number>; columnVisibility?: Record<string, boolean>; sort?: TableSortModel },
+  ) => void;
+}
+
+export type TableSortModel = ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
+
+function replaceTableValue<T>(values: Record<string, T>, tableId: string, value: T | undefined): Record<string, T> {
+  const next = { ...values };
+  if (value === undefined) delete next[tableId];
+  else next[tableId] = value;
+  return next;
 }
 
 export const useUiPrefsStore = create<UiPrefsState>()(
@@ -39,8 +58,10 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       defaultTailLines: 500,
       defaultShell: 'auto',
       protectByDefault: false,
+      navCollapsed: false,
       columnWidths: {},
       columnVisibility: {},
+      sortModels: {},
       set: (patch) => set(patch),
       setColumnWidth: (tableId, field, width) =>
         set((state) => ({
@@ -49,6 +70,16 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       setColumnVisibility: (tableId, model) =>
         set((state) => ({
           columnVisibility: { ...state.columnVisibility, [tableId]: model },
+        })),
+      setSortModel: (tableId, model) =>
+        set((state) => ({
+          sortModels: { ...state.sortModels, [tableId]: model },
+        })),
+      applyTableState: (tableId, state) =>
+        set((s) => ({
+          columnWidths: replaceTableValue(s.columnWidths, tableId, state.columnWidths),
+          columnVisibility: replaceTableValue(s.columnVisibility, tableId, state.columnVisibility),
+          sortModels: replaceTableValue(s.sortModels, tableId, state.sort),
         })),
     }),
     { name: 'kubus-prefs', version: 0, storage: createJSONStorage(() => kubusStateStorage) },

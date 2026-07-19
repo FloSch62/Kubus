@@ -1,13 +1,26 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
-import { initAuthToken } from './api/http.js';
+import { ApiError, initAuthToken } from './api/http.js';
+import { isMutationErrorHandledLocally } from './api/mutation-errors.js';
+import { showToast } from './state/toast.js';
 import App from './App.js';
 
 initAuthToken();
 
 const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    // Safety net so a failed action is never silent: mutations that handle
+    // their own errors keep doing so. Unreachable-backend and stale-token
+    // failures are excluded — the global status banner owns those.
+    onError: (error, _variables, _context, mutation) => {
+      if (mutation.options.onError) return;
+      if (isMutationErrorHandledLocally(mutation.meta)) return;
+      if (error instanceof ApiError && (error.status === 0 || error.status === 401)) return;
+      showToast('error', error instanceof Error ? error.message : String(error));
+    },
+  }),
   defaultOptions: {
     // staleTime keeps remounts (tab switches, pane reveals) from refetching
     // data that a polled query refreshed moments ago; polling intervals are

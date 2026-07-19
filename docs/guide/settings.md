@@ -25,7 +25,7 @@ The home for managing the clusters in your kubeconfig:
 
 - **Add cluster** — paste or fill in a new cluster.
 - **Edit** (:material-pencil:) — change a cluster's API server, credentials, TLS, and
-  proxy settings. See [Adding & editing clusters](clusters.md#adding-editing-clusters) and
+  proxy settings. See [Adding, editing & removing clusters](clusters.md#adding-editing-removing-clusters) and
   [Reaching clusters behind a proxy or bastion](clusters.md#reaching-clusters-behind-a-proxy-or-bastion).
 - **Protect** (:material-shield:) — mark a cluster as protected, or set **protect by
   default** so every cluster is guarded until you say otherwise. See

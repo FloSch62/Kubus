@@ -75,6 +75,7 @@ import type {
 } from '@kubus/shared';
 import { groupToPath } from '@kubus/shared';
 import { apiFetch } from './http.js';
+import { LOCAL_ERROR_HANDLING_META } from './mutation-errors.js';
 import { watchClient } from './ws/watch-client.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useRefetchInterval } from '../state/prefs.js';
@@ -157,6 +158,7 @@ export function useClusterCa(ctx: string, enabled: boolean) {
 export function useEditCluster() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, body }: { ctx: string; body: EditClusterRequest }) =>
       apiFetch<ContextInfo[]>(`/api/contexts/${encodeURIComponent(ctx)}/cluster`, {
         method: 'PUT',
@@ -174,6 +176,7 @@ export function useEditCluster() {
 export function useDeleteCluster() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: (ctx: string) => apiFetch<ContextInfo[]>(`/api/contexts/${encodeURIComponent(ctx)}`, { method: 'DELETE' }),
     onSuccess: (contexts, ctx) => {
       useClustersStore.getState().removeContext(ctx);
@@ -187,6 +190,7 @@ export function useDeleteCluster() {
 export function useSetSshHost() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, body }: { ctx: string; body: SetSshHostRequest }) =>
       apiFetch<ContextInfo[]>(`/api/contexts/${encodeURIComponent(ctx)}/ssh-host`, {
         method: 'PUT',
@@ -220,6 +224,7 @@ export function useKubeconfigSettings(enabled = true) {
 export function useSetKubeconfig() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: (body: SetKubeconfigRequest) =>
       apiFetch<KubeconfigSettings>('/api/settings/kubeconfig', {
         method: 'PUT',
@@ -236,6 +241,7 @@ export function useSetKubeconfig() {
 export function useImportKubeconfig() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: (body: KubeconfigImportRequest) =>
       apiFetch<KubeconfigImportResponse>('/api/settings/kubeconfig/import', {
         method: 'POST',
@@ -492,11 +498,16 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
   return `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(group)}/${version}/${plural}/${encodeURIComponent(name)}${q ? `?${q}` : ''}`;
 }
 
-export function useResource(sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined) {
+export function useResource(
+  sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
+  opts?: { liveMs?: number },
+) {
+  const interval = useRefetchInterval(opts?.liveMs ?? 0);
   return useQuery({
     queryKey: ['resource', sel],
     queryFn: () => apiFetch<KubeObject>(resourceUrl(sel!.ctx, sel!.group, sel!.version, sel!.plural, sel!.name, sel!.namespace, sel!.reveal ? { reveal: 'true' } : undefined)),
     enabled: !!sel,
+    refetchInterval: opts?.liveMs ? interval : false,
   });
 }
 
@@ -598,6 +609,7 @@ export async function resolveLogTargetPods(sel: {
 export function useApplyResource() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, group, version, plural, name, namespace, yamlBody }: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; yamlBody: string }) =>
       apiFetch<KubeObject>(resourceUrl(ctx, group, version, plural, name, namespace), {
         method: 'PUT',
@@ -610,6 +622,7 @@ export function useApplyResource() {
 
 export function useCreateResource() {
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, yamlBody }: { ctx: string; yamlBody: string }) =>
       apiFetch<KubeObject>(`/api/contexts/${encodeURIComponent(ctx)}/resources`, {
         method: 'POST',
@@ -621,6 +634,7 @@ export function useCreateResource() {
 
 export function useDryRunResource() {
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, yamlBody }: { ctx: string; yamlBody: string }) =>
       apiFetch<ResourceDryRunResponse>(`/api/contexts/${encodeURIComponent(ctx)}/resources/dry-run`, {
         method: 'POST',
@@ -632,6 +646,7 @@ export function useDryRunResource() {
 
 export function useDeleteResource() {
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, group, version, plural, name, namespace }: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string }) =>
       apiFetch(resourceUrl(ctx, group, version, plural, name, namespace), { method: 'DELETE' }),
   });
@@ -647,41 +662,42 @@ function actionMutation<T, R = { ok: boolean }>(action: string) {
 }
 
 export function useScale() {
-  return useMutation({ mutationFn: actionMutation<ScaleRequest>('scale') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<ScaleRequest>('scale') });
 }
 export function useRolloutRestart() {
-  return useMutation({ mutationFn: actionMutation<RolloutRestartRequest>('rollout-restart') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<RolloutRestartRequest>('rollout-restart') });
 }
 export function useCordon() {
-  return useMutation({ mutationFn: actionMutation<CordonRequest>('cordon') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<CordonRequest>('cordon') });
 }
 export function useDrain() {
-  return useMutation({ mutationFn: actionMutation<DrainRequest, DrainStartedResponse>('drain') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<DrainRequest, DrainStartedResponse>('drain') });
 }
 export function useTriggerCronJob() {
-  return useMutation({ mutationFn: actionMutation<TriggerCronJobRequest, { jobName: string }>('trigger-cronjob') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<TriggerCronJobRequest, { jobName: string }>('trigger-cronjob') });
 }
 export function useSuspendCronJob() {
-  return useMutation({ mutationFn: actionMutation<SuspendCronJobRequest>('suspend-cronjob') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<SuspendCronJobRequest>('suspend-cronjob') });
 }
 export function useSetImage() {
-  return useMutation({ mutationFn: actionMutation<SetImageRequest>('set-image') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<SetImageRequest>('set-image') });
 }
 export function useRerunJob() {
-  return useMutation({ mutationFn: actionMutation<RerunJobRequest, { jobName: string }>('rerun-job') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<RerunJobRequest, { jobName: string }>('rerun-job') });
 }
 export function useRolloutUndo() {
-  return useMutation({ mutationFn: actionMutation<RolloutUndoRequest>('rollout-undo') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<RolloutUndoRequest>('rollout-undo') });
 }
 export function useRolloutPause() {
-  return useMutation({ mutationFn: actionMutation<RolloutPauseRequest>('rollout-pause') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<RolloutPauseRequest>('rollout-pause') });
 }
 export function useDebugPod() {
-  return useMutation({ mutationFn: actionMutation<DebugPodRequest, DebugPodResponse>('debug-pod') });
+  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<DebugPodRequest, DebugPodResponse>('debug-pod') });
 }
 export function useStopDebug() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: actionMutation<StopDebugRequest>('stop-debug'),
     // The idle loop notices the stop file within ~1s — refetch after that so
     // the pod object actually shows the container as terminated.
@@ -786,6 +802,7 @@ function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
 export function useInstallMetricsServer() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, body }: { ctx: string; body: MetricsServerInstallRequest }) =>
       apiFetch<MetricsServerInstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server/install`, {
         method: 'POST',
@@ -799,6 +816,7 @@ export function useInstallMetricsServer() {
 export function useUninstallMetricsServer() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<MetricsServerUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`, { method: 'DELETE' }),
     onSuccess: () => invalidateMetricsServer(qc),
@@ -833,6 +851,7 @@ function invalidateNetworkAgent(qc: ReturnType<typeof useQueryClient>): void {
 export function useInstallNetworkAgent() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<NetworkAgentInstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent/install`, { method: 'POST' }),
     onSuccess: () => invalidateNetworkAgent(qc),
@@ -842,6 +861,7 @@ export function useInstallNetworkAgent() {
 export function useUninstallNetworkAgent() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<NetworkAgentUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent`, { method: 'DELETE' }),
     onSuccess: () => invalidateNetworkAgent(qc),
@@ -1046,6 +1066,7 @@ export function useHelmRevision(ctx: string | undefined, ns: string | undefined,
 export function useHelmUninstall() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, ns, name, skipHooks, deleteCrds }: { ctx: string; ns: string; name: string; skipHooks?: boolean; deleteCrds?: boolean }) => {
       const q = new URLSearchParams();
       if (skipHooks) q.set('skipHooks', 'true');
@@ -1067,6 +1088,7 @@ export function useHelmUninstall() {
 export function useHelmRollback() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({
       ctx,
       ns,
@@ -1121,6 +1143,7 @@ function invalidateHelmRepoData(qc: ReturnType<typeof useQueryClient>) {
 export function useAddHelmRepo() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: (repo: HelmRepo) =>
       apiFetch<HelmRepo>('/api/helm/repos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(repo) }),
     onSuccess: () => invalidateHelmRepoData(qc),
@@ -1130,6 +1153,7 @@ export function useAddHelmRepo() {
 export function useRemoveHelmRepo() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: (name: string) => apiFetch(`/api/helm/repos/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     onSuccess: () => invalidateHelmRepoData(qc),
   });
@@ -1262,6 +1286,7 @@ export interface HelmUpgradeVars {
 export function useHelmUpgrade() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, ns, name, ...body }: HelmUpgradeVars) =>
       apiFetch<HelmOperationStarted>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
         method: 'POST',
@@ -1275,6 +1300,7 @@ export function useHelmUpgrade() {
 /** Server-side render without applying — backs the upgrade preview diff. */
 export function useHelmUpgradeDryRun() {
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, ns, name, ...body }: HelmUpgradeVars) =>
       apiFetch<HelmDryRunResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/upgrade`, {
         method: 'POST',
@@ -1291,6 +1317,7 @@ export interface HelmInstallVars extends Omit<HelmInstallRequest, 'dryRun'> {
 export function useHelmInstall() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, ...body }: HelmInstallVars) =>
       apiFetch<HelmOperationStarted>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
         method: 'POST',
@@ -1303,6 +1330,7 @@ export function useHelmInstall() {
 
 export function useHelmInstallDryRun() {
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, ...body }: HelmInstallVars) =>
       apiFetch<HelmDryRunResult>(`/api/contexts/${encodeURIComponent(ctx)}/helm/install`, {
         method: 'POST',
@@ -1333,6 +1361,7 @@ export function usePortForwards() {
 export function useStartPortForward() {
   const qc = useQueryClient();
   return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx, body }: { ctx: string; body: PortForwardRequest }) =>
       apiFetch<PortForwardInfo>(`/api/contexts/${encodeURIComponent(ctx)}/portforwards`, {
         method: 'POST',

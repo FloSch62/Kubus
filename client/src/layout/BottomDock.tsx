@@ -1,4 +1,4 @@
-import { memo, useEffect } from 'react';
+import { memo } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Tab from '@mui/material/Tab';
@@ -25,15 +25,8 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
   const maximized = useDockStore((s) => s.maximized);
   const setMaximized = useDockStore((s) => s.setMaximized);
 
-  useEffect(() => {
-    if (!maximized) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMaximized(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [maximized, setMaximized]);
-
+  // Escape restores a maximized dock via the global dismiss chain in
+  // GlobalShortcuts — guarded there so a focused terminal keeps its Escape.
   if (!open || tabs.length === 0) return null;
 
   // Resize by writing the container height directly to the DOM (one write per
