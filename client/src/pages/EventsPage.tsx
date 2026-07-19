@@ -250,14 +250,20 @@ export function EventsPage() {
         density={grid.density}
         onColumnWidthChange={grid.onColumnWidthChange}
         onRowClick={(p) => openInvolved(p.row as EventRow)}
-        onCellKeyDown={handleCopyCellKeyDown}
+        onCellKeyDown={(params, event, details) => {
+          handleCopyCellKeyDown(params, event, details);
+          // Keyboard equivalent of clicking the row.
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            openInvolved(params.row as EventRow);
+          }
+        }}
         initialState={{ sorting: { sortModel: [{ field: 'lastSeen', sort: 'desc' }] } }}
         sx={{
           border: 0,
           flex: 1,
           minHeight: 0,
           '& .MuiDataGrid-row': { cursor: 'pointer' },
-          '& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus': { outline: 'none' },
           ...copyCellGridSx,
         }}
       />

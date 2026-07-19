@@ -346,7 +346,18 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
             </MenuItem>
           ))}
         </Select>
-        <TextField placeholder="Filter (regex)…" value={filter} onChange={(e) => setFilter(e.target.value)} sx={{ width: 200 }} />
+        <TextField
+          placeholder="Filter (regex)…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            if (filter) setFilter('');
+            else (e.target as HTMLElement).blur();
+          }}
+          sx={{ width: 200 }}
+        />
         <TextField
           placeholder="Find…"
           inputRef={findRef}
@@ -359,6 +370,16 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
             if (e.key === 'Enter') {
               e.preventDefault();
               findStep(e.shiftKey ? -1 : 1);
+              return;
+            }
+            if (e.key === 'Escape') {
+              e.stopPropagation();
+              if (find) {
+                setFind('');
+                setCursor(0);
+              } else {
+                (e.target as HTMLElement).blur();
+              }
             }
           }}
           sx={{ width: 170 }}

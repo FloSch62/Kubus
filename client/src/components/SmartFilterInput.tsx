@@ -156,6 +156,23 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
           {...params}
           inputRef={inputRef}
           placeholder="Search… type / for smart filter"
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return;
+            const input = e.target as HTMLElement;
+            // With the suggestion popup open, Escape only closes it (MUI).
+            if (input.getAttribute('aria-expanded') === 'true') return;
+            e.stopPropagation();
+            if (value) {
+              onChange('');
+              return;
+            }
+            // Empty already: leave the input and hand focus to the grid.
+            input.blur();
+            input
+              .closest('.kubus-table')
+              ?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"], .MuiDataGrid-cell')
+              ?.focus();
+          }}
           slotProps={{
             ...params.slotProps,
             input: {

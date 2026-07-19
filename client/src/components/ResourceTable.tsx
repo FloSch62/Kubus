@@ -205,7 +205,7 @@ export function ResourceTable({
   useQuickSearchShortcut(searchInputRef);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <Box className="kubus-table" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
         <SmartFilterInput
           value={inputValue}
@@ -323,7 +323,6 @@ export function ResourceTable({
             bgcolor: 'action.selected',
             '&:hover': { bgcolor: 'action.selected' },
           },
-          '& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus': { outline: 'none' },
           ...copyCellGridSx,
         }}
       />

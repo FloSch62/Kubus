@@ -269,6 +269,13 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
               color: c.textSecondary,
             },
             '& .MuiDataGrid-columnSeparator': { color: 'transparent' },
+            // No outline for mouse focus, but keyboard navigation must show
+            // which cell is focused (source order: focus-visible wins).
+            '& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus': { outline: 'none' },
+            '& .MuiDataGrid-cell:focus-visible, & .MuiDataGrid-columnHeader:focus-visible': {
+              outline: `2px solid ${alpha(c.primary, 0.8)}`,
+              outlineOffset: '-2px',
+            },
             '& .MuiDataGrid-row:hover': { backgroundColor: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' },
             '& .MuiDataGrid-row.Mui-selected': {
               backgroundColor: c.selectedPill,

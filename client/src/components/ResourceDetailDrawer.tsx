@@ -20,6 +20,7 @@ import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { withoutManagedFields } from '../kube-display.js';
+import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
 import { GenericDetail } from './detail/GenericDetail.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
@@ -174,7 +175,18 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
       }}
     >
       {sel && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Box
+          onKeyDown={(e) => {
+            // Alt+← steps back through the related-resource stack — but not
+            // while typing (macOS Option+← moves the caret by word).
+            if (e.key === 'ArrowLeft' && e.altKey && !e.ctrlKey && !e.metaKey && onBack && !isTextEntryTarget(e.target)) {
+              e.preventDefault();
+              e.stopPropagation();
+              onBack();
+            }
+          }}
+          sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+        >
           <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
             {onBack && (
               <IconButton onClick={onBack} sx={{ mr: 1 }}>

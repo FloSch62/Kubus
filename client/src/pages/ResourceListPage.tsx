@@ -81,6 +81,26 @@ function DetailUrlSync({ sel }: { sel: ResourceSelection | undefined }) {
 }
 
 /**
+ * Renderless `c` shortcut: create a resource on the visible list page. Kept
+ * out of ResourceListPage so pane-activation flips re-render this stub only.
+ */
+function CreateShortcut({ onCreate }: { onCreate: () => void }) {
+  const paneActive = usePaneActive();
+  useEffect(() => {
+    if (!paneActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key.toLowerCase() !== 'c' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (isTextEntryTarget(e.target)) return;
+      e.preventDefault();
+      onCreate();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [paneActive, onCreate]);
+  return null;
+}
+
+/**
  * Side-by-side detail view. Unlike the global overlay drawer it never blocks
  * the table (other rows stay clickable) and only closes explicitly — but it
  * also only takes space while a resource is selected. The divider drags to
@@ -304,6 +324,7 @@ export function ResourceListPage() {
   const nodeAllocation = useMemo(() => (behaviorKind === 'Node' ? makeNodeAllocationLookup(auxPods.rows) : undefined), [behaviorKind, auxPods.rows]);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const openCreate = useCallback(() => setCreateOpen(true), []);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
   const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number } | null>(null);
@@ -543,6 +564,7 @@ export function ResourceListPage() {
   return (
     <Box className="kubus-resource-page" sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <DetailUrlSync sel={sel} />
+      <CreateShortcut onCreate={openCreate} />
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>

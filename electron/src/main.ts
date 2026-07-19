@@ -288,11 +288,24 @@ function createWindow(url: string): void {
   // whole window when nothing is docked. preventDefault() stops the native menu
   // accelerator from firing (and keeps the key out of the page).
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || input.key.toLowerCase() !== 'w' || input.alt || input.shift) return;
-    const closeChord = isMac ? input.meta && !input.control : input.control && !input.meta;
-    if (!closeChord) return;
-    event.preventDefault();
-    mainWindow?.webContents.send('kubus:close-tab');
+    if (input.type !== 'keyDown') return;
+    const key = input.key.toLowerCase();
+    // Cmd/Ctrl+W closes the focused dock/page tab — never the window.
+    if (key === 'w' && !input.alt && !input.shift && (isMac ? input.meta && !input.control : input.control && !input.meta)) {
+      event.preventDefault();
+      mainWindow?.webContents.send('kubus:close-tab');
+      return;
+    }
+    // Browser-style page-tab cycling; the payload is true to cycle backwards.
+    if (input.control && !input.meta && !input.alt && (key === 'tab' || key === 'pageup' || key === 'pagedown')) {
+      event.preventDefault();
+      mainWindow?.webContents.send('kubus:cycle-tab', key === 'tab' ? input.shift : key === 'pageup');
+      return;
+    }
+    if (isMac && input.meta && input.shift && !input.control && !input.alt && (input.code === 'BracketLeft' || input.code === 'BracketRight')) {
+      event.preventDefault();
+      mainWindow?.webContents.send('kubus:cycle-tab', input.code === 'BracketLeft');
+    }
   });
   void mainWindow.loadURL(url);
 }

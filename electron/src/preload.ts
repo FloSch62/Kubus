@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
     ipcRenderer.on('kubus:close-tab', listener);
     return () => ipcRenderer.removeListener('kubus:close-tab', listener);
   },
+  // Fires on the tab-cycling chords (Ctrl+Tab, Ctrl+PgUp/PgDn, macOS
+  // Cmd+Shift+[/]); backwards=true cycles left. Returns an unsubscribe.
+  onCycleTab(callback: (backwards: boolean) => void): () => void {
+    const listener = (_event: unknown, backwards: unknown): void => callback(backwards === true);
+    ipcRenderer.on('kubus:cycle-tab', listener);
+    return () => ipcRenderer.removeListener('kubus:cycle-tab', listener);
+  },
   closeWindow(): void {
     ipcRenderer.send('kubus:close-window');
   },

@@ -1,9 +1,8 @@
-import { lazy, memo, Suspense, useEffect, useState } from 'react';
+import { lazy, memo, Suspense, useState } from 'react';
 import { layout } from '../theme.js';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
-import useMediaQuery from '@mui/material/useMediaQuery';
 import MenuIcon from '@mui/icons-material/Menu';
 import Stack from '@mui/material/Stack';
 import Toolbar from '@mui/material/Toolbar';
@@ -18,9 +17,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore } from '../state/dock.js';
-import { NAV_OVERLAY_MEDIA_QUERY, useNavUiStore } from '../state/nav-ui.js';
-import { useUiPrefsStore } from '../state/prefs.js';
-import { isTextEntryTarget } from '../text-entry.js';
+import { useUiStore } from '../state/ui.js';
+import { HOTKEY_MOD_LABEL } from '../platform.js';
+import { toggleNavRail } from '../shortcuts.js';
 import { ShortcutHelpDialog } from '../components/ShortcutHelpDialog.js';
 import { ClusterSwitcher } from './ClusterSwitcher.js';
 import { NamespaceFilter } from './NamespaceFilter.js';
@@ -38,41 +37,19 @@ export const TopBar = memo(function TopBar() {
   const dockOpen = useDockStore((s) => s.open);
   const dockTabCount = useDockStore((s) => s.tabs.length);
   const setDockOpen = useDockStore((s) => s.setOpen);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  // Wide viewports: toggle the pinned rail. Narrow: toggle the overlay.
-  const navOverlay = useMediaQuery(NAV_OVERLAY_MEDIA_QUERY);
-  const handleNavToggle = () => {
-    if (navOverlay) {
-      const nav = useNavUiStore.getState();
-      nav.setOverlayOpen(!nav.overlayOpen);
-    } else {
-      const prefs = useUiPrefsStore.getState();
-      prefs.set({ navCollapsed: !prefs.navCollapsed });
-    }
-  };
+  // Dialog open state lives in the ui store: the global shortcuts and the
+  // command palette drive the same dialogs.
+  const searchOpen = useUiStore((s) => s.searchOpen);
+  const setSearchOpen = useUiStore((s) => s.setSearchOpen);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const shortcutsOpen = useUiStore((s) => s.shortcutsOpen);
+  const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
   // Mounted on first open, kept mounted after so close animations still play.
   const [searchMounted, setSearchMounted] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
   if (searchOpen && !searchMounted) setSearchMounted(true);
   if (settingsOpen && !settingsMounted) setSettingsMounted(true);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey && !isTextEntryTarget(e.target)) {
-        e.preventDefault();
-        setShortcutsOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   return (
     <>
@@ -98,8 +75,8 @@ export const TopBar = memo(function TopBar() {
             },
           }}
         >
-          <Tooltip title="Toggle navigation">
-            <IconButton size="small" aria-label="Toggle navigation" onClick={handleNavToggle} sx={{ mr: 0.5 }}>
+          <Tooltip title={`Toggle navigation (${HOTKEY_MOD_LABEL}B)`}>
+            <IconButton size="small" aria-label="Toggle navigation" onClick={toggleNavRail} sx={{ mr: 0.5 }}>
               <MenuIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -123,13 +100,13 @@ export const TopBar = memo(function TopBar() {
           <ClusterSwitcher />
           <NamespaceFilter />
           <Box sx={{ flex: 1 }} />
-          <Tooltip title="Search (Ctrl+K)">
+          <Tooltip title={`Search (${HOTKEY_MOD_LABEL}K)`}>
             <IconButton size="small" onClick={() => setSearchOpen(true)} onMouseEnter={() => void loadSearchDialog()} onFocus={() => void loadSearchDialog()}>
               <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           {dockTabCount > 0 && (
-            <Tooltip title={dockOpen ? 'Hide dock' : `Show dock (${dockTabCount} tabs)`}>
+            <Tooltip title={dockOpen ? `Hide dock (${HOTKEY_MOD_LABEL}J)` : `Show dock — ${dockTabCount} tabs (${HOTKEY_MOD_LABEL}J)`}>
               <IconButton size="small" onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
                 <TerminalIcon fontSize="small" />
               </IconButton>
@@ -145,7 +122,7 @@ export const TopBar = memo(function TopBar() {
               {mode === 'light' ? <DarkModeOutlinedIcon fontSize="small" /> : mode === 'dark' ? <BrightnessAutoOutlinedIcon fontSize="small" /> : <LightModeOutlinedIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Settings">
+          <Tooltip title={`Settings (${HOTKEY_MOD_LABEL},)`}>
             <IconButton size="small" onClick={() => setSettingsOpen(true)} onMouseEnter={() => void loadSettingsDialog()} onFocus={() => void loadSettingsDialog()}>
               <SettingsOutlinedIcon fontSize="small" />
             </IconButton>

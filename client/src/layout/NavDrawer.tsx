@@ -641,6 +641,12 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
           placeholder="Filter resources…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            if (filter) setFilter('');
+            else (e.target as HTMLElement).blur();
+          }}
           slotProps={{
             input: {
               startAdornment: (

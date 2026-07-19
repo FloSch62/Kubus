@@ -120,6 +120,24 @@ export const TabsBar = memo(function TabsBar() {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   act(() => useTabsStore.getState().setActive(tab.id));
+                  return;
+                }
+                if (e.key === 'Delete') {
+                  e.preventDefault();
+                  closeTab(tab.id);
+                  // The focused element is gone; keep keyboard flow on the strip.
+                  requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus());
+                  return;
+                }
+                // Roving focus per the ARIA tabs pattern: arrows move focus
+                // (with wrap-around), Enter/Space activates.
+                if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'Home' || e.key === 'End') {
+                  e.preventDefault();
+                  const els = [...(scrollRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
+                  const i = els.indexOf(e.currentTarget as HTMLElement);
+                  const to =
+                    e.key === 'Home' ? 0 : e.key === 'End' ? els.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + els.length) % els.length;
+                  els[to]?.focus();
                 }
               }}
               onAuxClick={(e) => {

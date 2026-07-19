@@ -193,7 +193,16 @@ export function HelmPage() {
         density={grid.density}
         onColumnWidthChange={grid.onColumnWidthChange}
         onRowClick={(p) => navigate(`/helm/${encodeURIComponent(p.row.ctx)}/${encodeURIComponent(p.row.release.namespace)}/${encodeURIComponent(p.row.release.name)}`)}
-        onCellKeyDown={handleCopyCellKeyDown}
+        onCellKeyDown={(params, event, details) => {
+          handleCopyCellKeyDown(params, event, details);
+          // Keyboard equivalent of clicking the row.
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            void navigate(
+              `/helm/${encodeURIComponent(params.row.ctx)}/${encodeURIComponent(params.row.release.namespace)}/${encodeURIComponent(params.row.release.name)}`,
+            );
+          }
+        }}
         sx={{ flex: 1, minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx }}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
       />
