@@ -68,3 +68,12 @@ export function useIsProtected(ctx: string): boolean {
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
   return explicit ?? protectByDefault;
 }
+
+/**
+ * The one definition of what the global namespace filter means: an empty
+ * selection shows everything, and cluster-scoped items (no namespace)
+ * are always visible.
+ */
+export function namespaceVisible(namespace: string | undefined, selected: string[]): boolean {
+  return selected.length === 0 || !namespace || selected.includes(namespace);
+}

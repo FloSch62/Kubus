@@ -14,8 +14,7 @@ import { SmartFilterInput } from './SmartFilterInput.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
 import type { MetricsLookup } from './columns.js';
 import { useUiPrefsStore } from '../state/prefs.js';
-import { isTextEntryTarget } from '../text-entry.js';
-import { usePaneActive } from '../layout/pane-context.js';
+import { useQuickSearchShortcut } from './quick-search.js';
 
 interface Props {
   rows: ClusterRow[];
@@ -188,32 +187,7 @@ export function ResourceTable({
     }, 250);
   };
 
-  const focusSearch = useCallback(() => {
-    // Focus synchronously: deferring (e.g. into a rAF) leaves a gap where
-    // keystrokes typed right after the trigger key still hit the grid.
-    searchInputRef.current?.focus();
-    searchInputRef.current?.select();
-  }, []);
-
-  // Tables in hidden tab panes stay mounted; only the visible one may own the
-  // global find/quick-search shortcuts (N listeners would also race focus).
-  const paneActive = usePaneActive();
-  useEffect(() => {
-    if (!paneActive) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isTextEntryTarget(event.target)) return;
-      const key = event.key.toLowerCase();
-      const shortcutModifier = event.ctrlKey || event.metaKey;
-      const isFindShortcut = shortcutModifier && !event.altKey && !event.shiftKey && key === 'f';
-      const isQuickSearchShortcut = !shortcutModifier && !event.altKey && (key === 's' || key === ':' || key === '/');
-      if (!isFindShortcut && !isQuickSearchShortcut) return;
-      event.preventDefault();
-      event.stopPropagation();
-      focusSearch();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [focusSearch, paneActive]);
+  useQuickSearchShortcut(searchInputRef);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>

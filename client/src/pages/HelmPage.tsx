@@ -15,7 +15,7 @@ import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { HelmReleaseSummary } from '@kubus/shared';
 import { useAppInfo, useHelmOperations, useHelmReleases, useHelmUpdates } from '../api/queries.js';
-import { useClustersStore } from '../state/clusters.js';
+import { namespaceVisible, useClustersStore } from '../state/clusters.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -44,8 +44,7 @@ export function HelmPage() {
   const rows = useMemo(() => {
     const all = data ?? [];
     if (!namespaces.length) return all;
-    const set = new Set(namespaces);
-    return all.filter((r) => set.has(r.release.namespace));
+    return all.filter((r) => namespaceVisible(r.release.namespace, namespaces));
   }, [data, namespaces]);
   const updateItems = useMemo(
     () =>
