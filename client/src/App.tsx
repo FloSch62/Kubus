@@ -7,6 +7,7 @@ import { useClustersStore } from './state/clusters.js';
 import { AppRouter } from './router.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { ToastHost } from './components/ToastHost.js';
+import { BackendStatusBanner } from './components/BackendStatusBanner.js';
 import { UpdateNotification } from './components/UpdateNotification.js';
 import { TitleBarAwareBackdrop } from './components/TitleBarAwareBackdrop.js';
 
@@ -35,6 +36,7 @@ export default function App() {
         <AppRouter />
       </ErrorBoundary>
       <ToastHost />
+      <BackendStatusBanner />
       <UpdateNotification />
     </ThemeProvider>
   );

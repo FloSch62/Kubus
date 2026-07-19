@@ -62,7 +62,8 @@ class WatchClient {
     });
   }
 
-  private reconnectNow(): void {
+  /** Skip any pending backoff — used when connectivity is known to be back. */
+  reconnectNow(): void {
     if (this.subs.size === 0 && this.broadcastHandlers.size === 0) return;
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
     this.reconnectDelay = 1000;

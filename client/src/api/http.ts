@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '@kubus/shared';
+import { reportAuthInvalid, reportBackendDown, reportBackendUp } from '../state/backend.js';
 
 let token = '';
 
@@ -34,11 +35,30 @@ function authHeaders(init?: HeadersInit): Headers {
   return headers;
 }
 
+/**
+ * Fetch that feeds the global backend-status store: connection failures and
+ * 401s are cross-cutting states (server gone / token stale), not per-call
+ * errors, so every call site reports them here instead of handling them.
+ */
+async function statusFetch(path: string, init?: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: authHeaders(init?.headers),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    reportBackendDown();
+    throw new ApiError(0, 'Cannot reach the Kubus backend');
+  }
+  reportBackendUp();
+  if (res.status === 401) reportAuthInvalid();
+  return res;
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: authHeaders(init?.headers),
-  });
+  const res = await statusFetch(path, init);
   const text = await res.text();
   let body: unknown;
   try {
@@ -55,10 +75,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 /** Authenticated fetch returning the raw Response (for blob/stream downloads). */
 export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(path, {
-    ...init,
-    headers: authHeaders(init?.headers),
-  });
+  const res = await statusFetch(path, init);
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
