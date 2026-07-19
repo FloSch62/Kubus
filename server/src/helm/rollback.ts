@@ -1,183 +1,300 @@
 import type { FastifyBaseLogger } from 'fastify';
-import type { KubernetesObject } from '@kubernetes/client-node';
-import type { HelmRollbackResult } from '@kubus/shared';
+import type { HelmOperationFailure, HelmOperationPhase, HelmRollbackResult } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
-import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';
-import { dumpYaml, loadAllYaml } from '../util/yaml.js';
-import { decodeReleaseSecret, encodeReleasePayload, listReleaseSecretsRaw, type HelmReleasePayload, type ReleaseSecret } from './release-reader.js';
+import { dumpYaml } from '../util/yaml.js';
+import { applyDoc, createReleaseRecord, deleteDoc, docKey, docLabel, manifestDocs, patchReleaseRecord, rfc3339Local } from './common.js';
+import { execHooks } from './hooks.js';
+import { HelmReadinessError, waitForResources } from './readiness.js';
+import { decodeReleaseRecord, listReleaseRecords, revOf, type HelmReleasePayload } from './release-reader.js';
+import type { HelmProgressReporter } from './operations.js';
 
-const REVISION_SUFFIX_RE = /\.v(\d+)$/;
-
-function revOf(secret: ReleaseSecret): number {
-  return Number(REVISION_SUFFIX_RE.exec(secret.metadata.name)?.[1] ?? 0);
+export interface RollbackOptions {
+  skipHooks?: boolean;
+  wait?: boolean;
+  timeoutSeconds?: number;
+  report?: HelmProgressReporter;
 }
 
-/** RFC3339 with the local UTC offset — matches how helm stamps last_deployed. */
-function rfc3339Local(date: Date): string {
-  const offsetMin = -date.getTimezoneOffset();
-  const sign = offsetMin >= 0 ? '+' : '-';
-  const abs = Math.abs(offsetMin);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
-    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
-  );
+type PodTemplateWorkload = {
+  spec?: {
+    template?: {
+      metadata?: { annotations?: Record<string, string> };
+    };
+  };
+};
+
+/**
+ * A rollback can return to an already-existing ReplicaSet whose pods still
+ * hold Secret/ConfigMap values from the failed revision. Force a fresh pod
+ * template revision so every restored dependency is loaded before readiness.
+ */
+function forceRollbackRollout(docs: ReturnType<typeof manifestDocs>, revision: number): void {
+  for (const doc of docs) {
+    if (!['Deployment', 'StatefulSet', 'DaemonSet'].includes(doc.kind ?? '')) continue;
+    const workload = doc as typeof doc & PodTemplateWorkload;
+    workload.spec ??= {};
+    workload.spec.template ??= {};
+    workload.spec.template.metadata ??= {};
+    workload.spec.template.metadata.annotations ??= {};
+    workload.spec.template.metadata.annotations['kubus.dev/helm-rollback-revision'] = String(revision);
+  }
 }
 
-function manifestDocs(manifest: string | undefined, defaultNamespace: string): KubernetesObject[] {
-  return loadAllYaml(manifest ?? '')
-    .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
-    .map((d) => d as unknown as KubernetesObject)
-    .filter((obj) => !!obj.kind && !!obj.metadata?.name)
-    .map((obj) => {
-      obj.metadata!.namespace ??= defaultNamespace;
-      return obj;
-    });
-}
-
-function docKey(obj: KubernetesObject): string {
-  return `${obj.apiVersion ?? ''}|${obj.kind ?? ''}|${obj.metadata?.namespace ?? ''}|${obj.metadata?.name ?? ''}`;
-}
-
-function docLabel(obj: KubernetesObject): string {
-  return `${obj.kind}/${obj.metadata?.namespace ?? ''}/${obj.metadata?.name}`;
-}
-
-/** Resolve the list path for a manifest doc via API discovery (kind → plural, scope). */
-async function pathForDoc(handle: ClusterHandle, obj: KubernetesObject): Promise<string> {
-  const apiVersion = obj.apiVersion ?? 'v1';
-  const [group, version] = apiVersion.includes('/') ? (apiVersion.split('/') as [string, string]) : ['', apiVersion];
-  const all = await handle.discovery.getResources();
-  const info = all.find((r) => r.group === group && r.version === version && r.kind === obj.kind);
-  if (!info) throw new HttpProblem(422, `unknown kind ${apiVersion}/${obj.kind}`);
-  return resourcePath(group, version, info.plural, {
-    namespace: info.namespaced ? obj.metadata?.namespace : undefined,
-    name: obj.metadata?.name,
-    query: new URLSearchParams({ fieldManager: 'kubus', force: 'true' }),
-  });
-}
-
-/** Update a release secret's payload and status label in place. */
-async function patchReleaseSecret(handle: ClusterHandle, namespace: string, secretName: string, payload: HelmReleasePayload): Promise<void> {
-  await handle.raw.json(resourcePath('', 'v1', 'secrets', { namespace, name: secretName }), {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/merge-patch+json' },
-    body: JSON.stringify({
-      stringData: { release: encodeReleasePayload(payload) },
-      metadata: { labels: { status: payload.info?.status ?? 'unknown' } },
-    }),
-  });
+function serializeManifest(docs: ReturnType<typeof manifestDocs>): string {
+  return docs.map((doc) => `---\n${dumpYaml(doc, { noRefs: true })}`).join('');
 }
 
 /**
- * Roll a release back to an earlier revision the way the helm CLI does:
- * re-apply the stored manifest of the target revision (server-side apply),
- * prune resources only present in the current revision, mark previously
- * deployed records superseded and write a new release record vN+1.
- * Helm hooks are NOT executed — the UI states this.
+ * Roll a release back using Helm-compatible records and lifecycle ordering:
+ * run the target revision's pre-rollback hooks, reconcile its stored manifest
+ * with server-side apply, prune resources only present in the current
+ * revision, run post-rollback hooks, mark previously deployed records
+ * superseded and write a new release record vN+1.
  */
-export async function rollbackRelease(handle: ClusterHandle, namespace: string, name: string, toRevision: number, log: FastifyBaseLogger): Promise<HelmRollbackResult> {
-  const secrets = await listReleaseSecretsRaw(handle, namespace, name);
-  if (!secrets.length) throw new HttpProblem(404, `helm release "${namespace}/${name}" not found`);
-  secrets.sort((a, b) => revOf(b) - revOf(a));
-  const latestSecret = secrets[0]!;
-  const latestRev = revOf(latestSecret);
+export async function rollbackRelease(
+  handle: ClusterHandle,
+  namespace: string,
+  name: string,
+  toRevision: number,
+  log: FastifyBaseLogger,
+  opts: RollbackOptions = {},
+): Promise<HelmRollbackResult> {
+  opts.report?.({ phase: 'rendering', message: `Loading release history and revision ${toRevision}` });
+  const records = await listReleaseRecords(handle, namespace, name);
+  if (!records.length) throw new HttpProblem(404, `helm release "${namespace}/${name}" not found`);
+  records.sort((a, b) => revOf(b) - revOf(a));
+  const latestRecord = records[0]!;
+  const latestRev = revOf(latestRecord);
+  const latest = decodeReleaseRecord(latestRecord);
+  if (latest.info?.status?.startsWith('pending')) {
+    throw new HttpProblem(409, `release is in state "${latest.info.status}" — another operation may be in progress`);
+  }
   if (toRevision >= latestRev) throw new HttpProblem(422, `revision ${toRevision} is not older than the current revision ${latestRev}`);
-  const targetSecret = secrets.find((s) => revOf(s) === toRevision);
-  if (!targetSecret) throw new HttpProblem(404, `revision ${toRevision} not found`);
+  const targetRecord = records.find((s) => revOf(s) === toRevision);
+  if (!targetRecord) throw new HttpProblem(404, `revision ${toRevision} not found`);
 
-  // Deep-copy: decodeReleaseSecret caches payloads and they must not be mutated.
-  const target = JSON.parse(JSON.stringify(decodeReleaseSecret(targetSecret))) as HelmReleasePayload;
-  const latest = decodeReleaseSecret(latestSecret);
+  // Deep-copy: decodeReleaseRecord caches payloads and they must not be mutated.
+  const target = JSON.parse(JSON.stringify(decodeReleaseRecord(targetRecord))) as HelmReleasePayload;
+  const newRevision = latestRev + 1;
+  const targetDocs = manifestDocs(target.manifest, namespace);
+  forceRollbackRollout(targetDocs, newRevision);
+  // Capture prune identity before applying: applyDoc strips the stamped
+  // namespace from cluster-scoped docs in place, and keys computed after that
+  // would never match the current revision — pruning ClusterRoles and other
+  // cluster-wide resources the release still owns.
+  const targetKeys = new Set(targetDocs.map(docKey));
+  opts.report?.({
+    phase: 'rendering',
+    message: `Prepared revision ${toRevision} as new revision ${newRevision}`,
+    targetVersion: target.chart?.metadata?.version,
+    revision: newRevision,
+  });
+  const result: HelmRollbackResult = { newRevision, applied: [], pruned: [], failed: [], hooksRan: [] };
+  const newPayload: HelmReleasePayload = {
+    ...target,
+    version: newRevision,
+    info: {
+      ...target.info,
+      status: 'pending-rollback',
+      last_deployed: rfc3339Local(new Date()),
+      description: `Rollback to ${toRevision} underway`,
+    },
+  };
+  const recordName = await createReleaseRecord(handle, newPayload, latestRecord.driver);
+  opts.report?.({
+    phase: opts.skipHooks ? 'applying' : 'pre-hook',
+    message: `Created pending rollback revision from revision ${toRevision}`,
+    revision: newRevision,
+    currentResource: undefined,
+  });
+  const fail = async (description: string, phase: HelmOperationPhase): Promise<never> => {
+    newPayload.info = { ...newPayload.info, status: 'failed', description };
+    await patchReleaseRecord(handle, namespace, recordName, newPayload, latestRecord.driver).catch(() => {});
+    const details: HelmOperationFailure = {
+      operation: 'rollback',
+      phase,
+      revision: newRevision,
+      recoveryRevision: toRevision,
+      applied: result.applied,
+      pruned: result.pruned,
+      failed: result.failed,
+      hooksRan: result.hooksRan,
+      suggestions: [
+        'Inspect the failed workload, pod logs, and namespace events.',
+        'Do not repeat a rollback when the application database or persisted data is not backward compatible.',
+        'Follow the application vendor recovery procedure or restore a data backup.',
+      ],
+    };
+    throw new HttpProblem(500, description, 'HelmRollbackFailed', details);
+  };
 
-  const result: HelmRollbackResult = { newRevision: latestRev + 1, applied: [], pruned: [], failed: [] };
+  if (!opts.skipHooks) {
+    try {
+      await execHooks(handle, target.hooks, 'pre-rollback', namespace, log, result.hooksRan, (message, resource) =>
+        opts.report?.({ phase: 'pre-hook', message, currentResource: resource }),
+      );
+    } catch (err) {
+      return fail(`Rollback failed: ${err instanceof Error ? err.message : String(err)}`, 'pre-hook');
+    }
+  }
 
   // 1. Re-apply the target revision's manifest (create-or-update per doc).
-  const targetDocs = manifestDocs(target.manifest, namespace);
-  for (const doc of targetDocs) {
+  for (let index = 0; index < targetDocs.length; index++) {
+    const doc = targetDocs[index]!;
     const label = docLabel(doc);
+    opts.report?.({
+      phase: 'applying',
+      message: `Restoring resources (${index + 1}/${targetDocs.length})`,
+      currentResource: label,
+      completedResources: index,
+      totalResources: targetDocs.length,
+      waitingFor: undefined,
+    });
     try {
-      const path = await pathForDoc(handle, doc);
-      const res = await handle.raw.request(path, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/apply-patch+yaml' },
-        body: dumpYaml(doc, { noRefs: true }),
-      });
-      if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`.trim());
+      await applyDoc(handle, doc);
       result.applied.push(label);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ label, err: message }, 'helm rollback: apply failed');
       result.failed.push({ resource: label, error: message });
+      return fail(`Rollback failed: could not apply ${label}: ${message}`, 'apply');
     }
   }
+  opts.report?.({
+    phase: 'applying',
+    message: `Restored ${targetDocs.length} resources`,
+    completedResources: targetDocs.length,
+    totalResources: targetDocs.length,
+    currentResource: undefined,
+  });
+  // Persist the rollout annotation as part of the new revision's manifest so
+  // history/diffs match the live resources.
+  newPayload.manifest = serializeManifest(targetDocs);
+  await patchReleaseRecord(handle, namespace, recordName, newPayload, latestRecord.driver).catch((err: unknown) =>
+    log.warn({ record: recordName, err: String(err) }, 'helm rollback: pending manifest update failed'),
+  );
 
   // 2. Prune resources present in the current revision but not in the target.
-  const targetKeys = new Set(targetDocs.map(docKey));
-  const pruneDocs = manifestDocs(latest.manifest, namespace).filter((d) => !targetKeys.has(docKey(d)));
-  for (const doc of pruneDocs.reverse()) {
+  let reversedPruneDocs: ReturnType<typeof manifestDocs>;
+  try {
+    reversedPruneDocs = manifestDocs(latest.manifest, namespace)
+      .filter((d) => !targetKeys.has(docKey(d)))
+      .reverse();
+  } catch (err) {
+    return fail(`Rollback failed: current revision's manifest is not parseable YAML: ${err instanceof Error ? err.message : String(err)}`, 'prune');
+  }
+  for (let index = 0; index < reversedPruneDocs.length; index++) {
+    const doc = reversedPruneDocs[index]!;
     const label = docLabel(doc);
+    opts.report?.({
+      phase: 'pruning',
+      message: `Removing newer resources (${index + 1}/${reversedPruneDocs.length})`,
+      currentResource: label,
+      completedResources: index,
+      totalResources: reversedPruneDocs.length,
+      waitingFor: undefined,
+    });
     try {
-      await handle.objects.delete(doc);
+      await deleteDoc(handle, doc);
       result.pruned.push(label);
     } catch (err) {
-      const code = (err as { code?: number }).code;
-      if (code === 404) {
-        result.pruned.push(label);
-      } else {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn({ label, err: message }, 'helm rollback: prune failed');
-        result.failed.push({ resource: label, error: message });
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ label, err: message }, 'helm rollback: prune failed');
+      result.failed.push({ resource: label, error: message });
+      return fail(`Rollback failed: could not remove ${label}: ${message}`, 'prune');
+    }
+  }
+  if (reversedPruneDocs.length) {
+    opts.report?.({
+      phase: 'pruning',
+      message: `Removed ${reversedPruneDocs.length} newer resources`,
+      completedResources: reversedPruneDocs.length,
+      totalResources: reversedPruneDocs.length,
+      currentResource: undefined,
+    });
+  }
+
+  if (opts.wait ?? true) {
+    try {
+      await waitForResources(
+        handle,
+        targetDocs,
+        opts.timeoutSeconds ?? 300,
+        (progress) =>
+          opts.report?.({
+            phase: 'readiness',
+            message: progress.recovering.length
+              ? `Resolving ${progress.recovering.length} ReadWriteOnce volume rollout deadlock${progress.recovering.length === 1 ? '' : 's'} with brief downtime`
+              : progress.pending.length
+                ? `Waiting for ${progress.pending.length} of ${progress.total} workloads`
+                : `All ${progress.total} workloads are ready`,
+            completedResources: progress.ready,
+            totalResources: progress.total,
+            currentResource: progress.pending[0]?.resource,
+            waitingFor: progress.pending,
+          }),
+        { recoverMultiAttach: true },
+      );
+    } catch (err) {
+      if (err instanceof HelmReadinessError) {
+        result.failed.push(...err.issues.map((issue) => ({ resource: issue.resource, error: issue.message })));
       }
+      return fail(`Rollback failed while waiting for workloads: ${err instanceof Error ? err.message : String(err)}`, 'readiness');
     }
   }
 
-  // 3. Mark previously deployed records superseded.
-  for (const secret of secrets) {
-    const payload = decodeReleaseSecret(secret);
+  if (!opts.skipHooks) {
+    try {
+      await execHooks(handle, target.hooks, 'post-rollback', namespace, log, result.hooksRan, (message, resource) =>
+        opts.report?.({ phase: 'post-hook', message, currentResource: resource, waitingFor: undefined }),
+      );
+    } catch (err) {
+      return fail(`Rollback failed: ${err instanceof Error ? err.message : String(err)}`, 'post-hook');
+    }
+  }
+
+  // 3. Finalize the new revision first, keeping the old deployed record as a
+  // recovery anchor if storage finalization itself fails.
+  newPayload.info = {
+    ...newPayload.info,
+    status: 'deployed',
+    last_deployed: rfc3339Local(new Date()),
+    description: `Rollback to ${toRevision}`,
+  };
+  opts.report?.({
+    phase: 'recording',
+    message: 'Finalizing Helm release history',
+    currentResource: undefined,
+    completedResources: undefined,
+    totalResources: undefined,
+    waitingFor: undefined,
+  });
+  try {
+    await patchReleaseRecord(handle, namespace, recordName, newPayload, latestRecord.driver);
+  } catch (err) {
+    return fail(`Rollback applied, but the release record could not be finalized: ${err instanceof Error ? err.message : String(err)}`, 'record');
+  }
+
+  // 4. Mark previously deployed records superseded.
+  for (const record of records) {
+    let payload: HelmReleasePayload;
+    try {
+      payload = decodeReleaseRecord(record);
+    } catch (err) {
+      // The rollback already succeeded; an undecodable old record must not fail it.
+      log.warn({ record: record.metadata.name, err: String(err) }, 'helm rollback: skipping undecodable record');
+      continue;
+    }
     if (payload.info?.status !== 'deployed') continue;
     const superseded = JSON.parse(JSON.stringify(payload)) as HelmReleasePayload;
     superseded.info = { ...superseded.info, status: 'superseded' };
     try {
-      await patchReleaseSecret(handle, namespace, secret.metadata.name, superseded);
+      await patchReleaseRecord(handle, namespace, record.metadata.name, superseded, record.driver);
     } catch (err) {
-      log.warn({ secret: secret.metadata.name, err: String(err) }, 'helm rollback: superseded update failed');
+      log.warn({ record: record.metadata.name, err: String(err) }, 'helm rollback: superseded update failed');
     }
   }
-
-  // 4. Write the new release record (a copy of the target at revision N+1).
-  const newPayload: HelmReleasePayload = {
-    ...target,
-    version: latestRev + 1,
-    info: {
-      ...target.info,
-      status: 'deployed',
-      last_deployed: rfc3339Local(new Date()),
-      description: `Rollback to ${toRevision}`,
-    },
-  };
-  await handle.core.createNamespacedSecret({
-    namespace,
-    body: {
-      apiVersion: 'v1',
-      kind: 'Secret',
-      type: 'helm.sh/release.v1',
-      metadata: {
-        name: `sh.helm.release.v1.${name}.v${latestRev + 1}`,
-        namespace,
-        labels: {
-          name,
-          owner: 'helm',
-          status: 'deployed',
-          version: String(latestRev + 1),
-          modifiedAt: String(Math.floor(Date.now() / 1000)),
-        },
-      },
-      stringData: { release: encodeReleasePayload(newPayload) },
-    },
-  });
 
   return result;
 }

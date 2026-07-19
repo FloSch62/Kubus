@@ -29,6 +29,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: helm-engine/go.mod
+          cache-dependency-path: helm-engine/go.sum
       - name: Cache Electron binaries
         uses: actions/cache@v6
         with:
@@ -46,6 +50,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
       - run: pnpm -r build
+      - run: pnpm build:helm-engine
       - name: Package
         run: pnpm --filter @kubus/electron exec electron-builder --publish never
         env:

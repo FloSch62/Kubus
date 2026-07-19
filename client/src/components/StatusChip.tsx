@@ -3,7 +3,20 @@ import CircleIcon from '@mui/icons-material/Circle';
 
 const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
 const BAD = new Set(['failed', 'crashloopbackoff', 'imagepullbackoff', 'errimagepull', 'error', 'evicted', 'lost', 'notready', 'oomkilled', 'false', 'unhealthy', 'degraded', 'stopped', 'down']);
-const WARN = new Set(['pending', 'terminating', 'containercreating', 'podinitializing', 'released', 'unknown', 'schedulingdisabled', 'pending-install', 'pending-upgrade', 'superseded', 'uninstalling']);
+const WARN = new Set([
+  'pending',
+  'terminating',
+  'containercreating',
+  'podinitializing',
+  'released',
+  'unknown',
+  'schedulingdisabled',
+  'pending-install',
+  'pending-upgrade',
+  'pending-rollback',
+  'superseded',
+  'uninstalling',
+]);
 
 export function statusColor(status: string): 'success' | 'error' | 'warning' | 'default' {
   const normalized = status.trim().toLowerCase();

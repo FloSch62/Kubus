@@ -8,6 +8,8 @@ export interface PersistedSettings {
   kubeconfigPath?: string;
   /** Kubus-managed SSH tunnels: scoped kubeconfig context key -> ssh destination (config alias or user@host). */
   sshTunnels?: Record<string, string>;
+  /** Configured Helm chart repositories (classic http(s) index.yaml repos). */
+  helmRepos?: Array<{ name: string; url: string }>;
 }
 
 /**

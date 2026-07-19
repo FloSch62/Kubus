@@ -7,6 +7,7 @@ export class HttpProblem extends Error {
     public statusCode: number,
     message: string,
     public reason?: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -34,7 +35,7 @@ function parseK8sBody(body: unknown): K8sStatusBody | undefined {
 /** Map any thrown error to a consistent problem JSON response. */
 export function sendError(reply: FastifyReply, err: unknown): void {
   if (err instanceof HttpProblem) {
-    const body: ApiErrorBody = { message: err.message, reason: err.reason, code: err.statusCode };
+    const body: ApiErrorBody = { message: err.message, reason: err.reason, code: err.statusCode, details: err.details };
     void reply.code(err.statusCode).send(body);
     return;
   }

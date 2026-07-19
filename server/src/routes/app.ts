@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
 import type { AppContext } from '../app.js';
+import { engineAvailable } from '../helm/engine.js';
 
 const UPDATE_MANIFEST_URL = 'https://flosch62.github.io/Kubus/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
@@ -78,7 +79,7 @@ function releaseUrl(value: unknown): string | undefined {
 }
 
 function appInfo(): AppInfo {
-  return { name: 'Kubus', version: APP_VERSION };
+  return { name: 'Kubus', version: APP_VERSION, helmEngine: engineAvailable() };
 }
 
 async function checkForUpdate(force = false): Promise<UpdateCheckResult> {

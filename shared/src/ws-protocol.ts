@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { KubeObject, PortForwardInfo } from './api-types.js';
+import type { HelmOperation, KubeObject, PortForwardInfo } from './api-types.js';
 
 /** Messages the client sends on /ws/watch. */
 export const watchClientMessageSchema = z.discriminatedUnion('op', [
@@ -32,8 +32,10 @@ export type WatchServerMessage =
   | { op: 'events'; id: string; events: Array<{ type: WatchEventType; object: KubeObject }> }
   | { op: 'status'; id: string; state: WatchStatusState; message?: string }
   | { op: 'drain-progress'; drainId: string; evicted: number; total: number; current?: string; done?: boolean; error?: string }
+  | { op: 'helm-operation'; operation: HelmOperation }
   | { op: 'pf-update'; forwards: PortForwardInfo[] }
   | { op: 'contexts-changed' }
+  | { op: 'discovery-update'; ctx: string }
   /** A context's server-side session was torn down or (re)created — watch subscriptions for it must resubscribe. */
   | { op: 'context-reset'; ctx: string };
 
