@@ -27,6 +27,6 @@
     "esbuild": "^0.28.1",
     "fix-path": "^5.0.0",
     "sharp": "^0.35.3",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
