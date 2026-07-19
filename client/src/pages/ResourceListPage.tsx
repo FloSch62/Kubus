@@ -12,11 +12,13 @@ import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
 import { useParams, useSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
-import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDryRunResource, useFilteredList, useResourceMetrics, useWatchedList, type ClusterRow } from '../api/queries.js';
+import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
@@ -27,7 +29,9 @@ import { ResourceDetailPanel, type ResourceSelection } from '../components/Resou
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
 import { YamlEditor } from '../components/YamlEditor.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { NoClustersState } from '../components/NoClustersState.js';
+import { showToast } from '../state/toast.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { usePaneActive } from '../layout/pane-context.js';
 import { addLabelTerm } from '../label-selector.js';
@@ -281,6 +285,35 @@ export function ResourceListPage() {
   const create = useCreateResource();
   const dryRun = useDryRunResource();
   const addSavedView = useNavigationStore((s) => s.addSavedView);
+  const del = useDeleteResource();
+  const rolloutRestart = useRolloutRestart();
+  const [bulkDialog, setBulkDialog] = useState<'delete' | 'restart' | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const contextSettings = useClustersStore((s) => s.contextSettings);
+  const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
+  // This page instance is reused across kinds — a selection must not survive
+  // the switch to a different resource list.
+  useEffect(() => setSelectedRows([]), [group, version, plural]);
+
+  const bulkRestartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
+  const bulkProtected = selectedRows.some((r) => contextSettings[r.ctx]?.protected ?? protectByDefault);
+  const runBulk = async (verb: string, run: (row: ClusterRow) => Promise<unknown>) => {
+    const rows = selectedRows;
+    setBulkBusy(true);
+    const results = await Promise.allSettled(rows.map((row) => run(row)));
+    setBulkBusy(false);
+    setBulkDialog(null);
+    const failures = results
+      .map((result, i) => ({ result, row: rows[i]! }))
+      .filter((f): f is { result: PromiseRejectedResult; row: ClusterRow } => f.result.status === 'rejected');
+    if (!failures.length) {
+      showToast('success', `${verb} ${rows.length} ${rows.length === 1 ? kind : resourceTitle}`);
+    } else {
+      const first = failures[0]!;
+      const message = first.result.reason instanceof Error ? first.result.reason.message : String(first.result.reason);
+      showToast('error', `${verb} failed for ${failures.length} of ${rows.length} — ${first.row.obj.metadata.name}: ${message}`);
+    }
+  };
 
   // Detail selection deep-linked via ?sel=ctx|namespace|name
   const sel: ResourceSelection | undefined = useMemo(() => {
@@ -535,8 +568,8 @@ export function ResourceListPage() {
           setContextAction({ target: rowActionTarget(row), mouseX: event.clientX + 2, mouseY: event.clientY - 6 });
           setContextMenuOpen(true);
         }}
-        checkboxSelection={kind === 'Pod'}
-        onSelectionChange={kind === 'Pod' ? setSelectedRows : undefined}
+        checkboxSelection
+        onSelectionChange={setSelectedRows}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}
         toolbar={
@@ -573,10 +606,62 @@ export function ResourceListPage() {
                 Logs ({selectedRows.length})
               </Button>
             )}
+            {selectedRows.length > 0 && bulkRestartable && (
+              <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
+                Restart ({selectedRows.length})
+              </Button>
+            )}
+            {selectedRows.length > 0 && (
+              <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
+                Delete ({selectedRows.length})
+              </Button>
+            )}
             <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setCreateOpen(true)}>
               Create
             </Button>
           </>
+        }
+      />
+      <ConfirmDialog
+        open={bulkDialog === 'delete'}
+        title={`Delete ${selectedRows.length} ${selectedRows.length === 1 ? kind : resourceTitle}`}
+        message={
+          <>
+            Delete the selected {selectedRows.length === 1 ? kind : `${selectedRows.length} ${resourceTitle}`}? This cannot be undone.
+            <BulkTargetList rows={selectedRows} />
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        busy={bulkBusy}
+        confirmText={bulkProtected ? `delete ${selectedRows.length}` : undefined}
+        onClose={() => setBulkDialog(null)}
+        onConfirm={() =>
+          void runBulk('Deleted', (row) =>
+            del.mutateAsync({ ctx: row.ctx, group, version, plural, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace }),
+          )
+        }
+      />
+      <ConfirmDialog
+        open={bulkDialog === 'restart'}
+        title={`Restart ${selectedRows.length} ${selectedRows.length === 1 ? kind : resourceTitle}`}
+        message={
+          <>
+            Trigger a rolling restart of the selected {selectedRows.length === 1 ? kind : `${selectedRows.length} ${resourceTitle}`}?
+            <BulkTargetList rows={selectedRows} />
+          </>
+        }
+        confirmLabel="Restart"
+        busy={bulkBusy}
+        confirmText={bulkProtected ? `restart ${selectedRows.length}` : undefined}
+        onClose={() => setBulkDialog(null)}
+        onConfirm={() =>
+          void runBulk('Restarted', (row) =>
+            rolloutRestart.mutateAsync({
+              ctx: row.ctx,
+              body: { kind: kind as 'Deployment', namespace: row.obj.metadata.namespace ?? '', name: row.obj.metadata.name },
+            }),
+          )
         }
       />
       {contextAction && (
@@ -619,6 +704,23 @@ export function ResourceListPage() {
       </Dialog>
       </Box>
       <EmbeddedResourceDetail />
+    </Box>
+  );
+}
+
+/** Compact cluster/namespace/name listing shown in bulk-action confirms. */
+function BulkTargetList({ rows }: { rows: ClusterRow[] }) {
+  const shown = rows.slice(0, 8);
+  const more = rows.length - shown.length;
+  return (
+    <Box component="ul" sx={{ my: 1, pl: 2.5, fontFamily: 'monospace', fontSize: 12 }}>
+      {shown.map((row) => (
+        <li key={row.obj.metadata.uid}>
+          {row.ctx}: {row.obj.metadata.namespace ? `${row.obj.metadata.namespace}/` : ''}
+          {row.obj.metadata.name}
+        </li>
+      ))}
+      {more > 0 && <li>… and {more} more</li>}
     </Box>
   );
 }
