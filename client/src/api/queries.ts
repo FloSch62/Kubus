@@ -492,11 +492,16 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
   return `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(group)}/${version}/${plural}/${encodeURIComponent(name)}${q ? `?${q}` : ''}`;
 }
 
-export function useResource(sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined) {
+export function useResource(
+  sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
+  opts?: { liveMs?: number },
+) {
+  const interval = useRefetchInterval(opts?.liveMs ?? 0);
   return useQuery({
     queryKey: ['resource', sel],
     queryFn: () => apiFetch<KubeObject>(resourceUrl(sel!.ctx, sel!.group, sel!.version, sel!.plural, sel!.name, sel!.namespace, sel!.reveal ? { reveal: 'true' } : undefined)),
     enabled: !!sel,
+    refetchInterval: opts?.liveMs ? interval : false,
   });
 }
 

@@ -86,7 +86,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
     if (!hasSel) setFullScreen(false);
   }, [hasSel]);
 
-  const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined);
+  // Live-refresh the object while Overview is showing so stuck pods, rollouts
+  // and conditions update in place; other tabs (YAML editing!) keep the
+  // snapshot they opened with.
+  const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
+    liveMs: tab === 'overview' ? 5000 : undefined,
+  });
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();

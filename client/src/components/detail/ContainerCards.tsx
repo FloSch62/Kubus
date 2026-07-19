@@ -15,6 +15,8 @@ export interface ContainerCardData {
   kind?: 'init' | 'sidecar';
   /** StatusChip label, e.g. Running / Completed / CrashLoopBackOff. */
   state?: string;
+  /** Why the container is in `state` (waiting/terminated message). */
+  stateMessage?: string;
   restarts?: number;
   lastRestart?: { reason?: string; at?: string };
   ports?: string;
@@ -61,6 +63,23 @@ function ContainerCard({ c }: { c: ContainerCardData }) {
           sx={{ display: 'block', fontFamily: 'monospace', fontSize: 11, mt: 0.25 }}
         >
           {c.image}
+        </Typography>
+      )}
+      {c.stateMessage && (
+        <Typography
+          variant="caption"
+          title={c.stateMessage}
+          sx={{
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            wordBreak: 'break-word',
+            color: 'warning.main',
+            mt: 0.25,
+          }}
+        >
+          {c.stateMessage}
         </Typography>
       )}
       {showRestarts && (
