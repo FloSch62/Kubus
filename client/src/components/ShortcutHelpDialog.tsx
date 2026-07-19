@@ -50,7 +50,9 @@ const SECTIONS: Array<{ title: string; shortcuts: Shortcut[] }> = [
       { combos: [['S'], ['/'], [':']], description: 'Focus the filter input' },
       { combos: [[MOD, 'F']], description: 'Focus the filter input' },
       { combos: [[MOD, 'C']], description: 'Copy the focused cell' },
-      { combos: [['Right-click']], description: 'Open the row actions menu' },
+      { combos: [['Enter']], description: 'Open details for the focused row' },
+      { combos: [['Right-click'], ['Shift', 'F10']], description: 'Open the row actions menu' },
+      { combos: [['Esc']], description: 'Close the details panel (from inside it)' },
     ],
   },
   {

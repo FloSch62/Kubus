@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { layout } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
@@ -31,7 +31,10 @@ interface Props {
   onFilterChange?: (value: string) => void;
   onLabelSelectorChange?: (value: string) => void;
   onRowClick?: (row: ClusterRow) => void;
-  onRowContextMenu?: (row: ClusterRow, event: MouseEvent<HTMLElement>) => void;
+  /** Keyboard activation (Enter on a cell); lets pages move focus along. */
+  onRowActivate?: (row: ClusterRow) => void;
+  /** Opened by right-click or the ContextMenu / Shift+F10 keys. */
+  onRowContextMenu?: (row: ClusterRow, position: { clientX: number; clientY: number }) => void;
   /** Extra toolbar elements (e.g. create button). */
   toolbar?: ReactNode;
   /** Enable checkbox selection; returns selected rows. */
@@ -74,6 +77,7 @@ export function ResourceTable({
   onFilterChange,
   onLabelSelectorChange,
   onRowClick,
+  onRowActivate,
   onRowContextMenu,
   toolbar,
   checkboxSelection,
@@ -293,7 +297,21 @@ export function ResourceTable({
         columnVisibilityModel={visibility}
         onColumnVisibilityModelChange={handleVisibilityChange}
         onColumnWidthChange={tableId ? (params) => setColumnWidth(tableId, params.colDef.field, params.width) : undefined}
-        onCellKeyDown={handleCopyCellKeyDown}
+        onCellKeyDown={(params, event, details) => {
+          handleCopyCellKeyDown(params, event, details);
+          const row = rowsById.get(String(params.id));
+          if (!row) return;
+          // Keyboard equivalents of clicking and right-clicking a row.
+          if (event.key === 'Enter' && (onRowActivate || onRowClick)) {
+            event.preventDefault();
+            (onRowActivate ?? onRowClick)!(row);
+          } else if (onRowContextMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+            event.preventDefault();
+            const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
+            const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
+            onRowContextMenu(row, { clientX: rect.left + 8, clientY: rect.bottom - 4 });
+          }
+        }}
         sortModel={sortModel}
         onSortModelChange={handleSortChange}
         sx={{

@@ -35,6 +35,7 @@ import { NoClustersState } from '../components/NoClustersState.js';
 import { showToast } from '../state/toast.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { usePaneActive } from '../layout/pane-context.js';
+import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 
 /**
@@ -97,8 +98,14 @@ function EmbeddedResourceDetail() {
   const setCollapsed = useDetailStore((s) => s.setCollapsed);
   const width = useDetailStore((s) => s.width);
   const setWidth = useDetailStore((s) => s.setWidth);
+  const focusSeq = useDetailStore((s) => s.focusSeq);
   const [searchParams, setSearchParams] = useSearchParams();
   const asideRef = useRef<HTMLElement>(null);
+
+  // Keyboard row activation asks for focus here; Escape hands it back.
+  useEffect(() => {
+    if (focusSeq && paneActive) asideRef.current?.focus({ preventScroll: true });
+  }, [focusSeq, paneActive]);
 
   // Drag writes the width straight to the DOM; once the mouseup commit
   // re-renders with the same value, drop the inline override so sx takes
@@ -158,6 +165,16 @@ function EmbeddedResourceDetail() {
         component="aside"
         ref={asideRef}
         aria-label="Resource details"
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          // Escape closes the panel and hands focus back to the grid — but
+          // never while typing (inputs, Monaco), where Escape has meaning.
+          if (e.key !== 'Escape' || isTextEntryTarget(e.target)) return;
+          e.stopPropagation();
+          const page = asideRef.current?.closest('.kubus-resource-page');
+          handleClose();
+          page?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"]')?.focus();
+        }}
         sx={{
           position: 'relative',
           flexShrink: 0,
@@ -168,6 +185,7 @@ function EmbeddedResourceDetail() {
           bgcolor: 'background.paper',
           borderLeft: 1,
           borderColor: 'divider',
+          outline: 'none',
         }}
       >
         {!collapsed && (
@@ -366,6 +384,7 @@ export function ResourceListPage() {
   const pushDetail = useDetailStore((s) => s.push);
   const openDetail = useDetailStore((s) => s.open);
   const setDetailCollapsed = useDetailStore((s) => s.setCollapsed);
+  const requestDetailFocus = useDetailStore((s) => s.requestFocus);
   const crdSelection: ResourceSelection | undefined =
     isCustomKind && resourceCtx && group
       ? {
@@ -478,6 +497,18 @@ export function ResourceListPage() {
   const multiLogs = kind === 'Pod' && selectedRows.length > 0;
   const kindPath = `/r/${groupToPath(group)}/${version}/${plural}`;
 
+  const openRow = (row: ClusterRow) => {
+    // Update immediately so the embedded panel responds in the same render
+    // cycle; the URL remains the deep-link source of truth. Picking a row is
+    // an explicit ask for details, so also undo a collapse.
+    openDetail({ ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind });
+    setDetailCollapsed(false);
+    const next = new URLSearchParams(searchParams);
+    next.delete('field');
+    next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
+    setSearchParams(next);
+  };
+
   const saveCurrentView = () => {
     const params = new URLSearchParams();
     if (textFilter.trim()) params.set('q', textFilter.trim());
@@ -502,7 +533,7 @@ export function ResourceListPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <Box className="kubus-resource-page" sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <DetailUrlSync sel={sel} />
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
@@ -553,20 +584,15 @@ export function ResourceListPage() {
         labelSelector={labelSelector}
         onFilterChange={(value) => setQueryParam('q', value)}
         onLabelSelectorChange={(value) => setQueryParam('label', value)}
-        onRowClick={(row) => {
-          // Update immediately so the embedded panel responds in the same
-          // render cycle; the URL remains the deep-link source of truth.
-          // Picking a row is an explicit ask for details, so also undo a
-          // collapse.
-          openDetail({ ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind });
-          setDetailCollapsed(false);
-          const next = new URLSearchParams(searchParams);
-          next.delete('field');
-          next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
-          setSearchParams(next);
+        onRowClick={openRow}
+        onRowActivate={(row) => {
+          // Keyboard activation also moves focus into the panel; Escape there
+          // returns it to the grid.
+          openRow(row);
+          requestDetailFocus();
         }}
-        onRowContextMenu={(row, event) => {
-          setContextAction({ target: rowActionTarget(row), mouseX: event.clientX + 2, mouseY: event.clientY - 6 });
+        onRowContextMenu={(row, position) => {
+          setContextAction({ target: rowActionTarget(row), mouseX: position.clientX + 2, mouseY: position.clientY - 6 });
           setContextMenuOpen(true);
         }}
         checkboxSelection
