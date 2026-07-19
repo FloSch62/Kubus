@@ -2,6 +2,29 @@ import type { ElementType } from 'react';
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
 import type {} from '@mui/x-data-grid/themeAugmentation';
 
+/**
+ * Shared layout dimensions. Several of these are cross-file contracts:
+ * anything that changes one side must keep the other in sync, so both sides
+ * read the same token instead of repeating the number.
+ */
+export const layout = {
+  /** TopBar toolbar height; drawers/panels below it offset by the same value. */
+  topBarHeight: 52,
+  navDrawerWidth: 228,
+  /** Fixed tab width so the shrink-to-fit tablist sizes to n×tabs. */
+  tabWidth: 190,
+  /** Themed scrollbar thickness; grids reserve the same explicit gutter. */
+  scrollbarSize: 10,
+  /**
+   * The embedded detail panel's resize handle and collapse button overhang
+   * the grid, whose floating scrollbars are MUI-internal zIndex 60 (70 on
+   * hover) in the same stacking context — these must stay above both, and
+   * the button above the handle.
+   */
+  zDetailResizeHandle: 71,
+  zDetailCollapseButton: 72,
+} as const;
+
 const modalBackdropAlpha = 0.5;
 
 const darkColors = {
@@ -114,7 +137,7 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
             scrollbarWidth: 'thin',
             scrollbarColor: `${c.scrollThumb} transparent`,
           },
-          '*::-webkit-scrollbar': { width: 10, height: 10 },
+          '*::-webkit-scrollbar': { width: layout.scrollbarSize, height: layout.scrollbarSize },
           '*::-webkit-scrollbar-track': { background: 'transparent' },
           '*::-webkit-scrollbar-thumb': {
             backgroundColor: c.scrollThumb,

@@ -1,4 +1,5 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
 import Drawer from '@mui/material/Drawer';
@@ -39,7 +40,7 @@ import { useNavigationStore } from '../state/navigation.js';
 import { useTabsStore } from '../state/tabs.js';
 import { GROUP_ICONS } from './tab-meta.js';
 
-const WIDTH = 228;
+const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
 const ITEM_INDENT = '42px';
 const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';

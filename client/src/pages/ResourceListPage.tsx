@@ -1,4 +1,5 @@
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { layout } from '../theme.js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -183,7 +184,7 @@ function EmbeddedResourceDetail() {
               bottom: 0,
               width: 8,
               cursor: 'col-resize',
-              zIndex: 71,
+              zIndex: layout.zDetailResizeHandle,
               '&:hover .drag-line, &:active .drag-line': { opacity: 1 },
             }}
           >
@@ -213,7 +214,7 @@ function EmbeddedResourceDetail() {
               left: collapsed ? 'auto' : 0,
               right: collapsed ? 0 : 'auto',
               transform: collapsed ? 'translateY(-50%)' : 'translate(-50%, -50%)',
-              zIndex: 72,
+              zIndex: layout.zDetailCollapseButton,
               width: 20,
               height: 52,
               borderRadius: '10px',

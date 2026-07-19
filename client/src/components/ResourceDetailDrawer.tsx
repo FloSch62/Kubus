@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -111,7 +112,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const hasMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node';
   const hasRolloutHistory = behaviorKind === 'Deployment' || behaviorKind === 'StatefulSet';
   const showMap = !isCrd;
-  const drawerTopOffset = 52;
+  const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
     top: `${drawerTopOffset}px`,
     height: `calc(100% - ${drawerTopOffset}px)`,

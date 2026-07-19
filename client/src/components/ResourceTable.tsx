@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { layout } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
@@ -262,7 +263,7 @@ export function ResourceTable({
         // scrollbar as 0px and floats its own on top of the last column;
         // an explicit size (matching the themed 10px scrollbars) makes it
         // reserve a real gutter instead.
-        scrollbarSize={10}
+        scrollbarSize={layout.scrollbarSize}
         checkboxSelection={checkboxSelection}
         onRowSelectionModelChange={
           onSelectionChange

@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useEffect, useState } from 'react';
+import { layout } from '../theme.js';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -70,7 +71,7 @@ export const TopBar = memo(function TopBar() {
           variant="dense"
           sx={{
             gap: 1.5,
-            minHeight: 52,
+            minHeight: layout.topBarHeight,
             WebkitAppRegion: 'drag',
             // double the specificity: MUI's responsive gutter rule wins otherwise
             '&&': {

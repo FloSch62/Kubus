@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Menu from '@mui/material/Menu';
@@ -138,8 +139,8 @@ export const TabsBar = memo(function TabsBar() {
                 pl: 1.25,
                 pr: 0.75,
                 // Explicit width (not flex-basis) so the shrink-to-fit tablist
-                // sizes to n×190 and only squeezes tabs once the bar is full.
-                width: 190,
+                // sizes to n×tabWidth and only squeezes tabs once the bar is full.
+                width: layout.tabWidth,
                 minWidth: 100,
                 flexShrink: 1,
                 borderRight: 1,
