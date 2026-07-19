@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: helm-engine/go.mod
+          cache-dependency-path: helm-engine/go.sum
       - name: Cache Electron binaries
         uses: actions/cache@v6
         with:
@@ -43,6 +47,8 @@ jobs:
       # build first: @kubus/shared (and /server for electron) resolve types
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
+      - run: pnpm build:helm-engine
+      - run: pnpm --filter @kubus/server test
       # Type-aware linting also resolves workspace package declarations.
       - run: pnpm lint
       - run: pnpm typecheck

@@ -56,6 +56,35 @@ export async function pathForDoc(handle: ClusterHandle, obj: KubernetesObject, f
   });
 }
 
+/**
+ * Create one manifest doc without updating an object that already exists.
+ * The POST/409 result is an atomic existence check, avoiding the race between
+ * a separate GET and create. This matches Helm's handling of chart CRDs.
+ */
+export async function createDocIfAbsent(handle: ClusterHandle, doc: KubernetesObject): Promise<boolean> {
+  const apiVersion = doc.apiVersion ?? 'v1';
+  const [group, version] = apiVersion.includes('/') ? (apiVersion.split('/') as [string, string]) : ['', apiVersion];
+  const all = await handle.discovery.getResources();
+  const info = all.find((resource) => resource.group === group && resource.version === version && resource.kind === doc.kind);
+  if (!info) throw new HttpProblem(422, `unknown kind ${apiVersion}/${doc.kind}`);
+  if (!info.namespaced && doc.metadata?.namespace) delete doc.metadata.namespace;
+  const path = resourcePath(group, version, info.plural, {
+    namespace: info.namespaced ? doc.metadata?.namespace : undefined,
+  });
+  const res = await handle.raw.request(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(doc),
+  });
+  if (res.status === 409) {
+    await res.arrayBuffer().catch(() => undefined);
+    return false;
+  }
+  if (!res.ok) throw new Error(`${res.status} ${await responseMessage(res)}`.trim());
+  await res.arrayBuffer().catch(() => undefined);
+  return true;
+}
+
 /** Server-side apply in Kubernetes dry-run mode; nothing is persisted. */
 export async function validateDoc(handle: ClusterHandle, doc: KubernetesObject): Promise<void> {
   const path = await pathForDoc(handle, doc);

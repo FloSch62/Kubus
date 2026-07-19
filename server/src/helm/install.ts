@@ -5,7 +5,7 @@ import { resourcePath } from '../kube/raw-client.js';
 import { HttpProblem } from '../util/errors.js';
 import { loadAllYaml } from '../util/yaml.js';
 import type { KubernetesObject } from '@kubernetes/client-node';
-import { applyDoc, clusterCapabilities, createReleaseRecord, docLabel, manifestDocs, patchReleaseRecord, rfc3339Local } from './common.js';
+import { applyDoc, clusterCapabilities, createDocIfAbsent, createReleaseRecord, docLabel, manifestDocs, patchReleaseRecord, rfc3339Local } from './common.js';
 import { renderChart } from './engine.js';
 import { execHooks } from './hooks.js';
 import { HelmReadinessError, validateResources, waitForResources } from './readiness.js';
@@ -95,8 +95,11 @@ export async function installRelease(handle: ClusterHandle, opts: InstallOptions
     for (const doc of loadAllYaml(crd.content).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')) {
       const obj = doc as unknown as KubernetesObject;
       if (!obj.kind || !obj.metadata?.name) continue;
-      opts.report?.({ phase: 'applying', message: 'Installing chart CRDs', currentResource: docLabel(obj) });
-      await applyDoc(handle, obj);
+      const label = docLabel(obj);
+      opts.report?.({ phase: 'applying', message: 'Installing chart CRDs', currentResource: label });
+      if (!(await createDocIfAbsent(handle, obj))) {
+        log.info({ label }, 'helm install: chart CRD already exists; skipping');
+      }
     }
   }
   if (rendered.crds.length) handle.discovery.invalidate();

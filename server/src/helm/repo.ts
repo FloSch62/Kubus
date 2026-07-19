@@ -105,20 +105,46 @@ export function compareVersionsDesc(a: string, b: string): number {
   const pb = parseSemver(b);
   if (pa && pb) {
     for (let i = 0; i < 3; i++) {
-      if (pa.nums[i]! !== pb.nums[i]!) return pb.nums[i]! - pa.nums[i]!;
+      if (pa.nums[i]! !== pb.nums[i]!) return pa.nums[i]! > pb.nums[i]! ? -1 : 1;
     }
-    // Release > pre-release; otherwise compare pre-release strings.
+    // A release has higher precedence than its pre-release.
     if (!pa.pre && pb.pre) return -1;
     if (pa.pre && !pb.pre) return 1;
-    return (pb.pre ?? '').localeCompare(pa.pre ?? '');
+    if (!pa.pre || !pb.pre) return 0;
+    return comparePrereleaseDesc(pa.pre, pb.pre);
   }
   return b.localeCompare(a, undefined, { numeric: true });
 }
 
-function parseSemver(v: string): { nums: number[]; pre?: string } | undefined {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(v.trim());
+function comparePrereleaseDesc(a: string[], b: string[]): number {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    const left = a[index]!;
+    const right = b[index]!;
+    if (left === right) continue;
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) return BigInt(left) > BigInt(right) ? -1 : 1;
+    // Numeric identifiers have lower precedence than non-numeric ones.
+    if (leftNumeric !== rightNumeric) return leftNumeric ? 1 : -1;
+    // Valid SemVer identifiers are ASCII, so code-unit order is ASCII order.
+    return left > right ? -1 : 1;
+  }
+  if (a.length === b.length) return 0;
+  // With an equal prefix, the version with more identifiers is newer.
+  return a.length > b.length ? -1 : 1;
+}
+
+function parseSemver(v: string): { nums: bigint[]; pre?: string[] } | undefined {
+  const m =
+    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      v.trim(),
+    );
   if (!m) return undefined;
-  return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] };
+  const pre = m[4]?.split('.');
+  // Numeric pre-release identifiers with leading zeroes are not valid SemVer.
+  if (pre?.some((identifier) => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith('0'))) return undefined;
+  return { nums: [BigInt(m[1]!), BigInt(m[2]!), BigInt(m[3]!)], pre };
 }
 
 function isPrerelease(v: string): boolean {

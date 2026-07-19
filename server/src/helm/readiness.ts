@@ -23,6 +23,9 @@ interface LiveObject {
   spec?: {
     replicas?: number;
     strategy?: DeploymentStrategy;
+    updateStrategy?: {
+      type?: string;
+    };
     selector?: {
       matchLabels?: Record<string, string>;
       matchExpressions?: Array<{ key?: string; operator?: string; values?: string[] }>;
@@ -140,7 +143,7 @@ function condition(object: LiveObject, type: string, status = 'True') {
   return object.status?.conditions?.find((item) => item.type === type && item.status === status);
 }
 
-function workloadState(kind: string, object: LiveObject): ReadinessState {
+export function workloadState(kind: string, object: LiveObject): ReadinessState {
   const status = object.status ?? {};
   if (kind === 'Deployment') {
     const failed = condition(object, 'Progressing', 'False');
@@ -168,7 +171,8 @@ function workloadState(kind: string, object: LiveObject): ReadinessState {
   if (kind === 'StatefulSet') {
     const desired = object.spec?.replicas ?? 1;
     const observed = (status.observedGeneration ?? 0) >= (object.metadata?.generation ?? 0);
-    const ready = observed && (status.updatedReplicas ?? 0) >= desired && (status.readyReplicas ?? 0) >= desired;
+    const podsUpdated = object.spec?.updateStrategy?.type === 'OnDelete' || (status.updatedReplicas ?? 0) >= desired;
+    const ready = observed && podsUpdated && (status.readyReplicas ?? 0) >= desired;
     return { ready, message: `${status.readyReplicas ?? 0}/${desired} replicas ready` };
   }
   if (kind === 'DaemonSet') {
