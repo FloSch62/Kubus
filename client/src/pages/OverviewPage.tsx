@@ -1,6 +1,9 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
+import CircularProgress from '@mui/material/CircularProgress';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
@@ -24,35 +27,110 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router';
-import { useNodeMetrics, useOverview } from '../api/queries.js';
+import { useContexts, useKubeconfigSettings, useNodeMetrics, useOverview } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { AgeCell } from '../components/AgeCell.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
-import { EmptyState } from '../components/EmptyState.js';
 import { InstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { formatBytes, formatCpu } from '../components/format.js';
+
+// Adding a cluster pulls the settings chunk (js-yaml); keep it lazy here.
+const AddClusterDialog = lazy(() => import('../components/settings/AddClusterDialog.js').then((m) => ({ default: m.AddClusterDialog })));
+
+const HEALTH_COLOR: Record<string, string> = { connected: 'success.main', connecting: 'warning.main', error: 'error.main' };
+
+/**
+ * First-run path: instead of pointing at the cluster switcher, list the
+ * kubeconfig's contexts for one-click connect, or lead straight into the
+ * add-cluster flow when the kubeconfig is empty.
+ */
+function WelcomeState() {
+  // Selecting drives the ClusterSwitcher's keep-healthy effect, which owns
+  // connecting — no second connect path here.
+  const setSelected = useClustersStore((s) => s.setSelected);
+  const { data: contexts, isLoading } = useContexts();
+  const { data: kubeconfig } = useKubeconfigSettings();
+  const [addOpen, setAddOpen] = useState(false);
+  const shown = (contexts ?? []).slice(0, 8);
+
+  return (
+    <Stack sx={{ flex: 1, alignItems: 'center', justifyContent: 'center', p: 3, minHeight: '100%' }} spacing={2}>
+      <Box component="img" src="/kubus.svg" alt="" aria-hidden sx={{ width: 48, height: 54, objectFit: 'contain' }} />
+      <Typography variant="h5" sx={{ fontWeight: 700 }}>
+        Welcome to Kubus
+      </Typography>
+      {isLoading && <CircularProgress size={22} />}
+      {!isLoading && shown.length > 0 && (
+        <>
+          <Typography variant="body2" color="text.secondary">
+            Pick a cluster from your kubeconfig to get started.
+          </Typography>
+          <Stack spacing={1} sx={{ width: 'min(520px, 100%)' }}>
+            {shown.map((c) => (
+              <ButtonBase
+                key={c.name}
+                onClick={() => setSelected([c.name])}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.25,
+                  px: 1.75,
+                  py: 1.25,
+                  border: 1,
+                  borderColor: 'divider',
+                  borderRadius: 1.5,
+                  textAlign: 'left',
+                  justifyContent: 'flex-start',
+                  '&:hover': { bgcolor: 'action.hover', borderColor: 'primary.main' },
+                }}
+              >
+                <Box sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: HEALTH_COLOR[c.health] ?? 'text.disabled' }} />
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                    {c.name}
+                  </Typography>
+                  {c.server && (
+                    <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                      {c.server}
+                    </Typography>
+                  )}
+                </Box>
+                {c.current && <Chip label="current" size="small" variant="outlined" sx={{ flexShrink: 0 }} />}
+              </ButtonBase>
+            ))}
+            {(contexts?.length ?? 0) > shown.length && (
+              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+                …and {(contexts?.length ?? 0) - shown.length} more in the cluster switcher above.
+              </Typography>
+            )}
+          </Stack>
+        </>
+      )}
+      {!isLoading && shown.length === 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 440, textAlign: 'center' }}>
+          No clusters found in your kubeconfig. Add one by pasting a kubeconfig or entering connection details.
+        </Typography>
+      )}
+      <Button variant={shown.length === 0 ? 'contained' : 'outlined'} startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
+        Add cluster
+      </Button>
+      {addOpen && (
+        <Suspense fallback={null}>
+          <AddClusterDialog primaryPath={kubeconfig?.primaryPath ?? null} onClose={() => setAddOpen(false)} />
+        </Suspense>
+      )}
+    </Stack>
+  );
+}
 
 export function OverviewPage() {
   const selected = useClustersStore((s) => s.selected);
 
   if (selected.length === 0) {
-    return (
-      <EmptyState
-        icon={
-          <Box
-            component="img"
-            src="/kubus.svg"
-            alt=""
-            aria-hidden
-            sx={{ width: 48, height: 54, objectFit: 'contain' }}
-          />
-        }
-        title="Welcome to Kubus"
-        subtitle="Select one or more clusters in the top bar to get started."
-      />
-    );
+    return <WelcomeState />;
   }
 
   return (
