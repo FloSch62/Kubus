@@ -147,6 +147,8 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
   const selectedSource = useMemo<HelmChartSourceRef | undefined>(() => {
     if (customRef.trim()) {
       const ref = customRef.trim();
+      // Partial input must not become a fetchable source.
+      if (!/^(?:https?|oci):\/\/\S+$/.test(ref)) return undefined;
       if (ref.startsWith('oci://')) return customVersion.trim() ? { ociRef: ref, version: customVersion.trim() } : undefined;
       return { url: ref };
     }
@@ -155,8 +157,23 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
       ? { repoUrl: selectedOption.repoUrl, chart: release.chart, version: selectedOption.version }
       : { repo: selectedOption.repo, chart: release.chart, version: selectedOption.version };
   }, [customRef, customVersion, release.chart, selectedOption]);
-  const targetDetail = useHelmChartSourceDetail(selectedSource);
-  const targetVersion = targetDetail.data?.version ?? selectedOption?.version;
+  // Debounce the detail lookup for hand-typed custom sources: every fetch is a
+  // server-side chart download, which must not run per keystroke. Repo/hub
+  // options are discrete clicks and resolve immediately.
+  const [detailSource, setDetailSource] = useState<HelmChartSourceRef | undefined>();
+  useEffect(() => {
+    if (!customRef.trim()) {
+      setDetailSource(selectedSource);
+      return;
+    }
+    const t = setTimeout(() => setDetailSource(selectedSource), 400);
+    return () => clearTimeout(t);
+  }, [customRef, selectedSource]);
+  const targetDetail = useHelmChartSourceDetail(detailSource);
+  // Detail data may still belong to the previously debounced source.
+  const detailCurrent = JSON.stringify(detailSource) === JSON.stringify(selectedSource);
+  const customTargetKnown = !customRef.trim() || (detailCurrent && !!targetDetail.data?.version);
+  const targetVersion = (detailCurrent ? targetDetail.data?.version : undefined) ?? selectedOption?.version;
   const versionDelta = targetVersion ? compareHelmVersions(targetVersion, release.chartVersion) : 0;
   const isDowngrade = versionDelta < 0;
   const isVersionUpgrade = versionDelta > 0;
@@ -186,6 +203,20 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
     }
     if (customRef.trim().startsWith('oci://') && !customVersion.trim()) {
       setFormError('OCI chart sources need an explicit version.');
+      return undefined;
+    }
+    if (customRef.trim() && !selectedSource) {
+      setFormError('Custom chart source must be a complete oci:// ref or http(s) chart URL.');
+      return undefined;
+    }
+    // The downgrade warning and typed confirmation hinge on knowing the target
+    // version; applying an unresolved custom source would bypass both.
+    if (customRef.trim() && !customTargetKnown) {
+      setFormError(
+        targetDetail.error
+          ? `The custom chart source could not be loaded: ${targetDetail.error.message}`
+          : 'Still resolving the custom chart source — wait for the target version to load.',
+      );
       return undefined;
     }
     if (chartChoice === CURRENT_CHART && !customRef.trim() && valuesOnlyBlocked) {
@@ -381,10 +412,10 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
         <Button
           variant="contained"
           color={isDowngrade ? 'warning' : 'primary'}
-          disabled={busy}
+          disabled={busy || !customTargetKnown}
           onClick={() => (needsConfirmation ? setConfirmOpen(true) : runUpgrade())}
         >
-          {upgrade.isPending ? 'Starting…' : actionLabel}
+          {upgrade.isPending ? 'Starting…' : !customTargetKnown ? 'Resolving chart…' : actionLabel}
         </Button>
       </DialogActions>
       {preview && (

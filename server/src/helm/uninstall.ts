@@ -1,18 +1,12 @@
 import type { FastifyBaseLogger } from 'fastify';
+import type { HelmUninstallResult } from '@kubus/shared';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { deleteDoc, docLabel, manifestDocs } from './common.js';
 import { execHooks } from './hooks.js';
 import { chartCrdNames, getLatestPayload, listReleaseRecords, revOf } from './release-reader.js';
 
-export interface UninstallResult {
-  deleted: string[];
-  failed: Array<{ resource: string; error: string }>;
-  hooksRan: string[];
-  crdsDeleted: string[];
-  /** True when records remain so the incomplete operation can be inspected/retried. */
-  recordsRetained: boolean;
-}
+export type UninstallResult = HelmUninstallResult;
 
 export interface UninstallOptions {
   skipHooks?: boolean;

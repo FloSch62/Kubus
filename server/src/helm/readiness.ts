@@ -6,6 +6,7 @@ import { docLabel, pathForDoc, validateDoc } from './common.js';
 
 const POLL_MS = 2_000;
 const CRASH_LOOP_GRACE_MS = 90_000;
+const READ_ERROR_GRACE_MS = 60_000;
 const WAIT_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Pod', 'PersistentVolumeClaim']);
 const POD_WARNING_REASONS = new Set(['FailedAttachVolume', 'FailedMount', 'FailedScheduling', 'FailedCreatePodSandBox']);
 const MULTI_ATTACH_RE = /multi-attach|already used by pod|already exclusively attached|can't be attached to another/i;
@@ -22,9 +23,11 @@ interface LiveObject {
   };
   spec?: {
     replicas?: number;
+    paused?: boolean;
     strategy?: DeploymentStrategy;
     updateStrategy?: {
       type?: string;
+      rollingUpdate?: { partition?: number };
     };
     selector?: {
       matchLabels?: Record<string, string>;
@@ -84,6 +87,8 @@ interface ContainerStatus {
 interface ReadinessState {
   ready: boolean;
   failed?: boolean;
+  /** The state could not be read (API hiccup) — grace-tracked, not an instant failure. */
+  transientError?: boolean;
   message: string;
 }
 
@@ -146,6 +151,11 @@ function condition(object: LiveObject, type: string, status = 'True') {
 export function workloadState(kind: string, object: LiveObject): ReadinessState {
   const status = object.status ?? {};
   if (kind === 'Deployment') {
+    // A paused deployment never progresses and never sets
+    // ProgressDeadlineExceeded — waiting on it would burn the whole timeout.
+    if (object.spec?.paused) {
+      return { ready: false, failed: true, message: 'deployment is paused (spec.paused) and cannot roll out; resume it and retry' };
+    }
     const failed = condition(object, 'Progressing', 'False');
     if (failed?.reason === 'ProgressDeadlineExceeded') {
       return { ready: false, failed: true, message: failed.message ?? 'deployment exceeded its progress deadline' };
@@ -171,7 +181,12 @@ export function workloadState(kind: string, object: LiveObject): ReadinessState 
   if (kind === 'StatefulSet') {
     const desired = object.spec?.replicas ?? 1;
     const observed = (status.observedGeneration ?? 0) >= (object.metadata?.generation ?? 0);
-    const podsUpdated = object.spec?.updateStrategy?.type === 'OnDelete' || (status.updatedReplicas ?? 0) >= desired;
+    const strategy = object.spec?.updateStrategy;
+    // With a rolling-update partition only ordinals >= partition update, so
+    // updatedReplicas legitimately tops out below desired (helm's waiter does
+    // the same arithmetic); OnDelete never updates pods on its own.
+    const expectedUpdated = Math.max(desired - (strategy?.rollingUpdate?.partition ?? 0), 0);
+    const podsUpdated = strategy?.type === 'OnDelete' || (status.updatedReplicas ?? 0) >= expectedUpdated;
     const ready = observed && podsUpdated && (status.readyReplicas ?? 0) >= desired;
     return { ready, message: `${status.readyReplicas ?? 0}/${desired} replicas ready` };
   }
@@ -369,14 +384,20 @@ async function workloadPodDiagnostics(
 }
 
 async function readState(handle: ClusterHandle, doc: KubernetesObject): Promise<{ state: ReadinessState; object?: LiveObject }> {
-  const path = await pathForDoc(handle, doc, false);
-  const res = await handle.raw.request(path);
-  if (res.status === 404) return { state: { ready: false, message: 'resource does not exist yet' } };
-  if (!res.ok) {
-    return { state: { ready: false, failed: true, message: `${res.status} ${await res.text().catch(() => '')}`.trim() } };
+  try {
+    const path = await pathForDoc(handle, doc, false);
+    const res = await handle.raw.request(path);
+    if (res.status === 404) return { state: { ready: false, message: 'resource does not exist yet' } };
+    if (!res.ok) {
+      // A 429/500/etcd blip during a multi-minute wait is not a workload
+      // failure; the caller grace-tracks these instead of failing instantly.
+      return { state: { ready: false, transientError: true, message: `${res.status} ${await res.text().catch(() => '')}`.trim() } };
+    }
+    const object = (await res.json()) as LiveObject;
+    return { state: workloadState(doc.kind ?? '', object), object };
+  } catch (err) {
+    return { state: { ready: false, transientError: true, message: `could not read state: ${err instanceof Error ? err.message : String(err)}` } };
   }
-  const object = (await res.json()) as LiveObject;
-  return { state: workloadState(doc.kind ?? '', object), object };
 }
 
 function unavailableReplicas(value: number | string | undefined, desired: number): number {
@@ -475,6 +496,7 @@ export async function waitForResources(
   let pending: ReadinessIssue[] = waiting.map((doc) => ({ resource: docLabel(doc), message: 'checking readiness' }));
   const recovering = new Map<string, { doc: KubernetesObject; originalStrategy: DeploymentStrategy | undefined; issue: ReadinessIssue }>();
   const crashLoopSince = new Map<string, { since: number; identity: string }>();
+  const readErrorSince = new Map<string, number>();
   onProgress?.({ ready: 0, total: waiting.length, pending, recovering: [] });
 
   try {
@@ -503,9 +525,24 @@ export async function waitForResources(
         }
       }
 
+      // Transient read errors only fail the operation once they persist.
+      const escalatedReadErrors: ReadinessIssue[] = [];
+      for (const { doc, state } of states) {
+        const resource = docLabel(doc);
+        if (!state.transientError) {
+          readErrorSince.delete(resource);
+          continue;
+        }
+        const since = readErrorSince.get(resource) ?? Date.now();
+        readErrorSince.set(resource, since);
+        if (Date.now() - since >= READ_ERROR_GRACE_MS) {
+          escalatedReadErrors.push({ resource, message: `state could not be read for ${Math.round(READ_ERROR_GRACE_MS / 1_000)}s: ${state.message}` });
+        }
+      }
+
       const failed = states.filter(({ state }) => state.failed);
-      if (failed.length) {
-        const issues = failed.map(({ doc, state }) => ({ resource: docLabel(doc), message: state.message }));
+      if (failed.length || escalatedReadErrors.length) {
+        const issues = [...failed.map(({ doc, state }) => ({ resource: docLabel(doc), message: state.message })), ...escalatedReadErrors];
         onProgress?.({ ready: waiting.length - issues.length, total: waiting.length, pending: issues, recovering: [...recovering.values()].map((item) => item.issue) });
         throw new HelmReadinessError(`Workload failed: ${issues.map((issue) => `${issue.resource}: ${issue.message}`).join('; ')}`, issues);
       }

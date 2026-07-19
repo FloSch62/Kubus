@@ -11,7 +11,7 @@ import type {
 import type { AppContext } from '../app.js';
 import { inspectChart } from '../helm/engine.js';
 import { installRelease } from '../helm/install.js';
-import { getHistory, getRelease, getRevisionDetail, listReleases } from '../helm/release-reader.js';
+import { getHistory, getRelease, getRevisionDetail, listReleaseRecords, listReleases, revOf } from '../helm/release-reader.js';
 import {
   addRepo,
   checkChartUpdates,
@@ -148,6 +148,13 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
         const revision = req.body?.revision;
         if (!revision || !Number.isInteger(revision) || revision < 1) throw new HttpProblem(422, 'revision must be a positive integer');
         const timeout = timeoutSeconds(req.body?.timeoutSeconds);
+        // Fail in-request for a missing release/revision — a 202 whose
+        // operation can only ever fail is not an accepted rollback.
+        const records = await listReleaseRecords(handle, req.params.ns, req.params.name);
+        if (!records.length) throw new HttpProblem(404, `helm release "${req.params.ns}/${req.params.name}" not found`);
+        if (!records.some((record) => revOf(record) === revision)) {
+          throw new HttpProblem(404, `revision ${revision} of helm release "${req.params.ns}/${req.params.name}" not found`);
+        }
         const started = ctx.helmOperations.start(
           {
             kind: 'rollback',
@@ -180,10 +187,18 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       try {
         const handle = ctx.clusters.get(req.params.ctx);
-        const result = await uninstallRelease(handle, req.params.ns, req.params.name, app.log, {
-          skipHooks: req.query.skipHooks === 'true',
-          deleteCrds: req.query.deleteCrds === 'true',
-        });
+        // Same per-release exclusion as background operations: an uninstall
+        // racing an in-flight upgrade would delete records the upgrade then
+        // recreates, leaving live resources with no release history at all.
+        const result = await ctx.helmOperations.runExclusive(
+          { ctx: req.params.ctx, namespace: req.params.ns, releaseName: req.params.name },
+          'uninstall',
+          () =>
+            uninstallRelease(handle, req.params.ns, req.params.name, app.log, {
+              skipHooks: req.query.skipHooks === 'true',
+              deleteCrds: req.query.deleteCrds === 'true',
+            }),
+        );
         handle.crdTracker.checkNow();
         return result;
       } catch (err) {
@@ -462,9 +477,13 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.post<{ Body: HelmChartSourceRef }>('/api/helm/charts/detail', async (req, reply) => {
     try {
       const ref = req.body;
-      const encoded = await resolveChartArchive(ctx, ref);
-      if (!encoded) throw new HttpProblem(422, 'chart source is required');
-      return await chartDetail(ctx, JSON.stringify(ref), async () => Buffer.from(encoded, 'base64'));
+      if (!ref || typeof ref !== 'object') throw new HttpProblem(422, 'chart source is required');
+      // Resolve lazily: a cache hit must not re-download the archive.
+      return await chartDetail(ctx, JSON.stringify(ref), async () => {
+        const encoded = await resolveChartArchive(ctx, ref);
+        if (!encoded) throw new HttpProblem(422, 'chart source is required');
+        return Buffer.from(encoded, 'base64');
+      });
     } catch (err) {
       sendError(reply, err);
       return reply;

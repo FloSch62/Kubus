@@ -60,6 +60,7 @@ import type {
   HelmDryRunResult,
   HelmOperation,
   HelmOperationStarted,
+  HelmUninstallResult,
   AppInfo,
   PrinterColumn,
   AuditReport,
@@ -1050,13 +1051,7 @@ export function useHelmUninstall() {
       if (skipHooks) q.set('skipHooks', 'true');
       if (deleteCrds) q.set('deleteCrds', 'true');
       const qs = q.size ? `?${q.toString()}` : '';
-      return apiFetch<{
-        deleted: string[];
-        failed: Array<{ resource: string; error: string }>;
-        hooksRan: string[];
-        crdsDeleted: string[];
-        recordsRetained: boolean;
-      }>(
+      return apiFetch<HelmUninstallResult>(
         `/api/contexts/${encodeURIComponent(ctx)}/helm/releases/${encodeURIComponent(ns)}/${encodeURIComponent(name)}${qs}`,
         { method: 'DELETE' },
       );

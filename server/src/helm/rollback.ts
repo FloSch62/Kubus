@@ -79,6 +79,11 @@ export async function rollbackRelease(
   const newRevision = latestRev + 1;
   const targetDocs = manifestDocs(target.manifest, namespace);
   forceRollbackRollout(targetDocs, newRevision);
+  // Capture prune identity before applying: applyDoc strips the stamped
+  // namespace from cluster-scoped docs in place, and keys computed after that
+  // would never match the current revision — pruning ClusterRoles and other
+  // cluster-wide resources the release still owns.
+  const targetKeys = new Set(targetDocs.map(docKey));
   opts.report?.({
     phase: 'rendering',
     message: `Prepared revision ${toRevision} as new revision ${newRevision}`,
@@ -171,9 +176,14 @@ export async function rollbackRelease(
   );
 
   // 2. Prune resources present in the current revision but not in the target.
-  const targetKeys = new Set(targetDocs.map(docKey));
-  const pruneDocs = manifestDocs(latest.manifest, namespace).filter((d) => !targetKeys.has(docKey(d)));
-  const reversedPruneDocs = pruneDocs.reverse();
+  let reversedPruneDocs: ReturnType<typeof manifestDocs>;
+  try {
+    reversedPruneDocs = manifestDocs(latest.manifest, namespace)
+      .filter((d) => !targetKeys.has(docKey(d)))
+      .reverse();
+  } catch (err) {
+    return fail(`Rollback failed: current revision's manifest is not parseable YAML: ${err instanceof Error ? err.message : String(err)}`, 'prune');
+  }
   for (let index = 0; index < reversedPruneDocs.length; index++) {
     const doc = reversedPruneDocs[index]!;
     const label = docLabel(doc);
@@ -268,7 +278,14 @@ export async function rollbackRelease(
 
   // 4. Mark previously deployed records superseded.
   for (const record of records) {
-    const payload = decodeReleaseRecord(record);
+    let payload: HelmReleasePayload;
+    try {
+      payload = decodeReleaseRecord(record);
+    } catch (err) {
+      // The rollback already succeeded; an undecodable old record must not fail it.
+      log.warn({ record: record.metadata.name, err: String(err) }, 'helm rollback: skipping undecodable record');
+      continue;
+    }
     if (payload.info?.status !== 'deployed') continue;
     const superseded = JSON.parse(JSON.stringify(payload)) as HelmReleasePayload;
     superseded.info = { ...superseded.info, status: 'superseded' };

@@ -900,6 +900,15 @@ export interface HelmActionResult {
   notes?: string;
 }
 
+export interface HelmUninstallResult {
+  deleted: string[];
+  failed: Array<{ resource: string; error: string }>;
+  hooksRan: string[];
+  crdsDeleted: string[];
+  /** True when records remain so the incomplete operation can be inspected/retried. */
+  recordsRetained: boolean;
+}
+
 export interface HelmDryRunResult {
   manifest: string;
   notes: string;

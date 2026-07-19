@@ -52,7 +52,7 @@ import {
 import { useIsProtected } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { HelmAddRepoDialog } from './HelmAddRepoDialog.js';
-import { parseValues, valuesOverrides } from './helm-values.js';
+import { parseValues, rebaseValuesText, valuesOverrides } from './helm-values.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { ChartMarkdown } from './ChartMarkdown.js';
@@ -316,10 +316,17 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
   const [version, setVersion] = useState<string>();
   const effectiveVersion = version ?? versions?.[0]?.version;
   const [ociVersion, setOciVersion] = useState('');
+  // Debounced: each detail fetch for an OCI tag is a server-side registry pull,
+  // which must not run per keystroke.
+  const [debouncedOciVersion, setDebouncedOciVersion] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedOciVersion(ociVersion.trim()), 400);
+    return () => clearTimeout(t);
+  }, [ociVersion]);
 
   const repoDetail = useHelmChartDetail(pick.repo, pick.chart, effectiveVersion);
   const urlDetail = useHelmChartDetailByUrl(repoUrl, isHub ? pick.chart : undefined, isHub ? effectiveVersion : undefined);
-  const ociDetail = useHelmOciDetail(isOci ? pick.customRef : undefined, isOci ? ociVersion || undefined : undefined);
+  const ociDetail = useHelmOciDetail(isOci ? pick.customRef : undefined, isOci ? debouncedOciVersion || undefined : undefined);
   const directDetail = useHelmChartSourceDetail(isUrl ? { url: pick.customRef } : undefined);
   const detail = isOci ? ociDetail.data : isUrl ? directDetail.data : isHub ? urlDetail.data : repoDetail.data;
   const detailLoading = isOci ? ociDetail.isLoading : isUrl ? directDetail.isLoading : isHub ? hubInfo.isLoading || urlDetail.isLoading : repoDetail.isLoading;
@@ -332,11 +339,18 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
   const { data: namespaces } = useNamespaces(ctx ? [ctx] : []);
 
   // Values start from the chart's defaults once they arrive; edits stick.
+  // When the defaults change under an edited text (version switch), re-base
+  // the user's changes onto the new defaults — otherwise every default that
+  // differs between the two versions would be submitted as a user override.
   const [valuesText, setValuesText] = useState<string>();
   const [loadedDefaults, setLoadedDefaults] = useState<string>();
   useEffect(() => {
     if (!detail || detail.valuesYaml === loadedDefaults) return;
-    setValuesText((current) => (current === undefined || current === loadedDefaults ? detail.valuesYaml : current));
+    setValuesText((current) => {
+      if (current === undefined || current === loadedDefaults) return detail.valuesYaml;
+      if (loadedDefaults === undefined) return current;
+      return rebaseValuesText(current, loadedDefaults, detail.valuesYaml) ?? current;
+    });
     setLoadedDefaults(detail.valuesYaml);
   }, [detail, loadedDefaults]);
 

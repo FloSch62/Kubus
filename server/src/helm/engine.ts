@@ -90,7 +90,15 @@ let modulePromise: Promise<WebAssembly.Module> | null = null;
 let evictTimer: NodeJS.Timeout | null = null;
 
 function getModule(): Promise<WebAssembly.Module> {
-  modulePromise ??= readFile(assetPath()).then((gz) => WebAssembly.compile(gunzipSync(gz)));
+  if (!modulePromise) {
+    const loading = readFile(assetPath()).then((gz) => WebAssembly.compile(gunzipSync(gz)));
+    // A failed load must not stick: cached rejections would fail every helm
+    // call until the idle eviction, even after the asset is fixed.
+    loading.catch(() => {
+      if (modulePromise === loading) modulePromise = null;
+    });
+    modulePromise = loading;
+  }
   if (evictTimer) clearTimeout(evictTimer);
   evictTimer = setTimeout(() => {
     modulePromise = null;
@@ -134,5 +142,10 @@ export async function renderChart(req: EngineRenderRequest): Promise<EngineRende
 }
 
 export async function inspectChart(chartArchive: string): Promise<EngineInspectResult> {
-  return invoke<EngineInspectResult>({ op: 'inspect', chartArchive });
+  const out = await invoke<EngineInspectResult>({ op: 'inspect', chartArchive });
+  // Go marshals a nil values map (empty/comment-only values.yaml) as null.
+  out.values ??= {};
+  out.valuesYaml ??= '';
+  out.readme ??= '';
+  return out;
 }

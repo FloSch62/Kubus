@@ -219,17 +219,29 @@ export async function getHistory(handle: ClusterHandle, namespace: string, name:
   const records = await listReleaseRecords(handle, namespace, name);
   if (!records.length) throw new HttpProblem(404, `helm release "${namespace}/${name}" not found`);
   return records
-    .map((r) => {
-      const payload = decodeReleaseRecord(r);
-      return {
-        revision: payload.version,
-        status: payload.info?.status ?? 'unknown',
-        chart: payload.chart?.metadata?.name ?? '',
-        chartVersion: payload.chart?.metadata?.version ?? '',
-        appVersion: payload.chart?.metadata?.appVersion,
-        updated: payload.info?.last_deployed,
-        description: payload.info?.description,
-      };
+    .map((r): HelmRevision => {
+      try {
+        const payload = decodeReleaseRecord(r);
+        return {
+          revision: payload.version,
+          status: payload.info?.status ?? 'unknown',
+          chart: payload.chart?.metadata?.name ?? '',
+          chartVersion: payload.chart?.metadata?.version ?? '',
+          appVersion: payload.chart?.metadata?.appVersion,
+          updated: payload.info?.last_deployed,
+          description: payload.info?.description,
+        };
+      } catch {
+        // One corrupt record must not take down the whole history (or the
+        // rollback picker built on it) — surface it instead of hiding it.
+        return {
+          revision: revOf(r),
+          status: r.metadata.labels?.status ?? 'unknown',
+          chart: '',
+          chartVersion: '',
+          description: 'release record could not be decoded',
+        };
+      }
     })
     .sort((a, b) => b.revision - a.revision);
 }

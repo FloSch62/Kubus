@@ -9,7 +9,7 @@ import { applyDoc, clusterCapabilities, createDocIfAbsent, createReleaseRecord, 
 import { renderChart } from './engine.js';
 import { execHooks } from './hooks.js';
 import { HelmReadinessError, validateResources, waitForResources } from './readiness.js';
-import { decodeReleaseRecord, listReleaseRecords, type HelmReleasePayload } from './release-reader.js';
+import { decodeReleaseRecord, listReleaseRecords, revOf, type HelmReleasePayload } from './release-reader.js';
 import type { HelmProgressReporter } from './operations.js';
 
 export interface InstallOptions {
@@ -36,7 +36,14 @@ export async function installRelease(handle: ClusterHandle, opts: InstallOptions
 
   const existing = await listReleaseRecords(handle, opts.namespace, opts.name);
   if (existing.length && !opts.dryRun) {
-    const status = decodeReleaseRecord(existing[existing.length - 1]!).info?.status ?? 'unknown';
+    // List order is lexicographic (".v10" before ".v2"); report the real latest revision.
+    const latest = existing.reduce((a, b) => (revOf(b) > revOf(a) ? b : a));
+    let status = 'unknown';
+    try {
+      status = decodeReleaseRecord(latest).info?.status ?? 'unknown';
+    } catch {
+      // undecodable record — the release still exists, report it as unknown
+    }
     throw new HttpProblem(409, `release "${opts.namespace}/${opts.name}" already exists (status: ${status})`);
   }
 
@@ -155,7 +162,12 @@ export async function installRelease(handle: ClusterHandle, opts: InstallOptions
     }
   }
 
-  const installDocs = manifestDocs(rendered.manifest, opts.namespace);
+  let installDocs: KubernetesObject[];
+  try {
+    installDocs = manifestDocs(rendered.manifest, opts.namespace);
+  } catch (err) {
+    return fail(`Install failed: rendered manifest is not parseable YAML: ${err instanceof Error ? err.message : String(err)}`, 'apply');
+  }
   for (let index = 0; index < installDocs.length; index++) {
     const doc = installDocs[index]!;
     const label = docLabel(doc);

@@ -24,6 +24,11 @@ and shows the newest available stable version inline. The page header summarises
 releases have updates, and **Refresh updates** checks again without making one request per
 release.
 
+Update checks consult your configured repositories **and [Artifact Hub](https://artifacthub.io)**,
+so the names of installed charts are sent to artifacthub.io. Only sources whose version
+history actually contains the installed version may suggest an update, which keeps
+same-name charts from unrelated publishers out of the results.
+
 The list honours the [namespace filter](clusters.md#filtering-by-namespace), and shows a
 Cluster column when several are selected. Click a release to open it.
 

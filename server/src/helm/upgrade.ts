@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { HelmActionResult, HelmDryRunResult, HelmOperationFailure, HelmOperationPhase } from '@kubus/shared';
+import type { KubernetesObject } from '@kubernetes/client-node';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { HttpProblem } from '../util/errors.js';
 import { applyDoc, clusterCapabilities, createReleaseRecord, deleteDoc, docKey, docLabel, manifestDocs, patchReleaseRecord, rfc3339Local } from './common.js';
@@ -102,6 +103,18 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
     hooks: rendered.hooks,
     kubus: { computedValues: rendered.computedValues },
   };
+  // Resolve the recovery hint before creating the pending record: a throw in
+  // here after creation would strand the release in pending-upgrade forever.
+  const recoveryRevision = records
+    .filter((record) => {
+      try {
+        return ['deployed', 'superseded'].includes(decodeReleaseRecord(record).info?.status ?? '');
+      } catch {
+        return false; // undecodable record — not a recovery candidate
+      }
+    })
+    .map(revOf)
+    .sort((a, b) => b - a)[0];
   const recordName = await createReleaseRecord(handle, payload, driver);
   opts.report?.({
     phase: opts.skipHooks ? 'applying' : 'pre-hook',
@@ -111,10 +124,6 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
   });
 
   const result: HelmActionResult = { revision: newRev, applied: [], pruned: [], failed: [], hooksRan: [], notes: rendered.notes };
-  const recoveryRevision = records
-    .filter((record) => ['deployed', 'superseded'].includes(decodeReleaseRecord(record).info?.status ?? ''))
-    .map(revOf)
-    .sort((a, b) => b - a)[0];
   const fail = async (description: string, phase: HelmOperationPhase): Promise<never> => {
     payload.info = { ...payload.info, status: 'failed', description };
     await patchReleaseRecord(handle, opts.namespace, recordName, payload, driver).catch(() => {});
@@ -146,7 +155,17 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
     }
   }
 
-  const newDocs = manifestDocs(rendered.manifest, opts.namespace);
+  let newDocs: KubernetesObject[];
+  try {
+    newDocs = manifestDocs(rendered.manifest, opts.namespace);
+  } catch (err) {
+    return fail(`Upgrade failed: rendered manifest is not parseable YAML: ${err instanceof Error ? err.message : String(err)}`, 'apply');
+  }
+  // Capture prune identity before applying: applyDoc strips the stamped
+  // namespace from cluster-scoped docs in place, and keys computed after that
+  // would never match the previous revision — pruning ClusterRoles and other
+  // cluster-wide resources the release still owns.
+  const newKeys = new Set(newDocs.map(docKey));
   for (let index = 0; index < newDocs.length; index++) {
     const doc = newDocs[index]!;
     const label = docLabel(doc);
@@ -177,9 +196,14 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
   });
 
   // Prune resources that were in the previous revision but not in this one.
-  const newKeys = new Set(newDocs.map(docKey));
-  const pruneDocs = manifestDocs(current.manifest, opts.namespace).filter((d) => !newKeys.has(docKey(d)));
-  const reversedPruneDocs = pruneDocs.reverse();
+  let reversedPruneDocs: KubernetesObject[];
+  try {
+    reversedPruneDocs = manifestDocs(current.manifest, opts.namespace)
+      .filter((d) => !newKeys.has(docKey(d)))
+      .reverse();
+  } catch (err) {
+    return fail(`Upgrade failed: previous revision's manifest is not parseable YAML: ${err instanceof Error ? err.message : String(err)}`, 'prune');
+  }
   for (let index = 0; index < reversedPruneDocs.length; index++) {
     const doc = reversedPruneDocs[index]!;
     const label = docLabel(doc);
@@ -269,7 +293,14 @@ export async function upgradeRelease(handle: ClusterHandle, opts: UpgradeOptions
 
   // Mark previously deployed records superseded.
   for (const record of records) {
-    const prev = decodeReleaseRecord(record);
+    let prev: HelmReleasePayload;
+    try {
+      prev = decodeReleaseRecord(record);
+    } catch (err) {
+      // The upgrade already succeeded; an undecodable old record must not fail it.
+      log.warn({ record: record.metadata.name, err: String(err) }, 'helm upgrade: skipping undecodable record');
+      continue;
+    }
     if (prev.info?.status !== 'deployed') continue;
     const superseded = JSON.parse(JSON.stringify(prev)) as HelmReleasePayload;
     superseded.info = { ...superseded.info, status: 'superseded' };

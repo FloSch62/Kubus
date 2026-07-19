@@ -69,7 +69,7 @@ function failureProgressPhase(failure: HelmOperationFailure | undefined, fallbac
  */
 export class HelmOperationManager {
   private operations = new Map<string, HelmOperation>();
-  private activeByRelease = new Map<string, string>();
+  private activeByRelease = new Map<string, { id?: string; kind: HelmOperationKind | 'uninstall' }>();
 
   constructor(
     private log: FastifyBaseLogger,
@@ -80,13 +80,32 @@ export class HelmOperationManager {
     return [...this.operations.values()].toSorted((left, right) => right.startedAt.localeCompare(left.startedAt)).map((operation) => structuredClone(operation));
   }
 
+  /**
+   * Run a request-scoped mutation (uninstall) under the same per-release
+   * exclusion as background operations: it must never overlap an install,
+   * upgrade, or rollback of the same release — and vice versa.
+   */
+  async runExclusive<T>(input: Pick<StartHelmOperation, 'ctx' | 'namespace' | 'releaseName'>, kind: 'uninstall', run: () => Promise<T>): Promise<T> {
+    const key = operationKey(input);
+    this.assertIdle(key, input);
+    this.activeByRelease.set(key, { kind });
+    try {
+      return await run();
+    } finally {
+      this.activeByRelease.delete(key);
+    }
+  }
+
+  private assertIdle(key: string, input: Pick<StartHelmOperation, 'namespace' | 'releaseName'>): void {
+    const active = this.activeByRelease.get(key);
+    if (active) {
+      throw new HttpProblem(409, `${active.kind} operation already running for ${input.namespace}/${input.releaseName}`);
+    }
+  }
+
   start(input: StartHelmOperation, run: (report: HelmProgressReporter) => Promise<HelmOperationResult>): HelmOperationStarted {
     const key = operationKey(input);
-    const activeId = this.activeByRelease.get(key);
-    if (activeId) {
-      const active = this.operations.get(activeId);
-      throw new HttpProblem(409, `${active?.kind ?? 'Helm'} operation already running for ${input.namespace}/${input.releaseName}`);
-    }
+    this.assertIdle(key, input);
 
     this.trimHistory();
     const now = new Date().toISOString();
@@ -105,7 +124,7 @@ export class HelmOperationManager {
       targetRevision: input.targetRevision,
     };
     this.operations.set(operation.id, operation);
-    this.activeByRelease.set(key, operation.id);
+    this.activeByRelease.set(key, { id: operation.id, kind: input.kind });
     this.emitSnapshot(operation);
 
     // Let the HTTP handler return 202 before chart download, rendering, hooks,

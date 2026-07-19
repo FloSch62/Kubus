@@ -30,8 +30,14 @@ export function manifestDocs(manifest: string | undefined, defaultNamespace: str
     });
 }
 
+/**
+ * Release-membership identity for prune matching. Helm matches resources
+ * across revisions by kind + namespace + name, deliberately ignoring
+ * group/version: an apiVersion migration must not delete the object that was
+ * just applied under the new version.
+ */
 export function docKey(obj: KubernetesObject): string {
-  return `${obj.apiVersion ?? ''}|${obj.kind ?? ''}|${obj.metadata?.namespace ?? ''}|${obj.metadata?.name ?? ''}`;
+  return `${obj.kind ?? ''}|${obj.metadata?.namespace ?? ''}|${obj.metadata?.name ?? ''}`;
 }
 
 export function docLabel(obj: KubernetesObject): string {

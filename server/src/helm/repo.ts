@@ -31,23 +31,39 @@ interface RepoIndex {
   entries?: Record<string, IndexVersionEntry[]>;
 }
 
+// Bounded: keyed by user-supplied repo URLs, and one parsed big index is tens
+// of MB — unbounded growth would eventually take the process down.
+const INDEX_CACHE_MAX = 20;
 const indexCache = new Map<string, { fetchedAt: number; index: RepoIndex }>();
+
+function boundCache<T>(cache: Map<string, T>, max: number, oldestFirst: (a: T, b: T) => number): void {
+  if (cache.size <= max) return;
+  for (const [key] of [...cache.entries()].sort((a, b) => oldestFirst(a[1], b[1])).slice(0, cache.size - max)) {
+    cache.delete(key);
+  }
+}
 
 function normalizeRepoUrl(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
 export function listRepos(settings: SettingsStore): HelmRepo[] {
-  return settings.load().helmRepos ?? [];
+  const repos = settings.load().helmRepos;
+  // settings.json is hand-editable; malformed entries must not 500 every repo route.
+  if (!Array.isArray(repos)) return [];
+  return repos.filter((r): r is HelmRepo => !!r && typeof r === 'object' && typeof r.name === 'string' && typeof r.url === 'string');
 }
 
 export async function addRepo(settings: SettingsStore, name: string, url: string): Promise<HelmRepo> {
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) throw new HttpProblem(422, 'repository name may only contain letters, digits, ".", "_" and "-"');
   const normalized = normalizeRepoUrl(url);
   if (!/^https?:\/\//.test(normalized)) throw new HttpProblem(422, 'repository URL must be http(s) — OCI registries are used via direct oci:// refs, no repository entry needed');
+  if (listRepos(settings).some((r) => r.name === name)) throw new HttpProblem(409, `repository "${name}" already exists`);
+  await fetchIndex(normalized); // validates the URL actually serves an index.yaml
+  // Re-read after the (up to 60s) index fetch: saving the pre-fetch snapshot
+  // would silently drop a repo added concurrently.
   const repos = listRepos(settings);
   if (repos.some((r) => r.name === name)) throw new HttpProblem(409, `repository "${name}" already exists`);
-  await fetchIndex(normalized); // validates the URL actually serves an index.yaml
   const repo: HelmRepo = { name, url: normalized };
   settings.save({ helmRepos: [...repos, repo] });
   return repo;
@@ -79,11 +95,33 @@ async function fetchBytes(url: string, opts?: { accept?: string; token?: string;
   } catch (err) {
     throw new HttpProblem(502, `fetch ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (!res.ok) throw new HttpProblem(res.status === 404 ? 404 : 502, `fetch ${url}: HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
   const max = opts?.maxBytes ?? CHART_MAX_BYTES;
-  if (buf.length > max) throw new HttpProblem(413, `${url} exceeds ${Math.round(max / 1e6)}MB limit`);
-  return { body: buf, contentType: res.headers.get('content-type') ?? '' };
+  const overLimit = () => new HttpProblem(413, `${url} exceeds ${Math.round(max / 1e6)}MB limit`);
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new HttpProblem(res.status === 404 ? 404 : 502, `fetch ${url}: HTTP ${res.status}`);
+  }
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => {});
+    throw overLimit();
+  }
+  // Enforce the limit while streaming: buffering first would let a hostile or
+  // broken server feed gigabytes into memory before any check runs.
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of res.body ?? []) {
+      const buf = Buffer.from(chunk as Uint8Array);
+      total += buf.length;
+      if (total > max) throw overLimit();
+      chunks.push(buf);
+    }
+  } catch (err) {
+    if (err instanceof HttpProblem) throw err;
+    throw new HttpProblem(502, `fetch ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { body: Buffer.concat(chunks), contentType: res.headers.get('content-type') ?? '' };
 }
 
 async function fetchIndex(repoUrl: string): Promise<RepoIndex> {
@@ -96,6 +134,7 @@ async function fetchIndex(repoUrl: string): Promise<RepoIndex> {
   }
   const index = parsed as RepoIndex;
   indexCache.set(repoUrl, { fetchedAt: Date.now(), index });
+  boundCache(indexCache, INDEX_CACHE_MAX, (a, b) => a.fetchedAt - b.fetchedAt);
   return index;
 }
 
@@ -309,6 +348,7 @@ export async function fetchChartArchive(repo: HelmRepo, chart: string, version: 
 
 const HUB_API = 'https://artifacthub.io/api/v1';
 const HUB_TTL_MS = 10 * 60 * 1000;
+const HUB_CACHE_MAX = 200;
 const hubCache = new Map<string, { at: number; value: unknown }>();
 
 async function hubJson<T>(path: string): Promise<T> {
@@ -317,6 +357,7 @@ async function hubJson<T>(path: string): Promise<T> {
   const { body } = await fetchBytes(`${HUB_API}${path}`, { accept: 'application/json', maxBytes: 10 * 1024 * 1024 });
   const value = JSON.parse(body.toString('utf8')) as T;
   hubCache.set(path, { at: Date.now(), value });
+  boundCache(hubCache, HUB_CACHE_MAX, (a, b) => a.at - b.at);
   return value;
 }
 
@@ -406,10 +447,26 @@ interface OciRef {
   tag?: string;
 }
 
+// Distribution-spec charsets. The segments end up interpolated into registry
+// URLs, so anything looser would let a ref smuggle "..", "?" or "#" into the
+// request path (and break the repository:<repo>:pull token scope).
+const OCI_HOST_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?(?::\d+)?$/;
+const OCI_REPOSITORY_RE = /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
+const OCI_TAG_RE = /^[a-zA-Z0-9_][a-zA-Z0-9._+-]{0,127}$/;
+
 export function parseOciRef(ref: string): OciRef {
   const m = /^oci:\/\/([^/]+)\/(.+?)(?::([^:/]+))?$/.exec(ref.trim());
   if (!m) throw new HttpProblem(422, `invalid OCI ref "${ref}" — expected oci://registry/repository[:tag]`);
-  return { host: m[1]!, repository: m[2]!, tag: m[3] };
+  const [, host, repository, tag] = m as unknown as [string, string, string, string | undefined];
+  if (!OCI_HOST_RE.test(host)) throw new HttpProblem(422, `invalid OCI registry host "${host}"`);
+  if (!OCI_REPOSITORY_RE.test(repository)) throw new HttpProblem(422, `invalid OCI repository "${repository}"`);
+  if (tag !== undefined && !OCI_TAG_RE.test(tag)) throw new HttpProblem(422, `invalid OCI tag "${tag}"`);
+  return { host, repository, tag };
+}
+
+/** OCI tags forbid "+"; helm publishes semver build metadata with "_" instead. */
+function ociTagFor(version: string): string {
+  return version.replaceAll('+', '_');
 }
 
 /** Anonymous bearer-token dance: 401 → parse WWW-Authenticate → token endpoint. */
@@ -446,8 +503,10 @@ const HELM_CHART_LAYER = 'application/vnd.cncf.helm.chart.content.v1.tar+gzip';
 
 export async function pullOciChart(ref: string, version?: string): Promise<Buffer> {
   const { host, repository, tag } = parseOciRef(ref);
-  const useTag = version || tag;
-  if (!useTag) throw new HttpProblem(422, `OCI ref "${ref}" needs a version`);
+  const requested = version || tag;
+  if (!requested) throw new HttpProblem(422, `OCI ref "${ref}" needs a version`);
+  const useTag = ociTagFor(requested);
+  if (!OCI_TAG_RE.test(useTag)) throw new HttpProblem(422, `invalid OCI tag "${requested}"`);
   const token = await ociToken(host, repository);
   const accept = 'application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json';
   const { body: manifestBody } = await fetchBytes(`https://${host}/v2/${repository}/manifests/${useTag}`, { token, accept, maxBytes: 10 * 1024 * 1024 });
