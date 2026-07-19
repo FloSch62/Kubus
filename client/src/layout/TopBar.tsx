@@ -3,6 +3,8 @@ import { layout } from '../theme.js';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import MenuIcon from '@mui/icons-material/Menu';
 import Stack from '@mui/material/Stack';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
@@ -16,6 +18,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore } from '../state/dock.js';
+import { NAV_OVERLAY_MEDIA_QUERY, useNavUiStore } from '../state/nav-ui.js';
+import { useUiPrefsStore } from '../state/prefs.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { ShortcutHelpDialog } from '../components/ShortcutHelpDialog.js';
 import { ClusterSwitcher } from './ClusterSwitcher.js';
@@ -37,6 +41,17 @@ export const TopBar = memo(function TopBar() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Wide viewports: toggle the pinned rail. Narrow: toggle the overlay.
+  const navOverlay = useMediaQuery(NAV_OVERLAY_MEDIA_QUERY);
+  const handleNavToggle = () => {
+    if (navOverlay) {
+      const nav = useNavUiStore.getState();
+      nav.setOverlayOpen(!nav.overlayOpen);
+    } else {
+      const prefs = useUiPrefsStore.getState();
+      prefs.set({ navCollapsed: !prefs.navCollapsed });
+    }
+  };
   // Mounted on first open, kept mounted after so close animations still play.
   const [searchMounted, setSearchMounted] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
@@ -83,6 +98,11 @@ export const TopBar = memo(function TopBar() {
             },
           }}
         >
+          <Tooltip title="Toggle navigation">
+            <IconButton size="small" aria-label="Toggle navigation" onClick={handleNavToggle} sx={{ mr: 0.5 }}>
+              <MenuIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Stack direction="row" spacing={1} sx={{ mr: 1.5, alignItems: 'center' }}>
             <Box
               component="img"

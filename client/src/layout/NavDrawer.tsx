@@ -455,7 +455,16 @@ function FavoriteDragShell({
   );
 }
 
-export const NavDrawer = memo(function NavDrawer() {
+interface NavDrawerProps {
+  /** Render as a temporary overlay (narrow viewports) instead of a pinned rail. */
+  overlay: boolean;
+  /** Pinned rail collapsed to zero width; content stays mounted for hotkeys. */
+  hidden: boolean;
+  open: boolean;
+  onClose: () => void;
+}
+
+export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClose }: NavDrawerProps) {
   const selected = useClustersStore((s) => s.selected);
   const { data: apiResources } = useApiResourcesForContexts(selected);
   const favorites = useNavigationStore((s) => s.favorites);
@@ -478,6 +487,14 @@ export const NavDrawer = memo(function NavDrawer() {
   const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
   const deferredFilter = useDeferredValue(filter);
   const navigate = useNavigate();
+
+  // The overlay covers content — dismiss it once a nav click lands.
+  const location = useLocation();
+  const currentPath = location.pathname + location.search;
+  useEffect(() => {
+    if (overlay) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close on navigation only
+  }, [currentPath]);
 
   // Cmd/Ctrl+1–9 jumps to the corresponding favorite. Digits come from
   // e.code so the physical number row works on any keyboard layout. Note the
@@ -595,19 +612,26 @@ export const NavDrawer = memo(function NavDrawer() {
       children
     );
 
+  const railHidden = !overlay && hidden;
   return (
     <Drawer
-      variant="permanent"
+      variant={overlay ? 'temporary' : 'permanent'}
+      open={overlay ? open : true}
+      onClose={onClose}
       sx={{
-        width: WIDTH,
+        width: overlay || railHidden ? 0 : WIDTH,
         flexShrink: 0,
+        transition: 'width 150ms ease',
         '& .MuiDrawer-paper': {
-          width: WIDTH,
-          position: 'relative',
-          borderRight: 1,
+          width: railHidden ? 0 : WIDTH,
+          borderRight: railHidden ? 0 : 1,
           borderColor: 'divider',
           overflowY: 'auto',
+          overflowX: 'hidden',
           bgcolor: (theme) => (theme.palette.mode === 'dark' ? '#151518' : '#f4f4f5'),
+          ...(overlay
+            ? { top: `${layout.topBarHeight}px`, height: `calc(100% - ${layout.topBarHeight}px)` }
+            : { position: 'relative', transition: 'width 150ms ease' }),
         },
       }}
     >

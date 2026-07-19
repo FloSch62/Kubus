@@ -1,6 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { useLocation, useNavigate } from 'react-router';
+import { NAV_OVERLAY_MEDIA_QUERY, useNavUiStore } from '../state/nav-ui.js';
+import { useUiPrefsStore } from '../state/prefs.js';
 import { TopBar } from './TopBar.js';
 import { NavDrawer } from './NavDrawer.js';
 import { TabsBar } from './TabsBar.js';
@@ -18,6 +21,10 @@ const ResourceDetailDrawer = lazy(() => import('../components/ResourceDetailDraw
 
 export function AppShell() {
   useHelmOperationEvents();
+  const navOverlay = useMediaQuery(NAV_OVERLAY_MEDIA_QUERY);
+  const navCollapsed = useUiPrefsStore((s) => s.navCollapsed);
+  const navOverlayOpen = useNavUiStore((s) => s.overlayOpen);
+  const setNavOverlayOpen = useNavUiStore((s) => s.setOverlayOpen);
   const dockOpen = useDockStore((s) => s.open);
   const dockHeight = useDockStore((s) => s.height);
   const maximized = useDockStore((s) => s.maximized);
@@ -75,7 +82,7 @@ export function AppShell() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <TopBar />
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <NavDrawer />
+        <NavDrawer overlay={navOverlay} hidden={navCollapsed} open={navOverlayOpen} onClose={() => setNavOverlayOpen(false)} />
         <Box component="main" sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <TabsBar />
           <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>

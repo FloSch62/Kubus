@@ -21,6 +21,8 @@ interface UiPrefsState {
   defaultShell: string;
   /** Treat contexts without an explicit protected flag as protected. */
   protectByDefault: boolean;
+  /** Nav rail collapsed to reclaim width (wide viewports only). */
+  navCollapsed: boolean;
   /** User-resized column widths, keyed by table id then column field. */
   columnWidths: Record<string, Record<string, number>>;
   /** User-toggled column visibility models, keyed by table id then column field. */
@@ -49,6 +51,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       defaultTailLines: 500,
       defaultShell: 'auto',
       protectByDefault: false,
+      navCollapsed: false,
       columnWidths: {},
       columnVisibility: {},
       sortModels: {},
