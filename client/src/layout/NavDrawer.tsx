@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
@@ -549,6 +549,85 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [apiResources]);
 
+  // Group chain (outermost first) containing each kind path, used to reveal
+  // the entry for the active resource after a cross-kind jump.
+  const groupChainByPath = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const group of BUILTIN_NAV_GROUPS) {
+      for (const k of group.kinds) map.set(kindPath(k.group, k.version, k.plural), [group.title]);
+    }
+    for (const [groupName, kinds] of customKinds) {
+      for (const k of kinds) {
+        map.set(kindPath(k.group, k.version, k.plural), ['Custom Resources', `${CUSTOM_GROUP_PREFIX}${groupName}`]);
+      }
+    }
+    return map;
+  }, [customKinds]);
+
+  const listRef = useRef<HTMLUListElement | null>(null);
+  // Bring the active entry into view. A just-expanded Collapse animates open,
+  // growing the drawer's scroll range as it goes, so a single scroll lands
+  // short; keep nudging each frame until the entry's position settles.
+  // Favorites can render a second copy of the active entry; the canonical
+  // group entry is the last match, and expanding its chain guarantees it
+  // is present. Returns a canceller for use as an effect cleanup.
+  const scrollActiveEntryIntoView = useCallback(() => {
+    const deadline = performance.now() + 1200;
+    let raf = 0;
+    let lastTop: number | null = null;
+    let stable = 0;
+    const tick = () => {
+      const entries = listRef.current?.querySelectorAll('.Mui-selected');
+      const el = entries?.[entries.length - 1];
+      if (el) {
+        const top = el.getBoundingClientRect().top;
+        stable = lastTop !== null && Math.abs(top - lastTop) < 0.5 ? stable + 1 : 0;
+        lastTop = top;
+        el.scrollIntoView({ block: 'nearest' });
+        if (stable >= 5) return;
+      }
+      if (performance.now() < deadline) raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // When navigation lands on a kind (cross-resource jump, tab switch, deep
+  // link), expand the groups containing it and bring the entry into view.
+  // Guarded per path so discovery refetches don't reopen a group the user
+  // collapsed afterwards; a custom kind's chain is unknown until discovery
+  // arrives, so those retry once groupChainByPath fills in.
+  const revealedPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (revealedPathRef.current === location.pathname) return;
+    const chain = groupChainByPath.get(location.pathname);
+    if (!chain && location.pathname.startsWith('/r/')) return;
+    revealedPathRef.current = location.pathname;
+    if (chain) {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        // Custom-group keys are an explicit open override, so open means
+        // present in the set; every other title is open when absent.
+        for (const title of chain) {
+          if (title.startsWith(CUSTOM_GROUP_PREFIX)) next.add(title);
+          else next.delete(title);
+        }
+        return next.size === prev.size && [...next].every((t) => prev.has(t)) ? prev : next;
+      });
+    }
+    return scrollActiveEntryIntoView();
+  }, [location.pathname, groupChainByPath, scrollActiveEntryIntoView]);
+
+  // Clearing the filter re-collapses groups; keep the active entry in view
+  // instead of letting the selection vanish with them.
+  const prevFilterRef = useRef(deferredFilter);
+  useEffect(() => {
+    const hadFilter = !!prevFilterRef.current;
+    prevFilterRef.current = deferredFilter;
+    if (!hadFilter || deferredFilter) return;
+    return scrollActiveEntryIntoView();
+  }, [deferredFilter, scrollActiveEntryIntoView]);
+
   // Kinds belonging to each favoritable category, used to expand a favorited
   // category inline under the Favorites group.
   const categoryKindsMap = useMemo(() => {
@@ -671,7 +750,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
           }}
         />
       </Box>
-      <List dense disablePadding sx={{ pb: 4 }}>
+      <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
         <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
         <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
         <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
