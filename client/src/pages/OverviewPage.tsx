@@ -21,6 +21,7 @@ import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router';
 import { useContexts, useKubeconfigSettings, useNodeMetrics, useOverview } from '../api/queries.js';
@@ -28,6 +29,7 @@ import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { InstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { formatBytes, formatCpu } from '../components/format.js';
+import { CertExpiryCard } from '../components/overview/CertExpiryCard.js';
 import { FailingPodsCard, ProblemCard, StatCard, WarningEventsCard } from '../components/overview/cards.js';
 import { NamespaceOverviewSection } from '../components/overview/NamespaceOverviewSection.js';
 import { OperatorSection } from '../components/overview/OperatorSection.js';
@@ -204,6 +206,17 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
               icon={<Inventory2OutlinedIcon />}
             />
             <StatCard
+              label="TLS certificates"
+              value={data.certificates.expiring.length > 0 ? data.certificates.expiring.length : data.certificates.total}
+              sub={data.certificates.expiring.length > 0 ? 'expiring <30d' : 'tracked'}
+              warn={data.certificates.expiring.length > 0}
+              icon={<VerifiedUserOutlinedIcon />}
+              onClick={() => {
+                const certs = data.operators.find((o) => o.id === 'cert-manager')?.resources.find((r) => r.plural === 'certificates');
+                void navigate(certs ? `/r/${certs.group}/${certs.version}/${certs.plural}` : '/r/core/v1/secrets');
+              }}
+            />
+            <StatCard
               label="Failing pods"
               value={data.failingPods.length}
               warn={data.failingPods.length > 0}
@@ -224,6 +237,8 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
           <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.unavailableWorkloads} />
 
           <OperatorSection ctx={ctx} operators={data.operators} />
+
+          <CertExpiryCard ctx={ctx} certificates={data.certificates} />
 
           <PodUsagePanels ctx={ctx} />
 

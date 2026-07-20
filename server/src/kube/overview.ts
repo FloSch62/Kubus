@@ -1,4 +1,5 @@
 import type { ClusterOverview, KubeObject, OverviewWarningEvent } from '@kubus/shared';
+import { apiServerCertNotAfter, collectCertificates } from './cert-expiry.js';
 import type { ClusterHandle } from './cluster-manager.js';
 import { computeOperatorRollups } from './operator-rollups.js';
 import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
@@ -72,6 +73,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       warningEvents: [],
       workloadHealth: [],
       operators: [],
+      certificates: { total: 0, expiring: [] },
     };
 
     const healthBySpec = new Map(healthWatchers.map((w, i) => [w.spec, healthResults[i] ?? { items: [], unavailable: true }]));
@@ -83,7 +85,13 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     const health = computeWorkloadHealth(healthKinds);
     overview.workloadHealth = health.kinds;
     overview.unavailableWorkloads = health.issues;
-    overview.operators = await computeOperatorRollups(handle, crds);
+    const [operators, certificates, apiServerNotAfter] = await Promise.all([
+      computeOperatorRollups(handle, crds),
+      collectCertificates(handle, crds),
+      apiServerCertNotAfter(handle),
+    ]);
+    overview.operators = operators;
+    overview.certificates = { ...certificates, apiServerNotAfter };
 
     const now = Date.now();
     for (const pod of pods) {

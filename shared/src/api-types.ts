@@ -748,6 +748,28 @@ export interface OverviewRestart {
   reason?: string;
 }
 
+export interface CertExpiryEntry {
+  source: 'cert-manager' | 'tls-secret';
+  kind: string;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string;
+  name: string;
+  notAfter: string;
+}
+
+export interface OverviewCertificates {
+  /** Certificates tracked: cert-manager Certificates plus kubernetes.io/tls Secrets (cert-manager-owned secrets deduped). */
+  total: number;
+  /** Expired or expiring within 30 days, soonest first. */
+  expiring: CertExpiryEntry[];
+  /** API server serving certificate expiry (cluster overview only), from the TLS handshake. */
+  apiServerNotAfter?: string;
+  /** Secrets are RBAC-denied — TLS secret expiry unknown. */
+  secretsUnavailable?: boolean;
+}
+
 export interface ClusterOverview {
   counts: {
     nodes: number;
@@ -772,6 +794,8 @@ export interface ClusterOverview {
   workloadHealth: OverviewKindHealth[];
   /** Rollups for operators whose CRDs are installed (cert-manager, Argo, Flux, KEDA, Karpenter). */
   operators: OperatorRollup[];
+  /** TLS certificate expiry rollup. */
+  certificates: OverviewCertificates;
 }
 
 // ---- Pod resource usage vs requests/limits (overview panels) ----
@@ -835,6 +859,8 @@ export interface NamespaceOverview {
   warningEvents: OverviewWarningEvent[];
   /** Operator rollups scoped to this namespace (namespaced resources only). */
   operators: OperatorRollup[];
+  /** TLS certificate expiry rollup scoped to this namespace. */
+  certificates: OverviewCertificates;
 }
 
 // ---- Security audit ----

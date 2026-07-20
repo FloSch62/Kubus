@@ -10,6 +10,7 @@ import { pluralLabel, type NamespaceInventoryEntry, type NamespaceQuotaStatus } 
 import { useNamespaceOverview } from '../../api/queries.js';
 import { StatusChip } from '../StatusChip.js';
 import { usageColor } from '../UsageMeter.js';
+import { CertExpiryCard } from './CertExpiryCard.js';
 import { FailingPodsCard, ProblemCard, WarningEventsCard, kindListPath } from './cards.js';
 import { OperatorSection } from './OperatorSection.js';
 import { PodUsagePanels } from './PodUsagePanels.js';
@@ -53,6 +54,8 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
           <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.issues} scoped hideNamespace={single} />
 
           <OperatorSection ctx={ctx} operators={data.operators} scoped />
+
+          <CertExpiryCard ctx={ctx} certificates={data.certificates} hideNamespace={single} />
 
           {data.quotas.length > 0 && <QuotasCard quotas={data.quotas} />}
 
