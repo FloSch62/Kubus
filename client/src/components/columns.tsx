@@ -11,7 +11,7 @@ import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './format.js';
-import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobPhase, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, ownerReference, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
+import { dataKeyCount, eventFields, hasRunningDebugContainer, hpaProblems, ingressHosts, jobPhase, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, ownerReference, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
 import { cronHumanText, cronNextRun } from '../cron.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
@@ -520,6 +520,13 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     valueGetter: (_v, row) => nodeConditions(obj(row)),
     renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
   }),
+  nodeProviderID: () => ({
+    field: 'nodeProviderID',
+    headerName: 'Provider ID',
+    width: 220,
+    valueGetter: (_v, row) => ((obj(row).spec as { providerID?: string })?.providerID ?? ''),
+    renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
+  }),
   nsStatus: () => ({
     field: 'nsStatus',
     headerName: 'Status',
@@ -591,6 +598,27 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Replicas',
     width: 80,
     valueGetter: (_v, row) => ((obj(row).status as { currentReplicas?: number })?.currentReplicas ?? 0).toString(),
+  }),
+  hpaConditions: () => ({
+    field: 'hpaConditions',
+    headerName: 'Conditions',
+    flex: 1,
+    minWidth: 160,
+    valueGetter: (_v, row) => hpaProblems(obj(row)),
+    renderCell: (params) => {
+      const text = String(params.value ?? '');
+      return text ? (
+        <Tooltip title={text}>
+          <Typography variant="body2" color="warning.main" noWrap sx={{ minWidth: 0 }}>
+            {text}
+          </Typography>
+        </Tooltip>
+      ) : (
+        <Typography variant="body2" color="text.disabled">
+          —
+        </Typography>
+      );
+    },
   }),
 };
 

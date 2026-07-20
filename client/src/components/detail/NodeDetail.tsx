@@ -11,6 +11,7 @@ import Typography from '@mui/material/Typography';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, ConditionsTable } from './GenericDetail.js';
 import { PodMiniList } from './PodMiniList.js';
+import { CopyValueButton } from '../CellCopy.js';
 import { StatusChip } from '../StatusChip.js';
 import { formatBytes } from '../format.js';
 import { nodeRoles, nodeStatus, parseQuantity } from '../../kube-display.js';
@@ -37,6 +38,7 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const status = (obj.status ?? {}) as NodeStatus;
   const name = obj.metadata.name;
   const roles = nodeRoles(obj);
+  const providerID = (obj.spec as { providerID?: string } | undefined)?.providerID;
   const podsQuery = useResourceList({ ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${name}` });
 
   const resourceKeys = ['cpu', 'memory', 'pods', 'ephemeral-storage'].filter((k) => status.capacity?.[k] !== undefined || status.allocatable?.[k] !== undefined);
@@ -52,19 +54,27 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         {status.nodeInfo?.containerRuntimeVersion && <Chip label={status.nodeInfo.containerRuntimeVersion} variant="outlined" />}
       </Stack>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
-        {!!status.addresses?.length && (
+        {(!!status.addresses?.length || providerID) && (
           <Box>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
               Addresses
             </Typography>
             <Table size="small">
               <TableBody>
-                {status.addresses.map((a) => (
+                {(status.addresses ?? []).map((a) => (
                   <TableRow key={`${a.type}:${a.address}`}>
                     <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{a.type}</TableCell>
                     <TableCell sx={{ border: 0 }}>{a.address}</TableCell>
                   </TableRow>
                 ))}
+                {providerID && (
+                  <TableRow>
+                    <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>Provider ID</TableCell>
+                    <TableCell sx={{ border: 0, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                      {providerID} <CopyValueButton text={providerID} label="Copy provider ID" />
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </Box>

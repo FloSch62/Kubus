@@ -40,6 +40,9 @@ import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
 
+// Wide, rarely-needed builtin columns start hidden; the column menu re-enables them.
+const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID'] };
+
 /**
  * Renderless bridge between this page's URL params and the shared detail
  * selection. Pages stay mounted (and live) in hidden tab panes, so everything
@@ -504,7 +507,10 @@ export function ResourceListPage() {
     }
     return merged;
   }, [staticColumns, metricColumns, columnIds]);
-  const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
+  const hiddenFields = useMemo(
+    () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
+    [isCustomKind, printerCols, behaviorKind],
+  );
 
   const discoveryMissing = useMemo(() => {
     if (!apiResources) return [];

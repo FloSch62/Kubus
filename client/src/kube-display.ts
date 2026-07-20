@@ -117,6 +117,21 @@ function nodeGoodConditionStatus(type: string): string {
   return type === 'Ready' ? 'True' : 'False';
 }
 
+/**
+ * HPA conditions that indicate scaling is blocked or capped (empty when
+ * healthy): AbleToScale/ScalingActive are bad when False, ScalingLimited is
+ * bad when True (replica count pinned at min/max).
+ */
+export function hpaProblems(hpa: KubeObject): string {
+  const conditions = (hpa.status as { conditions?: Array<{ type?: string; status?: string; reason?: string }> } | undefined)?.conditions ?? [];
+  return conditions
+    .flatMap((c) => {
+      const bad = c.type === 'ScalingLimited' ? c.status === 'True' : c.status === 'False';
+      return bad && c.type ? [`${c.type}${c.reason ? ` (${c.reason})` : ''}`] : [];
+    })
+    .join(', ');
+}
+
 export function servicePorts(svc: KubeObject): string {
   const ports = (svc.spec as { ports?: Array<{ port: number; protocol?: string; nodePort?: number }> })?.ports ?? [];
   return ports.map((p) => `${p.port}${p.nodePort ? `:${p.nodePort}` : ''}/${p.protocol ?? 'TCP'}`).join(', ');

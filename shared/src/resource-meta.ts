@@ -124,10 +124,11 @@ export const KIND_COLUMNS: Record<string, string[]> = {
     'nodeExternalIp',
     'nodeTaints',
     'nodeConditions',
+    'nodeProviderID',
   ],
   Namespace: ['name', 'cluster', 'nsStatus', 'age'],
   Event: ['eventType', 'eventReason', 'eventObject', 'eventMessage', 'namespace', 'cluster', 'eventCount', 'eventLastSeen'],
-  HorizontalPodAutoscaler: ['name', 'namespace', 'cluster', 'hpaTarget', 'hpaMinMax', 'hpaReplicas', 'age'],
+  HorizontalPodAutoscaler: ['name', 'namespace', 'cluster', 'hpaTarget', 'hpaMinMax', 'hpaReplicas', 'hpaConditions', 'age'],
   ServiceAccount: ['name', 'namespace', 'cluster', 'age'],
 };
 
