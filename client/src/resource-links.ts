@@ -17,6 +17,15 @@ export function detailPathForRef(ref: ResourceRef): string {
 }
 
 /**
+ * Absolute shareable link for an in-app path. The desktop app is served from
+ * a random localhost port, so there the link uses the kubus:// protocol the
+ * OS hands back to the app; browsers get a plain origin URL.
+ */
+export function shareLinkForPath(path: string): string {
+  return window.kubusDesktop ? `kubus://${path.startsWith('/') ? path.slice(1) : path}` : window.location.origin + path;
+}
+
+/**
  * Favorite entry for a resource. The id matches the server's search-result
  * ids so the grid star and the search-palette star toggle the same favorite.
  */

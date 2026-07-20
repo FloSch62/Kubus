@@ -38,6 +38,49 @@ let server: RunningServer | undefined;
 let closing: Promise<void> | undefined;
 let updateCheck: Promise<UpdateCheckResult> | undefined;
 
+// ---- kubus:// deep links -------------------------------------------------
+// The client is served from a random localhost port, so shareable links use
+// the kubus:// scheme and carry only the in-app route; the renderer's router
+// resolves it against whatever origin this instance runs on.
+
+const PROTOCOL = 'kubus';
+let pendingRoute: string | undefined;
+
+/** kubus://r/apps/v1/deployments?sel=… → "/r/apps/v1/deployments?sel=…". */
+function routeFromDeepLink(raw: string): string | undefined {
+  if (!raw.startsWith(`${PROTOCOL}://`)) return undefined;
+  const rest = raw.slice(`${PROTOCOL}://`.length);
+  const route = rest.startsWith('/') ? rest : `/${rest}`;
+  // Reject protocol-relative smuggling — only same-app routes may pass.
+  return route.startsWith('//') ? undefined : route;
+}
+
+function openRoute(route: string): void {
+  const win = mainWindow;
+  if (win && !win.webContents.isLoading()) {
+    win.webContents.send('kubus:open-route', route);
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  } else {
+    // Cold start: delivered once the renderer finishes loading.
+    pendingRoute = route;
+  }
+}
+
+if (app.isPackaged) {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+} else if (process.argv[1]) {
+  // Dev: register with explicit args so the OS can relaunch this checkout.
+  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+}
+
+// macOS delivers deep links via open-url (cold starts queue until the window loads).
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  const route = routeFromDeepLink(url);
+  if (route) openRoute(route);
+});
+
 interface WindowState {
   width: number;
   height: number;
@@ -307,6 +350,12 @@ function createWindow(url: string): void {
       mainWindow?.webContents.send('kubus:cycle-tab', input.code === 'BracketLeft');
     }
   });
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (pendingRoute) {
+      mainWindow?.webContents.send('kubus:open-route', pendingRoute);
+      pendingRoute = undefined;
+    }
+  });
   void mainWindow.loadURL(url);
 }
 
@@ -378,14 +427,22 @@ ipcMain.handle('kubus:check-for-update', async (event, options?: { force?: unkno
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+    // Windows/Linux deliver a deep link to the running instance as an argv
+    // entry of the second process.
+    const link = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    const route = link ? routeFromDeepLink(link) : undefined;
+    if (route) openRoute(route);
   });
 
   void app.whenReady().then(async () => {
+    // Windows/Linux cold start via a deep link: the URL arrives in our own argv.
+    const link = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    if (link) pendingRoute = routeFromDeepLink(link);
     // The esbuild bundle breaks the server's import.meta.url asset lookup, so
     // point it at the packaged (or repo) helm engine explicitly.
     process.env.KUBUS_HELM_ENGINE ??= app.isPackaged

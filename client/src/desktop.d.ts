@@ -18,6 +18,8 @@ declare global {
       onCloseTab(callback: () => void): () => void;
       /** Subscribe to the tab-cycling chords (Ctrl+Tab & friends); backwards=true cycles left. */
       onCycleTab(callback: (backwards: boolean) => void): () => void;
+      /** Subscribe to kubus:// deep links; the payload is an in-app route. Returns unsubscribe. */
+      onOpenRoute(callback: (route: string) => void): () => void;
       /** Close the main window (fallback when no dock tab is open). */
       closeWindow(): void;
     };

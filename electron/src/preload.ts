@@ -38,6 +38,15 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
     ipcRenderer.on('kubus:cycle-tab', listener);
     return () => ipcRenderer.removeListener('kubus:cycle-tab', listener);
   },
+  // Fires when the OS opens a kubus:// deep link; the payload is an in-app
+  // route ("/r/apps/v1/deployments?sel=…"). Returns an unsubscribe.
+  onOpenRoute(callback: (route: string) => void): () => void {
+    const listener = (_event: unknown, route: unknown): void => {
+      if (typeof route === 'string') callback(route);
+    };
+    ipcRenderer.on('kubus:open-route', listener);
+    return () => ipcRenderer.removeListener('kubus:open-route', listener);
+  },
   closeWindow(): void {
     ipcRenderer.send('kubus:close-window');
   },

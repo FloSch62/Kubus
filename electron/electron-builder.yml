@@ -17,6 +17,9 @@ extraResources:
     to: icon.png
 icon: build/icon.png
 artifactName: kubus-${version}-${os}-${arch}.${ext}
+protocols:
+  - name: Kubus
+    schemes: [kubus]
 npmRebuild: false
 afterPack: scripts/after-pack.cjs
 win:

@@ -45,6 +45,7 @@ import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
 import SpeedIcon from '@mui/icons-material/Speed';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
+import LinkIcon from '@mui/icons-material/Link';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -71,7 +72,8 @@ import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { podContainerNames } from '../kube-display.js';
 import { splitImageRef } from '../image-ref.js';
-import { favoriteForRef, kindListPath } from '../resource-links.js';
+import { copyToClipboard } from '../clipboard.js';
+import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -199,7 +201,8 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const isProtected = useIsProtected(ctx);
   const close = onClose;
 
-  const favorite = favoriteForRef({ ctx, group: target.group, version: target.version, plural: target.plural, kind, name, namespace });
+  const resourceRef = { ctx, group: target.group, version: target.version, plural: target.plural, kind, name, namespace };
+  const favorite = favoriteForRef(resourceRef);
   const isFav = useNavigationStore((s) => s.isFavorite(favorite.id));
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
@@ -497,6 +500,19 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         >
           <ListItemIcon>{isFav ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}</ListItemIcon>
           <ListItemText>{isFav ? 'Remove favorite' : 'Add to favorites'}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            void copyToClipboard(shareLinkForPath(detailPathForRef(resourceRef))).then((copied) =>
+              copied ? ok('Link copied') : showToast('error', 'Copy to clipboard failed'),
+            );
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <LinkIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Copy link</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem

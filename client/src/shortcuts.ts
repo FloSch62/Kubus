@@ -350,11 +350,14 @@ export function GlobalShortcuts() {
     const desktop = window.kubusDesktop;
     const offClose = desktop?.onCloseTab?.(closeActiveTab);
     const offCycle = desktop?.onCycleTab?.((backwards) => cycleTab(backwards ? -1 : 1));
+    // kubus:// deep links land here as in-app routes.
+    const offRoute = desktop?.onOpenRoute?.((route) => void navRef.current(route));
     return () => {
       window.removeEventListener('keydown', onCapture, true);
       window.removeEventListener('keydown', onBubble);
       offClose?.();
       offCycle?.();
+      offRoute?.();
     };
   }, []);
 
