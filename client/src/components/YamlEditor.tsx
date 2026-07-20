@@ -11,6 +11,10 @@ export interface YamlEditorProps {
   onApply?: (yamlText: string) => Promise<void>;
   onDryRun?: (yamlText: string) => Promise<ResourceDryRunResponse>;
   applyLabel?: string;
+  /** Enable Apply/Dry run on unedited text — create flows where the generated manifest is already submittable. */
+  applyUnchanged?: boolean;
+  /** Observe the edited text (e.g. to carry edits across a form/YAML tab switch). */
+  onChange?: (yamlText: string) => void;
   /** Extra toolbar content (e.g. reveal-secrets toggle). */
   toolbar?: React.ReactNode;
   /** Kind being edited; enables schema-based hover docs, completion and validation. */

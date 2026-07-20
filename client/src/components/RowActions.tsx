@@ -55,7 +55,6 @@ import {
   useScale,
   useSetImage,
   useSuspendCronJob,
-  useTriggerCronJob,
 } from '../api/queries.js';
 import { watchClient } from '../api/ws/watch-client.js';
 import { useDockStore, dockTabId, type DockTab } from '../state/dock.js';
@@ -63,6 +62,7 @@ import { useIsProtected } from '../state/clusters.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
+import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { podContainerNames } from '../kube-display.js';
 import { kindListPath } from '../resource-links.js';
@@ -175,13 +175,12 @@ export function RowActions({ target }: { target: RowActionTarget }) {
 }
 
 export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose }: RowActionMenuProps) {
-  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'files' | null>(null);
+  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'files' | 'trigger' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
 
   const del = useDeleteResource();
   const restart = useRolloutRestart();
   const cordon = useCordon();
-  const trigger = useTriggerCronJob();
   const rerun = useRerunJob();
   const rolloutPause = useRolloutPause();
   const suspendCj = useSuspendCronJob();
@@ -412,14 +411,14 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         {isCronJob && (
           <MenuItem
             onClick={() => {
-              trigger.mutate({ ctx, body: { namespace: namespace ?? '', name } }, { onSuccess: (r) => ok(`Created job ${r.jobName}`), onError: fail });
+              setDialog('trigger');
               close();
             }}
           >
             <ListItemIcon>
               <PlayArrowIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>Trigger now</ListItemText>
+            <ListItemText>Trigger now…</ListItemText>
           </MenuItem>
         )}
         {isCronJob && (
@@ -574,6 +573,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
           addTab({ kind: 'node-shell', id: dockTabId(), title: `node: ${name}`, ctx, node: name });
         }}
       />
+      {dialog === 'trigger' && <TriggerCronJobDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} onDone={ok} />}
       {dialog === 'scale' && <ScaleDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'debug' && <DebugDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'files' && <FileCopyDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} />}

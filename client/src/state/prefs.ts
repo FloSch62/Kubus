@@ -23,6 +23,8 @@ interface UiPrefsState {
   protectByDefault: boolean;
   /** Nav rail collapsed to reclaim width (wide viewports only). */
   navCollapsed: boolean;
+  /** CronJob schedule columns show human-readable text instead of the cron expression. */
+  cronHumanSchedule: boolean;
   /** Overview "high usage" pod panel: usage ≥ this % of the limit. */
   highUsagePct: number;
   /** Overview "under-requested" pod panel: usage ≥ this multiple of the request. */
@@ -63,6 +65,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       defaultShell: 'auto',
       protectByDefault: false,
       navCollapsed: false,
+      cronHumanSchedule: false,
       highUsagePct: 80,
       underRequestedFactor: 2,
       columnWidths: {},

@@ -20,7 +20,7 @@ Actions only appear where they make sense — you'll never see *Cordon* on a Con
 | **Set image…** | Deployment, StatefulSet, DaemonSet | Swap the image on any container or init container. |
 | **Restart pods…** | ReplicaSet | Deletes the managed pods so they're recreated. |
 | **Re-run** | Job | Creates a fresh Job from the same template. |
-| **Trigger now** | CronJob | Creates a Job immediately, off-schedule. |
+| **Trigger now…** | CronJob | Creates a Job immediately, off-schedule — with the generated Job YAML shown for review and one-off edits first. |
 | **Suspend / Resume** | CronJob | Pause or resume scheduling. |
 
 ### Scaling

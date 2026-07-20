@@ -362,11 +362,6 @@ export interface DrainStartedResponse {
   totalPods: number;
 }
 
-export interface TriggerCronJobRequest {
-  namespace: string;
-  name: string;
-}
-
 export interface RerunJobRequest {
   namespace: string;
   name: string;

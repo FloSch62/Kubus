@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import CircleIcon from '@mui/icons-material/Circle';
 
-const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
+const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'complete', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
 const BAD = new Set(['failed', 'crashloopbackoff', 'imagepullbackoff', 'errimagepull', 'error', 'evicted', 'lost', 'notready', 'oomkilled', 'false', 'unhealthy', 'degraded', 'stopped', 'down']);
 const WARN = new Set([
   'pending',

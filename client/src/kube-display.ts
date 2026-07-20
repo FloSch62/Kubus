@@ -137,6 +137,29 @@ export function dataKeyCount(obj: KubeObject): number {
   return Object.keys((obj.data as Record<string, unknown> | undefined) ?? {}).length;
 }
 
+/**
+ * Coarse Job lifecycle phase for the list Status column. Terminal conditions
+ * win; otherwise suspension beats activity so a paused Job doesn't read as
+ * pending work.
+ */
+export function jobPhase(job: KubeObject): string {
+  const spec = job.spec as { suspend?: boolean } | undefined;
+  const status = job.status as { conditions?: Array<{ type?: string; status?: string }>; active?: number } | undefined;
+  const has = (type: string) => (status?.conditions ?? []).some((c) => c.type === type && c.status === 'True');
+  if (has('Failed')) return 'Failed';
+  if (has('Complete')) return 'Complete';
+  if (spec?.suspend) return 'Suspended';
+  if ((status?.active ?? 0) > 0) return 'Running';
+  return 'Pending';
+}
+
+/** The object's controlling owner, falling back to the first ownerReference. */
+export function ownerReference(obj: KubeObject): { kind: string; name: string } | undefined {
+  const refs = obj.metadata.ownerReferences ?? [];
+  const ref = refs.find((r) => r.controller) ?? refs[0];
+  return ref ? { kind: ref.kind, name: ref.name } : undefined;
+}
+
 export function jobStatus(job: KubeObject): { completions: string; duration: string } {
   const spec = job.spec as { completions?: number } | undefined;
   const status = job.status as { succeeded?: number; startTime?: string; completionTime?: string } | undefined;

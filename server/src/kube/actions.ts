@@ -94,37 +94,6 @@ export async function setCordon(handle: ClusterHandle, node: string, unschedulab
   });
 }
 
-export async function triggerCronJob(handle: ClusterHandle, namespace: string, name: string): Promise<{ jobName: string }> {
-  const cj = await handle.batch.readNamespacedCronJob({ name, namespace });
-  const jobTemplate = cj.spec?.jobTemplate;
-  if (!jobTemplate) throw new HttpProblem(422, 'cronjob has no jobTemplate');
-  const jobName = `${name}-manual-${Math.floor(Date.now() / 1000)}`.slice(0, 63);
-  await handle.batch.createNamespacedJob({
-    namespace,
-    body: {
-      apiVersion: 'batch/v1',
-      kind: 'Job',
-      metadata: {
-        name: jobName,
-        namespace,
-        annotations: { 'cronjob.kubernetes.io/instantiate': 'manual' },
-        labels: jobTemplate.metadata?.labels,
-        ownerReferences: [
-          {
-            apiVersion: 'batch/v1',
-            kind: 'CronJob',
-            name,
-            uid: cj.metadata!.uid!,
-            controller: false,
-          },
-        ],
-      },
-      spec: jobTemplate.spec,
-    },
-  });
-  return { jobName };
-}
-
 /**
  * Clone a (typically finished) Job and submit it under a new name, stripping
  * the runtime fields the Job controller stamps onto it. Jobs with
