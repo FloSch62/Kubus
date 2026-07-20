@@ -161,6 +161,13 @@ function ContainerCard({ c, onForwardPort, onEditImage }: { c: ContainerCardData
           podCount={c.podCount}
         />
       </Box>
+      {(c.resources.ephemeralRequestBytes !== undefined || c.resources.ephemeralLimitBytes !== undefined) && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          {`Ephemeral storage · req ${c.resources.ephemeralRequestBytes !== undefined ? formatBytes(c.resources.ephemeralRequestBytes) : '—'} · lim ${
+            c.resources.ephemeralLimitBytes !== undefined ? formatBytes(c.resources.ephemeralLimitBytes) : '—'
+          }`}
+        </Typography>
+      )}
     </Box>
   );
 }

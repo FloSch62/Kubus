@@ -304,6 +304,8 @@ export interface ContainerResources {
   memRequestBytes?: number;
   cpuLimitMilli?: number;
   memLimitBytes?: number;
+  ephemeralRequestBytes?: number;
+  ephemeralLimitBytes?: number;
 }
 
 export function containerResources(c: ContainerWithResources): ContainerResources {
@@ -312,6 +314,8 @@ export function containerResources(c: ContainerWithResources): ContainerResource
     memRequestBytes: quantityBytes(c.resources?.requests?.memory),
     cpuLimitMilli: quantityMilli(c.resources?.limits?.cpu),
     memLimitBytes: quantityBytes(c.resources?.limits?.memory),
+    ephemeralRequestBytes: quantityBytes(c.resources?.requests?.['ephemeral-storage']),
+    ephemeralLimitBytes: quantityBytes(c.resources?.limits?.['ephemeral-storage']),
   };
 }
 

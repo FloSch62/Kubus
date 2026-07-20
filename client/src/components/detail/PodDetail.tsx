@@ -31,6 +31,17 @@ import { useDetailStore } from '../../state/detail.js';
 import { showToast } from '../../state/toast.js';
 import { useDockStore, dockTabId } from '../../state/dock.js';
 
+interface Probe {
+  httpGet?: { path?: string; port?: number | string; scheme?: string };
+  tcpSocket?: { port?: number | string };
+  exec?: { command?: string[] };
+  grpc?: { port?: number; service?: string };
+  initialDelaySeconds?: number;
+  periodSeconds?: number;
+  timeoutSeconds?: number;
+  failureThreshold?: number;
+}
+
 interface ContainerSpec {
   name: string;
   image?: string;
@@ -38,11 +49,15 @@ interface ContainerSpec {
   ports?: Array<{ containerPort: number; protocol?: string; name?: string }>;
   volumeMounts?: Array<{ name: string; mountPath: string; readOnly?: boolean; subPath?: string }>;
   resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
+  livenessProbe?: Probe;
+  readinessProbe?: Probe;
+  startupProbe?: Probe;
 }
 
 interface ContainerStatus {
   name: string;
   ready?: boolean;
+  started?: boolean;
   restartCount?: number;
   state?: Record<string, { reason?: string; message?: string }>;
   lastState?: { terminated?: { reason?: string; finishedAt?: string } };
@@ -153,6 +168,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         </Section>
       )}
       <DebugContainersSection obj={obj} ctx={ctx} />
+      <ProbesSection spec={spec} statusByName={new Map([...initStatusByName, ...statusByName])} terminal={terminal} />
       {namespace && <EnvSection ctx={ctx} namespace={namespace} pod={obj.metadata.name} onOpenRef={openRelated} />}
       <VolumesSection spec={spec} onOpenRef={openRelated} />
       <SchedulingSection spec={spec} />
@@ -242,6 +258,81 @@ function DebugContainersSection({ obj, ctx }: { obj: KubeObject; ctx: string }) 
 }
 
 type RefOpener = (kind: RelatedKind, name: string) => void;
+
+const PROBE_KINDS = [
+  ['readiness', 'readinessProbe'],
+  ['liveness', 'livenessProbe'],
+  ['startup', 'startupProbe'],
+] as const;
+
+function probeTarget(p: Probe): string {
+  if (p.httpGet) return `${(p.httpGet.scheme ?? 'HTTP') === 'HTTPS' ? 'HTTPS' : 'HTTP'} ${p.httpGet.path ?? '/'} :${p.httpGet.port ?? ''}`;
+  if (p.tcpSocket) return `TCP :${p.tcpSocket.port ?? ''}`;
+  if (p.grpc) return `gRPC :${p.grpc.port ?? ''}${p.grpc.service ? ` ${p.grpc.service}` : ''}`;
+  if (p.exec) return `exec ${(p.exec.command ?? []).join(' ')}`;
+  return '';
+}
+
+function probeTiming(p: Probe): string {
+  return `delay ${p.initialDelaySeconds ?? 0}s · period ${p.periodSeconds ?? 10}s · timeout ${p.timeoutSeconds ?? 1}s · fail ${p.failureThreshold ?? 3}×`;
+}
+
+function ProbesSection({ spec, statusByName, terminal }: { spec: PodSpec | undefined; statusByName: Map<string, ContainerStatus>; terminal: boolean }) {
+  const rows: Array<{ container: string; kind: string; target: string; timing: string; state?: string }> = [];
+  for (const c of [...(spec?.containers ?? []), ...(spec?.initContainers ?? [])]) {
+    const st = statusByName.get(c.name);
+    for (const [label, key] of PROBE_KINDS) {
+      const probe = c[key];
+      if (!probe) continue;
+      // Live probe outcome where the API surfaces one: readiness → `ready`,
+      // startup → `started`. Liveness failures only show up as restarts.
+      // Finished pods are expectedly NotReady, so no state is shown there.
+      const state = terminal
+        ? undefined
+        : label === 'readiness' && st
+          ? st.ready
+            ? 'Ready'
+            : 'NotReady'
+          : label === 'startup' && st
+            ? st.started
+              ? 'Started'
+              : 'Pending'
+            : undefined;
+      rows.push({ container: c.name, kind: label, target: probeTarget(probe), timing: probeTiming(probe), state });
+    }
+  }
+  if (!rows.length) return null;
+  return (
+    <Section title="Probes" count={rows.length}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Container</TableCell>
+            <TableCell>Probe</TableCell>
+            <TableCell>Target</TableCell>
+            <TableCell>Timing</TableCell>
+            <TableCell>State</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={`${r.container}:${r.kind}`}>
+              <TableCell sx={{ wordBreak: 'break-all' }}>{r.container}</TableCell>
+              <TableCell>{r.kind}</TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{r.target}</TableCell>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                <Typography variant="caption" color="text.secondary">
+                  {r.timing}
+                </Typography>
+              </TableCell>
+              <TableCell>{r.state ? <StatusChip status={r.state} /> : ''}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Section>
+  );
+}
 
 function envSourceLabel(env: PodEnvVar): { text: string; refKind?: 'ConfigMap' | 'Secret'; refName?: string } {
   const s = env.source;
@@ -334,6 +425,10 @@ function volumeInfo(v: VolumeSpec): { type: string; detail?: string; refKind?: '
     return { type: 'secret', detail: name, refKind: 'Secret', refName: name };
   }
   if (v.hostPath) return { type: 'hostPath', detail: (v.hostPath as { path?: string }).path };
+  if (v.image) {
+    const img = v.image as { reference?: string; pullPolicy?: string };
+    return { type: 'image', detail: `${img.reference ?? ''}${img.pullPolicy ? ` (${img.pullPolicy})` : ''}` };
+  }
   const type = Object.keys(v).find((k) => k !== 'name') ?? 'unknown';
   return { type };
 }
