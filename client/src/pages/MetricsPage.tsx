@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
@@ -16,6 +19,7 @@ import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
 import { alpha, useTheme } from '@mui/material/styles';
 import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import MemoryOutlinedIcon from '@mui/icons-material/MemoryOutlined';
 import SdStorageOutlinedIcon from '@mui/icons-material/SdStorageOutlined';
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
@@ -23,7 +27,7 @@ import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import type { ClusterMetricsSummary, MetricsSeriesEntry } from '@kubus/shared';
-import { useMetricsServerStatus, useMetricsSummary } from '../api/queries.js';
+import { invalidateMetricsServer, useMetricsServerStatus, useMetricsSummary } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { NoClustersState } from '../components/NoClustersState.js';
@@ -60,6 +64,7 @@ function ClusterMetricsSection({ ctx }: { ctx: string }) {
   const { data: status, error: statusError } = useMetricsServerStatus(ctx, { refetchMs: 5_000 });
   const { data: summary, error: summaryError } = useMetricsSummary(ctx);
   const error = statusError ?? summaryError;
+  const qc = useQueryClient();
 
   const installed = status?.installed ?? false;
   const available = summary?.available ?? false;
@@ -76,6 +81,12 @@ function ClusterMetricsSection({ ctx }: { ctx: string }) {
             label={available ? 'collecting' : status?.ready ? 'waiting for samples' : 'starting'}
           />
         )}
+        {/* One-shot refetch, independent of the cadence preset — works while polling is paused. */}
+        <Tooltip title="Refresh metrics now">
+          <IconButton size="small" aria-label={`Refresh metrics for ${ctx}`} onClick={() => invalidateMetricsServer(qc)}>
+            <RefreshIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <Box sx={{ flex: 1 }} />
         {installed && <UninstallMetricsServerButton ctx={ctx} status={status} />}
       </ClusterSectionHeader>

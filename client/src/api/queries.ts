@@ -792,11 +792,13 @@ export function useMetricsServerStatus(ctx: string, opts?: { refetchMs?: number 
   });
 }
 
-function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
+/** One-shot refetch of every metrics query — also the "refresh now" action, so it works while polling is paused. */
+export function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
   void qc.invalidateQueries({ queryKey: ['metrics-server-status'] });
   void qc.invalidateQueries({ queryKey: ['metrics-summary'] });
   void qc.invalidateQueries({ queryKey: ['metrics-nodes'] });
   void qc.invalidateQueries({ queryKey: ['metrics-snapshot'] });
+  void qc.invalidateQueries({ queryKey: ['metrics-history'] });
 }
 
 export function useInstallMetricsServer() {
