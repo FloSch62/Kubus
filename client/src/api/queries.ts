@@ -17,6 +17,8 @@ import type {
   MetricsServerStatus,
   MetricsServerUninstallResult,
   MetricsSnapshot,
+  NamespaceOverview,
+  PodResourcesResponse,
   ClusterNetworkSummary,
   NetworkAgentInstallResult,
   NetworkAgentStatus,
@@ -873,6 +875,31 @@ export function useOverview(ctx: string) {
     queryKey: ['overview', ctx],
     queryFn: () => apiFetch<ClusterOverview>(`/api/contexts/${encodeURIComponent(ctx)}/overview`),
     refetchInterval: useRefetchInterval(10_000),
+  });
+}
+
+/** Live pod usage joined with requests/limits — thresholds are applied client-side. */
+export function usePodResources(ctx: string, namespace?: string) {
+  return useQuery({
+    queryKey: ['pod-resources', ctx, namespace ?? ''],
+    queryFn: () => {
+      const q = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
+      return apiFetch<PodResourcesResponse>(`/api/contexts/${encodeURIComponent(ctx)}/overview/pod-resources${q}`);
+    },
+    refetchInterval: useRefetchInterval(20_000),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Namespace-scoped overview for the global namespace selection. */
+export function useNamespaceOverview(ctx: string, namespaces: string[]) {
+  const key = [...namespaces].sort().join(',');
+  return useQuery({
+    queryKey: ['namespace-overview', ctx, key],
+    queryFn: () => apiFetch<NamespaceOverview>(`/api/contexts/${encodeURIComponent(ctx)}/namespace-overview?namespaces=${encodeURIComponent(key)}`),
+    enabled: !!ctx && namespaces.length > 0,
+    refetchInterval: useRefetchInterval(10_000),
+    placeholderData: keepPreviousData,
   });
 }
 

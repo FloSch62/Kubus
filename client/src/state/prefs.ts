@@ -23,6 +23,10 @@ interface UiPrefsState {
   protectByDefault: boolean;
   /** Nav rail collapsed to reclaim width (wide viewports only). */
   navCollapsed: boolean;
+  /** Overview "high usage" pod panel: usage ≥ this % of the limit. */
+  highUsagePct: number;
+  /** Overview "under-requested" pod panel: usage ≥ this multiple of the request. */
+  underRequestedFactor: number;
   /** User-resized column widths, keyed by table id then column field. */
   columnWidths: Record<string, Record<string, number>>;
   /** User-toggled column visibility models, keyed by table id then column field. */
@@ -59,6 +63,8 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       defaultShell: 'auto',
       protectByDefault: false,
       navCollapsed: false,
+      highUsagePct: 80,
+      underRequestedFactor: 2,
       columnWidths: {},
       columnVisibility: {},
       sortModels: {},

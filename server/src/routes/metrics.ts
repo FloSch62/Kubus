@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { MetricsHistoryResponse, MetricsServerInstallRequest, MetricsSnapshot } from '@kubus/shared';
 import type { AppContext } from '../app.js';
+import { computeNamespaceOverview } from '../kube/namespace-overview.js';
 import { computeOverview } from '../kube/overview.js';
+import { computePodResources } from '../kube/pod-resources.js';
 import { installMetricsServer, metricsServerStatus, uninstallMetricsServer } from '../kube/metrics-server.js';
 import { computeMetricsSummary } from '../kube/metrics-summary.js';
 import { cpuToMilli, memToBytes } from '../kube/quantity.js';
@@ -111,6 +113,34 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       return await computeOverview(handle);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string }; Querystring: { namespace?: string } }>('/api/contexts/:ctx/overview/pod-resources', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await computePodResources(handle, req.query.namespace || undefined);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string }; Querystring: { namespaces?: string } }>('/api/contexts/:ctx/namespace-overview', async (req, reply) => {
+    try {
+      const namespaces = (req.query.namespaces ?? '')
+        .split(',')
+        .map((ns) => ns.trim())
+        .filter(Boolean);
+      if (namespaces.length === 0) {
+        reply.code(400).send({ message: 'namespaces query parameter is required', reason: 'BadRequest', code: 400 });
+        return reply;
+      }
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await computeNamespaceOverview(handle, namespaces);
     } catch (err) {
       sendError(reply, err);
       return reply;

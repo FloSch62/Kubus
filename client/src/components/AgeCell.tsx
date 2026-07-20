@@ -25,10 +25,7 @@ function getTick(): number {
   return tickCount;
 }
 
-export function formatAge(timestamp: string | undefined): string {
-  if (!timestamp) return '';
-  const ms = Date.now() - Date.parse(timestamp);
-  if (Number.isNaN(ms) || ms < 0) return '0s';
+function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -41,6 +38,24 @@ export function formatAge(timestamp: string | undefined): string {
   return y >= 1 ? `${y}y${Math.floor((d % 365) / 30)}mo` : `${Math.floor(d / 30)}mo`;
 }
 
+export function formatAge(timestamp: string | undefined): string {
+  if (!timestamp) return '';
+  const ms = Date.now() - Date.parse(timestamp);
+  if (Number.isNaN(ms)) return '0s';
+  // Future timestamps (expiry dates in CRD columns) used to clamp to "0s".
+  if (ms < -30_000) return `in ${formatDuration(-ms)}`;
+  return formatDuration(Math.max(0, ms));
+}
+
+/** Direction-aware relative time: "5d ago" for the past, "in 47d" for the future. */
+export function formatRelative(timestamp: string | undefined): string {
+  if (!timestamp) return '';
+  const diff = Date.parse(timestamp) - Date.now();
+  if (Number.isNaN(diff)) return '';
+  if (Math.abs(diff) < 30_000) return 'now';
+  return diff > 0 ? `in ${formatDuration(diff)}` : `${formatDuration(-diff)} ago`;
+}
+
 /** Live-ticking relative age. */
 export function AgeCell({ timestamp, variant = 'body2' }: { timestamp?: string; variant?: TypographyProps['variant'] }) {
   useSyncExternalStore(subscribeTick, getTick);
@@ -49,6 +64,22 @@ export function AgeCell({ timestamp, variant = 'body2' }: { timestamp?: string; 
     <Tooltip title={new Date(timestamp).toLocaleString()}>
       <Typography variant={variant} component="span">
         {formatAge(timestamp)}
+      </Typography>
+    </Tooltip>
+  );
+}
+
+/**
+ * Live-ticking relative time that handles future timestamps (certificate
+ * expiry, renewal times) — includes the "ago"/"in" direction itself.
+ */
+export function RelativeTimeCell({ timestamp, variant = 'body2' }: { timestamp?: string; variant?: TypographyProps['variant'] }) {
+  useSyncExternalStore(subscribeTick, getTick);
+  if (!timestamp) return null;
+  return (
+    <Tooltip title={new Date(timestamp).toLocaleString()}>
+      <Typography variant={variant} component="span">
+        {formatRelative(timestamp)}
       </Typography>
     </Tooltip>
   );

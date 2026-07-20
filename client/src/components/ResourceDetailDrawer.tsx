@@ -28,6 +28,7 @@ import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
+import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
@@ -331,6 +332,11 @@ function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | unde
     case 'CustomResourceDefinition':
       return <CrdDetail obj={obj} ctx={ctx} />;
     default:
+      // cert-manager Certificates get an expiry/renewal headline the printer
+      // columns don't surface.
+      if (crd?.metadata.name === 'certificates.cert-manager.io') {
+        return <CertificateDetail obj={obj} ctx={ctx} crd={crd} version={version} />;
+      }
       // Custom resources with their backing CRD loaded get a status-aware
       // overview driven by the CRD's printer columns.
       return crd ? <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} /> : <GenericDetail obj={obj} ctx={ctx} />;

@@ -8,7 +8,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { KubeObject } from '@kubus/shared';
 import { evalPrinterColumnPath } from '@kubus/shared';
-import { AgeCell } from '../AgeCell.js';
+import { RelativeTimeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { statusLikeName } from '../../kube-display.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
@@ -113,11 +113,9 @@ function StatusRowValue({ row }: { row: StatusRow }) {
     );
   }
   if ((row.date || ISO_TIMESTAMP_RE.test(row.value)) && ISO_TIMESTAMP_RE.test(row.value)) {
-    return (
-      <>
-        <AgeCell timestamp={row.value} /> ago
-      </>
-    );
+    // Direction-aware: expiry/renewal fields are future timestamps and used
+    // to collapse into a meaningless "0s ago".
+    return <RelativeTimeCell timestamp={row.value} />;
   }
   if (statusLikeName(row.label)) return <StatusChip status={row.value} />;
   return <Typography variant="body2">{row.value}</Typography>;

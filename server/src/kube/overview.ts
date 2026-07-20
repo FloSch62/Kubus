@@ -1,5 +1,8 @@
-import type { ClusterOverview, KubeObject } from '@kubus/shared';
+import type { ClusterOverview, KubeObject, OverviewWarningEvent } from '@kubus/shared';
+import { apiServerCertNotAfter, collectCertificates } from './cert-expiry.js';
 import type { ClusterHandle } from './cluster-manager.js';
+import { computeOperatorRollups } from './operator-rollups.js';
+import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
 
 const RECENT_MS = 60 * 60 * 1000; // 1h window for restarts/events
 
@@ -21,6 +24,12 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
   const namespacesWatcher = handle.watchers.acquire('', 'v1', 'namespaces');
   const pvsWatcher = handle.watchers.acquire('', 'v1', 'persistentvolumes');
   const crdsWatcher = handle.watchers.acquire('apiextensions.k8s.io', 'v1', 'customresourcedefinitions');
+  // Deployments are pinned above; the remaining health kinds are acquired on
+  // demand and shared with the list pages (30s linger between polls).
+  const healthWatchers = HEALTH_KINDS.filter((spec) => spec.kind !== 'Deployment').map((spec) => ({
+    spec,
+    handle: handle.watchers.acquire(spec.group, spec.version, spec.plural),
+  }));
   try {
     await Promise.all([
       podsWatcher.watcher.ready(),
@@ -29,9 +38,10 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       nodesWatcher.watcher.ready(),
       namespacesWatcher.watcher.ready(),
     ]);
-    const [persistentVolumesResult, crdsResult] = await Promise.all([
+    const [persistentVolumesResult, crdsResult, ...healthResults] = await Promise.all([
       optionalItems(pvsWatcher.watcher),
       optionalItems(crdsWatcher.watcher),
+      ...healthWatchers.map((w) => optionalItems(w.handle.watcher)),
     ]);
     const pods = podsWatcher.watcher.items();
     const deployments = deploysWatcher.watcher.items();
@@ -61,48 +71,38 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       unavailableWorkloads: [],
       recentRestarts: [],
       warningEvents: [],
+      workloadHealth: [],
+      operators: [],
+      certificates: { total: 0, expiring: [] },
     };
+
+    const healthBySpec = new Map(healthWatchers.map((w, i) => [w.spec, healthResults[i] ?? { items: [], unavailable: true }]));
+    const healthKinds: HealthKindItems[] = HEALTH_KINDS.map((spec) => {
+      if (spec.kind === 'Deployment') return { spec, items: deployments, unavailable: false };
+      const result = healthBySpec.get(spec) ?? { items: [], unavailable: true };
+      return { spec, items: result.items, unavailable: result.unavailable };
+    });
+    const health = computeWorkloadHealth(healthKinds);
+    overview.workloadHealth = health.kinds;
+    overview.unavailableWorkloads = health.issues;
+    const [operators, certificates, apiServerNotAfter] = await Promise.all([
+      computeOperatorRollups(handle, crds),
+      collectCertificates(handle, crds),
+      apiServerCertNotAfter(handle),
+    ]);
+    overview.operators = operators;
+    overview.certificates = { ...certificates, apiServerNotAfter };
 
     const now = Date.now();
     for (const pod of pods) {
-      const status = pod.status as { phase?: string; reason?: string; message?: string; containerStatuses?: ContainerStatus[] } | undefined;
+      const status = pod.status as { phase?: string; containerStatuses?: ContainerStatus[] } | undefined;
       if (status?.phase === 'Running') overview.counts.podsRunning += 1;
-      const statuses = status?.containerStatuses ?? [];
-      const restarts = statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0);
-
-      let reason: string | undefined;
-      let message: string | undefined;
-      if (status?.phase === 'Failed') {
-        reason = status.reason ?? 'Failed';
-        message = status.message;
-      } else {
-        for (const c of statuses) {
-          const waiting = c.state?.waiting;
-          if (waiting?.reason && FAILING_WAIT_REASONS.has(waiting.reason)) {
-            reason = waiting.reason;
-            message = waiting.message;
-            break;
-          }
-        }
-      }
-      // Pending too long (unschedulable) also counts as failing.
-      if (!reason && status?.phase === 'Pending') {
-        const created = Date.parse(pod.metadata.creationTimestamp ?? '');
-        if (!Number.isNaN(created) && now - created > 5 * 60 * 1000) {
-          reason = 'Pending';
-        }
-      }
-      if (reason) {
-        overview.failingPods.push({
-          namespace: pod.metadata.namespace ?? '',
-          name: pod.metadata.name,
-          reason,
-          message,
-          restarts,
-        });
+      const failure = podFailure(pod, now);
+      if (failure) {
+        overview.failingPods.push({ namespace: pod.metadata.namespace ?? '', name: pod.metadata.name, ...failure });
       }
 
-      for (const c of statuses) {
+      for (const c of status?.containerStatuses ?? []) {
         const finishedAt = c.lastState?.terminated?.finishedAt;
         if (finishedAt && now - Date.parse(finishedAt) < RECENT_MS && (c.restartCount ?? 0) > 0) {
           overview.recentRestarts.push({
@@ -117,49 +117,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       }
     }
 
-    for (const d of deployments) {
-      const spec = d.spec as { replicas?: number } | undefined;
-      const status = d.status as { availableReplicas?: number } | undefined;
-      const desired = spec?.replicas ?? 1;
-      const available = status?.availableReplicas ?? 0;
-      if (desired > 0 && available < desired) {
-        overview.unavailableWorkloads.push({
-          kind: 'Deployment',
-          namespace: d.metadata.namespace ?? '',
-          name: d.metadata.name,
-          ready: available,
-          desired,
-        });
-      }
-    }
-
-    overview.warningEvents = events
-      .flatMap((e) => {
-        if ((e as { type?: string }).type !== 'Warning') return [];
-        const time = eventTime(e);
-        const t = Date.parse(time);
-        return !Number.isNaN(t) && now - t < RECENT_MS ? [{ e, time }] : [];
-      })
-      .sort((a, b) => b.time.localeCompare(a.time))
-      .slice(0, 50)
-      .map(({ e, time }) => {
-        const ev = e as KubeObject & {
-          reason?: string;
-          message?: string;
-          count?: number;
-          lastTimestamp?: string;
-          involvedObject?: { kind?: string; name?: string };
-        };
-        return {
-          namespace: e.metadata.namespace ?? '',
-          reason: ev.reason ?? '',
-          message: ev.message ?? '',
-          involvedKind: ev.involvedObject?.kind ?? '',
-          involvedName: ev.involvedObject?.name ?? '',
-          count: ev.count ?? 1,
-          lastTimestamp: time || undefined,
-        };
-      });
+    overview.warningEvents = collectWarningEvents(events, now);
 
     overview.failingPods.sort((a, b) => `${a.namespace}/${a.name}`.localeCompare(`${b.namespace}/${b.name}`));
     overview.recentRestarts.sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''));
@@ -172,7 +130,64 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     namespacesWatcher.release();
     pvsWatcher.release();
     crdsWatcher.release();
+    for (const w of healthWatchers) w.handle.release();
   }
+}
+
+/** Failing-pod detection shared with the namespace overview. */
+export function podFailure(pod: KubeObject, now: number): { reason: string; message?: string; restarts: number } | undefined {
+  const status = pod.status as { phase?: string; reason?: string; message?: string; containerStatuses?: ContainerStatus[] } | undefined;
+  const statuses = status?.containerStatuses ?? [];
+  const restarts = statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0);
+
+  if (status?.phase === 'Failed') {
+    return { reason: status.reason ?? 'Failed', message: status.message, restarts };
+  }
+  for (const c of statuses) {
+    const waiting = c.state?.waiting;
+    if (waiting?.reason && FAILING_WAIT_REASONS.has(waiting.reason)) {
+      return { reason: waiting.reason, message: waiting.message, restarts };
+    }
+  }
+  // Pending too long (unschedulable) also counts as failing.
+  if (status?.phase === 'Pending') {
+    const created = Date.parse(pod.metadata.creationTimestamp ?? '');
+    if (!Number.isNaN(created) && now - created > 5 * 60 * 1000) {
+      return { reason: 'Pending', restarts };
+    }
+  }
+  return undefined;
+}
+
+/** Warning events within the 1h window, newest first, capped at 50. */
+export function collectWarningEvents(events: KubeObject[], now: number): OverviewWarningEvent[] {
+  return events
+    .flatMap((e) => {
+      if ((e as { type?: string }).type !== 'Warning') return [];
+      const time = eventTime(e);
+      const t = Date.parse(time);
+      return !Number.isNaN(t) && now - t < RECENT_MS ? [{ e, time }] : [];
+    })
+    .sort((a, b) => b.time.localeCompare(a.time))
+    .slice(0, 50)
+    .map(({ e, time }) => {
+      const ev = e as KubeObject & {
+        reason?: string;
+        message?: string;
+        count?: number;
+        lastTimestamp?: string;
+        involvedObject?: { kind?: string; name?: string };
+      };
+      return {
+        namespace: e.metadata.namespace ?? '',
+        reason: ev.reason ?? '',
+        message: ev.message ?? '',
+        involvedKind: ev.involvedObject?.kind ?? '',
+        involvedName: ev.involvedObject?.name ?? '',
+        count: ev.count ?? 1,
+        lastTimestamp: time || undefined,
+      };
+    });
 }
 
 function eventTime(e: KubeObject): string {
@@ -185,7 +200,7 @@ function isEstablishedCrd(crd: KubeObject): boolean {
   return conditions.some((c) => c.type === 'Established' && c.status === 'True');
 }
 
-async function optionalItems(watcher: {
+export async function optionalItems(watcher: {
   ready(): Promise<void>;
   items(): KubeObject[];
   currentState(): string;
