@@ -70,6 +70,11 @@ interface LogBuffer {
   markerCount: number;
 }
 
+interface SourceResumeCursor {
+  timestamp: string;
+  frameCounts: Map<string, number>;
+}
+
 const POD_COLORS = ['#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7', '#7dcfff', '#ff9e64', '#73daca'];
 const MAX_ENTRIES = 20_000;
 const MAX_RECONNECT_ATTEMPTS = 8;
@@ -195,6 +200,40 @@ function workloadPreferenceKey(ctx: string, namespace: string, kind: NonNullable
 
 function sourceKey(pod: string, container: string): string {
   return `${pod}/${container}`;
+}
+
+function consumeReplayFrame(
+  replayCursors: Map<string, SourceResumeCursor>,
+  source: string,
+  timestamp: string,
+  line: string,
+): boolean {
+  const cursor = replayCursors.get(source);
+  if (!cursor) return false;
+  if (cursor.timestamp !== timestamp) {
+    replayCursors.delete(source);
+    return false;
+  }
+  const remaining = cursor.frameCounts.get(line) ?? 0;
+  if (!remaining) return false;
+  if (remaining === 1) cursor.frameCounts.delete(line);
+  else cursor.frameCounts.set(line, remaining - 1);
+  if (!cursor.frameCounts.size) replayCursors.delete(source);
+  return true;
+}
+
+function recordResumeFrame(
+  cursors: Map<string, SourceResumeCursor>,
+  source: string,
+  timestamp: string,
+  line: string,
+): void {
+  const cursor = cursors.get(source);
+  if (cursor?.timestamp === timestamp) {
+    cursor.frameCounts.set(line, (cursor.frameCounts.get(line) ?? 0) + 1);
+    return;
+  }
+  cursors.set(source, { timestamp, frameCounts: new Map([[line, 1]]) });
 }
 
 function setsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
@@ -368,8 +407,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     return new Set(available.length ? available : allContainerNames);
   });
   const bufferRef = useRef<LogLine[]>([]);
-  const lastTimestampBySourceRef = useRef(new Map<string, string>());
-  const lastFrameBySourceRef = useRef(new Map<string, { ts: string; line: string }>());
+  const resumeCursorBySourceRef = useRef(new Map<string, SourceResumeCursor>());
   const scrollRef = useRef<HTMLDivElement>(null);
   const findRef = useRef<HTMLInputElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -399,7 +437,17 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     () => allContainerNames.filter((container) => enabledContainers.has(container)).join(','),
     [allContainerNames, enabledContainers],
   );
-  const selectedSourceCount = Math.max(1, enabledPods.size * Math.max(1, enabledContainers.size));
+  const selectedSourceCount = useMemo(() => {
+    if (!allContainerNames.length) return Math.max(1, enabledPods.size);
+    let count = 0;
+    for (const source of sources) {
+      if (!enabledPods.has(source.pod)) continue;
+      for (const container of source.containers) {
+        if (enabledContainers.has(container)) count++;
+      }
+    }
+    return Math.max(1, count);
+  }, [allContainerNames.length, enabledContainers, enabledPods, sources]);
 
   const flushBuffered = useCallback(() => {
     if (!bufferRef.current.length) return;
@@ -431,10 +479,22 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
 
     const connect = () => {
       if (disposed) return;
-      const resumeAt = Object.fromEntries(lastTimestampBySourceRef.current);
+      const resumeAt = Object.fromEntries(
+        [...resumeCursorBySourceRef.current].map(([key, cursor]) => [key, cursor.timestamp]),
+      );
+      const replayCursors = new Map(
+        [...resumeCursorBySourceRef.current].map(([key, cursor]) => [
+          key,
+          { timestamp: cursor.timestamp, frameCounts: new Map(cursor.frameCounts) },
+        ]),
+      );
+      const requestedSinceSeconds =
+        modeParams.tailLines !== undefined ? undefined : (modeParams.sinceSeconds ?? tab.sinceSeconds);
+      const combinedTailLines =
+        modeParams.tailLines ?? (requestedSinceSeconds !== undefined ? MAX_ENTRIES : undefined);
       const requestedTailLines =
-        modeParams.tailLines !== undefined
-          ? Math.max(1, Math.floor(modeParams.tailLines / selectedSourceCount))
+        combinedTailLines !== undefined
+          ? Math.max(1, Math.floor(combinedTailLines / selectedSourceCount))
           : modeParams.tail
             ? (tab.tailLines ?? defaultTailLines)
             : undefined;
@@ -446,7 +506,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
         previous: modeParams.previous ?? false,
         follow: modeParams.follow,
         tailLines: requestedTailLines,
-        sinceSeconds: modeParams.tailLines !== undefined ? undefined : (modeParams.sinceSeconds ?? tab.sinceSeconds),
+        sinceSeconds: requestedSinceSeconds,
         resumeAt: Object.keys(resumeAt).length ? JSON.stringify(resumeAt) : undefined,
       }));
       let opened = false;
@@ -466,11 +526,9 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
           const msg = JSON.parse(ev.data as string) as LogServerMessage;
           if (msg.op === 'line') {
             const key = sourceKey(msg.pod, msg.container);
-            const lastFrame = lastFrameBySourceRef.current.get(key);
-            if (msg.ts && lastFrame?.ts === msg.ts && lastFrame.line === msg.line) return;
             if (msg.ts) {
-              lastTimestampBySourceRef.current.set(key, msg.ts);
-              lastFrameBySourceRef.current.set(key, { ts: msg.ts, line: msg.line });
+              if (consumeReplayFrame(replayCursors, key, msg.ts, msg.line)) return;
+              recordResumeFrame(resumeCursorBySourceRef.current, key, msg.ts, msg.line);
             }
             bufferRef.current.push({ kind: 'line', pod: msg.pod, container: msg.container, ts: msg.ts, line: msg.line, receivedAt: Date.now() });
           } else if (msg.op === 'pod-status' && msg.state === 'error') {
@@ -667,8 +725,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
 
   const changeTimeMode = (next: LogTimeMode) => {
     bufferRef.current = [];
-    lastTimestampBySourceRef.current.clear();
-    lastFrameBySourceRef.current.clear();
+    resumeCursorBySourceRef.current.clear();
     setLogBuffer({ entries: [], markerCount: 0 });
     setFollow(paramsForMode(next).follow);
     setTimeMode(next);
