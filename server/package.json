@@ -20,7 +20,7 @@
     "@kubus/shared": "workspace:*",
     "fastify": "^5.10.0",
     "js-yaml": "^5.2.1",
-    "nanoid": "^5.1.16",
+    "nanoid": "^6.0.0",
     "node-fetch": "^3.3.2",
     "open": "^11.0.0",
     "pino": "^10.3.1",
