@@ -43,6 +43,8 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
 import SpeedIcon from '@mui/icons-material/Speed';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -61,6 +63,7 @@ import {
 import { watchClient } from '../api/ws/watch-client.js';
 import { useDockStore, dockTabId, type DockTab } from '../state/dock.js';
 import { useIsProtected } from '../state/clusters.js';
+import { useNavigationStore } from '../state/navigation.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
@@ -68,7 +71,7 @@ import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { podContainerNames } from '../kube-display.js';
 import { splitImageRef } from '../image-ref.js';
-import { kindListPath } from '../resource-links.js';
+import { favoriteForRef, kindListPath } from '../resource-links.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -195,6 +198,11 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const namespace = obj.metadata.namespace;
   const isProtected = useIsProtected(ctx);
   const close = onClose;
+
+  const favorite = favoriteForRef({ ctx, group: target.group, version: target.version, plural: target.plural, kind, name, namespace });
+  const isFav = useNavigationStore((s) => s.isFavorite(favorite.id));
+  const addFavorite = useNavigationStore((s) => s.addFavorite);
+  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
 
   const ok = (text: string) => showToast('success', text);
   const fail = (err: unknown) => showToast('error', err instanceof Error ? err.message : String(err));
@@ -480,6 +488,16 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ListItemText>Drain…</ListItemText>
           </MenuItem>
         )}
+        <MenuItem
+          onClick={() => {
+            if (isFav) removeFavorite(favorite.id);
+            else addFavorite(favorite);
+            close();
+          }}
+        >
+          <ListItemIcon>{isFav ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}</ListItemIcon>
+          <ListItemText>{isFav ? 'Remove favorite' : 'Add to favorites'}</ListItemText>
+        </MenuItem>
         <Divider />
         <MenuItem
           onClick={() => {
