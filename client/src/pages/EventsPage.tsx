@@ -211,6 +211,7 @@ export function EventsPage() {
   }
 
   const errors = Object.entries(list.status).filter(([, s]) => s.state === 'error');
+  const reconnecting = Object.entries(list.status).filter(([, s]) => s.state === 'reconnecting');
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -221,6 +222,11 @@ export function EventsPage() {
         {errors.map(([ctx, s]) => (
           <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>
             {ctx}: {s.message ?? 'watch error'}
+          </Alert>
+        ))}
+        {reconnecting.map(([ctx]) => (
+          <Alert key={ctx} severity="warning" sx={{ mt: 0.5 }}>
+            {ctx}: connection lost — reconnecting, events may be stale.
           </Alert>
         ))}
       </Box>

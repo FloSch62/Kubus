@@ -523,6 +523,7 @@ export function ResourceListPage() {
   const unavailableContexts = new Set(unavailable.map(([ctx]) => ctx));
   const discoveryOnlyMissing = discoveryMissing.filter((ctx) => !unavailableContexts.has(ctx));
   const errors = Object.entries(list.status).filter(([, s]) => s.state === 'error');
+  const reconnecting = Object.entries(list.status).filter(([, s]) => s.state === 'reconnecting');
   const activeRowId = useMemo(() => {
     if (!sel) return undefined;
     return list.rows.find(
@@ -596,6 +597,11 @@ export function ResourceListPage() {
         {errors.map(([ctx, s]) => (
           <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>
             {ctx}: {s.message ?? 'watch error'}
+          </Alert>
+        ))}
+        {reconnecting.map(([ctx]) => (
+          <Alert key={ctx} severity="warning" sx={{ mt: 0.5 }}>
+            {ctx}: connection lost — reconnecting, the list may be stale.
           </Alert>
         ))}
         {unavailable.map(([ctx, s]) => (
