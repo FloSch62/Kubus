@@ -628,6 +628,14 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return scrollActiveEntryIntoView();
   }, [deferredFilter, scrollActiveEntryIntoView]);
 
+  // The temporary drawer mounts its content only while open, so a reveal
+  // that ran while it was closed expanded the groups but had no list to
+  // scroll. Bring the active entry into view whenever the overlay opens.
+  useEffect(() => {
+    if (!overlay || !open) return;
+    return scrollActiveEntryIntoView();
+  }, [overlay, open, scrollActiveEntryIntoView]);
+
   // Kinds belonging to each favoritable category, used to expand a favorited
   // category inline under the Favorites group.
   const categoryKindsMap = useMemo(() => {
