@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { DebugPodRequest, DebugPodResponse, StopDebugRequest } from '@kubus/shared';
+import type { DebugPodRequest, DebugPodResponse, DebugProfile, StopDebugRequest } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { runCommand } from './file-copy.js';
@@ -18,6 +18,18 @@ const STOP_FILE = '/tmp/.kubus-stop';
 const DEBUG_IDLE_COMMAND = ['sh', '-c', `trap "exit 0" TERM INT; i=0; while [ ! -e ${STOP_FILE} ] && [ "$i" -lt 3600 ]; do sleep 1; i=$((i+1)); done`];
 
 /**
+ * Security context per kubectl-debug profile. `general` stays unset so the
+ * container inherits namespace/PodSecurity defaults; `restricted` matches the
+ * PodSecurity restricted policy so debugging works in enforced namespaces.
+ */
+const PROFILE_SECURITY_CONTEXT: Record<DebugProfile, object | undefined> = {
+  general: undefined,
+  restricted: { runAsNonRoot: true, allowPrivilegeEscalation: false, capabilities: { drop: ['ALL'] }, seccompProfile: { type: 'RuntimeDefault' } },
+  netadmin: { capabilities: { add: ['NET_ADMIN', 'NET_RAW'] } },
+  sysadmin: { privileged: true },
+};
+
+/**
  * kubectl-debug equivalent: append an ephemeral container to a running pod
  * (pods/ephemeralcontainers subresource) and wait until it runs, so the
  * caller can exec into it. Ephemeral containers are append-only and
@@ -27,6 +39,8 @@ export async function addDebugContainer(handle: ClusterHandle, req: DebugPodRequ
   const containerName = `debug-${nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`;
   const image = req.image?.trim() || DEFAULT_DEBUG_IMAGE;
   if (/\s/.test(image)) throw new HttpProblem(422, 'image must be a reference without whitespace');
+  const profile = req.profile ?? 'general';
+  if (!(profile in PROFILE_SECURITY_CONTEXT)) throw new HttpProblem(422, `unknown debug profile ${String(profile)}`);
   const patch = {
     spec: {
       ephemeralContainers: [
@@ -38,6 +52,7 @@ export async function addDebugContainer(handle: ClusterHandle, req: DebugPodRequ
           tty: true,
           targetContainerName: req.target || undefined,
           terminationMessagePolicy: 'File',
+          securityContext: PROFILE_SECURITY_CONTEXT[profile],
         },
       ],
     },

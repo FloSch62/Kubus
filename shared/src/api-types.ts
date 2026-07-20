@@ -393,6 +393,9 @@ export interface RolloutRevision {
   replicas?: number;
 }
 
+/** kubectl-debug style security profile applied to the ephemeral container. */
+export type DebugProfile = 'general' | 'restricted' | 'netadmin' | 'sysadmin';
+
 export interface DebugPodRequest {
   namespace: string;
   pod: string;
@@ -400,6 +403,8 @@ export interface DebugPodRequest {
   image?: string;
   /** Container whose process namespace the debug container targets. */
   target?: string;
+  /** Security profile; defaults to general (no extra privileges). */
+  profile?: DebugProfile;
 }
 
 export interface DebugPodResponse {

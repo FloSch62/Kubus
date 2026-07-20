@@ -43,7 +43,7 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
 import SpeedIcon from '@mui/icons-material/Speed';
-import { gvkForResource, type KubeObject, type LogTargetKind } from '@kubus/shared';
+import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,
@@ -891,12 +891,20 @@ export function SetImageDialog({
   );
 }
 
+const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }> = [
+  { value: 'general', label: 'General', hint: 'No extra privileges — inherits the namespace defaults.' },
+  { value: 'restricted', label: 'Restricted', hint: 'Non-root, all capabilities dropped — for PodSecurity-restricted namespaces (needs a non-root image).' },
+  { value: 'netadmin', label: 'Network admin', hint: 'Adds NET_ADMIN and NET_RAW — tcpdump, iptables, ping.' },
+  { value: 'sysadmin', label: 'System admin', hint: 'Privileged container — full access, rejected in restricted namespaces.' },
+];
+
 function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
   const debug = useDebugPod();
   const addTab = useDockStore((s) => s.addTab);
   const containers = podContainerNames(target.obj);
   const [image, setImage] = useState('busybox:1.36');
   const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
+  const [profile, setProfile] = useState<DebugProfile>('general');
   const name = target.obj.metadata.name;
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
@@ -918,6 +926,19 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" fullWidth>
+          <InputLabel id="debug-profile">Profile</InputLabel>
+          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfile(e.target.value as DebugProfile)}>
+            {DEBUG_PROFILES.map((p) => (
+              <MenuItem key={p.value} value={p.value}>
+                {p.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+          {DEBUG_PROFILES.find((p) => p.value === profile)?.hint}
+        </Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={debug.isPending}>
@@ -928,7 +949,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           disabled={debug.isPending || !image.trim()}
           onClick={() =>
             debug.mutate(
-              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined } },
+              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined, profile } },
               {
                 onSuccess: ({ containerName }) => {
                   onClose();
