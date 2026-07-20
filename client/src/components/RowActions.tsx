@@ -76,7 +76,7 @@ export interface RowActionMenuProps {
   onClose: () => void;
 }
 
-const LOG_TARGET_KINDS = new Set<string>(['Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service']);
+const LOG_TARGET_KINDS = new Set<string>(['Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service', 'Job']);
 
 export function isLogTargetKind(kind: string): kind is LogTargetKind {
   return LOG_TARGET_KINDS.has(kind);
@@ -92,13 +92,14 @@ async function openLogsForTarget(target: RowActionTarget, addTab: (tab: DockTab)
   if (!namespace) throw new Error(`${kind} has no namespace`);
   const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
   if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
-  const byNamespace = new Map<string, string[]>();
+  const byNamespace = new Map<string, typeof pods>();
   for (const pod of pods) {
-    const names = byNamespace.get(pod.namespace);
-    if (names) names.push(pod.name);
-    else byNamespace.set(pod.namespace, [pod.name]);
+    const namespacePods = byNamespace.get(pod.namespace);
+    if (namespacePods) namespacePods.push(pod);
+    else byNamespace.set(pod.namespace, [pod]);
   }
-  for (const [ns, podNames] of byNamespace) {
+  for (const [ns, namespacePods] of byNamespace) {
+    const podNames = namespacePods.map((pod) => pod.name);
     addTab({
       kind: 'logs',
       id: dockTabId(),
@@ -106,6 +107,8 @@ async function openLogsForTarget(target: RowActionTarget, addTab: (tab: DockTab)
       ctx,
       namespace: ns,
       pods: podNames,
+      sources: namespacePods.map((pod) => ({ pod: pod.name, containers: pod.containers })),
+      target: { kind: actionKind, name },
       follow: true,
     });
   }

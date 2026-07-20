@@ -470,7 +470,11 @@ export interface SecretTlsResponse {
 
 // ---- Logs ----
 
-export type LogTargetKind = 'Pod' | 'Deployment' | 'ReplicaSet' | 'StatefulSet' | 'DaemonSet' | 'Service';
+/** Application close codes used by the logs WebSocket. */
+export const LOG_SOCKET_COMPLETE_CODE = 4000;
+export const LOG_SOCKET_NO_STREAMS_CODE = 4001;
+
+export type LogTargetKind = 'Pod' | 'Deployment' | 'ReplicaSet' | 'StatefulSet' | 'DaemonSet' | 'Service' | 'Job';
 
 export interface LogTargetPod {
   name: string;

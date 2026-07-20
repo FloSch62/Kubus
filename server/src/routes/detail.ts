@@ -50,6 +50,10 @@ async function resolveLogTargetPods(handle: ClusterHandle, target: KubeObject, k
   }
 
   const selector = selectorToString((target.spec as { selector?: LabelSelector } | undefined)?.selector);
+  if (kind === 'Job') {
+    const pods = await listPods(handle, namespace, selector);
+    return pods.filter((pod) => owns(pod, target.metadata.uid));
+  }
   if (!selector) return [];
 
   if (kind === 'Deployment') {

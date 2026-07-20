@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { LogTargetKind } from '@kubus/shared';
 import { useDetailStore } from './detail.js';
 
 export interface TerminalTab {
@@ -26,6 +27,8 @@ export interface LogsTab {
   ctx: string;
   namespace: string;
   pods: string[];
+  sources?: Array<{ pod: string; containers: string[] }>;
+  target?: { kind: LogTargetKind; name: string };
   container?: string;
   follow?: boolean;
   tailLines?: number;

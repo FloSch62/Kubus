@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "KUBUS_DEV=1 tsx watch --clear-screen=false src/index.ts",
     "build": "tsc",
-    "test": "node --test test/helm-regressions.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js"
   },

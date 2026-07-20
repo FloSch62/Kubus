@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { gvkForResource, type KubeObject, type ResourceRef } from '@kubus/shared';
+import { gvkForResource, type KubeObject, type LogTargetKind, type ResourceRef } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,
@@ -53,7 +53,7 @@ export function actionsForRef(ref: ResourceRef): PaletteAction[] {
     case 'CronJob':
       return [OPEN, TRIGGER, SUSPEND, MORE];
     case 'Job':
-      return [OPEN, RERUN, MORE];
+      return [OPEN, LOGS, RERUN, MORE];
     case 'Node':
       return [OPEN, CORDON, MORE];
     default:
@@ -76,15 +76,17 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
       const fetchObj = () => apiFetch<KubeObject>(resourceUrl(ref.ctx, ref.group, ref.version, ref.plural, ref.name, ref.namespace));
       switch (action.id) {
         case 'logs': {
-          const { pods } = await resolveLogTargetPods({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: ref.kind as 'Pod', namespace, name: ref.name });
+          const logKind = ref.kind as LogTargetKind;
+          const { pods } = await resolveLogTargetPods({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: logKind, namespace, name: ref.name });
           if (!pods.length) throw new Error(`No pods found for ${ref.kind} ${namespace}/${ref.name}`);
-          const byNamespace = new Map<string, string[]>();
+          const byNamespace = new Map<string, typeof pods>();
           for (const pod of pods) {
-            const names = byNamespace.get(pod.namespace);
-            if (names) names.push(pod.name);
-            else byNamespace.set(pod.namespace, [pod.name]);
+            const namespacePods = byNamespace.get(pod.namespace);
+            if (namespacePods) namespacePods.push(pod);
+            else byNamespace.set(pod.namespace, [pod]);
           }
-          for (const [ns, podNames] of byNamespace) {
+          for (const [ns, namespacePods] of byNamespace) {
+            const podNames = namespacePods.map((pod) => pod.name);
             addTab({
               kind: 'logs',
               id: dockTabId(),
@@ -92,6 +94,8 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
               ctx: ref.ctx,
               namespace: ns,
               pods: podNames,
+              sources: namespacePods.map((pod) => ({ pod: pod.name, containers: pod.containers })),
+              target: { kind: logKind, name: ref.name },
               follow: true,
             });
           }

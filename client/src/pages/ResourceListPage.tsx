@@ -37,6 +37,7 @@ import { useNavigationStore } from '../state/navigation.js';
 import { usePaneActive } from '../layout/pane-context.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
+import { podContainerNames } from '../kube-display.js';
 
 /**
  * Renderless bridge between this page's URL params and the shared detail
@@ -654,6 +655,7 @@ export function ResourceListPage() {
                       ctx: ctx!,
                       namespace: namespace ?? '',
                       pods: rows.map((r) => r.obj.metadata.name),
+                      sources: rows.map((r) => ({ pod: r.obj.metadata.name, containers: podContainerNames(r.obj) })),
                       follow: true,
                       tailLines: 500,
                     });
