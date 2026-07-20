@@ -103,6 +103,17 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
     ],
   },
   {
+    title: 'Cluster picker',
+    shortcuts: [
+      { combos: [['↑'], ['↓']], description: 'Move selection (grid: also ← →)' },
+      { combos: [['Enter']], description: 'Switch to the highlighted cluster' },
+      { combos: [['Space'], [MOD, 'Enter']], description: 'Toggle the highlighted cluster (multi-select)' },
+      { combos: [[MOD, 'A']], description: 'Select all shown contexts (with an empty search)' },
+      { combos: [['Alt', '↑'], ['Alt', '↓']], description: 'Move the highlighted context (reorder / change group)' },
+      { combos: [['Esc']], description: 'Clear the search, then close' },
+    ],
+  },
+  {
     title: 'Resource lists',
     shortcuts: [
       { combos: [['S'], ['/'], [':']], description: 'Focus the filter input' },
