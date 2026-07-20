@@ -1187,13 +1187,15 @@ export interface HelmChartUpdate {
 
 // ---- Port forward ----
 
+export type PortForwardTargetKind = 'pod' | 'service' | 'deployment' | 'statefulset' | 'daemonset' | 'replicaset';
+
 export interface PortForwardInfo {
   id: string;
   ctx: string;
   namespace: string;
-  kind: 'pod' | 'service';
+  kind: PortForwardTargetKind;
   name: string;
-  /** Pod actually being forwarded to (resolved for services). */
+  /** Pod actually being forwarded to (resolved for services and workloads). */
   targetPod?: string;
   remotePort: number;
   localPort: number;
@@ -1204,8 +1206,19 @@ export interface PortForwardInfo {
 
 export interface PortForwardRequest {
   namespace: string;
-  kind: 'pod' | 'service';
+  kind: PortForwardTargetKind;
   name: string;
   remotePort: number;
   localPort?: number;
+}
+
+export interface PortForwardPreflightResponse {
+  allowed: boolean;
+  /** RBAC denial reason, when the cluster reports one. */
+  reason?: string;
+}
+
+export interface LocalPortCheckResponse {
+  port: number;
+  available: boolean;
 }

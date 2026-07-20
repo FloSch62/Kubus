@@ -1,6 +1,7 @@
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
@@ -19,7 +20,7 @@ export interface ContainerCardData {
   stateMessage?: string;
   restarts?: number;
   lastRestart?: { reason?: string; at?: string };
-  ports?: string;
+  ports?: Array<{ port: number; protocol?: string; name?: string }>;
   resources: ContainerResources;
   usage?: { cpuMilli: number; memBytes: number };
   /** Pods aggregated into `usage` (workload views); scales the bar's denominator. */
@@ -27,18 +28,18 @@ export interface ContainerCardData {
 }
 
 /** Card grid for a pod's (or workload template's) containers. */
-export function ContainerCards({ items }: { items: ContainerCardData[] }) {
+export function ContainerCards({ items, onForwardPort }: { items: ContainerCardData[]; onForwardPort?: (port: number) => void }) {
   if (!items.length) return null;
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 1.5 }}>
       {items.map((c) => (
-        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} />
+        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} onForwardPort={onForwardPort} />
       ))}
     </Box>
   );
 }
 
-function ContainerCard({ c }: { c: ContainerCardData }) {
+function ContainerCard({ c, onForwardPort }: { c: ContainerCardData; onForwardPort?: (port: number) => void }) {
   const showRestarts = (c.restarts ?? 0) > 0 || c.lastRestart;
   return (
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5, minWidth: 0 }}>
@@ -98,10 +99,31 @@ function ContainerCard({ c }: { c: ContainerCardData }) {
           )}
         </Typography>
       )}
-      {c.ports && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-          Ports {c.ports}
-        </Typography>
+      {!!c.ports?.length && (
+        <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            Ports
+          </Typography>
+          {c.ports.map((p) => {
+            const forwardable = onForwardPort && (p.protocol ?? 'TCP') === 'TCP';
+            const chip = (
+              <Chip
+                label={`${p.port}${p.name ? ` · ${p.name}` : ''}/${p.protocol ?? 'TCP'}`}
+                sx={{ height: 18, fontSize: 11 }}
+                clickable={!!forwardable}
+                onClick={forwardable ? () => onForwardPort(p.port) : undefined}
+              />
+            );
+            const key = `${p.port}/${p.protocol ?? 'TCP'}`;
+            return forwardable ? (
+              <Tooltip key={key} title={`Forward port ${p.port}`}>
+                {chip}
+              </Tooltip>
+            ) : (
+              <span key={key}>{chip}</span>
+            );
+          })}
+        </Stack>
       )}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5, mt: 1 }}>
         <Meter

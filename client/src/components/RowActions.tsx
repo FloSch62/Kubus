@@ -54,7 +54,6 @@ import {
   useRolloutRestart,
   useScale,
   useSetImage,
-  useStartPortForward,
   useSuspendCronJob,
   useTriggerCronJob,
 } from '../api/queries.js';
@@ -64,6 +63,7 @@ import { useIsProtected } from '../state/clusters.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
+import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { podContainerNames } from '../kube-display.js';
 import { kindListPath } from '../resource-links.js';
 
@@ -206,7 +206,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const isNode = actionKind === 'Node';
   const isCronJob = actionKind === 'CronJob';
   const isJob = actionKind === 'Job';
-  const canForward = isPod || actionKind === 'Service';
+  const canForward = isForwardableKind(actionKind);
   const canViewLogs = isLogTargetKind(actionKind ?? '');
   const unschedulable = isNode && !!(obj.spec as { unschedulable?: boolean })?.unschedulable;
   const cjSuspended = isCronJob && !!(obj.spec as { suspend?: boolean })?.suspend;
@@ -578,7 +578,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
       {dialog === 'debug' && <DebugDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'files' && <FileCopyDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} />}
       {dialog === 'set-image' && <SetImageDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
-      {dialog === 'forward' && <PortForwardDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
+      {dialog === 'forward' && <PortForwardDialog ctx={ctx} kind={actionKind ?? kind} obj={obj} onClose={() => setDialog(null)} />}
       {dialog === 'drain' && <DrainDialog target={target} onClose={() => setDialog(null)} />}
     </>
   );
@@ -897,58 +897,6 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           }
         >
           {debug.isPending ? 'Starting…' : 'Start'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-function PortForwardDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
-  const start = useStartPortForward();
-  const isPod = target.kind === 'Pod';
-  const defaultPort = isPod
-    ? ((target.obj.spec as { containers?: Array<{ ports?: Array<{ containerPort: number }> }> })?.containers?.[0]?.ports?.[0]?.containerPort ?? 80)
-    : ((target.obj.spec as { ports?: Array<{ port: number }> })?.ports?.[0]?.port ?? 80);
-  const [remotePort, setRemotePort] = useState(defaultPort);
-  const [localPort, setLocalPort] = useState<number | ''>('');
-  return (
-    <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Port forward {target.obj.metadata.name}</DialogTitle>
-      <DialogContent sx={{ display: 'flex', gap: 2, pt: '12px !important' }}>
-        <TextField label={`${target.kind} port`} type="number" value={remotePort} onChange={(e) => setRemotePort(Number(e.target.value))} />
-        <TextField label="Local port (auto)" type="number" value={localPort} onChange={(e) => setLocalPort(e.target.value === '' ? '' : Number(e.target.value))} placeholder="auto" />
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          disabled={start.isPending}
-          onClick={() =>
-            start.mutate(
-              {
-                ctx: target.ctx,
-                body: {
-                  namespace: target.obj.metadata.namespace ?? '',
-                  kind: isPod ? 'pod' : 'service',
-                  name: target.obj.metadata.name,
-                  remotePort,
-                  localPort: localPort === '' ? undefined : localPort,
-                },
-              },
-              {
-                onSuccess: (info) => {
-                  onClose();
-                  onDone(`Forwarding localhost:${info.localPort} → ${info.name}:${info.remotePort}`);
-                },
-                onError: (e) => {
-                  onClose();
-                  onError(e);
-                },
-              },
-            )
-          }
-        >
-          Start
         </Button>
       </DialogActions>
     </Dialog>

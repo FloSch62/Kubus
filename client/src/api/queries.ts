@@ -23,7 +23,9 @@ import type {
   NetworkAgentInstallResult,
   NetworkAgentStatus,
   NetworkAgentUninstallResult,
+  LocalPortCheckResponse,
   PortForwardInfo,
+  PortForwardPreflightResponse,
   PortForwardRequest,
   ResourceKindInfo,
   WatchStatusState,
@@ -1405,4 +1407,30 @@ export function useStopPortForward() {
     mutationFn: (id: string) => apiFetch(`/api/portforwards/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['portforwards'] }),
   });
+}
+
+export function useStopAllPortForwards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch('/api/portforwards', { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['portforwards'] }),
+  });
+}
+
+/** RBAC preflight for pods/portforward create in a namespace. */
+export function usePortForwardPreflight(vars: { ctx: string; namespace: string } | undefined) {
+  return useQuery({
+    queryKey: ['portforward-preflight', vars?.ctx, vars?.namespace],
+    queryFn: () =>
+      apiFetch<PortForwardPreflightResponse>(
+        `/api/contexts/${encodeURIComponent(vars!.ctx)}/portforwards/preflight?namespace=${encodeURIComponent(vars!.namespace)}`,
+      ),
+    enabled: !!vars,
+    staleTime: 60_000,
+  });
+}
+
+/** Whether a local port can be bound right now (advisory — start() re-checks). */
+export function checkLocalPort(port: number): Promise<LocalPortCheckResponse> {
+  return apiFetch<LocalPortCheckResponse>(`/api/portforwards/port-check?port=${port}`);
 }

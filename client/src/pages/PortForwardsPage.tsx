@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
 import Tooltip from '@mui/material/Tooltip';
 import StopIcon from '@mui/icons-material/Stop';
+import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { PortForwardInfo } from '@kubus/shared';
-import { usePortForwards, useStopPortForward } from '../api/queries.js';
+import { usePortForwards, useStopAllPortForwards, useStopPortForward } from '../api/queries.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -19,6 +21,8 @@ import { PageHeader } from '../components/PageHeader.js';
 export function PortForwardsPage() {
   const { data, isLoading } = usePortForwards();
   const { mutate: stop } = useStopPortForward();
+  const stopAll = useStopAllPortForwards();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const columns: GridColDef<PortForwardInfo>[] = useMemo(() => {
     const defs: GridColDef<PortForwardInfo>[] = [
@@ -72,12 +76,42 @@ export function PortForwardsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>
       <PageHeader title="Port Forwards" icon={<CableOutlinedIcon />}>
         <Chip label={`${data?.length ?? 0} active`} variant="outlined" />
+        <Box sx={{ flex: 1 }} />
+        {selectedIds.length > 0 && (
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<StopIcon />}
+            onClick={() => {
+              for (const id of selectedIds) stop(id);
+              setSelectedIds([]);
+            }}
+          >
+            Stop selected ({selectedIds.length})
+          </Button>
+        )}
+        {(data?.length ?? 0) > 0 && (
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<StopCircleOutlinedIcon />}
+            disabled={stopAll.isPending}
+            onClick={() => {
+              stopAll.mutate();
+              setSelectedIds([]);
+            }}
+          >
+            Stop all
+          </Button>
+        )}
       </PageHeader>
       {(data?.length ?? 0) === 0 && !isLoading ? (
         <EmptyState
           icon={<CableOutlinedIcon />}
           title="No active forwards"
-          subtitle="Start one from a Pod or Service row menu (⋮ → Port forward)."
+          subtitle="Start one from a Pod, Service or workload row menu (⋮ → Port forward…), or from the ports listed in a resource's details."
         />
       ) : (
         <DataGrid
@@ -86,6 +120,17 @@ export function PortForwardsPage() {
           loading={isLoading}
           getRowId={(r) => r.id}
           density={grid.density}
+          checkboxSelection
+          disableRowSelectionOnClick
+          onRowSelectionModelChange={(model) => {
+            // The header "select all" checkbox reports an exclude-type model
+            // whose ids are the deselected rows.
+            const ids = model.ids instanceof Set ? model.ids : new Set();
+            const rows = data ?? [];
+            setSelectedIds(
+              (model.type === 'exclude' ? rows.filter((r) => !ids.has(r.id)) : rows.filter((r) => ids.has(r.id))).map((r) => r.id),
+            );
+          }}
           onColumnWidthChange={grid.onColumnWidthChange}
           onCellKeyDown={handleCopyCellKeyDown}
           sx={{ border: 0, ...copyCellGridSx }}

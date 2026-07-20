@@ -18,6 +18,7 @@ import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { ContainerUsage, KubeObject, PodEnvVar } from '@kubus/shared';
 import { gvkForKind } from '@kubus/shared';
 import { ConditionChips, KeyValueChips, KeyValueSection, MetadataSection } from './GenericDetail.js';
+import { PortForwardDialog } from '../PortForwardDialog.js';
 import { PodProblems } from './PodProblems.js';
 import { Section } from './Section.js';
 import { ContainerCards, type ContainerCardData } from './ContainerCards.js';
@@ -34,7 +35,7 @@ interface ContainerSpec {
   name: string;
   image?: string;
   restartPolicy?: string;
-  ports?: Array<{ containerPort: number; protocol?: string }>;
+  ports?: Array<{ containerPort: number; protocol?: string; name?: string }>;
   volumeMounts?: Array<{ name: string; mountPath: string; readOnly?: boolean; subPath?: string }>;
   resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
 }
@@ -84,7 +85,7 @@ function containerCard(c: ContainerSpec, st: ContainerStatus | undefined, usage:
     stateMessage: stateKey && stateKey !== 'running' ? st!.state![stateKey]?.message : undefined,
     restarts: st?.restartCount,
     lastRestart: last ? { reason: last.reason, at: last.finishedAt } : undefined,
-    ports: (c.ports ?? []).map((p) => `${p.containerPort}/${p.protocol ?? 'TCP'}`).join(', ') || undefined,
+    ports: (c.ports ?? []).map((p) => ({ port: p.containerPort, protocol: p.protocol, name: p.name })),
     resources: containerResources(c),
     usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
   };
@@ -100,6 +101,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const initStatusByName = new Map((status?.initContainerStatuses ?? []).map((c) => [c.name, c]));
   const push = useDetailStore((s) => s.push);
   const namespace = obj.metadata.namespace;
+  const [forwardPort, setForwardPort] = useState<number>();
 
   const metricsQuery = useResourceMetrics([ctx], 'pods');
   const usageByContainer = useMemo(() => {
@@ -143,7 +145,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       </Stack>
       <PodProblems obj={obj} ctx={ctx} />
       <Section title="Containers" count={mainCards.length}>
-        <ContainerCards items={mainCards} />
+        <ContainerCards items={mainCards} onForwardPort={terminal ? undefined : setForwardPort} />
       </Section>
       {initCards.length > 0 && (
         <Section title="Init containers" count={initCards.length}>
@@ -157,6 +159,9 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
       <MetadataSection obj={obj} ctx={ctx} defaultOpen={false} />
+      {forwardPort !== undefined && (
+        <PortForwardDialog ctx={ctx} kind="Pod" obj={obj} initialRemotePort={forwardPort} onClose={() => setForwardPort(undefined)} />
+      )}
     </Stack>
   );
 }
