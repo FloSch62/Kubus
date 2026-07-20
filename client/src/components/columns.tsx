@@ -7,11 +7,13 @@ import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
-import { AgeCell } from './AgeCell.js';
+import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './format.js';
-import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
+import { dataKeyCount, eventFields, hasRunningDebugContainer, ingressHosts, jobPhase, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, ownerReference, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
+import { cronHumanText, cronNextRun } from '../cron.js';
+import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
@@ -287,6 +289,13 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     width: 75,
     valueGetter: (_v, row) => ((obj(row).status as { numberReady?: number })?.numberReady ?? 0).toString(),
   }),
+  jobStatus: () => ({
+    field: 'jobStatus',
+    headerName: 'Status',
+    width: 100,
+    valueGetter: (_v, row) => jobPhase(obj(row)),
+    renderCell: (params) => <StatusChip status={String(params.value ?? '')} />,
+  }),
   jobCompletions: () => ({
     field: 'jobCompletions',
     headerName: 'Completions',
@@ -299,11 +308,43 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     width: 90,
     valueGetter: (_v, row) => jobStatus(obj(row)).duration,
   }),
+  jobOwner: () => ({
+    field: 'jobOwner',
+    headerName: 'Owner',
+    width: 170,
+    valueGetter: (_v, row) => {
+      const ref = ownerReference(obj(row));
+      return ref ? `${ref.kind}/${ref.name}` : '';
+    },
+    renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
+  }),
   cronSchedule: () => ({
     field: 'cronSchedule',
     headerName: 'Schedule',
-    width: 110,
+    width: 150,
     valueGetter: (_v, row) => (obj(row).spec as { schedule?: string })?.schedule ?? '',
+    renderCell: (params) => <ScheduleCell spec={obj(params.row).spec as { schedule?: string; timeZone?: string } | undefined} />,
+  }),
+  cronNextRun: () => ({
+    field: 'cronNextRun',
+    headerName: 'Next run',
+    width: 95,
+    type: 'number',
+    headerAlign: 'left',
+    align: 'left',
+    valueGetter: (_v, row) => {
+      const spec = obj(row).spec as { schedule?: string; suspend?: boolean; timeZone?: string } | undefined;
+      if (!spec?.schedule || spec.suspend) return null;
+      return cronNextRun(spec.schedule, spec.timeZone)?.getTime() ?? null;
+    },
+    renderCell: (params) =>
+      typeof params.value === 'number' ? (
+        <RelativeTimeCell timestamp={new Date(params.value).toISOString()} />
+      ) : (
+        <Typography variant="body2" color="text.disabled">
+          —
+        </Typography>
+      ),
   }),
   cronSuspend: () => ({
     field: 'cronSuspend',
@@ -619,6 +660,35 @@ function LabelsCell({ labels, onLabelClick }: { labels?: Record<string, string>;
         {visible.map(chip)}
         {overflow > 0 && <Chip label={`+${overflow}`} size="small" sx={{ height: 20, fontSize: 11, flexShrink: 0 }} />}
       </Box>
+    </Tooltip>
+  );
+}
+
+/**
+ * CronJob schedule, shown as the cron expression or its human-readable text.
+ * Clicking flips the (persisted) preference for every schedule cell at once.
+ */
+function ScheduleCell({ spec }: { spec?: { schedule?: string; timeZone?: string } }) {
+  const human = useUiPrefsStore((s) => s.cronHumanSchedule);
+  const schedule = spec?.schedule ?? '';
+  if (!schedule) return null;
+  const humanText = cronHumanText(schedule);
+  const shown = human && humanText ? humanText : schedule;
+  const alt = human && humanText ? schedule : humanText;
+  const hint = [alt, spec?.timeZone, 'click to toggle'].filter(Boolean).join(' — ');
+  return (
+    <Tooltip title={hint}>
+      <Typography
+        variant="body2"
+        noWrap
+        onClick={(event) => {
+          event.stopPropagation();
+          useUiPrefsStore.getState().set({ cronHumanSchedule: !human });
+        }}
+        sx={{ cursor: 'pointer', minWidth: 0 }}
+      >
+        {shown}
+      </Typography>
     </Tooltip>
   );
 }

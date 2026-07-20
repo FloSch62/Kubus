@@ -12,7 +12,7 @@ import { newYamlModelPath } from '../monaco-setup.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useYamlSchema, type YamlEditorProps } from './YamlEditor.js';
 
-export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', toolbar, schema }: YamlEditorProps) {
+export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', applyUnchanged, onChange, toolbar, schema }: YamlEditorProps) {
   const theme = useTheme();
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
   const [text, setText] = useState(value);
@@ -44,9 +44,12 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
   );
 
   const dirty = text !== value;
+  const applicable = dirty || !!applyUnchanged;
   const dryRunCurrent = dryRunText === text ? dryRun : undefined;
+  // Edits must pass a dry-run before applying; an unedited generated manifest
+  // may go straight through — unless a dry-run of it already failed.
   const dryRunRequired = !!onDryRun && !!onApply && dirty;
-  const dryRunPassed = !dryRunRequired || dryRunCurrent?.ok;
+  const dryRunPassed = dryRunCurrent ? !!dryRunCurrent.ok : !dryRunRequired;
 
   const copyYaml = async () => {
     setError(undefined);
@@ -101,14 +104,20 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
         {onApply ? (
           <>
             {onDryRun ? (
-              <Button disabled={!dirty || dryRunBusy || busy} onClick={() => void validate()}>
+              <Button disabled={!applicable || dryRunBusy || busy} onClick={() => void validate()}>
                 {dryRunBusy ? 'Validating…' : dryRunCurrent?.ok ? 'Validated' : 'Dry run'}
               </Button>
             ) : null}
-            <Button disabled={!dirty || busy} onClick={() => setText(value)}>
+            <Button
+              disabled={!dirty || busy}
+              onClick={() => {
+                setText(value);
+                onChange?.(value);
+              }}
+            >
               Reset
             </Button>
-            <Button variant="contained" disabled={!dirty || busy || !dryRunPassed} onClick={() => void apply()}>
+            <Button variant="contained" disabled={!applicable || busy || !dryRunPassed} onClick={() => void apply()}>
               {busy ? 'Applying…' : applyLabel}
             </Button>
           </>
@@ -137,6 +146,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
           value={text}
           onChange={(v) => {
             setText(v ?? '');
+            onChange?.(v ?? '');
             setCopied(false);
             setDryRun(undefined);
             setDryRunText(undefined);

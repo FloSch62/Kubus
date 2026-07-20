@@ -1,8 +1,8 @@
 import { nanoid } from 'nanoid';
 import type { FastifyInstance } from 'fastify';
-import { groupFromPath, type CordonRequest, type DebugPodRequest, type DrainRequest, type RerunJobRequest, type RolloutPauseRequest, type RolloutRestartRequest, type RolloutUndoRequest, type ScaleRequest, type SetImageRequest, type StopDebugRequest, type SuspendCronJobRequest, type TriggerCronJobRequest } from '@kubus/shared';
+import { groupFromPath, type CordonRequest, type DebugPodRequest, type DrainRequest, type RerunJobRequest, type RolloutPauseRequest, type RolloutRestartRequest, type RolloutUndoRequest, type ScaleRequest, type SetImageRequest, type StopDebugRequest, type SuspendCronJobRequest } from '@kubus/shared';
 import type { AppContext } from '../app.js';
-import { drainNode, rerunJob, rolloutRestart, scaleResource, setCordon, setCronJobSuspend, setImage, triggerCronJob, type DrainProgress } from '../kube/actions.js';
+import { drainNode, rerunJob, rolloutRestart, scaleResource, setCordon, setCronJobSuspend, setImage, type DrainProgress } from '../kube/actions.js';
 import { addDebugContainer, stopDebugContainer } from '../kube/debug.js';
 import { rolloutUndo, setRolloutPaused } from '../kube/rollout.js';
 import { sendError } from '../util/errors.js';
@@ -37,16 +37,6 @@ export function registerActionRoutes(app: FastifyInstance, ctx: AppContext): voi
       const handle = ctx.clusters.get(req.params.ctx);
       await setCordon(handle, req.body.node, req.body.unschedulable);
       return { ok: true };
-    } catch (err) {
-      sendError(reply, err);
-      return reply;
-    }
-  });
-
-  app.post<{ Params: { ctx: string }; Body: TriggerCronJobRequest }>('/api/contexts/:ctx/actions/trigger-cronjob', async (req, reply) => {
-    try {
-      const handle = ctx.clusters.get(req.params.ctx);
-      return await triggerCronJob(handle, req.body.namespace, req.body.name);
     } catch (err) {
       sendError(reply, err);
       return reply;

@@ -3,15 +3,16 @@ import { gvkForResource, type KubeObject, type LogTargetKind, type ResourceRef }
 import {
   resolveLogTargetPods,
   useCordon,
+  useCreateResource,
   useRerunJob,
   useRolloutRestart,
   useSuspendCronJob,
-  useTriggerCronJob,
 } from '../api/queries.js';
 import { apiFetch } from '../api/http.js';
 import { resourceUrl } from '../api/queries.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { podContainerNames } from '../kube-display.js';
+import { manualJobYaml } from '../manual-job.js';
 
 /**
  * Palette actions for a resource. `run` actions execute immediately and
@@ -64,7 +65,7 @@ export function actionsForRef(ref: ResourceRef): PaletteAction[] {
 /** Execute a `run` palette action; resolves to a toast message. */
 export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) => Promise<string> {
   const restart = useRolloutRestart();
-  const trigger = useTriggerCronJob();
+  const create = useCreateResource();
   const rerun = useRerunJob();
   const suspendCj = useSuspendCronJob();
   const cordon = useCordon();
@@ -111,8 +112,10 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
           await restart.mutateAsync({ ctx: ref.ctx, body: { kind: ref.kind as 'Deployment', namespace, name: ref.name } });
           return `Rollout restart triggered for ${ref.name}`;
         case 'trigger': {
-          const r = await trigger.mutateAsync({ ctx: ref.ctx, body: { namespace, name: ref.name } });
-          return `Created job ${r.jobName}`;
+          // The palette triggers immediately; the row menu's dialog is where YAML review lives.
+          const obj = await fetchObj();
+          const created = await create.mutateAsync({ ctx: ref.ctx, yamlBody: manualJobYaml(obj) });
+          return `Created job ${created.metadata.name}`;
         }
         case 'rerun': {
           const r = await rerun.mutateAsync({ ctx: ref.ctx, body: { namespace, name: ref.name } });
@@ -134,6 +137,6 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
           throw new Error(`unknown palette action ${action.id}`);
       }
     },
-    [restart, trigger, rerun, suspendCj, cordon, addTab],
+    [restart, create, rerun, suspendCj, cordon, addTab],
   );
 }

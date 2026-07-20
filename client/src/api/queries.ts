@@ -42,7 +42,6 @@ import type {
   DrainStartedResponse,
   SetImageRequest,
   SuspendCronJobRequest,
-  TriggerCronJobRequest,
   RerunJobRequest,
   RolloutUndoRequest,
   RolloutPauseRequest,
@@ -676,9 +675,6 @@ export function useCordon() {
 }
 export function useDrain() {
   return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<DrainRequest, DrainStartedResponse>('drain') });
-}
-export function useTriggerCronJob() {
-  return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<TriggerCronJobRequest, { jobName: string }>('trigger-cronjob') });
 }
 export function useSuspendCronJob() {
   return useMutation({ meta: LOCAL_ERROR_HANDLING_META, mutationFn: actionMutation<SuspendCronJobRequest>('suspend-cronjob') });

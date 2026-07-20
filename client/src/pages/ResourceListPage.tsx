@@ -30,6 +30,7 @@ import { ResourceDetailPanel, type ResourceSelection } from '../components/Resou
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
 import { YamlEditor } from '../components/YamlEditor.js';
+import { BatchCreateDialog } from '../components/BatchCreateDialog.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { showToast } from '../state/toast.js';
@@ -326,6 +327,9 @@ export function ResourceListPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const openCreate = useCallback(() => setCreateOpen(true), []);
+  // Batch kinds get the guided form-based create dialog instead of the raw YAML stub.
+  const isBatchCreate = group === 'batch' && (kind === 'Job' || kind === 'CronJob');
+  const nsFilter = useClustersStore((s) => s.namespaces);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
   const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number } | null>(null);
@@ -746,21 +750,32 @@ export function ResourceListPage() {
             : undefined
         }
       />
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="md" fullWidth slotProps={{ paper: { sx: { height: '80vh' } } }}>
-        <DialogTitle>Create resource{selected.length > 1 ? ` on ${selected[0]}` : ''}</DialogTitle>
-        <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
-          <YamlEditor
-            value={createTemplate(kind, group, version)}
-            applyLabel="Create"
-            schema={selected[0] ? { ctx: selected[0], group, version, kind } : undefined}
-            onApply={async (text) => {
-              await create.mutateAsync({ ctx: selected[0]!, yamlBody: text });
-              setCreateOpen(false);
-            }}
-            onDryRun={(text) => dryRun.mutateAsync({ ctx: selected[0]!, yamlBody: text })}
-          />
-        </DialogContent>
-      </Dialog>
+      {createOpen && isBatchCreate && selected[0] ? (
+        <BatchCreateDialog
+          ctx={selected[0]}
+          kind={kind as 'Job' | 'CronJob'}
+          group={group}
+          version={version}
+          defaultNamespace={nsFilter.length === 1 ? nsFilter[0] : undefined}
+          onClose={() => setCreateOpen(false)}
+        />
+      ) : (
+        <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="md" fullWidth slotProps={{ paper: { sx: { height: '80vh' } } }}>
+          <DialogTitle>Create resource{selected.length > 1 ? ` on ${selected[0]}` : ''}</DialogTitle>
+          <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
+            <YamlEditor
+              value={createTemplate(kind, group, version)}
+              applyLabel="Create"
+              schema={selected[0] ? { ctx: selected[0], group, version, kind } : undefined}
+              onApply={async (text) => {
+                await create.mutateAsync({ ctx: selected[0]!, yamlBody: text });
+                setCreateOpen(false);
+              }}
+              onDryRun={(text) => dryRun.mutateAsync({ ctx: selected[0]!, yamlBody: text })}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
       </Box>
       <EmbeddedResourceDetail />
     </Box>
