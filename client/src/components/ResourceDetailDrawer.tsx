@@ -22,7 +22,10 @@ import { useApplyResource, useDryRunResource, useResource, useResourceEvents } f
 import { withoutManagedFields } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import { GenericDetail } from './detail/GenericDetail.js';
+import { ConfigMapDetail } from './detail/ConfigMapDetail.js';
+import { DataEditor } from './detail/DataEditor.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
 import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
@@ -60,11 +63,14 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const [tab, setTab] = useState('overview');
   const [reveal, setReveal] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
+  const [dataDirty, setDataDirty] = useState(false);
+  const [pendingLeave, setPendingLeave] = useState<() => void>();
   const pushDetail = useDetailStore((s) => s.push);
   const registeredKind = sel && gvkForResource(sel.group, sel.version, sel.plural)?.kind;
   const isCrdResource = sel?.group === 'apiextensions.k8s.io' && sel.version === 'v1' && sel.plural === 'customresourcedefinitions';
   const behaviorKind = sel && (registeredKind === sel.kind || isCrdResource) ? sel.kind : undefined;
   const isSecret = behaviorKind === 'Secret';
+  const hasDataTab = isSecret || behaviorKind === 'ConfigMap';
   const isCrd = isCrdResource && sel?.kind === 'CustomResourceDefinition';
   const backingCrdSelection = sel?.custom && !isCrd && sel.group
     ? {
@@ -82,7 +88,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   useEffect(() => {
     setTab('overview');
     setReveal(false);
+    setDataDirty(false);
+    setPendingLeave(undefined);
   }, [selKey]);
+
+  // Leaving the Data tab drops its staged per-key edits — route tab switches,
+  // back and close through a discard confirmation while it is dirty.
+  const guardLeave = (leave: () => void) => {
+    if (tab === 'data' && dataDirty) setPendingLeave(() => leave);
+    else leave();
+  };
 
   const hasSel = !!sel;
   useEffect(() => {
@@ -157,7 +172,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
       anchor="right"
       variant={inline ? 'permanent' : 'temporary'}
       open={inline || !!sel}
-      onClose={onClose}
+      onClose={() => guardLeave(onClose)}
       sx={
         inline
           ? {
@@ -183,14 +198,14 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             if (e.key === 'ArrowLeft' && e.altKey && !e.ctrlKey && !e.metaKey && onBack && !isTextEntryTarget(e.target)) {
               e.preventDefault();
               e.stopPropagation();
-              onBack();
+              guardLeave(onBack);
             }
           }}
           sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}
         >
           <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
             {onBack && (
-              <IconButton onClick={onBack} sx={{ mr: 1 }}>
+              <IconButton onClick={() => guardLeave(onBack)} sx={{ mr: 1 }}>
                 <ArrowBackIcon />
               </IconButton>
             )}
@@ -239,18 +254,19 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 </IconButton>
               </Tooltip>
             )}
-            <IconButton onClick={onClose} aria-label="Close resource details">
+            <IconButton onClick={() => guardLeave(onClose)} aria-label="Close resource details">
               <CloseIcon />
             </IconButton>
           </Stack>
           <Tabs
             value={tab}
-            onChange={(_e, v) => setTab(v as string)}
+            onChange={(_e, v) => guardLeave(() => setTab(v as string))}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
           >
             <Tab value="overview" label="Overview" sx={{ minHeight: 36 }} />
+            {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
             {versions.map((v) => (
               <Tab key={v.name} value={`crd:${v.name}`} label={v.name} sx={{ minHeight: 36 }} />
             ))}
@@ -262,6 +278,14 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           </Tabs>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
+            {hasDataTab && tab === 'data' && (
+              <DataEditor
+                key={selKey}
+                sel={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, name: sel.name, namespace: sel.namespace }}
+                isSecret={isSecret}
+                onDirtyChange={setDataDirty}
+              />
+            )}
             {tab.startsWith('crd:') && schemaSource && <CrdSchemaDetail obj={schemaSource} versionName={tab.slice('crd:'.length)} />}
             {showMap && tab === 'map' && (
               <Box sx={{ height: '100%', p: 1.25 }}>
@@ -307,6 +331,19 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
               <RolloutHistory ctx={sel.ctx} kind={sel.kind as 'Deployment' | 'StatefulSet'} obj={obj} />
             )}
           </Box>
+          <ConfirmDialog
+            open={!!pendingLeave}
+            title="Discard data changes?"
+            message="The Data tab has key edits that have not been applied. Leaving discards them."
+            confirmLabel="Discard"
+            danger
+            onConfirm={() => {
+              setDataDirty(false);
+              pendingLeave?.();
+              setPendingLeave(undefined);
+            }}
+            onClose={() => setPendingLeave(undefined)}
+          />
         </Box>
       )}
     </Drawer>
@@ -327,6 +364,8 @@ function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | unde
       return <NodeDetail obj={obj} ctx={ctx} />;
     case 'Service':
       return <ServiceDetail obj={obj} ctx={ctx} />;
+    case 'ConfigMap':
+      return <ConfigMapDetail obj={obj} ctx={ctx} />;
     case 'Secret':
       return <SecretDetail obj={obj} ctx={ctx} />;
     case 'CustomResourceDefinition':

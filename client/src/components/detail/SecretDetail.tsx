@@ -50,7 +50,7 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
               ))}
             </Stack>
             <Typography variant="caption" color="text.secondary">
-              Values are redacted — use the YAML tab with “Reveal secret data” to inspect them.
+              Values are redacted — reveal, copy or edit them per key in the Data tab.
             </Typography>
           </Box>
         )}

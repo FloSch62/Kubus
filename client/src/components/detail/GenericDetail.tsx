@@ -9,6 +9,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import type { KubeObject } from '@kubus/shared';
 import { AgeCell, formatAge } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
@@ -38,12 +39,40 @@ export function KeyValueSection({ title, entries, defaultOpen = true }: { title:
   );
 }
 
+/** Href for values that are plain web links; anything else (other schemes, garbage) stays inert. */
+function safeHref(value: string): string | undefined {
+  if (!/^https?:\/\//i.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function ChipList({ items }: { items: Array<[string, string]> }) {
   return (
     <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-      {items.map(([k, v]) => (
-        <Chip key={k} label={`${k}=${v}`} variant="outlined" sx={{ maxWidth: 420 }} title={`${k}=${v}`} />
-      ))}
+      {items.map(([k, v]) => {
+        const href = safeHref(v);
+        return href ? (
+          <Chip
+            key={k}
+            component="a"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            clickable
+            icon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+            label={`${k}=${v}`}
+            variant="outlined"
+            sx={{ maxWidth: 420 }}
+            title={`Open ${v}`}
+          />
+        ) : (
+          <Chip key={k} label={`${k}=${v}`} variant="outlined" sx={{ maxWidth: 420 }} title={`${k}=${v}`} />
+        );
+      })}
     </Stack>
   );
 }
