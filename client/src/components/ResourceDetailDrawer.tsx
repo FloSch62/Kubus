@@ -63,9 +63,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const [tab, setTab] = useState('overview');
   const [reveal, setReveal] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
-  const [dataDirty, setDataDirty] = useState(false);
-  const [pendingLeave, setPendingLeave] = useState<() => void>();
   const pushDetail = useDetailStore((s) => s.push);
+  // Leaving the Data tab drops its staged per-key edits. The guard lives in
+  // the detail store because selection replacements (row clicks, topology,
+  // search) bypass the drawer entirely; the drawer routes its own affordances
+  // (tab switch, back, close) through the same guard and dialog.
+  const guardLeave = useDetailStore((s) => s.guard);
+  const setDataDirty = useDetailStore((s) => s.setDataDirty);
+  const pendingDiscard = useDetailStore((s) => s.pendingDiscard);
+  const confirmDiscard = useDetailStore((s) => s.confirmDiscard);
+  const cancelDiscard = useDetailStore((s) => s.cancelDiscard);
   const registeredKind = sel && gvkForResource(sel.group, sel.version, sel.plural)?.kind;
   const isCrdResource = sel?.group === 'apiextensions.k8s.io' && sel.version === 'v1' && sel.plural === 'customresourcedefinitions';
   const behaviorKind = sel && (registeredKind === sel.kind || isCrdResource) ? sel.kind : undefined;
@@ -88,16 +95,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   useEffect(() => {
     setTab('overview');
     setReveal(false);
-    setDataDirty(false);
-    setPendingLeave(undefined);
   }, [selKey]);
-
-  // Leaving the Data tab drops its staged per-key edits — route tab switches,
-  // back and close through a discard confirmation while it is dirty.
-  const guardLeave = (leave: () => void) => {
-    if (tab === 'data' && dataDirty) setPendingLeave(() => leave);
-    else leave();
-  };
 
   const hasSel = !!sel;
   useEffect(() => {
@@ -332,17 +330,13 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             )}
           </Box>
           <ConfirmDialog
-            open={!!pendingLeave}
+            open={!!pendingDiscard}
             title="Discard data changes?"
             message="The Data tab has key edits that have not been applied. Leaving discards them."
             confirmLabel="Discard"
             danger
-            onConfirm={() => {
-              setDataDirty(false);
-              pendingLeave?.();
-              setPendingLeave(undefined);
-            }}
-            onClose={() => setPendingLeave(undefined)}
+            onConfirm={confirmDiscard}
+            onClose={cancelDiscard}
           />
         </Box>
       )}

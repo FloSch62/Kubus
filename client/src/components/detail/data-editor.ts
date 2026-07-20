@@ -169,9 +169,10 @@ export function validateEntries(entries: DataEntry[]): EntryProblem[] {
 
 /**
  * Build the manifest to apply: the latest server object with the draft's
- * per-key operations replayed onto it. Keys the draft never touched keep the
- * server's current value, so a concurrent edit of an unrelated key isn't
- * silently reverted by the PUT replace.
+ * per-key operations replayed onto it. Keys the draft never touched mirror
+ * the server's current state — they keep a concurrently edited value and
+ * stay absent when another client deleted them — so the PUT replace only
+ * asserts the keys this draft actually changed.
  */
 export function buildManifest(latest: KubeObject, entries: DataEntry[], isSecret: boolean): KubeObject {
   const clone = JSON.parse(JSON.stringify(latest)) as KubeObject;
@@ -188,9 +189,12 @@ export function buildManifest(latest: KubeObject, entries: DataEntry[], isSecret
   for (const e of entries) {
     if (e.deleted) continue;
     const field = entryField(e, isSecret);
-    const untouched = !entryDirty(e, isSecret);
-    const raw = untouched ? (latestValues[field].get(e.name) ?? e.storedRaw ?? '') : entryRaw(e, isSecret);
-    result[field].set(e.name, raw);
+    if (!entryDirty(e, isSecret)) {
+      const raw = latestValues[field].get(e.name);
+      if (raw !== undefined) result[field].set(e.name, raw);
+      continue;
+    }
+    result[field].set(e.name, entryRaw(e, isSecret));
   }
   for (const field of ['data', 'binaryData'] as const) {
     if (result[field].size) clone[field] = Object.fromEntries(result[field]);
