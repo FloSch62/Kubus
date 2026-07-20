@@ -2,7 +2,8 @@ import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import type { ContainerUsage, KubeObject } from '@kubus/shared';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { PortForwardDialog } from '../PortForwardDialog.js';
 import { useResourceList, useResourceMetrics } from '../../api/queries.js';
 import { containerResources, workloadReady } from '../../kube-display.js';
 import { ReadyCounter } from '../ReadyCounter.js';
@@ -20,7 +21,7 @@ interface TemplateContainer {
   name: string;
   image?: string;
   restartPolicy?: string;
-  ports?: Array<{ containerPort: number; protocol?: string }>;
+  ports?: Array<{ containerPort: number; protocol?: string; name?: string }>;
   resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
 }
 
@@ -52,6 +53,7 @@ function ownedBy(obj: KubeObject, uid: string | undefined): boolean {
 const deploymentGoodWhen = (type: string): 'True' | 'False' => (type === 'ReplicaFailure' ? 'False' : 'True');
 
 export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
+  const [forwardPort, setForwardPort] = useState<number>();
   const namespace = obj.metadata.namespace;
   const spec = obj.spec as DeploymentSpec | undefined;
   const labelSelector = selectorToString(spec?.selector);
@@ -99,7 +101,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
         name: c.name,
         image: c.image,
         kind,
-        ports: (c.ports ?? []).map((p) => `${p.containerPort}/${p.protocol ?? 'TCP'}`).join(', ') || undefined,
+        ports: (c.ports ?? []).map((p) => ({ port: p.containerPort, protocol: p.protocol, name: p.name })),
         resources: containerResources(c),
         usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
         podCount: usage?.pods,
@@ -128,7 +130,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
         <ConditionChips obj={obj} goodWhen={deploymentGoodWhen} />
       </Stack>
       <Section title="Containers" count={cards.length}>
-        <ContainerCards items={cards} />
+        <ContainerCards items={cards} onForwardPort={setForwardPort} />
       </Section>
       <Section title="Pods" count={pods.length}>
         <PodMiniList
@@ -150,6 +152,9 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
       <MetadataSection obj={obj} ctx={ctx} defaultOpen={false} />
+      {forwardPort !== undefined && (
+        <PortForwardDialog ctx={ctx} kind="Deployment" obj={obj} initialRemotePort={forwardPort} onClose={() => setForwardPort(undefined)} />
+      )}
     </Stack>
   );
 }

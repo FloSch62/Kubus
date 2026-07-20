@@ -3,14 +3,29 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { nanoid } from 'nanoid';
 import type { FastifyBaseLogger } from 'fastify';
-import type { PortForwardInfo, PortForwardRequest } from '@kubus/shared';
+import type { KubeObject, LogTargetKind, PortForwardInfo, PortForwardPreflightResponse, PortForwardRequest } from '@kubus/shared';
 import type { ClusterManager } from './cluster-manager.js';
+import { resourcePath } from './raw-client.js';
+import { resolveTargetPods } from './target-pods.js';
 import { HttpProblem } from '../util/errors.js';
 
 interface ActiveForward {
   info: PortForwardInfo;
   server: net.Server;
   sockets: Set<net.Socket>;
+}
+
+const WORKLOADS: Partial<Record<PortForwardRequest['kind'], { plural: string; kind: LogTargetKind }>> = {
+  deployment: { plural: 'deployments', kind: 'Deployment' },
+  statefulset: { plural: 'statefulsets', kind: 'StatefulSet' },
+  daemonset: { plural: 'daemonsets', kind: 'DaemonSet' },
+  replicaset: { plural: 'replicasets', kind: 'ReplicaSet' },
+};
+
+function isPodReady(pod: KubeObject): boolean {
+  const status = pod.status as { phase?: string; conditions?: Array<{ type?: string; status?: string }> } | undefined;
+  if (status?.phase !== 'Running') return false;
+  return (status.conditions ?? []).some((c) => c.type === 'Ready' && c.status === 'True');
 }
 
 /**
@@ -36,6 +51,15 @@ export class PortForwardManager extends EventEmitter {
     const handle = this.clusters.get(ctx);
     const id = nanoid(10);
 
+    const access = await this.preflight(ctx, req.namespace);
+    if (!access.allowed) {
+      throw new HttpProblem(
+        403,
+        `Your user is not allowed to port-forward in namespace "${req.namespace}" on cluster "${ctx}"` +
+          `${access.reason ? ` (${access.reason})` : ''}. Ask a cluster admin for a role granting "create" on "pods/portforward" in this namespace.`,
+      );
+    }
+
     // Validate the target up front so obvious errors fail the request.
     const target = await this.resolveTarget(ctx, req);
 
@@ -60,9 +84,15 @@ export class PortForwardManager extends EventEmitter {
     });
 
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        reject(
+          err.code === 'EADDRINUSE'
+            ? new HttpProblem(409, `Local port ${info.localPort} is already in use — pick another port or leave it empty for an automatic one.`)
+            : err,
+        );
+      });
       server.listen(info.localPort, '127.0.0.1', () => {
-        server.removeListener('error', reject);
+        server.removeAllListeners('error');
         resolve();
       });
     });
@@ -86,6 +116,14 @@ export class PortForwardManager extends EventEmitter {
       let errText = '';
       errStream.on('data', (chunk: Buffer) => {
         errText += chunk.toString('utf8');
+        // The kubelet reports forwarding failures (e.g. connection refused on
+        // the pod port) on the error channel while the websocket stays open —
+        // cut the connection instead of leaving the client hanging bytelessly.
+        info.state = 'error';
+        info.error = errText.trim();
+        this.log.warn({ id: info.id, err: info.error }, 'port-forward stream error');
+        socket.destroy();
+        this.emitUpdate();
       });
       const ws = await handle.makePortForward().portForward(req.namespace, target.pod, [target.port], socket, errStream, socket);
       info.state = 'active';
@@ -117,11 +155,22 @@ export class PortForwardManager extends EventEmitter {
   /**
    * Resolve the concrete pod and container port. Pod targets pass through;
    * service targets pick a ready endpoint pod and map the service port to
-   * its targetPort (numeric or named), like kubectl does.
+   * its targetPort (numeric or named), like kubectl does; workload targets
+   * pick a ready pod matching the workload's selector.
    */
   private async resolveTarget(ctx: string, req: PortForwardRequest): Promise<{ pod: string; port: number }> {
     if (req.kind === 'pod') return { pod: req.name, port: req.remotePort };
     const handle = this.clusters.get(ctx);
+
+    const workload = WORKLOADS[req.kind];
+    if (workload) {
+      const target = await handle.raw.json<KubeObject>(resourcePath('apps', 'v1', workload.plural, { namespace: req.namespace, name: req.name }));
+      const pods = await resolveTargetPods(handle, target, workload.kind, req.namespace);
+      const candidates = pods.filter((p) => !p.metadata.deletionTimestamp);
+      const pod = candidates.find(isPodReady) ?? candidates[0];
+      if (!pod) throw new HttpProblem(503, `${req.kind} "${req.namespace}/${req.name}" has no running pods`);
+      return { pod: pod.metadata.name, port: req.remotePort };
+    }
 
     const svcPromise = handle.core.readNamespacedService({ name: req.name, namespace: req.namespace });
     svcPromise.catch(() => undefined);
@@ -150,6 +199,41 @@ export class PortForwardManager extends EventEmitter {
       if (match) return { pod: podName, port: match.containerPort };
     }
     throw new HttpProblem(422, `could not resolve named port "${targetPort}" on pod ${podName}`);
+  }
+
+  /**
+   * SelfSubjectAccessReview for pods/portforward create. Fails open when the
+   * review itself cannot be performed — the forward attempt still surfaces
+   * the real error.
+   */
+  async preflight(ctx: string, namespace: string): Promise<PortForwardPreflightResponse> {
+    const handle = this.clusters.get(ctx);
+    try {
+      const review = await handle.raw.json<{ status?: { allowed?: boolean; reason?: string } }>('/apis/authorization.k8s.io/v1/selfsubjectaccessreviews', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          apiVersion: 'authorization.k8s.io/v1',
+          kind: 'SelfSubjectAccessReview',
+          spec: { resourceAttributes: { namespace, verb: 'create', resource: 'pods', subresource: 'portforward' } },
+        }),
+      });
+      return { allowed: review.status?.allowed !== false, reason: review.status?.reason };
+    } catch (err) {
+      this.log.debug({ ctx, err: err instanceof Error ? err.message : String(err) }, 'port-forward access review failed');
+      return { allowed: true };
+    }
+  }
+
+  /** Try to bind the port on 127.0.0.1 the same way start() will. */
+  async isLocalPortFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.listen(port, '127.0.0.1', () => {
+        probe.close(() => resolve(true));
+      });
+    });
   }
 
   stop(id: string): void {
