@@ -272,8 +272,14 @@ export function ResourceTable({
         onRowSelectionModelChange={
           onSelectionChange
             ? (model) => {
+                // The header "select all" checkbox reports an exclude-type
+                // model whose ids are the deselected rows.
                 const ids = model.ids instanceof Set ? model.ids : new Set();
-                onSelectionChange(filtered.filter((r) => ids.has(r.obj.metadata.uid)));
+                const selected =
+                  model.type === 'exclude'
+                    ? filtered.filter((r) => !ids.has(r.obj.metadata.uid))
+                    : filtered.filter((r) => ids.has(r.obj.metadata.uid));
+                onSelectionChange(selected);
               }
             : undefined
         }
