@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
 import LinearProgress from '@mui/material/LinearProgress';
 import ListItemIcon from '@mui/material/ListItemIcon';
@@ -19,6 +23,8 @@ import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SubjectIcon from '@mui/icons-material/Subject';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -34,6 +40,7 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
+import SpeedIcon from '@mui/icons-material/Speed';
 import { gvkForResource, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -58,6 +65,7 @@ import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
 import { podContainerNames } from '../kube-display.js';
+import { kindListPath } from '../resource-links.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -190,6 +198,8 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const fail = (err: unknown) => showToast('error', err instanceof Error ? err.message : String(err));
 
   const scalable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'ReplicaSet';
+  const navigate = useNavigate();
+  const { scaler } = useOwningScaler(scalable ? target : undefined);
   const restartable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'DaemonSet';
   const isReplicaSet = actionKind === 'ReplicaSet';
   const isPod = actionKind === 'Pod';
@@ -291,7 +301,33 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ListItemText>Port forward…</ListItemText>
           </MenuItem>
         )}
-        {scalable && (
+        {scalable && scaler && (
+          <MenuItem
+            onClick={() => {
+              void navigate(kindListPath(scaler.gvr, { sel: { ctx, namespace, name: scaler.name } }));
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <SpeedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={scaler.kind === 'ScaledObject' ? 'Open ScaledObject' : 'Open HPA'} secondary={scaler.name} />
+          </MenuItem>
+        )}
+        {scalable && scaler && (
+          <MenuItem
+            onClick={() => {
+              setDialog('scale');
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <OpenInFullIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Override replicas…</ListItemText>
+          </MenuItem>
+        )}
+        {scalable && !scaler && (
           <MenuItem
             onClick={() => {
               setDialog('scale');
@@ -549,54 +585,145 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
 }
 
 interface HpaSpec {
-  scaleTargetRef?: { kind?: string; name?: string };
+  scaleTargetRef?: { apiVersion?: string; kind?: string; name?: string };
   minReplicas?: number;
   maxReplicas?: number;
 }
 
+interface OwningScaler {
+  /** The resource the user should edit: the ScaledObject when the HPA is KEDA-managed, else the HPA itself. */
+  kind: 'ScaledObject' | 'HorizontalPodAutoscaler';
+  name: string;
+  gvr: { group: string; version: string; plural: string };
+  minReplicas?: number;
+  maxReplicas?: number;
+}
+
+/**
+ * Resolve the HPA or KEDA ScaledObject that owns a workload's replica count, if any.
+ * `pending` covers only the initial lookup; a failed lookup resolves to no scaler so
+ * users without HPA list access can still scale manually.
+ */
+function useOwningScaler(target: RowActionTarget | undefined): { scaler: OwningScaler | undefined; pending: boolean } {
+  const { data: hpas, isLoading } = useResourceList(
+    target
+      ? { ctx: target.ctx, group: 'autoscaling', version: 'v2', plural: 'horizontalpodautoscalers', namespace: target.obj.metadata.namespace }
+      : undefined,
+  );
+  return { scaler: target ? findOwningScaler(target, hpas?.items) : undefined, pending: !!target && isLoading };
+}
+
+function findOwningScaler(target: RowActionTarget, hpas: KubeObject[] | undefined): OwningScaler | undefined {
+  const hpa = hpas?.find((h) => {
+    const ref = (h.spec as HpaSpec | undefined)?.scaleTargetRef;
+    if (ref?.kind !== target.kind || ref.name !== target.obj.metadata.name) return false;
+    const refGroup = ref.apiVersion ? (ref.apiVersion.includes('/') ? ref.apiVersion.split('/')[0] : '') : undefined;
+    return refGroup === undefined || refGroup === target.group;
+  });
+  if (!hpa) return undefined;
+  const spec = hpa.spec as HpaSpec | undefined;
+  const scaledObject =
+    (hpa.metadata.ownerReferences ?? []).find((o) => o.kind === 'ScaledObject')?.name ?? hpa.metadata.labels?.['scaledobject.keda.sh/name'];
+  return scaledObject
+    ? { kind: 'ScaledObject', name: scaledObject, gvr: { group: 'keda.sh', version: 'v1alpha1', plural: 'scaledobjects' }, minReplicas: spec?.minReplicas, maxReplicas: spec?.maxReplicas }
+    : {
+        kind: 'HorizontalPodAutoscaler',
+        name: hpa.metadata.name,
+        gvr: { group: 'autoscaling', version: 'v2', plural: 'horizontalpodautoscalers' },
+        minReplicas: spec?.minReplicas,
+        maxReplicas: spec?.maxReplicas,
+      };
+}
+
 function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
   const scale = useScale();
+  const navigate = useNavigate();
   const current = (target.obj.spec as { replicas?: number })?.replicas ?? 0;
   const [replicas, setReplicas] = useState(current);
   const isProtected = useIsProtected(target.ctx);
   const [typed, setTyped] = useState('');
+  // Manual scaling of an autoscaled workload is disabled until explicitly overridden.
+  const [override, setOverride] = useState(false);
+  const { scaler, pending: scalerPending } = useOwningScaler(target);
+  const overrideBlocked = scalerPending || (!!scaler && !override);
   // Scaling a protected cluster's workload to zero is effectively an outage — require typed confirmation.
   const needsConfirm = isProtected && replicas === 0 && current > 0;
   const confirmBlocked = needsConfirm && typed !== target.obj.metadata.name;
-  const { data: hpas } = useResourceList({
-    ctx: target.ctx,
-    group: 'autoscaling',
-    version: 'v2',
-    plural: 'horizontalpodautoscalers',
-    namespace: target.obj.metadata.namespace,
-  });
-  const hpa = hpas?.items.find((h) => {
-    const ref = (h.spec as HpaSpec)?.scaleTargetRef;
-    return ref?.kind === target.kind && ref?.name === target.obj.metadata.name;
-  });
-  const hpaSpec = hpa?.spec as HpaSpec | undefined;
-  const kedaName = hpa?.metadata.labels?.['scaledobject.keda.sh/name'];
   return (
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Scale {target.obj.metadata.name}</DialogTitle>
       <DialogContent>
-        {hpa && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            HorizontalPodAutoscaler <b>{hpa.metadata.name}</b> targets this {target.kind} (min {hpaSpec?.minReplicas ?? 1} / max {hpaSpec?.maxReplicas ?? '?'})
-            {kedaName ? <>, managed by KEDA ScaledObject <b>{kedaName}</b></> : null}. Manual scaling will likely be reverted by the autoscaler.
+        {scaler && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  onClose();
+                  void navigate(kindListPath(scaler.gvr, { sel: { ctx: target.ctx, namespace: target.obj.metadata.namespace, name: scaler.name } }));
+                }}
+              >
+                Open
+              </Button>
+            }
+          >
+            Replicas of this {target.kind} are managed by {scaler.kind} <b>{scaler.name}</b> (min {scaler.minReplicas ?? 1} / max{' '}
+            {scaler.maxReplicas ?? '?'}). To scale permanently, edit the {scaler.kind === 'ScaledObject' ? 'ScaledObject' : 'HPA'} instead.
           </Alert>
         )}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Current replicas: {current}
         </Typography>
+        {scaler && (
+          <FormControlLabel
+            sx={{ mb: 1 }}
+            control={<Checkbox checked={override} onChange={(e) => setOverride(e.target.checked)} />}
+            label={
+              <Typography variant="body2">
+                Override the autoscaler — this change is temporary and will be reverted the next time it reconciles.
+              </Typography>
+            }
+          />
+        )}
         <TextField
           autoFocus
           fullWidth
           type="number"
           label="Replicas"
+          disabled={overrideBlocked}
           value={replicas}
           onChange={(e) => setReplicas(Math.max(0, Number(e.target.value)))}
-          slotProps={{ htmlInput: { min: 0 } }}
+          sx={{
+            '& input[type=number]': { MozAppearance: 'textfield', textAlign: 'center' },
+            '& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 },
+          }}
+          slotProps={{
+            htmlInput: { min: 0 },
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <IconButton
+                    size="small"
+                    aria-label="Decrease replicas"
+                    disabled={overrideBlocked || replicas <= 0}
+                    onClick={() => setReplicas((r) => Math.max(0, r - 1))}
+                  >
+                    <RemoveIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton size="small" aria-label="Increase replicas" disabled={overrideBlocked} onClick={() => setReplicas((r) => r + 1)}>
+                    <AddIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            },
+          }}
         />
         {needsConfirm && (
           <>
@@ -611,7 +738,7 @@ function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={scale.isPending || confirmBlocked}
+          disabled={scale.isPending || confirmBlocked || overrideBlocked}
           onClick={() =>
             scale.mutate(
               {
@@ -631,7 +758,7 @@ function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTa
             )
           }
         >
-          Scale
+          {scaler ? 'Override' : 'Scale'}
         </Button>
       </DialogActions>
     </Dialog>

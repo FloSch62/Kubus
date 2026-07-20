@@ -11,20 +11,12 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
 import { useNavigate } from 'react-router';
-import { groupToPath, type OverviewProblemPod, type OverviewWarningEvent } from '@kubus/shared';
+import type { OverviewProblemPod, OverviewWarningEvent } from '@kubus/shared';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
+import { kindListPath } from '../../resource-links.js';
 
-/** List-page path for a kind, optionally deep-linking a selection via ?sel=. */
-export function kindListPath(
-  gvr: { group: string; version: string; plural: string },
-  opts?: { sel?: { ctx: string; namespace?: string; name: string } },
-): string {
-  const params = new URLSearchParams();
-  if (opts?.sel) params.set('sel', `${opts.sel.ctx}|${opts.sel.namespace ?? ''}|${opts.sel.name}`);
-  const q = params.toString();
-  return `/r/${groupToPath(gvr.group)}/${gvr.version}/${gvr.plural}${q ? `?${q}` : ''}`;
-}
+export { kindListPath };
 
 export function FailingPodsCard({ ctx, pods, hideNamespace }: { ctx: string; pods: OverviewProblemPod[]; hideNamespace?: boolean }) {
   const navigate = useNavigate();
