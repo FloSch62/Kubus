@@ -22,6 +22,16 @@ function isBoundaryStart(text: string, i: number): boolean {
   return prev === prev.toLowerCase() && text[i] !== text[i]!.toLowerCase();
 }
 
+/** Whether q[qi..] appears in order in t starting at or after ti. */
+function remainderMatches(q: string, qi: number, t: string, ti: number): boolean {
+  for (let i = qi; i < q.length; i++) {
+    ti = t.indexOf(q[i]!, ti);
+    if (ti === -1) return false;
+    ti += 1;
+  }
+  return true;
+}
+
 /**
  * Match `query` against `text`; returns null when not every query character
  * appears in order. Case-insensitive. Greedy left-to-right with a boundary
@@ -42,10 +52,12 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
     const ch = q[qi]!;
     let found = t.indexOf(ch, ti);
     if (found === -1) return null;
-    // If the plain hit is mid-word, a slightly later boundary hit is better.
+    // If the plain hit is mid-word, a slightly later boundary hit is better —
+    // but only when the rest of the query still matches after the hop, so a
+    // valid subsequence is never discarded (e.g. "ac" in "xab-c-a").
     if (!isBoundaryStart(text, found) && (!positions.length || found !== positions[positions.length - 1]! + 1)) {
       for (let i = found + 1; i < Math.min(t.length, found + 24); i++) {
-        if (t[i] === ch && isBoundaryStart(text, i)) {
+        if (t[i] === ch && isBoundaryStart(text, i) && remainderMatches(q, qi + 1, t, i + 1)) {
           found = i;
           break;
         }

@@ -272,6 +272,16 @@ export function ClusterSwitcher() {
     () => buildPicker(contexts ?? [], contextSettings, contextOrder, query),
     [contexts, contextSettings, contextOrder, query],
   );
+  // Flat index of each section's first context, for keyboard navigation.
+  const sectionStarts = useMemo(() => {
+    const starts: number[] = [];
+    let acc = 0;
+    for (const s of sections) {
+      starts.push(acc);
+      acc += s.contexts.length;
+    }
+    return starts;
+  }, [sections]);
   const groupNames = useMemo(() => {
     const names = new Set<string>();
     for (const c of contexts ?? []) {
@@ -372,6 +382,38 @@ export function ClusterSwitcher() {
     setContextOrder(names);
   };
 
+  /**
+   * Vertical arrow movement in the grid: each section renders its own
+   * GRID_COLS-wide grid, so map to the card visually above/below via
+   * section-local rows and columns instead of a global ±GRID_COLS.
+   */
+  const gridMove = (i: number, dir: 1 | -1): number => {
+    const si = sections.findIndex((s, n) => i >= sectionStarts[n]! && i < sectionStarts[n]! + s.contexts.length);
+    if (si === -1) return i;
+    const start = sectionStarts[si]!;
+    const len = sections[si]!.contexts.length;
+    const local = i - start;
+    const col = local % GRID_COLS;
+    if (dir === 1) {
+      const below = local + GRID_COLS;
+      if (below < len) return start + below;
+      // A partial last row exists below: snap to its last card.
+      if (Math.floor(local / GRID_COLS) < Math.floor((len - 1) / GRID_COLS)) return start + len - 1;
+      // On the section's last row: continue into the next section's first row.
+      if (si + 1 < sections.length) return sectionStarts[si + 1]! + Math.min(col, sections[si + 1]!.contexts.length - 1);
+      return i;
+    }
+    const above = local - GRID_COLS;
+    if (above >= 0) return start + above;
+    if (si > 0) {
+      // Land on the previous section's last row, same column.
+      const prevLen = sections[si - 1]!.contexts.length;
+      const lastRow = Math.floor((prevLen - 1) / GRID_COLS) * GRID_COLS;
+      return sectionStarts[si - 1]! + Math.min(lastRow + col, prevLen - 1);
+    }
+    return i;
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
     const fromSearch = e.target === searchRef.current;
@@ -390,9 +432,9 @@ export function ClusterSwitcher() {
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      const step = layout === 'grid' ? GRID_COLS : 1;
-      const delta = e.key === 'ArrowDown' ? step : -step;
-      setActiveIndex((i) => Math.max(0, Math.min(i + delta, flat.length - 1)));
+      const dir = e.key === 'ArrowDown' ? 1 : (-1 as const);
+      if (layout === 'grid') setActiveIndex((i) => gridMove(i, dir));
+      else setActiveIndex((i) => Math.max(0, Math.min(i + dir, flat.length - 1)));
       return;
     }
     if (layout === 'grid' && query === '' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
@@ -688,12 +730,6 @@ export function ClusterSwitcher() {
       </Box>
     );
   };
-
-  // Flat index of each section's first context, for keyboard navigation.
-  const sectionStarts = sections.reduce<number[]>((acc, s, i) => {
-    acc.push(i === 0 ? 0 : acc[i - 1]! + sections[i - 1]!.contexts.length);
-    return acc;
-  }, []);
 
   return (
     <>
