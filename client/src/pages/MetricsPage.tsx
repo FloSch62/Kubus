@@ -83,7 +83,7 @@ function ClusterMetricsSection({ ctx }: { ctx: string }) {
         )}
         {/* One-shot refetch, independent of the cadence preset — works while polling is paused. */}
         <Tooltip title="Refresh metrics now">
-          <IconButton size="small" aria-label={`Refresh metrics for ${ctx}`} onClick={() => invalidateMetricsServer(qc)}>
+          <IconButton size="small" aria-label={`Refresh metrics for ${ctx}`} onClick={() => invalidateMetricsServer(qc, ctx)}>
             <RefreshIcon fontSize="small" />
           </IconButton>
         </Tooltip>

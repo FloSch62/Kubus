@@ -807,13 +807,24 @@ export function useMetricsServerStatus(ctx: string, opts?: { refetchMs?: number 
   });
 }
 
-/** One-shot refetch of every metrics query — also the "refresh now" action, so it works while polling is paused. */
-export function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
-  void qc.invalidateQueries({ queryKey: ['metrics-server-status'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-summary'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-nodes'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-snapshot'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-history'] });
+/**
+ * One-shot refetch of metrics queries — also the "refresh now" action, so it
+ * works while polling is paused. Scoped to one cluster when ctx is given so a
+ * per-cluster refresh doesn't fan out to every selected cluster.
+ */
+export function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>, ctx?: string): void {
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-server-status', ctx] : ['metrics-server-status'] });
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-summary', ctx] : ['metrics-summary'] });
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-nodes', ctx] : ['metrics-nodes'] });
+  // ctx sits deeper in these keys: snapshots batch a context list, history keys a selector object.
+  void qc.invalidateQueries({
+    queryKey: ['metrics-snapshot'],
+    predicate: (q) => !ctx || ((q.queryKey[2] as string[] | undefined) ?? []).includes(ctx),
+  });
+  void qc.invalidateQueries({
+    queryKey: ['metrics-history'],
+    predicate: (q) => !ctx || (q.queryKey[1] as { ctx?: string } | undefined)?.ctx === ctx,
+  });
 }
 
 export function useInstallMetricsServer() {
@@ -826,7 +837,7 @@ export function useInstallMetricsServer() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateMetricsServer(qc),
+    onSuccess: (_result, { ctx }) => invalidateMetricsServer(qc, ctx),
   });
 }
 
@@ -836,7 +847,7 @@ export function useUninstallMetricsServer() {
     meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<MetricsServerUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`, { method: 'DELETE' }),
-    onSuccess: () => invalidateMetricsServer(qc),
+    onSuccess: (_result, { ctx }) => invalidateMetricsServer(qc, ctx),
   });
 }
 
