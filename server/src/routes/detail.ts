@@ -106,7 +106,14 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
           if (!encoded) continue;
           const pem = Buffer.from(encoded, 'base64').toString('utf8');
           for (const block of pem.match(CERT_BLOCK_RE) ?? []) {
-            const cert = new X509Certificate(block);
+            let cert: X509Certificate;
+            try {
+              cert = new X509Certificate(block);
+            } catch {
+              // A malformed block (often a hand-edited ca.crt) must not hide
+              // the certificates that did parse.
+              continue;
+            }
             certificates.push({
               subject: cert.subject,
               issuer: cert.issuer,
