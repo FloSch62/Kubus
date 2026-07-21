@@ -86,9 +86,14 @@ import { showToast } from '../state/toast.js';
 
 // ---- Contexts ----
 
-export function useContexts() {
+/**
+ * Mounted once at the app root: re-fetches the context list on server
+ * kubeconfig broadcasts and refreshes discovery-derived queries when a
+ * cluster's CRD set changes. One shared subscription serves every
+ * useContexts() observer, so the hook itself stays subscription-free.
+ */
+export function useContextsInvalidation() {
   const qc = useQueryClient();
-  // Re-fetch the context list whenever the server reports kubeconfig changes.
   useEffect(
     () =>
       watchClient.onBroadcast((msg) => {
@@ -106,10 +111,20 @@ export function useContexts() {
       }),
     [qc],
   );
+}
+
+/**
+ * The shared context list. Poll from long-lived single mounts (the cluster
+ * picker); per-cluster instances (section headers) pass poll: false and ride
+ * on the cache — each polling observer runs its own interval timer, so N
+ * headers would otherwise multiply the refetches.
+ */
+export function useContexts({ poll = true }: { poll?: boolean } = {}) {
+  const interval = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['contexts'],
     queryFn: () => apiFetch<ContextInfo[]>('/api/contexts'),
-    refetchInterval: useRefetchInterval(30_000),
+    refetchInterval: poll ? interval : false,
   });
 }
 

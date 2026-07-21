@@ -6,7 +6,8 @@ import { ContextHealthDot } from './ContextHealthDot.js';
 
 /** Header for one cluster's section on multi-cluster stacked pages (Overview, Metrics, Network). */
 export function ClusterSectionHeader({ ctx, children }: { ctx: string; children?: React.ReactNode }) {
-  const { data: contexts } = useContexts();
+  // Ride on the cluster picker's polling — one header per cluster mounts here.
+  const { data: contexts } = useContexts({ poll: false });
   const info = contexts?.find((c) => c.name === ctx);
   return (
     <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
