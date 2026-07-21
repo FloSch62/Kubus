@@ -142,13 +142,31 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
       try {
         const handle = ctx.clusters.get(req.params.ctx);
         const manifest = parseManifest(req.body);
+        // replace() derives its target from the manifest, so a body pasted or
+        // dropped for a different resource would silently overwrite that other
+        // resource. Require the manifest to identify the resource in the URL.
+        const group = groupFromPath(req.params.group);
+        const kind = await kindForManifest(await handle.discovery.getResources(), manifest);
+        if (kind.group !== group || kind.plural !== req.params.plural) {
+          throw new HttpProblem(422, `manifest is a ${manifest.apiVersion}/${manifest.kind}, not the ${req.params.plural}${group ? `.${group}` : ''} this editor is for`, 'ResourceMismatch');
+        }
+        if (manifest.metadata!.name !== req.params.name) {
+          throw new HttpProblem(422, `manifest is named "${manifest.metadata!.name}", not "${req.params.name}"`, 'ResourceMismatch');
+        }
+        const namespace = req.query.namespace || undefined;
+        if (kind.namespaced) {
+          if (manifest.metadata!.namespace && namespace && manifest.metadata!.namespace !== namespace) {
+            throw new HttpProblem(422, `manifest targets namespace "${manifest.metadata!.namespace}", not "${namespace}"`, 'ResourceMismatch');
+          }
+          // Without a namespace, replace() would route to "default".
+          manifest.metadata!.namespace ??= namespace;
+        }
         try {
           return await handle.objects.replace(manifest);
         } catch (err) {
           // On conflict, hand back the server's current object so the
           // client can offer a re-read/merge flow.
           if (err instanceof ApiException && err.code === 409) {
-            const group = groupFromPath(req.params.group);
             const path = resourcePath(group, req.params.version, req.params.plural, {
               namespace: req.query.namespace || undefined,
               name: req.params.name,
