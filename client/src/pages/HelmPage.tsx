@@ -32,6 +32,8 @@ interface Row {
   release: HelmReleaseSummary;
 }
 
+const releasesGridSx = { flex: 1, minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx };
+
 export function HelmPage() {
   const selected = useClustersStore((s) => s.selected);
   const namespaces = useClustersStore((s) => s.namespaces);
@@ -203,7 +205,7 @@ export function HelmPage() {
             );
           }
         }}
-        sx={{ flex: 1, minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx }}
+        sx={releasesGridSx}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
       />
       {installOpen && (

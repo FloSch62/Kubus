@@ -18,6 +18,8 @@ import { StatusChip } from '../components/StatusChip.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { PageHeader } from '../components/PageHeader.js';
 
+const forwardsGridSx = { border: 0, ...copyCellGridSx };
+
 export function PortForwardsPage() {
   const { data, isLoading } = usePortForwards();
   const { mutate: stop } = useStopPortForward();
@@ -133,7 +135,7 @@ export function PortForwardsPage() {
           }}
           onColumnWidthChange={grid.onColumnWidthChange}
           onCellKeyDown={handleCopyCellKeyDown}
-          sx={{ border: 0, ...copyCellGridSx }}
+          sx={forwardsGridSx}
         />
       )}
     </Box>

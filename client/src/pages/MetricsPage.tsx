@@ -60,8 +60,8 @@ export function MetricsPage() {
 }
 
 function ClusterMetricsSection({ ctx }: { ctx: string }) {
-  // Poll status faster than the nav does: this page is where install progress is watched.
-  const { data: status, error: statusError } = useMetricsServerStatus(ctx, { refetchMs: 5_000 });
+  // The hook polls fast on its own while an install is settling.
+  const { data: status, error: statusError } = useMetricsServerStatus(ctx);
   const { data: summary, error: summaryError } = useMetricsSummary(ctx);
   const error = statusError ?? summaryError;
   const qc = useQueryClient();

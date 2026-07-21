@@ -50,7 +50,7 @@ function WelcomeState() {
   // Selecting drives the ClusterSwitcher's keep-healthy effect, which owns
   // connecting — no second connect path here.
   const setSelected = useClustersStore((s) => s.setSelected);
-  const { data: contexts, isLoading } = useContexts();
+  const { data: contexts, isLoading } = useContexts({ poll: false });
   const { data: kubeconfig } = useKubeconfigSettings();
   const [addOpen, setAddOpen] = useState(false);
   const shown = (contexts ?? []).slice(0, 8);

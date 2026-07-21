@@ -91,7 +91,7 @@ export function DiffPage() {
 }
 
 function SidePicker({ label, side, onChange }: { label: string; side: Side; onChange: (s: Side) => void }) {
-  const { data: contexts } = useContexts();
+  const { data: contexts } = useContexts({ poll: false });
   const activeContexts = (contexts ?? []).filter((c) => c.active).map((c) => c.name);
   const { data: kinds } = useApiResources(side.ctx);
   const { data: namespaces } = useNamespaces(side.ctx ? [side.ctx] : []);

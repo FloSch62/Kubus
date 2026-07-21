@@ -8,6 +8,16 @@ import type { ResourceSelection } from '../components/ResourceDetailDrawer.js';
  */
 interface DetailState {
   stack: ResourceSelection[];
+  /**
+   * The stack belongs to a resource list page's embedded side panel (set by
+   * its opener). The overlay drawer must ignore embedded-owned selections:
+   * when navigating from a list page to another page, the page unmount clears
+   * the selection one commit after the route changes — without this flag the
+   * overlay would mount open for that one commit and immediately close, and
+   * that interrupted enter→exit transition can strand MUI's Modal portal as
+   * an invisible, input-eating overlay (seen in the wild as a frozen app).
+   */
+  embedded: boolean;
   /** Embedded panel shrunk to its handle; the selection stays live. */
   collapsed: boolean;
   /** Embedded panel width in px; user-resizable via the divider. */
@@ -18,8 +28,8 @@ interface DetailState {
   dataDirty: boolean;
   /** Action stalled behind the discard confirmation while dataDirty. */
   pendingDiscard?: () => void;
-  open: (sel: ResourceSelection) => void;
-  push: (sel: ResourceSelection) => void;
+  open: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
+  push: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
   back: () => void;
   close: () => void;
   setCollapsed: (collapsed: boolean) => void;
@@ -44,6 +54,7 @@ function selKeyOf(sel: ResourceSelection): string {
 
 export const useDetailStore = create<DetailState>((set, get) => ({
   stack: [],
+  embedded: false,
   collapsed: false,
   width: DEFAULT_DETAIL_WIDTH,
   focusSeq: 0,
@@ -52,15 +63,20 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   // search) and replace the mounted detail — guard them so staged Data-tab
   // edits aren't dropped without confirmation. Re-opening the same resource
   // doesn't remount the editor, so it passes through.
-  open: (sel) => {
+  open: (sel, opts) => {
+    const embedded = opts?.embedded ?? false;
     const { stack } = get();
     const sameSel = stack.length === 1 && selKeyOf(stack[0]!) === selKeyOf(sel);
-    if (sameSel) set({ stack: [sel] });
-    else get().guard(() => set({ stack: [sel] }));
+    if (sameSel) set({ stack: [sel], embedded });
+    else get().guard(() => set({ stack: [sel], embedded }));
   },
   // Pushes can come from outside the panel (e.g. the API-resource drawer's
-  // CRD link), so surface the result even if the panel was collapsed.
-  push: (sel) => get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false }))),
+  // CRD link), so surface the result even if the panel was collapsed. A push
+  // extends whichever surface owns the stack, so the embedded flag is kept
+  // unless the caller states ownership — needed when a push seeds an empty
+  // stack (list pages can open their CRD with no row selected).
+  push: (sel, opts) =>
+    get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false, embedded: opts?.embedded ?? s.embedded }))),
   back: () => set((s) => ({ stack: s.stack.slice(0, -1) })),
   // Bail when already closed — close() is called liberally (e.g. on page
   // unmounts), and a fresh [] would re-render every stack subscriber.

@@ -54,8 +54,8 @@ export function NetworkMetricsPage() {
 }
 
 function ClusterNetworkSection({ ctx }: { ctx: string }) {
-  // Poll status faster than the nav does: this page is where install progress is watched.
-  const { data: status, error: statusError } = useNetworkAgentStatus(ctx, { refetchMs: 5_000 });
+  // The hook polls fast on its own while an install is settling.
+  const { data: status, error: statusError } = useNetworkAgentStatus(ctx);
   const { data: summary, error: summaryError } = useNetworkSummary(ctx);
   const error = statusError ?? summaryError;
 

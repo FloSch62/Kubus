@@ -1,17 +1,45 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+// Client state is mirrored here and persisted with fire-and-forget messages.
+// sendSync is deliberately avoided for the steady-state path: it parks the
+// renderer main thread in an untimed wait, and a single lost reply (seen in
+// the wild under rapid-fire writes) freezes the whole UI permanently. The one
+// sync call left is the boot-time snapshot below, before the page loads.
+const stateSnapshot: Record<string, string> = (() => {
+  try {
+    const all = ipcRenderer.sendSync('kubus:state:get-all') as unknown;
+    return all && typeof all === 'object' ? (all as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+})();
+
+// The disk-side write failed in the main process: mirror the snapshot into
+// origin-scoped localStorage so a relaunch on the same origin can migrate it
+// back (kubusStateStorage.getItem reads browser storage when the desktop
+// store has no value).
+ipcRenderer.on('kubus:state:write-failed', () => {
+  try {
+    for (const [name, value] of Object.entries(stateSnapshot)) window.localStorage.setItem(name, value);
+  } catch {
+    /* browser storage unavailable — nothing left to fall back to */
+  }
+});
+
 // Desktop bridge for stable client state plus native window integrations.
 contextBridge.exposeInMainWorld('kubusDesktop', {
   platform: process.platform,
   stateStorage: {
     getItem(name: string): string | null {
-      return ipcRenderer.sendSync('kubus:state:get-item', name) as string | null;
+      return stateSnapshot[name] ?? null;
     },
     setItem(name: string, value: string): void {
-      if (!ipcRenderer.sendSync('kubus:state:set-item', name, value)) throw new Error('failed to persist desktop state');
+      stateSnapshot[name] = value;
+      ipcRenderer.send('kubus:state:set-item', name, value);
     },
     removeItem(name: string): void {
-      if (!ipcRenderer.sendSync('kubus:state:remove-item', name)) throw new Error('failed to remove desktop state');
+      delete stateSnapshot[name];
+      ipcRenderer.send('kubus:state:remove-item', name);
     },
   },
   setTitleBarOverlay(options: { color: string; symbolColor: string }) {

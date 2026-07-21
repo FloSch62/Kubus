@@ -382,36 +382,63 @@ ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
   }
 });
 
-ipcMain.on('kubus:state:get-item', (event, name: unknown) => {
-  event.returnValue = isMainWindowSender(event) && typeof name === 'string' ? (loadClientState()[name] ?? null) : null;
+// One sync call, at preload time only: the boot snapshot the bridge serves
+// getItem from. A sync handler must set returnValue on every path — a missed
+// reply parks the renderer main thread forever.
+ipcMain.on('kubus:state:get-all', (event) => {
+  try {
+    event.returnValue = isMainWindowSender(event) ? { ...loadClientState() } : {};
+  } catch {
+    event.returnValue = {};
+  }
 });
 
-ipcMain.on('kubus:state:set-item', (event, name: unknown, value: unknown) => {
-  if (!isMainWindowSender(event) || typeof name !== 'string' || typeof value !== 'string') {
-    event.returnValue = false;
-    return;
+// Steady-state writes are fire-and-forget so the renderer never blocks on
+// persistence; bursts (fast clicking flips several stores at once) coalesce
+// into one disk write.
+const STATE_FLUSH_MS = 150;
+const STATE_RETRY_MS = 5_000;
+let stateFlushTimer: NodeJS.Timeout | undefined;
+let pendingClientState: Record<string, string> | undefined;
+
+function scheduleClientStateFlush(state: Record<string, string>, delay = STATE_FLUSH_MS): void {
+  pendingClientState = state;
+  clientStateCache = state;
+  stateFlushTimer ??= setTimeout(() => {
+    stateFlushTimer = undefined;
+    flushClientState();
+  }, delay);
+}
+
+function flushClientState(): void {
+  if (stateFlushTimer !== undefined) {
+    clearTimeout(stateFlushTimer);
+    stateFlushTimer = undefined;
   }
+  const state = pendingClientState;
+  if (!state) return;
   try {
-    saveClientState({ ...loadClientState(), [name]: value });
-    event.returnValue = true;
+    saveClientState(state);
+    pendingClientState = undefined;
   } catch {
-    event.returnValue = false;
+    // Disk write failed (full disk, permissions …): keep the state pending
+    // and retry with backoff, and tell the renderer so it can mirror the
+    // snapshot into browser storage as a fallback.
+    mainWindow?.webContents.send('kubus:state:write-failed');
+    scheduleClientStateFlush(state, STATE_RETRY_MS);
   }
+}
+
+ipcMain.on('kubus:state:set-item', (event, name: unknown, value: unknown) => {
+  if (!isMainWindowSender(event) || typeof name !== 'string' || typeof value !== 'string') return;
+  scheduleClientStateFlush({ ...loadClientState(), [name]: value });
 });
 
 ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
-  if (!isMainWindowSender(event) || typeof name !== 'string') {
-    event.returnValue = false;
-    return;
-  }
-  try {
-    const next = { ...loadClientState() };
-    delete next[name];
-    saveClientState(next);
-    event.returnValue = true;
-  } catch {
-    event.returnValue = false;
-  }
+  if (!isMainWindowSender(event) || typeof name !== 'string') return;
+  const next = { ...loadClientState() };
+  delete next[name];
+  scheduleClientStateFlush(next);
 });
 
 // The renderer pulls the pending deep link once its route listener is
@@ -488,6 +515,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', (event) => {
+    flushClientState();
     if (!server) return;
     if (!closing) {
       closing = server.close().catch(() => undefined);

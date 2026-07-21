@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { usePaneActive } from '../layout/pane-context.js';
 import { kubusStateStorage } from './persist-storage.js';
 
 export type TableDensity = 'compact' | 'comfortable';
@@ -100,9 +101,16 @@ export const useUiPrefsStore = create<UiPrefsState>()(
  * A stable per-mount ±10% jitter decorrelates the timers of components that
  * poll with the same base (e.g. one overview section per cluster), so many
  * clusters don't fire synchronized request bursts.
+ *
+ * Polling pauses while the enclosing tab pane is hidden — pages stay mounted
+ * in inactive panes, and without this every open tab keeps its full request
+ * loop running. On reveal the poll resumes on its normal cadence (watches keep
+ * lists current; polled extras catch up within one interval).
  */
 export function useRefetchInterval(base: number): number | false {
   const rate = useUiPrefsStore((s) => s.refreshRate);
+  const paneActive = usePaneActive();
   const [jitter] = useState(() => 0.9 + Math.random() * 0.2);
-  return rate === 'off' ? false : Math.round(base * REFRESH_FACTOR[rate] * jitter);
+  if (!paneActive || rate === 'off') return false;
+  return Math.round(base * REFRESH_FACTOR[rate] * jitter);
 }
