@@ -2,6 +2,7 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Grid from '@mui/material/Grid';
+import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -10,10 +11,11 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { alpha } from '@mui/material/styles';
-import { useNavigate } from 'react-router';
-import type { OverviewProblemPod, OverviewWarningEvent } from '@kubus/shared';
+import { Link as RouterLink, useNavigate } from 'react-router';
+import { gvkForKind, type OverviewProblemPod, type OverviewWarningEvent } from '@kubus/shared';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
+import { useApiResources } from '../../api/queries.js';
 import { kindListPath } from '../../resource-links.js';
 
 export { kindListPath };
@@ -58,27 +60,51 @@ export function FailingPodsCard({ ctx, pods, hideNamespace }: { ctx: string; pod
   );
 }
 
-export function WarningEventsCard({ events }: { events: OverviewWarningEvent[] }) {
+export function WarningEventsCard({ ctx, events }: { ctx: string; events: OverviewWarningEvent[] }) {
+  const { data: apiResources } = useApiResources(events.length > 0 ? ctx : undefined);
   if (events.length === 0) return null;
+  // Server-side resolution can miss (payload from an older server, discovery
+  // hiccup); fall back to the builtin table, then the cached discovery list.
+  const kindFromDiscovery = (kind: string) => {
+    const byKind = apiResources?.filter((k) => k.kind === kind) ?? [];
+    return byKind.find((k) => !k.custom) ?? byKind[0];
+  };
   return (
     <ProblemCard title="Warning events (1h)">
       <Stack spacing={0.5}>
-        {events.slice(0, 15).map((e) => (
-          <Typography key={`${e.namespace}/${e.involvedKind}/${e.involvedName}/${e.reason}/${e.lastTimestamp ?? ''}/${e.message}`} variant="body2">
-            <Typography component="span" variant="body2" sx={{ color: 'warning.main', fontWeight: 600 }}>
-              {e.reason}
-            </Typography>
-            {e.count > 1 && (
-              <Typography component="span" variant="caption" sx={{ fontWeight: 600 }}>
-                {' '}({e.count}x)
+        {events.slice(0, 15).map((e) => {
+          const gvr = e.involvedGvr ?? gvkForKind(e.involvedKind) ?? kindFromDiscovery(e.involvedKind);
+          const label = `${e.involvedKind}/${e.namespace ? `${e.namespace}/` : ''}${e.involvedName}`;
+          return (
+            <Typography key={`${e.namespace}/${e.involvedKind}/${e.involvedName}/${e.reason}/${e.lastTimestamp ?? ''}/${e.message}`} variant="body2">
+              <Typography component="span" variant="body2" sx={{ color: 'warning.main', fontWeight: 600 }}>
+                {e.reason}
               </Typography>
-            )}{' '}
-            <Typography component="span" variant="caption" color="text.secondary">
-              <AgeCell timestamp={e.lastTimestamp} /> ago
-            </Typography>{' '}
-            — {e.involvedKind}/{e.namespace ? `${e.namespace}/` : ''}{e.involvedName}: {e.message}
-          </Typography>
-        ))}
+              {e.count > 1 && (
+                <Typography component="span" variant="caption" sx={{ fontWeight: 600 }}>
+                  {' '}({e.count}x)
+                </Typography>
+              )}{' '}
+              <Typography component="span" variant="caption" color="text.secondary">
+                <AgeCell timestamp={e.lastTimestamp} /> ago
+              </Typography>{' '}
+              —{' '}
+              {gvr ? (
+                <Link
+                  component={RouterLink}
+                  to={kindListPath(gvr, { sel: { ctx, namespace: e.namespace || undefined, name: e.involvedName } })}
+                  underline="hover"
+                  sx={{ fontWeight: 500 }}
+                >
+                  {label}
+                </Link>
+              ) : (
+                label
+              )}
+              : {e.message}
+            </Typography>
+          );
+        })}
       </Stack>
     </ProblemCard>
   );

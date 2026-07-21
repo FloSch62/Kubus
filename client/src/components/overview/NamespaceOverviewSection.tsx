@@ -71,7 +71,7 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
 
           <FailingPodsCard ctx={ctx} pods={data.failingPods} hideNamespace={single} />
 
-          <WarningEventsCard events={data.warningEvents} />
+          <WarningEventsCard ctx={ctx} events={data.warningEvents} />
 
           {healthy && (
             <Alert severity="success" variant="outlined">

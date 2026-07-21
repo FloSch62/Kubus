@@ -12,6 +12,11 @@ export function usageColor(pct: number): 'success' | 'warning' | 'error' {
  * utilization bar when a reference total (requests or limits) is known.
  * Shared by the list CPU/Memory cells, PodMiniList and the detail
  * container cards.
+ *
+ * Under budget the track spans the reference total. Over budget it rescales
+ * to actual usage: a tick marks where the request/limit sits and the hatched
+ * segment beyond it is the overshoot, so 154% and 400% look as different as
+ * they are.
  */
 export function UsageMeter({
   value,
@@ -45,7 +50,13 @@ export function UsageMeter({
     );
   }
   const pct = max ? (value / max) * 100 : undefined;
-  const tip = pct !== undefined ? `${text} of ${format(max!)} ${maxHint} (${pct.toFixed(0)}%)` : `${text} · ${emptyHint ?? 'no requests set'}`;
+  const over = pct !== undefined && pct > 100;
+  // Position of the request/limit tick on a track rescaled to `value`.
+  const markerPct = over ? (max! / value) * 100 : undefined;
+  const tip =
+    pct !== undefined
+      ? `${text} of ${format(max!)} ${maxHint} (${pct.toFixed(0)}%)${over ? ` — ${format(value - max!)} over` : ''}`
+      : `${text} · ${emptyHint ?? 'no requests set'}`;
   return (
     <Tooltip title={tip}>
       <Box sx={{ width: '100%', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -53,12 +64,43 @@ export function UsageMeter({
           {text}
         </Typography>
         {pct !== undefined ? (
-          <LinearProgress
-            variant="determinate"
-            value={Math.max(0, Math.min(100, pct))}
-            color={usageColor(pct)}
-            sx={{ flex: 1, minWidth: 36, height: 5, borderRadius: 999, bgcolor: 'action.hover' }}
-          />
+          <Box sx={{ position: 'relative', flex: 1, minWidth: 36 }}>
+            <LinearProgress
+              variant="determinate"
+              value={over ? 100 : Math.max(0, Math.min(100, pct))}
+              color={usageColor(pct)}
+              sx={{ height: 5, borderRadius: 999, bgcolor: 'action.hover' }}
+            />
+            {markerPct !== undefined && (
+              <>
+                <Box
+                  sx={(theme) => ({
+                    position: 'absolute',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    left: `${markerPct}%`,
+                    right: 0,
+                    height: 5,
+                    borderRadius: '0 999px 999px 0',
+                    backgroundImage: `repeating-linear-gradient(-45deg, ${theme.palette.error.dark} 0 3px, transparent 3px 6px)`,
+                  })}
+                />
+                <Box
+                  sx={(theme) => ({
+                    position: 'absolute',
+                    top: '50%',
+                    left: `${markerPct}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: 2,
+                    height: 11,
+                    borderRadius: 1,
+                    bgcolor: 'text.primary',
+                    boxShadow: `0 0 0 1px ${theme.palette.background.paper}`,
+                  })}
+                />
+              </>
+            )}
+          </Box>
         ) : (
           <Box sx={{ flex: 1, minWidth: 36, height: 5, borderRadius: 999, bgcolor: 'action.hover', opacity: 0.5 }} />
         )}

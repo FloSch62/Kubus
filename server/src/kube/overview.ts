@@ -1,4 +1,4 @@
-import type { ClusterOverview, KubeObject, OverviewWarningEvent } from '@kubus/shared';
+import type { ClusterOverview, KubeObject, OverviewWarningEvent, ResourceKindInfo } from '@kubus/shared';
 import { apiServerCertNotAfter, collectCertificates } from './cert-expiry.js';
 import type { ClusterHandle } from './cluster-manager.js';
 import { computeOperatorRollups } from './operator-rollups.js';
@@ -117,7 +117,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       }
     }
 
-    overview.warningEvents = collectWarningEvents(events, now);
+    overview.warningEvents = collectWarningEvents(events, now, await handle.discovery.getResources().catch(() => []));
 
     overview.failingPods.sort((a, b) => `${a.namespace}/${a.name}`.localeCompare(`${b.namespace}/${b.name}`));
     overview.recentRestarts.sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''));
@@ -160,7 +160,7 @@ export function podFailure(pod: KubeObject, now: number): { reason: string; mess
 }
 
 /** Warning events within the 1h window, newest first, capped at 50. */
-export function collectWarningEvents(events: KubeObject[], now: number): OverviewWarningEvent[] {
+export function collectWarningEvents(events: KubeObject[], now: number, kinds: ResourceKindInfo[] = []): OverviewWarningEvent[] {
   return events
     .flatMap((e) => {
       if ((e as { type?: string }).type !== 'Warning') return [];
@@ -176,7 +176,7 @@ export function collectWarningEvents(events: KubeObject[], now: number): Overvie
         message?: string;
         count?: number;
         lastTimestamp?: string;
-        involvedObject?: { kind?: string; name?: string };
+        involvedObject?: { apiVersion?: string; kind?: string; name?: string };
       };
       return {
         namespace: e.metadata.namespace ?? '',
@@ -184,10 +184,41 @@ export function collectWarningEvents(events: KubeObject[], now: number): Overvie
         message: ev.message ?? '',
         involvedKind: ev.involvedObject?.kind ?? '',
         involvedName: ev.involvedObject?.name ?? '',
+        involvedGvr: resolveInvolvedGvr(kinds, ev.involvedObject),
         count: ev.count ?? 1,
         lastTimestamp: time || undefined,
       };
     });
+}
+
+/**
+ * Resolve an event's involvedObject to its list GVR via discovery, so the
+ * client can deep-link it. Controllers are sloppy about apiVersion (bare
+ * group, stale version, or missing entirely), so this degrades from an exact
+ * group+version match down to a by-kind lookup rather than giving up.
+ */
+function resolveInvolvedGvr(
+  kinds: ResourceKindInfo[],
+  involved: { apiVersion?: string; kind?: string } | undefined,
+): { group: string; version: string; plural: string } | undefined {
+  const kind = involved?.kind;
+  if (!kind) return undefined;
+  const byKind = kinds.filter((k) => k.kind === kind);
+  if (byKind.length === 0) return undefined;
+  const apiVersion = involved.apiVersion ?? '';
+  let group = '';
+  let version = '';
+  if (apiVersion.includes('/')) [group = '', version = ''] = apiVersion.split('/');
+  else if (apiVersion.includes('.')) group = apiVersion; // bare group, e.g. "core.eda.nokia.com"
+  else version = apiVersion; // core-group version, e.g. "v1"
+  const inGroup = group ? byKind.filter((k) => k.group === group) : byKind;
+  const match =
+    inGroup.find((k) => version && k.version === version) ??
+    inGroup.find((k) => !k.custom) ??
+    inGroup[0] ??
+    byKind.find((k) => !k.custom) ??
+    byKind[0];
+  return match ? { group: match.group, version: match.version, plural: match.plural } : undefined;
 }
 
 function eventTime(e: KubeObject): string {

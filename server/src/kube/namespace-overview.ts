@@ -154,7 +154,7 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
       issues: health.issues,
       failingPods,
       quotas,
-      warningEvents: collectWarningEvents(events, now),
+      warningEvents: collectWarningEvents(events, now, await handle.discovery.getResources().catch(() => [])),
       operators: await computeOperatorRollups(handle, crdsResult.items, scope),
       certificates: await collectCertificates(handle, crdsResult.items, scope),
     };

@@ -254,7 +254,7 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
             </ProblemCard>
           )}
 
-          <WarningEventsCard events={data.warningEvents} />
+          <WarningEventsCard ctx={ctx} events={data.warningEvents} />
 
           {data.failingPods.length === 0 &&
             data.unavailableWorkloads.length === 0 &&
