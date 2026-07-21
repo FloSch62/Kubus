@@ -7,7 +7,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useNavigate } from 'react-router';
 import { pluralLabel, type NamespaceInventoryEntry, type NamespaceQuotaStatus } from '@kubus/shared';
-import { useNamespaceOverview } from '../../api/queries.js';
+import { useNamespaceOverview, useOverviewCertificates, useOverviewOperators } from '../../api/queries.js';
 import { StatusChip } from '../StatusChip.js';
 import { usageColor } from '../UsageMeter.js';
 import { CertExpiryCard } from './CertExpiryCard.js';
@@ -25,16 +25,24 @@ import { statusTextColor } from '../../theme.js';
  * List links inherit the same global filter.
  */
 export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; namespaces: string[] }) {
-  const { data, isLoading, error } = useNamespaceOverview(ctx, namespaces);
+  const { data, isLoading, error, isPlaceholderData } = useNamespaceOverview(ctx, namespaces);
+  // Operator rollups and certificates warm up slowly (operator CR lists, the
+  // all-secrets watcher) — they stream in behind the inventory and health.
+  const { data: operators } = useOverviewOperators(ctx, namespaces);
+  const { data: certificates } = useOverviewCertificates(ctx, namespaces);
   const single = namespaces.length === 1;
-  // The success alert must agree with every problem card above it.
+  // The success alert must agree with every problem card above it — and never
+  // judge a stale previous-scope placeholder against fresh operators/certs.
   const healthy =
     !!data &&
+    !isPlaceholderData &&
     data.issues.length === 0 &&
     data.failingPods.length === 0 &&
     data.warningEvents.length === 0 &&
-    data.certificates.expiring.length === 0 &&
-    data.operators.every((op) => op.resources.every((r) => r.issues.length === 0 && r.ready >= r.total));
+    !!certificates &&
+    certificates.expiring.length === 0 &&
+    !!operators &&
+    operators.every((op) => op.resources.every((r) => r.issues.length === 0 && r.ready >= r.total));
 
   return (
     <>
@@ -62,9 +70,9 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
 
           <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.issues} scoped hideNamespace={single} />
 
-          <OperatorSection ctx={ctx} operators={data.operators} scoped />
+          {operators && <OperatorSection ctx={ctx} operators={operators} scoped />}
 
-          <CertExpiryCard ctx={ctx} certificates={data.certificates} hideNamespace={single} />
+          {certificates && <CertExpiryCard ctx={ctx} certificates={certificates} hideNamespace={single} />}
 
           {data.quotas.length > 0 && <QuotasCard quotas={data.quotas} />}
 

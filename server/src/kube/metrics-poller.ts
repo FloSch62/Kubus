@@ -14,6 +14,8 @@ const RING_CAPACITY = 90; // ~30 min at 20s
  */
 export class MetricsPoller {
   available = false;
+  /** At least one probe has completed — before that `available` is provisional, not a verdict. */
+  probed = false;
   private nodes = new Map<string, MetricsSample[]>();
   private pods = new Map<string, MetricsSample[]>(); // key: ns/name
   private latestNodes: MetricsSnapshotEntry[] = [];
@@ -81,6 +83,7 @@ export class MetricsPoller {
   markUnavailable(): void {
     this.epoch++;
     this.available = false;
+    this.probed = true;
     this.latestNodes = [];
     this.latestPods = [];
     if (this.timer) clearTimeout(this.timer);
@@ -139,6 +142,7 @@ export class MetricsPoller {
       this.latestNodes = [];
       this.latestPods = [];
     } finally {
+      this.probed = true;
       this.polling = false;
     }
     if (this.stopped) return;

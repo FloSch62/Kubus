@@ -1,7 +1,5 @@
 import type { ClusterOverview, KubeObject, OverviewWarningEvent, ResourceKindInfo } from '@kubus/shared';
-import { apiServerCertNotAfter, collectCertificates } from './cert-expiry.js';
 import type { ClusterHandle } from './cluster-manager.js';
-import { computeOperatorRollups } from './operator-rollups.js';
 import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
 
 const RECENT_MS = 60 * 60 * 1000; // 1h window for restarts/events
@@ -15,7 +13,12 @@ interface ContainerStatus {
 
 const FAILING_WAIT_REASONS = new Set(['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'CreateContainerConfigError', 'CreateContainerError', 'InvalidImageName', 'RunContainerError']);
 
-/** Compute the health dashboard from already-cached watcher state — no API calls. */
+/**
+ * Compute the health dashboard from already-cached watcher state — no API
+ * calls. Operator rollups and certificate expiry live on their own endpoints
+ * so their (slower) warmups — the all-secrets watcher, operator CR lists, the
+ * API-server TLS probe — never delay the first paint of counts and health.
+ */
 export async function computeOverview(handle: ClusterHandle): Promise<ClusterOverview> {
   const podsWatcher = handle.watchers.acquire('', 'v1', 'pods');
   const deploysWatcher = handle.watchers.acquire('apps', 'v1', 'deployments');
@@ -31,7 +34,9 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     handle: handle.watchers.acquire(spec.group, spec.version, spec.plural),
   }));
   try {
-    await Promise.all([
+    // Warm every watcher concurrently — the optional ones must not wait for
+    // the core set to finish listing first.
+    const coreReady = Promise.all([
       podsWatcher.watcher.ready(),
       deploysWatcher.watcher.ready(),
       eventsWatcher.watcher.ready(),
@@ -43,6 +48,7 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       optionalItems(crdsWatcher.watcher),
       ...healthWatchers.map((w) => optionalItems(w.handle.watcher)),
     ]);
+    await coreReady;
     const pods = podsWatcher.watcher.items();
     const deployments = deploysWatcher.watcher.items();
     const events = eventsWatcher.watcher.items();
@@ -72,8 +78,6 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       recentRestarts: [],
       warningEvents: [],
       workloadHealth: [],
-      operators: [],
-      certificates: { total: 0, expiring: [] },
     };
 
     const healthBySpec = new Map(healthWatchers.map((w, i) => [w.spec, healthResults[i] ?? { items: [], unavailable: true }]));
@@ -85,13 +89,6 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     const health = computeWorkloadHealth(healthKinds);
     overview.workloadHealth = health.kinds;
     overview.unavailableWorkloads = health.issues;
-    const [operators, certificates, apiServerNotAfter] = await Promise.all([
-      computeOperatorRollups(handle, crds),
-      collectCertificates(handle, crds),
-      apiServerCertNotAfter(handle),
-    ]);
-    overview.operators = operators;
-    overview.certificates = { ...certificates, apiServerNotAfter };
 
     const now = Date.now();
     for (const pod of pods) {
@@ -229,6 +226,16 @@ function eventTime(e: KubeObject): string {
 function isEstablishedCrd(crd: KubeObject): boolean {
   const conditions = (crd.status as { conditions?: Array<{ type?: string; status?: string }> } | undefined)?.conditions ?? [];
   return conditions.some((c) => c.type === 'Established' && c.status === 'True');
+}
+
+/** Installed CRDs for the operator/certificate endpoints (empty when RBAC-denied). */
+export async function installedCrds(handle: ClusterHandle): Promise<KubeObject[]> {
+  const acquired = handle.watchers.acquire('apiextensions.k8s.io', 'v1', 'customresourcedefinitions');
+  try {
+    return (await optionalItems(acquired.watcher)).items;
+  } finally {
+    acquired.release();
+  }
 }
 
 export async function optionalItems(watcher: {

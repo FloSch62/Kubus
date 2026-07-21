@@ -13,7 +13,16 @@ export default function MetricsChartImpl({ ctx, kind, name, namespace }: Metrics
   const { data } = useMetricsHistory({ ctx, kind, name, namespace });
   const series = useTheme().palette.mode === 'dark' ? SERIES_DARK : SERIES_LIGHT;
 
-  if (!data?.available) {
+  // Query in flight, or the server's poller hasn't finished its first probe —
+  // availability is unknown, so don't claim metrics-server is missing yet.
+  if (!data || !data.probed) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+        Loading metrics…
+      </Typography>
+    );
+  }
+  if (!data.available) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
         Metrics unavailable — is metrics-server installed in this cluster?
