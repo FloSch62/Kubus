@@ -68,7 +68,7 @@ function DetailUrlSync({ sel }: { sel: ResourceSelection | undefined }) {
   // and enforces this tab's selection (open its ?sel, or close a leftover).
   useEffect(() => {
     if (!paneActive) return;
-    if (sel) openDetail(sel);
+    if (sel) openDetail(sel, { embedded: true });
     else closeDetail();
   }, [paneActive, sel, openDetail, closeDetail]);
 
@@ -542,7 +542,10 @@ export function ResourceListPage() {
     // Update immediately so the embedded panel responds in the same render
     // cycle; the URL remains the deep-link source of truth. Picking a row is
     // an explicit ask for details, so also undo a collapse.
-    openDetail({ ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind });
+    openDetail(
+      { ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind },
+      { embedded: true },
+    );
     setDetailCollapsed(false);
     const next = new URLSearchParams(searchParams);
     next.delete('field');

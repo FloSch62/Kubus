@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -26,22 +26,41 @@ export function AppShell() {
   const navOverlay = useMediaQuery(NAV_OVERLAY_MEDIA_QUERY);
   const navCollapsed = useUiPrefsStore((s) => s.navCollapsed);
   const navOverlayOpen = useNavUiStore((s) => s.overlayOpen);
-  const setNavOverlayOpen = useNavUiStore((s) => s.setOverlayOpen);
+  // Stable identity — an inline arrow would defeat NavDrawer's memo.
+  const closeNavOverlay = useCallback(() => useNavUiStore.getState().setOverlayOpen(false), []);
   const dockOpen = useDockStore((s) => s.open);
   const dockHeight = useDockStore((s) => s.height);
   const maximized = useDockStore((s) => s.maximized);
   const sel = useDetailStore((s) => s.stack.at(-1));
+  const selEmbedded = useDetailStore((s) => s.embedded);
   const hasParent = useDetailStore((s) => s.stack.length > 1);
   const back = useDetailStore((s) => s.back);
   const closeDetail = useDetailStore((s) => s.close);
-  // Mounted on first open, kept mounted after so close animations still play.
+  // Mounted on first open, kept mounted through a close so the exit animation
+  // still plays; fully unmounted shortly after (see the watchdog below).
   const [drawerMounted, setDrawerMounted] = useState(false);
   const dockRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const detailIsEmbedded = location.pathname.startsWith('/r/');
-  if (!drawerMounted && sel && !detailIsEmbedded) setDrawerMounted(true);
+  // Embedded-owned selections never reach the overlay drawer: when leaving a
+  // list page toward another page, the selection outlives the route change by
+  // one commit, and letting the drawer flash open for that commit interrupts
+  // its own transitions — a race that can strand MUI's Modal portal as an
+  // invisible click-eating overlay.
+  const overlaySel = detailIsEmbedded || selEmbedded ? undefined : sel;
+  if (!drawerMounted && overlaySel) setDrawerMounted(true);
+
+  // Watchdog: once the drawer is closed, drop it from the tree after the exit
+  // animation. Unmounting destroys the Modal portal outright, so no stuck
+  // transition state can outlive a close and keep swallowing input.
+  const drawerIdle = drawerMounted && !overlaySel;
+  useEffect(() => {
+    if (!drawerIdle) return;
+    const timer = setTimeout(() => setDrawerMounted(false), 1_000);
+    return () => clearTimeout(timer);
+  }, [drawerIdle]);
 
   // Closing the drawer via X/Escape/backdrop also drops the ?sel deep link
   // from the current tab's URL, so the tab doesn't reopen the drawer on its
@@ -87,7 +106,7 @@ export function AppShell() {
       </ButtonBase>
       <TopBar />
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <NavDrawer overlay={navOverlay} hidden={navCollapsed} open={navOverlayOpen} onClose={() => setNavOverlayOpen(false)} />
+        <NavDrawer overlay={navOverlay} hidden={navCollapsed} open={navOverlayOpen} onClose={closeNavOverlay} />
         <Box component="main" ref={mainRef} tabIndex={-1} sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', outline: 'none' }}>
           <TabsBar />
           <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
@@ -101,7 +120,7 @@ export function AppShell() {
       {drawerMounted && (
         <ErrorBoundary label="The details panel">
           <Suspense fallback={null}>
-            <ResourceDetailDrawer sel={detailIsEmbedded ? undefined : sel} onClose={handleDrawerClose} onBack={hasParent ? back : undefined} />
+            <ResourceDetailDrawer sel={overlaySel} onClose={handleDrawerClose} onBack={hasParent ? back : undefined} />
           </Suspense>
         </ErrorBoundary>
       )}
