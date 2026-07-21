@@ -25,15 +25,17 @@ import { statusTextColor } from '../../theme.js';
  * List links inherit the same global filter.
  */
 export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; namespaces: string[] }) {
-  const { data, isLoading, error } = useNamespaceOverview(ctx, namespaces);
+  const { data, isLoading, error, isPlaceholderData } = useNamespaceOverview(ctx, namespaces);
   // Operator rollups and certificates warm up slowly (operator CR lists, the
   // all-secrets watcher) — they stream in behind the inventory and health.
   const { data: operators } = useOverviewOperators(ctx, namespaces);
   const { data: certificates } = useOverviewCertificates(ctx, namespaces);
   const single = namespaces.length === 1;
-  // The success alert must agree with every problem card above it.
+  // The success alert must agree with every problem card above it — and never
+  // judge a stale previous-scope placeholder against fresh operators/certs.
   const healthy =
     !!data &&
+    !isPlaceholderData &&
     data.issues.length === 0 &&
     data.failingPods.length === 0 &&
     data.warningEvents.length === 0 &&

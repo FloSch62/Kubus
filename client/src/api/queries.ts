@@ -954,25 +954,27 @@ function overviewSectionQuery(ctx: string, section: 'operators' | 'certificates'
   };
 }
 
-/** Operator rollups (cert-manager, Argo, Flux…), optionally namespace-scoped. */
+/**
+ * Operator rollups (cert-manager, Argo, Flux…), optionally namespace-scoped.
+ * No placeholder across key changes: a namespace switch must not show the
+ * previous scope's rollups while the new scope loads.
+ */
 export function useOverviewOperators(ctx: string, namespaces?: string[]) {
   const { queryKey, path } = overviewSectionQuery(ctx, 'operators', namespaces);
   return useQuery({
     queryKey,
     queryFn: () => apiFetch<OperatorRollup[]>(path),
     refetchInterval: useRefetchInterval(15_000),
-    placeholderData: keepPreviousData,
   });
 }
 
-/** TLS certificate expiry rollup, optionally namespace-scoped. */
+/** TLS certificate expiry rollup, optionally namespace-scoped. Same no-placeholder rule as operators. */
 export function useOverviewCertificates(ctx: string, namespaces?: string[]) {
   const { queryKey, path } = overviewSectionQuery(ctx, 'certificates', namespaces);
   return useQuery({
     queryKey,
     queryFn: () => apiFetch<OverviewCertificates>(path),
     refetchInterval: useRefetchInterval(30_000),
-    placeholderData: keepPreviousData,
   });
 }
 
