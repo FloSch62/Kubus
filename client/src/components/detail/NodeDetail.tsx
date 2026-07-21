@@ -70,7 +70,7 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
                 {providerID && (
                   <TableRow>
                     <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>Provider ID</TableCell>
-                    <TableCell sx={{ border: 0, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                    <TableCell sx={{ border: 0, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-word' }}>
                       {providerID} <CopyValueButton text={providerID} label="Copy provider ID" />
                     </TableCell>
                   </TableRow>

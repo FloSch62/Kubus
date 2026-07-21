@@ -101,13 +101,13 @@ export const TopBar = memo(function TopBar() {
           <NamespaceFilter />
           <Box sx={{ flex: 1 }} />
           <Tooltip title={`Search (${HOTKEY_MOD_LABEL}K)`}>
-            <IconButton size="small" onClick={() => setSearchOpen(true)} onMouseEnter={() => void loadSearchDialog()} onFocus={() => void loadSearchDialog()}>
+            <IconButton size="small" aria-label="Search" onClick={() => setSearchOpen(true)} onMouseEnter={() => void loadSearchDialog()} onFocus={() => void loadSearchDialog()}>
               <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           {dockTabCount > 0 && (
             <Tooltip title={dockOpen ? `Hide dock (${HOTKEY_MOD_LABEL}J)` : `Show dock — ${dockTabCount} tabs (${HOTKEY_MOD_LABEL}J)`}>
-              <IconButton size="small" onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
+              <IconButton size="small" aria-label={dockOpen ? 'Hide dock' : 'Show dock'} onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
                 <TerminalIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -118,12 +118,12 @@ export const TopBar = memo(function TopBar() {
             </IconButton>
           </Tooltip>
           <Tooltip title={mode === 'light' ? 'Switch to dark mode' : mode === 'dark' ? 'Follow system theme' : 'Switch to light mode'}>
-            <IconButton size="small" onClick={toggleTheme}>
+            <IconButton size="small" aria-label="Toggle theme" onClick={toggleTheme}>
               {mode === 'light' ? <DarkModeOutlinedIcon fontSize="small" /> : mode === 'dark' ? <BrightnessAutoOutlinedIcon fontSize="small" /> : <LightModeOutlinedIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
           <Tooltip title={`Settings (${HOTKEY_MOD_LABEL},)`}>
-            <IconButton size="small" onClick={() => setSettingsOpen(true)} onMouseEnter={() => void loadSettingsDialog()} onFocus={() => void loadSettingsDialog()}>
+            <IconButton size="small" aria-label="Settings" onClick={() => setSettingsOpen(true)} onMouseEnter={() => void loadSettingsDialog()} onFocus={() => void loadSettingsDialog()}>
               <SettingsOutlinedIcon fontSize="small" />
             </IconButton>
           </Tooltip>

@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router';
 import { pluralLabel, type OverviewKindHealth, type OverviewWorkloadIssue } from '@kubus/shared';
 import { StatusChip } from '../StatusChip.js';
 import { ProblemCard, kindListPath } from './cards.js';
+import { statusTextColor } from '../../theme.js';
 
 /**
  * Unified workload health: one tile per kind (Deployments … ResourceQuotas)
@@ -56,7 +57,10 @@ export function WorkloadHealthSection({
               display: 'flex',
               alignItems: 'baseline',
               gap: 0.75,
-              '&:hover': { bgcolor: 'action.hover', borderColor: h.unhealthy > 0 ? 'warning.main' : 'primary.main' },
+              // Zero-count kinds are background noise — recede like the
+              // Inventory chips do (hover restores full contrast).
+              opacity: !h.unavailable && h.total === 0 ? 0.55 : 1,
+              '&:hover': { bgcolor: 'action.hover', borderColor: h.unhealthy > 0 ? 'warning.main' : 'primary.main', opacity: 1 },
             }}
           >
             <Typography variant="caption" color="text.secondary">
@@ -72,7 +76,7 @@ export function WorkloadHealthSection({
                   {h.total}
                 </Typography>
                 {h.unhealthy > 0 && (
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'warning.main' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: statusTextColor('warning') }}>
                     {h.unhealthy} unhealthy
                   </Typography>
                 )}

@@ -331,7 +331,12 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                         secondary={row.result.subtitle}
                         slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }}
                       />
-                      <Chip size="small" label={row.result.kind} color={RESULT_CHIP_COLOR[row.result.kind]} variant="outlined" sx={{ mr: 0.5 }} />
+                      {/* Resources dominate the results and already name their
+                          kind in the title — a chip on every row is noise, so
+                          only the rarer kind/page results get tagged. */}
+                      {row.result.kind !== 'resource' && (
+                        <Chip size="small" label={row.result.kind} color={RESULT_CHIP_COLOR[row.result.kind]} variant="outlined" sx={{ mr: 0.5 }} />
+                      )}
                       {row.result.ref && (
                         <Tooltip title="Actions (Tab)">
                           <IconButton

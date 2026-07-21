@@ -33,15 +33,10 @@ import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { InstallMetricsServerButton, UninstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { formatBytes, formatCpu } from '../components/format.js';
+import { SERIES_DARK, SERIES_LIGHT, timeTickFormatter } from '../components/chart-theme.js';
 
-// Categorical palette from the validated dataviz reference set (adjacent-pair
-// CVD-safe in this order — do not re-order or cycle past 8 series).
-const SERIES_LIGHT = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948'];
-const SERIES_DARK = ['#3987e5', '#008300', '#d55181', '#c98500', '#199e70', '#d95926', '#9085e9', '#e66767'];
 const MAX_NODE_SERIES = 8;
 const MAX_NAMESPACE_BARS = 10;
-
-const timeFormatter = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function MetricsPage() {
   const selected = useClustersStore((s) => s.selected);
@@ -272,7 +267,7 @@ function UsageLineChart({
         area,
         valueFormatter: (v: number | null) => (v === null ? '' : fmt(v)),
       }))}
-      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeFormatter }]}
+      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
       yAxis={[{ min: 0, valueFormatter: (v: number) => fmt(v), width: 56 }]}
       grid={{ horizontal: true }}
       hideLegend={hideLegend ?? entries.length < 2}
@@ -387,7 +382,7 @@ function StatTile({ icon, label, value, sub }: { icon: React.ReactElement; label
             sx={(theme) => ({
               width: 36,
               height: 36,
-              borderRadius: 2,
+              borderRadius: 1.5,
               flexShrink: 0,
               display: 'grid',
               placeItems: 'center',

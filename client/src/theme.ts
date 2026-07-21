@@ -2,6 +2,17 @@ import type { ElementType } from 'react';
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
 import type {} from '@mui/x-data-grid/themeAugmentation';
 
+declare module '@mui/material/styles' {
+  /** Chrome surfaces (top bar, nav rail, tab strip) share this background —
+   *  exposed on the palette so no component re-hardcodes the hex. */
+  interface Palette {
+    sidebar: string;
+  }
+  interface PaletteOptions {
+    sidebar?: string;
+  }
+}
+
 /**
  * Shared layout dimensions. Several of these are cross-file contracts:
  * anything that changes one side must keep the other in sync, so both sides
@@ -26,6 +37,16 @@ export const layout = {
 } as const;
 
 const modalBackdropAlpha = 0.5;
+
+/**
+ * Status hue for small colored text (status words, ready counts). The bright
+ * palette mains pass contrast on dark paper but fail WCAG AA as 12-13px text
+ * on the light backgrounds, so light mode drops to the pinned `dark` variant.
+ */
+export const statusTextColor =
+  (color: 'success' | 'error' | 'warning' | 'info') =>
+  (theme: Theme): string =>
+    theme.palette.mode === 'dark' ? theme.palette[color].main : theme.palette[color].dark;
 
 const darkColors = {
         primary: '#6e8bfb',
@@ -98,17 +119,25 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
       mode,
       primary: { main: c.primary },
       secondary: { main: c.secondary },
-      success: { main: c.success },
-      warning: { main: c.warning },
-      error: { main: c.error },
-      info: { main: c.info },
+      // Light mode pins the `dark` variants to hues that pass WCAG AA as
+      // small text on the near-white backgrounds (see statusTextColor).
+      success: { main: c.success, ...(dark ? {} : { dark: '#15803d' }) },
+      warning: { main: c.warning, ...(dark ? {} : { dark: '#8f6209' }) },
+      error: { main: c.error, ...(dark ? {} : { dark: '#b91c1c' }) },
+      info: { main: c.info, ...(dark ? {} : { dark: '#1d4ed8' }) },
       divider: c.divider,
+      sidebar: c.sidebar,
       background: { default: c.bgDefault, paper: c.bgPaper },
-      text: { primary: c.textPrimary, secondary: c.textSecondary },
+      // `disabled` is used as the dimmest text tier; keying it off the
+      // secondary hue keeps the two muted greys in the same family instead
+      // of MUI's unrelated default.
+      text: { primary: c.textPrimary, secondary: c.textSecondary, disabled: alpha(c.textSecondary, dark ? 0.55 : 0.6) },
     },
     shape: { borderRadius: 8 },
     typography: {
-      fontFamily: '"Inter", -apple-system, "Segoe UI", "Roboto", "Helvetica", "Arial", sans-serif',
+      // Bundled variable font (see main.tsx) — variable weights make the
+      // 550 emphasis tier real instead of snapping to 600.
+      fontFamily: '"Inter Variable", "Inter", -apple-system, "Segoe UI", "Roboto", "Helvetica", "Arial", sans-serif',
       fontSize: 13,
       h5: { fontWeight: 600, letterSpacing: -0.2 },
       h6: { fontWeight: 600, letterSpacing: -0.2 },
@@ -161,6 +190,9 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
       MuiButton: {
         defaultProps: { size: 'small' },
         styleOverrides: { root: { textTransform: 'none', borderRadius: 7 } },
+      },
+      MuiToggleButton: {
+        styleOverrides: { root: { textTransform: 'none', fontWeight: 550 } },
       },
       MuiTextField: { defaultProps: { size: 'small' } },
       MuiOutlinedInput: {

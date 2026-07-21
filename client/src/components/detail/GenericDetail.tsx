@@ -107,7 +107,9 @@ export function ConditionChips({ obj, goodWhen }: { obj: KubeObject; goodWhen?: 
         return (
           <Tooltip key={c.type} title={tip}>
             <Chip
-              label={c.type}
+              // A red "Available" reads as a contradiction — spell out the
+              // status whenever the condition is off its healthy value.
+              label={healthy ? c.type : `${c.type}: ${c.status}`}
               size="small"
               variant="outlined"
               color={unknown ? 'default' : healthy ? 'success' : 'error'}
@@ -209,7 +211,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <TableRow>
       <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{label}</TableCell>
-      <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>{value}</TableCell>
+      <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>{value}</TableCell>
     </TableRow>
   );
 }

@@ -14,6 +14,7 @@ import { useClustersStore } from '../state/clusters.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { tabMeta } from './tab-meta.js';
+import { TruncationTooltip } from '../components/truncation.js';
 
 // Electron always starts at '/'; on the first mount we reopen the tab the user
 // left active. Module-scoped so StrictMode's double effect doesn't re-restore.
@@ -83,7 +84,7 @@ export const TabsBar = memo(function TabsBar() {
         flexShrink: 0,
         borderBottom: 1,
         borderColor: 'divider',
-        bgcolor: (theme) => (theme.palette.mode === 'dark' ? '#151518' : '#f4f4f5'),
+        bgcolor: (theme) => theme.palette.sidebar,
       }}
     >
       <Box
@@ -183,9 +184,11 @@ export const TabsBar = memo(function TabsBar() {
               }}
             >
               <Box sx={{ display: 'flex', color: 'text.secondary', '& svg': { fontSize: 15 } }}>{meta.icon}</Box>
-              <Typography variant="body2" noWrap sx={{ flex: 1, fontSize: 12.5 }}>
-                {meta.title}
-              </Typography>
+              <TruncationTooltip text={meta.title}>
+                <Typography variant="body2" noWrap sx={{ flex: 1, fontSize: 12.5 }}>
+                  {meta.title}
+                </Typography>
+              </TruncationTooltip>
               <IconButton
                 className="tab-close"
                 size="small"

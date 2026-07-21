@@ -5,7 +5,7 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, type Theme } from '@mui/material/styles';
 import {
   applyNodeChanges,
   Background,
@@ -26,6 +26,7 @@ import {
 import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@kubus/shared';
 import { useTopologyGraphs } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
+import { statusTextColor } from '../theme.js';
 import { cachedTopologyLayout, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
 import type { TopologyGraphProps } from './TopologyGraph.js';
 
@@ -36,31 +37,45 @@ interface TopologyNodeData extends Record<string, unknown> {
 interface TopologyEdgeData extends Record<string, unknown> {
   routePoints: RoutePoint[];
   labelPoint?: RoutePoint;
+  kind: GraphEdge['kind'];
 }
 
 type TopologyFlowNode = Node<TopologyNodeData>;
 type TopologyFlowEdge = Edge<TopologyEdgeData>;
 
-const STATUS_COLOR: Record<GraphNodeStatus, string> = {
-  success: '#2e7d32',
-  warning: '#ed6c02',
-  error: '#d32f2f',
-  unknown: '#6b7280',
+/** Edge hues per theme mode: label text sits on background.paper chips, so
+ *  light mode needs the darker tones and dark mode the brighter ones. */
+const EDGE_COLOR: Record<'light' | 'dark', Record<GraphEdge['kind'], string>> = {
+  light: {
+    owns: '#64748b',
+    selects: '#2563eb',
+    routes: '#7c3aed',
+    mounts: '#0e7490',
+    binds: '#0f766e',
+    schedules: '#8f6209',
+    manages: '#9333ea',
+  },
+  dark: {
+    owns: '#94a3b8',
+    selects: '#60a5fa',
+    routes: '#a78bfa',
+    mounts: '#22d3ee',
+    binds: '#2dd4bf',
+    schedules: '#e7b341',
+    manages: '#c084fc',
+  },
 };
 
-const EDGE_COLOR: Record<GraphEdge['kind'], string> = {
-  owns: '#64748b',
-  selects: '#2563eb',
-  routes: '#7c3aed',
-  mounts: '#0891b2',
-  binds: '#0f766e',
-  schedules: '#ca8a04',
-  manages: '#9333ea',
-};
+function nodeStatusColor(status: GraphNodeStatus, theme: Theme): string {
+  return status === 'unknown' ? theme.palette.text.secondary : theme.palette[status].main;
+}
 
 function TopologyNode({ data, selected }: NodeProps) {
   const node = (data as TopologyNodeData).graphNode;
-  const color = STATUS_COLOR[node.status];
+  const theme = useTheme();
+  const color = nodeStatusColor(node.status, theme);
+  // Small status text needs the AA-safe tone; the 5px stripe can stay bright.
+  const reasonColor = node.status === 'unknown' ? theme.palette.text.secondary : statusTextColor(node.status)(theme);
   return (
     <Box
       sx={{
@@ -105,7 +120,7 @@ function TopologyNode({ data, selected }: NodeProps) {
         </Typography>
       )}
       {node.reason && (
-        <Typography variant="caption" sx={{ display: 'block', color, mt: 0.25 }} noWrap title={node.reason}>
+        <Typography variant="caption" sx={{ display: 'block', color: reasonColor, mt: 0.25 }} noWrap title={node.reason}>
           {node.reason}
         </Typography>
       )}
@@ -257,7 +272,7 @@ function placeEdgeLabels(edges: TopologyFlowEdge[]): TopologyFlowEdge[] {
     }
     chosen ??= pointAtFraction(points, 0.5);
     occupied.push(chosen);
-    return { ...edge, data: { ...edge.data, routePoints: points, labelPoint: chosen } };
+    return { ...edge, data: { ...edge.data!, routePoints: points, labelPoint: chosen } };
   });
 }
 
@@ -274,6 +289,10 @@ interface FlowState {
 const emptyFlow: FlowState = { nodes: [], edges: [], warnings: [], problemNodes: [] };
 
 function toFlowState(layout: TopologyLayout): FlowState {
+  // Fan-in/fan-out groups (a Service selecting 3 pods, 5 pods scheduled onto
+  // one node) would repeat the same label on every edge — label each identical
+  // text once per shared endpoint and let the rest stay bare lines.
+  const labeled = new Set<string>();
   return {
     nodes: layout.nodes.map(({ node, position }) => ({
       id: node.id,
@@ -282,18 +301,31 @@ function toFlowState(layout: TopologyLayout): FlowState {
       data: { graphNode: node },
       draggable: true,
     })),
-    edges: placeEdgeLabels(layout.edges.map(({ edge, routePoints }) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: 'routed',
-      label: edge.kind === 'owns' ? undefined : (edge.label ?? edge.kind),
-      animated: edge.kind === 'routes' || edge.kind === 'selects',
-      markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[edge.kind] },
-      style: { strokeWidth: 1.7, stroke: EDGE_COLOR[edge.kind] },
-      labelStyle: { fill: EDGE_COLOR[edge.kind], fontWeight: 700, fontSize: 11 },
-      data: { routePoints },
-    }))),
+    edges: placeEdgeLabels(layout.edges.map(({ edge, routePoints }) => {
+      const text = edge.kind === 'owns' ? undefined : (edge.label ?? edge.kind);
+      let label: string | undefined;
+      if (text) {
+        const bySource = `${text}|s|${edge.source}`;
+        const byTarget = `${text}|t|${edge.target}`;
+        if (!labeled.has(bySource) && !labeled.has(byTarget)) {
+          labeled.add(bySource);
+          labeled.add(byTarget);
+          label = text;
+        }
+      }
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: 'routed',
+        label,
+        animated: edge.kind === 'routes' || edge.kind === 'selects',
+        // Colors resolve per theme mode in the render-side edges memo.
+        style: { strokeWidth: 1.7 },
+        labelStyle: { fontWeight: 700, fontSize: 11 },
+        data: { routePoints, kind: edge.kind },
+      };
+    })),
     warnings: layout.warnings,
     problemNodes: layout.problemNodes,
   };
@@ -389,7 +421,7 @@ export default function TopologyGraphImpl({
     setFlow((f) => {
       const boxes = f.nodes.map((node) => topologyNodeBox(node.id, node.position, node.data.graphNode));
       const routes = routeEdges(boxes, f.edges);
-      return { ...f, edges: placeEdgeLabels(f.edges.map((edge) => ({ ...edge, data: { routePoints: routes.get(edge.id) ?? [] } }))) };
+      return { ...f, edges: placeEdgeLabels(f.edges.map((edge) => ({ ...edge, data: { ...edge.data!, routePoints: routes.get(edge.id) ?? [] } }))) };
     });
   }, []);
 
@@ -417,13 +449,16 @@ export default function TopologyGraphImpl({
 
   const edges = useMemo<TopologyFlowEdge[]>(
     () => {
+      const edgeColors = EDGE_COLOR[theme.palette.mode];
       const styled = flow.edges.map((edge) => {
         const connected = !activeSelectedNodeId || edge.source === activeSelectedNodeId || edge.target === activeSelectedNodeId;
+        const color = edgeColors[edge.data!.kind];
         return {
           ...edge,
           selected: !!activeSelectedNodeId && connected,
-          style: { ...edge.style, strokeWidth: activeSelectedNodeId && connected ? 2.8 : edge.style?.strokeWidth, opacity: connected ? 1 : 0.1 },
-          labelStyle: { ...edge.labelStyle, opacity: connected ? 1 : 0.1 },
+          markerEnd: { type: MarkerType.ArrowClosed, color },
+          style: { ...edge.style, stroke: color, strokeWidth: activeSelectedNodeId && connected ? 2.8 : edge.style?.strokeWidth, opacity: connected ? 1 : 0.1 },
+          labelStyle: { ...edge.labelStyle, fill: color, opacity: connected ? 1 : 0.1 },
         };
       });
       // Edges paint in array order within the edge layer, and every edge
@@ -432,7 +467,7 @@ export default function TopologyGraphImpl({
       // sort preserves order within each group).
       return activeSelectedNodeId ? styled.sort((a, b) => Number(a.selected) - Number(b.selected)) : styled;
     },
-    [activeSelectedNodeId, flow.edges],
+    [activeSelectedNodeId, flow.edges, theme.palette.mode],
   );
   const { warnings, problemNodes } = flow;
   // keepPreviousData preserves the prior graph while a new scope is fetched.

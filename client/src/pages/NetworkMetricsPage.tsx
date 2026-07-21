@@ -29,13 +29,12 @@ import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { InstallNetworkAgentButton, UninstallNetworkAgentButton } from '../components/NetworkAgentControls.js';
 import { formatBps } from '../components/format.js';
+import { SERIES_DARK, SERIES_LIGHT, timeTickFormatter } from '../components/chart-theme.js';
 
-// Sent/received pair from the validated dataviz palette (same set as MetricsPage).
-const SENT_COLOR = { light: '#2a78d6', dark: '#3987e5' };
-const RECV_COLOR = { light: '#008300', dark: '#008300' };
+// Sent/received pair from the shared chart palette (same set as MetricsPage).
+const SENT_COLOR = { light: SERIES_LIGHT[0]!, dark: SERIES_DARK[0]! };
+const RECV_COLOR = { light: SERIES_LIGHT[1]!, dark: SERIES_DARK[1]! };
 const MAX_LINK_ROWS = 50;
-
-const timeFormatter = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function NetworkMetricsPage() {
   const selected = useClustersStore((s) => s.selected);
@@ -173,7 +172,7 @@ function ThroughputLineChart({ series, color }: { series: ClusterNetworkSummary[
           valueFormatter: (v: number | null) => (v === null ? '' : formatBps(v)),
         },
       ]}
-      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeFormatter }]}
+      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
       yAxis={[{ min: 0, valueFormatter: (v: number) => formatBps(v), width: 72 }]}
       grid={{ horizontal: true }}
       hideLegend
@@ -305,7 +304,7 @@ function StatTile({ icon, label, value, sub }: { icon: React.ReactElement; label
             sx={(theme) => ({
               width: 36,
               height: 36,
-              borderRadius: 2,
+              borderRadius: 1.5,
               flexShrink: 0,
               display: 'grid',
               placeItems: 'center',

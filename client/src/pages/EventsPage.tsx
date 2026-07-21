@@ -25,6 +25,7 @@ import { SmartFilterInput } from '../components/SmartFilterInput.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { countLabel } from '../components/format.js';
 
 interface EventObj extends KubeObject {
   type?: string;
@@ -199,7 +200,7 @@ export function EventsPage() {
         headerName: 'Type',
         width: 90,
         valueGetter: (_v, row) => row.ev.type ?? '',
-        renderCell: (p) => <StatusChip status={p.row.ev.type === 'Warning' ? 'Error' : 'Ready'} />,
+        renderCell: (p) => <StatusChip status={p.row.ev.type ?? ''} />,
       },
       { field: 'reason', headerName: 'Reason', width: 150, valueGetter: (_v, row) => row.ev.reason ?? '' },
       {
@@ -245,7 +246,7 @@ export function EventsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <PageHeader title="Events" icon={<NotificationsNoneOutlinedIcon />}>
-          <Chip label={`${rows.length} events`} variant="outlined" />
+          <Chip label={countLabel(rows.length, 'event')} variant="outlined" />
         </PageHeader>
         {errors.map(([ctx, s]) => (
           <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>

@@ -15,6 +15,7 @@ import { useInstallMetricsServer, useUninstallMetricsServer } from '../api/queri
 import { useIsProtected } from '../state/clusters.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { statusTextColor } from '../theme.js';
 
 /**
  * One-click metrics-server install for a cluster: confirmation dialog with
@@ -52,7 +53,7 @@ export function InstallMetricsServerButton({ ctx, size = 'small' }: { ctx: strin
             }
           />
           {isProtected && (
-            <Typography variant="body2" color="warning.main" sx={{ mt: 1 }}>
+            <Typography variant="body2" sx={{ mt: 1, color: statusTextColor('warning') }}>
               This cluster is marked protected — make sure installing cluster components here is intended.
             </Typography>
           )}

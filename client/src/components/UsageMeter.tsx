@@ -14,9 +14,8 @@ export function usageColor(pct: number): 'success' | 'warning' | 'error' {
  * container cards.
  *
  * Under budget the track spans the reference total. Over budget it rescales
- * to actual usage: a tick marks where the request/limit sits and the hatched
- * segment beyond it is the overshoot, so 154% and 400% look as different as
- * they are.
+ * to actual usage and a tick marks where the request/limit sits, so 154% and
+ * 400% look as different as they are.
  */
 export function UsageMeter({
   value,
@@ -72,33 +71,19 @@ export function UsageMeter({
               sx={{ height: 5, borderRadius: 999, bgcolor: 'action.hover' }}
             />
             {markerPct !== undefined && (
-              <>
-                <Box
-                  sx={(theme) => ({
-                    position: 'absolute',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    left: `${markerPct}%`,
-                    right: 0,
-                    height: 5,
-                    borderRadius: '0 999px 999px 0',
-                    backgroundImage: `repeating-linear-gradient(-45deg, ${theme.palette.error.dark} 0 3px, transparent 3px 6px)`,
-                  })}
-                />
-                <Box
-                  sx={(theme) => ({
-                    position: 'absolute',
-                    top: '50%',
-                    left: `${markerPct}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: 2,
-                    height: 11,
-                    borderRadius: 1,
-                    bgcolor: 'text.primary',
-                    boxShadow: `0 0 0 1px ${theme.palette.background.paper}`,
-                  })}
-                />
-              </>
+              <Box
+                sx={(theme) => ({
+                  position: 'absolute',
+                  top: '50%',
+                  left: `${markerPct}%`,
+                  transform: 'translate(-50%, -50%)',
+                  width: 2,
+                  height: 11,
+                  borderRadius: 1,
+                  bgcolor: 'text.primary',
+                  boxShadow: `0 0 0 1px ${theme.palette.background.paper}`,
+                })}
+              />
             )}
           </Box>
         ) : (

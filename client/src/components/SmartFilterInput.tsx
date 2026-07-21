@@ -223,8 +223,10 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
                             maxWidth: 'calc(100vw - 24px)',
                             border: '1px solid',
                             borderColor: 'divider',
+                            // Same shadow as the Menu/Autocomplete theme token
+                            // so adjacent dropdowns cast identical shadows.
                             boxShadow: (theme) =>
-                              theme.palette.mode === 'dark' ? '0 16px 48px rgba(0, 0, 0, 0.55)' : '0 16px 40px rgba(20, 20, 30, 0.16)',
+                              theme.palette.mode === 'dark' ? '0 8px 28px rgba(0, 0, 0, 0.5)' : '0 8px 28px rgba(0, 0, 0, 0.12)',
                           },
                         },
                       }}
@@ -255,7 +257,7 @@ function FilterHelpPanel() {
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
         {HELP_SECTIONS.map((section) => (
           <Box key={section.title}>
-            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 650, color: 'text.primary' }}>
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600, color: 'text.primary' }}>
               {section.title}
             </Typography>
             <Box

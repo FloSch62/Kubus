@@ -783,6 +783,7 @@ export function ResourceListPage() {
             <YamlEditor
               value={createTemplate(kind, group, version)}
               applyLabel="Create"
+              applyUnchanged
               schema={selected[0] ? { ctx: selected[0], group, version, kind } : undefined}
               onApply={async (text) => {
                 await create.mutateAsync({ ctx: selected[0]!, yamlBody: text });

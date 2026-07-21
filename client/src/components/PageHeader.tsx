@@ -18,7 +18,7 @@ export function PageHeader({ title, icon, children }: Props) {
           sx={(theme) => ({
             width: 32,
             height: 32,
-            borderRadius: 2,
+            borderRadius: 1.5,
             display: 'grid',
             placeItems: 'center',
             color: 'primary.main',

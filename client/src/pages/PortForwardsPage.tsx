@@ -49,7 +49,7 @@ export function PortForwardsPage() {
         renderCell: (p) => (
           <Tooltip title={p.row.error ?? ''}>
             <span>
-              <StatusChip status={p.row.state === 'active' ? 'Ready' : 'Error'} />
+              <StatusChip status={p.row.state === 'active' ? 'Active' : 'Error'} />
             </span>
           </Tooltip>
         ),

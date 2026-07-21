@@ -24,6 +24,7 @@ import { NoClustersState } from '../components/NoClustersState.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { helmOperationPhaseLabel, helmOperationReleaseKey } from '../components/HelmOperationStatus.js';
 import { HelmOperationsOverview } from '../components/HelmOperationsOverview.js';
+import { countLabel } from '../components/format.js';
 
 const HelmInstallDialog = lazy(() => import('../components/HelmInstallDialog.js'));
 
@@ -162,7 +163,7 @@ export function HelmPage() {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5, pt: 1.5 }}>
       <PageHeader title="Helm Releases" icon={<SailingOutlinedIcon />}>
-        <Chip label={`${rows.length} releases`} variant="outlined" />
+        <Chip label={countLabel(rows.length, 'release')} variant="outlined" />
         {availableUpdates > 0 ? <Chip label={`${availableUpdates} update${availableUpdates === 1 ? '' : 's'} available`} color="primary" /> : null}
         <Tooltip title="Check chart repositories for updates">
           <span>

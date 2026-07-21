@@ -15,6 +15,7 @@ import { FailingPodsCard, ProblemCard, WarningEventsCard, kindListPath } from '.
 import { OperatorSection } from './OperatorSection.js';
 import { PodUsagePanels } from './PodUsagePanels.js';
 import { WorkloadHealthSection } from './WorkloadHealthSection.js';
+import { statusTextColor } from '../../theme.js';
 
 /**
  * The overview body while the global namespace filter is active: a
@@ -139,7 +140,7 @@ function InventoryTiles({ entries, onOpen }: { entries: NamespaceInventoryEntry[
                   {e.total}
                 </Typography>
                 {warn && (
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'warning.main' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: statusTextColor('warning') }}>
                     {e.unhealthy} unhealthy
                   </Typography>
                 )}

@@ -59,14 +59,14 @@ export function GoHint() {
           transform: 'translateX(-50%)',
           zIndex: (theme) => theme.zIndex.snackbar,
           p: 1.25,
-          borderRadius: 2,
+          borderRadius: 1.5,
           border: 1,
           borderColor: 'divider',
           maxWidth: 'min(760px, calc(100vw - 32px))',
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.75, px: 0.5 }}>
-          <Typography variant="caption" sx={{ fontWeight: 650 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
             Go to
           </Typography>
           <Typography variant="caption" color="text.secondary">

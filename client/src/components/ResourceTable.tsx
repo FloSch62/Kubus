@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { layout } from '../theme.js';
+import { layout, statusTextColor } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
@@ -17,6 +17,8 @@ import type { MetricsLookup } from './columns.js';
 import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useQuickSearchShortcut } from './quick-search.js';
+import { countLabel } from './format.js';
+import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 
 interface Props {
   rows: ClusterRow[];
@@ -231,6 +233,32 @@ export function ResourceTable({
 
   useQuickSearchShortcut(searchInputRef);
 
+  // Friendlier stand-in for the DataGrid's bare "No rows", telling apart an
+  // empty scope from filters hiding everything. A label selector filters
+  // server-side — the excluded objects never reach `rows`, so it gets a
+  // no-matches message without a hidden count.
+  const filteredOut = rows.length - filtered.length;
+  const labelFiltered = labelTerms.length > 0;
+  const NoRowsOverlay = useCallback(
+    () => (
+      <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
+        <InboxOutlinedIcon sx={{ fontSize: 34, color: 'text.secondary', opacity: 0.55 }} />
+        <Typography variant="body2" color="text.secondary">
+          {filteredOut > 0
+            ? `No matches — ${countLabel(filteredOut, 'item')} hidden by the current filters`
+            : labelFiltered
+              ? 'No matches for the current label selector'
+              : // `kind` falls back to the literal 'Resource' for plain custom
+                // resources — that would read "No Resource resources".
+                kind && kind !== 'Resource'
+                ? `No ${kind} resources in the current scope`
+                : 'No resources in the current scope'}
+        </Typography>
+      </Stack>
+    ),
+    [filteredOut, labelFiltered, kind],
+  );
+
   return (
     <Box className="kubus-table" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -276,9 +304,9 @@ export function ResourceTable({
             sx={{ width: 320 }}
           />
         )}
-        <Chip label={`${filtered.length} items`} variant="outlined" />
+        <Chip label={countLabel(filtered.length, 'item')} variant="outlined" />
         {statusText && (
-          <Typography variant="caption" color="warning.main">
+          <Typography variant="caption" sx={{ color: statusTextColor('warning') }}>
             {statusText}
           </Typography>
         )}
@@ -308,6 +336,7 @@ export function ResourceTable({
         // reserve a real gutter instead.
         scrollbarSize={layout.scrollbarSize}
         checkboxSelection={checkboxSelection}
+        slots={{ noRowsOverlay: NoRowsOverlay }}
         onRowSelectionModelChange={
           onSelectionChange
             ? (model) => {
