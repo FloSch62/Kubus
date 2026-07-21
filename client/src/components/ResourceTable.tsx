@@ -234,8 +234,11 @@ export function ResourceTable({
   useQuickSearchShortcut(searchInputRef);
 
   // Friendlier stand-in for the DataGrid's bare "No rows", telling apart an
-  // empty scope from filters hiding everything.
+  // empty scope from filters hiding everything. A label selector filters
+  // server-side — the excluded objects never reach `rows`, so it gets a
+  // no-matches message without a hidden count.
   const filteredOut = rows.length - filtered.length;
+  const labelFiltered = labelTerms.length > 0;
   const NoRowsOverlay = useCallback(
     () => (
       <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
@@ -243,15 +246,17 @@ export function ResourceTable({
         <Typography variant="body2" color="text.secondary">
           {filteredOut > 0
             ? `No matches — ${countLabel(filteredOut, 'item')} hidden by the current filters`
-            : // `kind` falls back to the literal 'Resource' for plain custom
-              // resources — that would read "No Resource resources".
-              kind && kind !== 'Resource'
-              ? `No ${kind} resources in the current scope`
-              : 'No resources in the current scope'}
+            : labelFiltered
+              ? 'No matches for the current label selector'
+              : // `kind` falls back to the literal 'Resource' for plain custom
+                // resources — that would read "No Resource resources".
+                kind && kind !== 'Resource'
+                ? `No ${kind} resources in the current scope`
+                : 'No resources in the current scope'}
         </Typography>
       </Stack>
     ),
-    [filteredOut, kind],
+    [filteredOut, labelFiltered, kind],
   );
 
   return (
