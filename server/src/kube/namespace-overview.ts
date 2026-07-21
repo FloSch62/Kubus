@@ -5,9 +5,8 @@ import {
   type NamespaceOverview,
   type NamespaceQuotaStatus,
 } from '@kubus/shared';
-import { collectCertificates } from './cert-expiry.js';
 import type { ClusterHandle } from './cluster-manager.js';
-import { computeOperatorRollups, resolveCrd } from './operator-rollups.js';
+import { resolveCrd } from './operator-rollups.js';
 import { collectWarningEvents, optionalItems, podFailure } from './overview.js';
 import { parseQuantity } from './quantity.js';
 import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
@@ -155,8 +154,6 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
       failingPods,
       quotas,
       warningEvents: collectWarningEvents(events, now, await handle.discovery.getResources().catch(() => [])),
-      operators: await computeOperatorRollups(handle, crdsResult.items, scope),
-      certificates: await collectCertificates(handle, crdsResult.items, scope),
     };
   } finally {
     namespacesWatcher.release();

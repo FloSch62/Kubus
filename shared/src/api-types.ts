@@ -521,11 +521,15 @@ export interface MetricsSnapshotEntry {
 
 export interface MetricsSnapshot {
   available: boolean;
+  /** At least one metrics probe has completed — until then `available` is provisional. */
+  probed: boolean;
   items: MetricsSnapshotEntry[];
 }
 
 export interface MetricsHistoryResponse {
   available: boolean;
+  /** At least one metrics probe has completed — until then `available` is provisional. */
+  probed: boolean;
   series: MetricsSample[];
 }
 
@@ -772,7 +776,7 @@ export interface OverviewCertificates {
   total: number;
   /** Expired or expiring within 30 days, soonest first. */
   expiring: CertExpiryEntry[];
-  /** API server serving certificate expiry (cluster overview only), from the TLS handshake. */
+  /** API server serving certificate expiry (cluster-wide scope only), from the TLS handshake. */
   apiServerNotAfter?: string;
   /** Secrets are RBAC-denied — TLS secret expiry unknown. */
   secretsUnavailable?: boolean;
@@ -800,10 +804,6 @@ export interface ClusterOverview {
   warningEvents: OverviewWarningEvent[];
   /** Unified per-kind health across workloads, autoscaling, storage, and policy. */
   workloadHealth: OverviewKindHealth[];
-  /** Rollups for operators whose CRDs are installed (cert-manager, Argo, Flux, KEDA, Karpenter). */
-  operators: OperatorRollup[];
-  /** TLS certificate expiry rollup. */
-  certificates: OverviewCertificates;
 }
 
 // ---- Pod resource usage vs requests/limits (overview panels) ----
@@ -865,10 +865,6 @@ export interface NamespaceOverview {
   failingPods: OverviewProblemPod[];
   quotas: NamespaceQuotaStatus[];
   warningEvents: OverviewWarningEvent[];
-  /** Operator rollups scoped to this namespace (namespaced resources only). */
-  operators: OperatorRollup[];
-  /** TLS certificate expiry rollup scoped to this namespace. */
-  certificates: OverviewCertificates;
 }
 
 // ---- Security audit ----

@@ -121,7 +121,7 @@ export function StatCard({
   onClick,
 }: {
   label: string;
-  value: number | string;
+  value: React.ReactNode;
   sub?: string;
   warn?: boolean;
   icon?: React.ReactElement;

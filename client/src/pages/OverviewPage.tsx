@@ -24,7 +24,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router';
-import { useContexts, useKubeconfigSettings, useNodeMetrics, useOverview } from '../api/queries.js';
+import { useContexts, useKubeconfigSettings, useNodeMetrics, useOverview, useOverviewCertificates, useOverviewOperators } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { InstallMetricsServerButton } from '../components/MetricsServerControls.js';
@@ -157,6 +157,10 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
 function WholeClusterSection({ ctx }: { ctx: string }) {
   const { data, isLoading, error } = useOverview(ctx);
   const { data: nodeMetrics } = useNodeMetrics(ctx);
+  // Slow-warmup sections (all-secrets watcher, operator CR lists, API-server
+  // TLS probe) arrive on their own; the core stats never wait for them.
+  const { data: operators } = useOverviewOperators(ctx);
+  const { data: certificates } = useOverviewCertificates(ctx);
   const navigate = useNavigate();
 
   return (
@@ -207,12 +211,12 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
             />
             <StatCard
               label="TLS certificates"
-              value={data.certificates.expiring.length > 0 ? data.certificates.expiring.length : data.certificates.total}
-              sub={data.certificates.expiring.length > 0 ? 'expiring <30d' : 'tracked'}
-              warn={data.certificates.expiring.length > 0}
+              value={certificates ? (certificates.expiring.length > 0 ? certificates.expiring.length : certificates.total) : <Skeleton width={32} />}
+              sub={certificates ? (certificates.expiring.length > 0 ? 'expiring <30d' : 'tracked') : undefined}
+              warn={(certificates?.expiring.length ?? 0) > 0}
               icon={<VerifiedUserOutlinedIcon />}
               onClick={() => {
-                const certs = data.operators.find((o) => o.id === 'cert-manager')?.resources.find((r) => r.plural === 'certificates');
+                const certs = operators?.find((o) => o.id === 'cert-manager')?.resources.find((r) => r.plural === 'certificates');
                 void navigate(certs ? `/r/${certs.group}/${certs.version}/${certs.plural}` : '/r/core/v1/secrets');
               }}
             />
@@ -236,9 +240,9 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
 
           <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.unavailableWorkloads} />
 
-          <OperatorSection ctx={ctx} operators={data.operators} />
+          {operators && <OperatorSection ctx={ctx} operators={operators} />}
 
-          <CertExpiryCard ctx={ctx} certificates={data.certificates} />
+          {certificates && <CertExpiryCard ctx={ctx} certificates={certificates} />}
 
           <PodUsagePanels ctx={ctx} />
 
@@ -259,8 +263,10 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
           {data.failingPods.length === 0 &&
             data.unavailableWorkloads.length === 0 &&
             data.warningEvents.length === 0 &&
-            data.certificates.expiring.length === 0 &&
-            data.operators.every((op) => op.resources.every((r) => r.issues.length === 0 && r.ready >= r.total)) && (
+            certificates &&
+            certificates.expiring.length === 0 &&
+            operators &&
+            operators.every((op) => op.resources.every((r) => r.issues.length === 0 && r.ready >= r.total)) && (
               <Alert severity="success" variant="outlined">
                 No problems detected — all workloads healthy.
               </Alert>
@@ -276,8 +282,8 @@ function OverviewSkeleton() {
   return (
     <>
       <Grid container spacing={1.5} sx={{ mb: 2 }}>
-        {Array.from({ length: 8 }, (_, i) => (
-          <Grid key={i} size={{ xs: 6, sm: 4, md: 2 }}>
+        {Array.from({ length: 10 }, (_, i) => (
+          <Grid key={i} size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
             <Skeleton variant="rounded" height={62} />
           </Grid>
         ))}
@@ -307,8 +313,10 @@ function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnT
         <Typography variant="subtitle2" sx={{ mb: 1 }}>
           Node usage
         </Typography>
-        {!nodeMetrics && <LinearProgress />}
-        {nodeMetrics && !nodeMetrics.available && (
+        {/* Before the first poller probe completes, "unavailable" is provisional —
+            keep the progress bar instead of a false install prompt. */}
+        {(!nodeMetrics || !nodeMetrics.probed) && <LinearProgress />}
+        {nodeMetrics?.probed && !nodeMetrics.available && (
           <Alert severity="info" variant="outlined" sx={{ alignItems: 'center' }} action={<InstallMetricsServerButton ctx={ctx} />}>
             CPU and memory usage are unavailable — metrics-server is not serving data in this cluster.
           </Alert>

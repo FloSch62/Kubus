@@ -1,13 +1,24 @@
 import type { FastifyInstance } from 'fastify';
-import type { MetricsHistoryResponse, MetricsServerInstallRequest, MetricsSnapshot } from '@kubus/shared';
+import type { MetricsHistoryResponse, MetricsServerInstallRequest, MetricsSnapshot, OverviewCertificates } from '@kubus/shared';
 import type { AppContext } from '../app.js';
+import { apiServerCertNotAfter, collectCertificates } from '../kube/cert-expiry.js';
 import { computeNamespaceOverview } from '../kube/namespace-overview.js';
-import { computeOverview } from '../kube/overview.js';
+import { computeOperatorRollups } from '../kube/operator-rollups.js';
+import { computeOverview, installedCrds } from '../kube/overview.js';
 import { computePodResources } from '../kube/pod-resources.js';
 import { installMetricsServer, metricsServerStatus, uninstallMetricsServer } from '../kube/metrics-server.js';
 import { computeMetricsSummary } from '../kube/metrics-summary.js';
 import { cpuToMilli, memToBytes } from '../kube/quantity.js';
 import { sendError } from '../util/errors.js';
+
+/** Optional `?namespaces=a,b` scope shared by the operator/certificate endpoints. */
+function parseNamespaceScope(raw: string | undefined): ReadonlySet<string> | undefined {
+  const namespaces = (raw ?? '')
+    .split(',')
+    .map((ns) => ns.trim())
+    .filter(Boolean);
+  return namespaces.length > 0 ? new Set(namespaces) : undefined;
+}
 
 export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/metrics/nodes', async (req, reply) => {
@@ -24,6 +35,7 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       }
       const snapshot: MetricsSnapshot = {
         available: poller.available,
+        probed: poller.probed,
         items: items.map((n) => {
           const alloc = capacity.get(n.name);
           return {
@@ -45,6 +57,7 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       const handle = ctx.clusters.get(req.params.ctx);
       const snapshot: MetricsSnapshot = {
         available: handle.metricsPoller.available,
+        probed: handle.metricsPoller.probed,
         items: handle.metricsPoller.podSnapshot(req.query.namespace || undefined),
       };
       return snapshot;
@@ -60,6 +73,7 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       const { kind, name, namespace } = req.query;
       const response: MetricsHistoryResponse = {
         available: handle.metricsPoller.available,
+        probed: handle.metricsPoller.probed,
         series: handle.metricsPoller.history(kind, name, namespace || undefined),
       };
       return response;
@@ -113,6 +127,35 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       return await computeOverview(handle);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  // Operator rollups and certificate expiry are split off the main overview
+  // payload: both can involve slow warmups (operator CR lists; the all-secrets
+  // watcher and an API-server TLS probe) and stream in behind the core stats.
+  app.get<{ Params: { ctx: string }; Querystring: { namespaces?: string } }>('/api/contexts/:ctx/overview/operators', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await computeOperatorRollups(handle, await installedCrds(handle), parseNamespaceScope(req.query.namespaces));
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string }; Querystring: { namespaces?: string } }>('/api/contexts/:ctx/overview/certificates', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      const scope = parseNamespaceScope(req.query.namespaces);
+      const [certificates, apiServerNotAfter] = await Promise.all([
+        installedCrds(handle).then((crds) => collectCertificates(handle, crds, scope)),
+        scope ? undefined : apiServerCertNotAfter(handle),
+      ]);
+      const response: OverviewCertificates = { ...certificates, apiServerNotAfter };
+      return response;
     } catch (err) {
       sendError(reply, err);
       return reply;

@@ -18,6 +18,8 @@ import type {
   MetricsServerUninstallResult,
   MetricsSnapshot,
   NamespaceOverview,
+  OperatorRollup,
+  OverviewCertificates,
   PodResourcesResponse,
   ClusterNetworkSummary,
   NetworkAgentInstallResult,
@@ -777,7 +779,7 @@ export function useResourceMetrics(contexts: string[], kind: 'pods' | 'nodes') {
         queryKey: ['metrics-snapshot', kind, ctx] as const,
         queryFn: () =>
           apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/${kind}`).catch(
-            () => ({ available: false, items: [] }) as MetricsSnapshot,
+            () => ({ available: false, probed: true, items: [] }) as MetricsSnapshot,
           ),
         refetchInterval: interval,
       })),
@@ -940,6 +942,37 @@ export function useOverview(ctx: string) {
     queryKey: ['overview', ctx],
     queryFn: () => apiFetch<ClusterOverview>(`/api/contexts/${encodeURIComponent(ctx)}/overview`),
     refetchInterval: useRefetchInterval(10_000),
+  });
+}
+
+/** Overview sections that warm up slowly stream in behind the core payload. */
+function overviewSectionQuery(ctx: string, section: 'operators' | 'certificates', namespaces?: string[]) {
+  const key = namespaces && namespaces.length > 0 ? [...namespaces].sort().join(',') : '';
+  return {
+    queryKey: [`overview-${section}`, ctx, key],
+    path: `/api/contexts/${encodeURIComponent(ctx)}/overview/${section}${key ? `?namespaces=${encodeURIComponent(key)}` : ''}`,
+  };
+}
+
+/** Operator rollups (cert-manager, Argo, Flux…), optionally namespace-scoped. */
+export function useOverviewOperators(ctx: string, namespaces?: string[]) {
+  const { queryKey, path } = overviewSectionQuery(ctx, 'operators', namespaces);
+  return useQuery({
+    queryKey,
+    queryFn: () => apiFetch<OperatorRollup[]>(path),
+    refetchInterval: useRefetchInterval(15_000),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** TLS certificate expiry rollup, optionally namespace-scoped. */
+export function useOverviewCertificates(ctx: string, namespaces?: string[]) {
+  const { queryKey, path } = overviewSectionQuery(ctx, 'certificates', namespaces);
+  return useQuery({
+    queryKey,
+    queryFn: () => apiFetch<OverviewCertificates>(path),
+    refetchInterval: useRefetchInterval(30_000),
+    placeholderData: keepPreviousData,
   });
 }
 
