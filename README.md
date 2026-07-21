@@ -5,17 +5,17 @@ your local machine. It uses your existing kubeconfig to browse and edit
 resources, stream logs, open shells, forward ports, watch metrics, inspect Helm
 releases, and more.
 
-**The docs are the main entry point:** [flosch62.github.io/Kubus](https://flosch62.github.io/Kubus/)
+**The docs are the main entry point:** [kubus-app.dev](https://kubus-app.dev/)
 
 [![vid](docs/assets/overview-play.png)](https://www.youtube.com/watch?v=b86yKodD5Mw)
 
 ## Start Here
 
-- [Install Kubus](https://flosch62.github.io/Kubus/install/)
-- [Quickstart](https://flosch62.github.io/Kubus/quickstart/)
-- [User guide](https://flosch62.github.io/Kubus/guide/)
-- [Reference](https://flosch62.github.io/Kubus/reference/)
-- [Contributing and development](https://flosch62.github.io/Kubus/community/)
+- [Install Kubus](https://kubus-app.dev/install/)
+- [Quickstart](https://kubus-app.dev/quickstart/)
+- [User guide](https://kubus-app.dev/guide/)
+- [Reference](https://kubus-app.dev/reference/)
+- [Contributing and development](https://kubus-app.dev/community/)
 - [Desktop releases](https://github.com/FloSch62/Kubus/releases)
 
 

@@ -7,7 +7,7 @@
 site_name = "Kubus"
 site_description = "Kubus — a free, open-source Kubernetes GUI. Browse every cluster and resource, stream logs, open shells, forward ports, watch metrics and manage Helm — all from one local web UI."
 site_author = "Kubus authors"
-site_url = "https://flosch62.github.io/Kubus/"
+site_url = "https://kubus-app.dev/"
 
 copyright = """
 Copyright &copy; 2026 the Kubus authors — released under the MIT license.
