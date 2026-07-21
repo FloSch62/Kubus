@@ -31,13 +31,16 @@ export default defineConfig({
               test: /node_modules[\\/]monaco-editor[\\/]/,
               includeDependenciesRecursively: false,
             },
-            // x-charts and x-data-grid stay out of this eager group: they are
-            // only reachable from lazy chunks and should load on demand.
-            // Dependencies (emotion, @mui/system, …) ride along — they are
-            // needed at first paint anyway, and leaving them ungrouped lets
-            // the bundler pack them into arbitrary lazy chunks, which then
-            // become eagerly loaded through the shared-module edge.
-            { name: 'mui', test: /node_modules[\\/]@mui[\\/](material|icons-material)[\\/]/ },
+            // x-charts, x-data-grid and icons-material stay out of this eager
+            // group: the former two are only reachable from lazy chunks, and
+            // icons ride with whichever chunk uses them — icons used only by
+            // lazy routes then stay off the first paint instead of being
+            // packed into the eager mui chunk. Dependencies (emotion,
+            // @mui/system, …) ride along — they are needed at first paint
+            // anyway, and leaving them ungrouped lets the bundler pack them
+            // into arbitrary lazy chunks, which then become eagerly loaded
+            // through the shared-module edge.
+            { name: 'mui', test: /node_modules[\\/]@mui[\\/]material[\\/]/ },
           ],
         },
       },
