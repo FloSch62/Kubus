@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -46,6 +46,18 @@ interface EventRow {
   firstSeen?: string;
   lastSeen?: string;
 }
+
+// Hoisted: the grid re-renders on every watch tick, and fresh sx/getRowId
+// identities would make it redo emotion serialization and prop-keyed work.
+const eventsGridSx = {
+  border: 0,
+  flex: 1,
+  minHeight: 0,
+  '& .MuiDataGrid-row': { cursor: 'pointer' },
+  ...copyCellGridSx,
+};
+const eventsGridInitialState = { sorting: { sortModel: [{ field: 'lastSeen', sort: 'desc' as const }] } };
+const getEventRowId = (r: EventRow) => r.id;
 
 function maxTime(...ts: Array<string | null | undefined>): string | undefined {
   return ts
@@ -144,25 +156,41 @@ export function EventsPage() {
     });
   }, [deduped, warningsOnly, kindFilter]);
 
-  const openInvolved = (row: EventRow) => {
-    const o = row.ev.involvedObject;
-    if (!o?.kind || !o.name) return;
-    // Resolve the GVR from discovery (covers CRDs), falling back to builtins.
-    const apiVersion = o.apiVersion ?? '';
-    const [group, version] = apiVersion.includes('/') ? apiVersion.split('/') : ['', apiVersion || 'v1'];
-    const fromDiscovery = (apiResources?.byContext[row.ctx] ?? []).find((r) => r.kind === o.kind && r.group === (group ?? '') && (!version || r.version === version));
-    const gvk = fromDiscovery ?? gvkForKind(o.kind);
-    if (!gvk) return;
-    openDetail({
-      ctx: row.ctx,
-      group: gvk.group,
-      version: gvk.version,
-      plural: gvk.plural,
-      kind: o.kind,
-      name: o.name,
-      namespace: o.namespace,
-    });
-  };
+  const openInvolved = useCallback(
+    (row: EventRow) => {
+      const o = row.ev.involvedObject;
+      if (!o?.kind || !o.name) return;
+      // Resolve the GVR from discovery (covers CRDs), falling back to builtins.
+      const apiVersion = o.apiVersion ?? '';
+      const [group, version] = apiVersion.includes('/') ? apiVersion.split('/') : ['', apiVersion || 'v1'];
+      const fromDiscovery = (apiResources?.byContext[row.ctx] ?? []).find((r) => r.kind === o.kind && r.group === (group ?? '') && (!version || r.version === version));
+      const gvk = fromDiscovery ?? gvkForKind(o.kind);
+      if (!gvk) return;
+      openDetail({
+        ctx: row.ctx,
+        group: gvk.group,
+        version: gvk.version,
+        plural: gvk.plural,
+        kind: o.kind,
+        name: o.name,
+        namespace: o.namespace,
+      });
+    },
+    [apiResources, openDetail],
+  );
+
+  const onRowClick = useCallback((p: { row: EventRow }) => openInvolved(p.row), [openInvolved]);
+  const onCellKeyDown = useCallback<NonNullable<React.ComponentProps<typeof DataGrid<EventRow>>['onCellKeyDown']>>(
+    (params, event, details) => {
+      handleCopyCellKeyDown(params, event, details);
+      // Keyboard equivalent of clicking the row.
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        openInvolved(params.row);
+      }
+    },
+    [openInvolved],
+  );
 
   const columns: GridColDef<EventRow>[] = useMemo(() => {
     const defs: GridColDef<EventRow>[] = [
@@ -252,26 +280,13 @@ export function EventsPage() {
         rows={rows}
         columns={grid.columns}
         loading={Object.values(list.status).some((s) => s.state === 'loading')}
-        getRowId={(r) => r.id}
+        getRowId={getEventRowId}
         density={grid.density}
         onColumnWidthChange={grid.onColumnWidthChange}
-        onRowClick={(p) => openInvolved(p.row as EventRow)}
-        onCellKeyDown={(params, event, details) => {
-          handleCopyCellKeyDown(params, event, details);
-          // Keyboard equivalent of clicking the row.
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            openInvolved(params.row as EventRow);
-          }
-        }}
-        initialState={{ sorting: { sortModel: [{ field: 'lastSeen', sort: 'desc' }] } }}
-        sx={{
-          border: 0,
-          flex: 1,
-          minHeight: 0,
-          '& .MuiDataGrid-row': { cursor: 'pointer' },
-          ...copyCellGridSx,
-        }}
+        onRowClick={onRowClick}
+        onCellKeyDown={onCellKeyDown}
+        initialState={eventsGridInitialState}
+        sx={eventsGridSx}
       />
     </Box>
   );

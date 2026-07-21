@@ -102,7 +102,9 @@ export function AuditPage() {
   const { data, isLoading, isFetching } = useAudit(selected);
   const queryClient = useQueryClient();
   const openDetail = useDetailStore((s) => s.open);
-  const { dismissedChecks, dismissCheck, restoreCheck } = useAuditPrefsStore();
+  const dismissedChecks = useAuditPrefsStore((s) => s.dismissedChecks);
+  const dismissCheck = useAuditPrefsStore((s) => s.dismissCheck);
+  const restoreCheck = useAuditPrefsStore((s) => s.restoreCheck);
   const [severityFilter, setSeverityFilter] = useState<ReadonlySet<AuditSeverity>>(new Set());
   const [textFilter, setTextFilter] = useState('');
   const deferredTextFilter = useDeferredValue(textFilter);

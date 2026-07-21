@@ -53,6 +53,8 @@ const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
 
 const DEFAULT_SORT: GridSortModel = [{ field: 'name', sort: 'asc' }];
 
+const EMPTY_LABEL_OPTIONS: { terms: string[]; keys: Set<string> } = { terms: [], keys: new Set() };
+
 /** All `key` and `key=value` selector terms present in the rows. */
 function labelSelectorOptions(rows: ClusterRow[]): { terms: string[]; keys: Set<string> } {
   const keys = new Set<string>();
@@ -192,8 +194,30 @@ export function ResourceTable({
   }, [rows, parsedFilter, kind, metricsForFilter]);
 
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
-  const labelOptions = useMemo(() => labelSelectorOptions(rows), [rows]);
+  // Scanning and sorting every row's labels is only worth doing while the
+  // dropdown is open — not on every watch flush of a large list.
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const labelOptions = useMemo(() => (labelsOpen ? labelSelectorOptions(rows) : EMPTY_LABEL_OPTIONS), [labelsOpen, rows]);
   const labelTerms = useMemo(() => splitLabelSelector(labelSelector ?? ''), [labelSelector]);
+
+  // The grid re-renders on every watch flush; keep the sx object stable so
+  // emotion doesn't re-serialize it each time.
+  const gridSx = useMemo(
+    () => ({
+      border: 0,
+      flex: 1,
+      minHeight: 0,
+      '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
+      '& .MuiDataGrid-row.kubus-active-resource-row': {
+        bgcolor: 'action.selected',
+        '&:hover': { bgcolor: 'action.selected' },
+      },
+      '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
+      '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
+      ...copyCellGridSx,
+    }),
+    [!!onRowClick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const setTextFilter = (value: string) => {
     setInputValue(value);
@@ -225,6 +249,8 @@ export function ResourceTable({
             limitTags={2}
             options={labelOptions.terms}
             value={labelTerms}
+            onOpen={() => setLabelsOpen(true)}
+            onClose={() => setLabelsOpen(false)}
             filterOptions={labelFilterOptions}
             onChange={(_event, values) => onLabelSelectorChange(joinLabelSelector(values))}
             renderOption={({ key, ...props }, option, { selected }) => (
@@ -333,19 +359,7 @@ export function ResourceTable({
         }}
         sortModel={sortModel}
         onSortModelChange={handleSortChange}
-        sx={{
-          border: 0,
-          flex: 1,
-          minHeight: 0,
-          '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
-          '& .MuiDataGrid-row.kubus-active-resource-row': {
-            bgcolor: 'action.selected',
-            '&:hover': { bgcolor: 'action.selected' },
-          },
-          '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
-          '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
-          ...copyCellGridSx,
-        }}
+        sx={gridSx}
       />
     </Box>
   );
