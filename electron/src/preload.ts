@@ -14,6 +14,18 @@ const stateSnapshot: Record<string, string> = (() => {
   }
 })();
 
+// The disk-side write failed in the main process: mirror the snapshot into
+// origin-scoped localStorage so a relaunch on the same origin can migrate it
+// back (kubusStateStorage.getItem reads browser storage when the desktop
+// store has no value).
+ipcRenderer.on('kubus:state:write-failed', () => {
+  try {
+    for (const [name, value] of Object.entries(stateSnapshot)) window.localStorage.setItem(name, value);
+  } catch {
+    /* browser storage unavailable — nothing left to fall back to */
+  }
+});
+
 // Desktop bridge for stable client state plus native window integrations.
 contextBridge.exposeInMainWorld('kubusDesktop', {
   platform: process.platform,

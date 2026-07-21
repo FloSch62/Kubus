@@ -396,16 +396,18 @@ ipcMain.on('kubus:state:get-all', (event) => {
 // Steady-state writes are fire-and-forget so the renderer never blocks on
 // persistence; bursts (fast clicking flips several stores at once) coalesce
 // into one disk write.
+const STATE_FLUSH_MS = 150;
+const STATE_RETRY_MS = 5_000;
 let stateFlushTimer: NodeJS.Timeout | undefined;
 let pendingClientState: Record<string, string> | undefined;
 
-function scheduleClientStateFlush(state: Record<string, string>): void {
+function scheduleClientStateFlush(state: Record<string, string>, delay = STATE_FLUSH_MS): void {
   pendingClientState = state;
   clientStateCache = state;
   stateFlushTimer ??= setTimeout(() => {
     stateFlushTimer = undefined;
     flushClientState();
-  }, 150);
+  }, delay);
 }
 
 function flushClientState(): void {
@@ -413,13 +415,17 @@ function flushClientState(): void {
     clearTimeout(stateFlushTimer);
     stateFlushTimer = undefined;
   }
-  if (!pendingClientState) return;
   const state = pendingClientState;
-  pendingClientState = undefined;
+  if (!state) return;
   try {
     saveClientState(state);
+    pendingClientState = undefined;
   } catch {
-    /* nothing actionable — the state lands with the next write */
+    // Disk write failed (full disk, permissions …): keep the state pending
+    // and retry with backoff, and tell the renderer so it can mirror the
+    // snapshot into browser storage as a fallback.
+    mainWindow?.webContents.send('kubus:state:write-failed');
+    scheduleClientStateFlush(state, STATE_RETRY_MS);
   }
 }
 
