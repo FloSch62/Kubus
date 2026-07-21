@@ -40,8 +40,10 @@ import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
 
-// Wide, rarely-needed builtin columns start hidden; the column menu re-enables them.
-const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID'] };
+// Wide, rarely-needed builtin columns start hidden; the column menu re-enables
+// them. Labels carry no signal on CRDs, so the Kind/Group/Scope columns take
+// their place there.
+const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID'], CustomResourceDefinition: ['labels'] };
 
 /**
  * Renderless bridge between this page's URL params and the shared detail

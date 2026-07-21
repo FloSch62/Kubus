@@ -11,7 +11,7 @@ import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
 import { StatusChip } from './StatusChip.js';
 import { formatBytes, formatCpu } from './format.js';
-import { dataKeyCount, eventFields, hasRunningDebugContainer, hpaProblems, ingressHosts, jobPhase, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, ownerReference, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
+import { crdStatus, crdVersions, dataKeyCount, eventFields, hasRunningDebugContainer, hpaProblems, ingressHosts, jobPhase, jobStatus, nodeAddress, nodeConditions, nodeRoles, nodeStatus, nodeTaints, ownerReference, parseQuantity, podRequestTotals, podSummary, serviceLoadBalancerAddresses, servicePorts, statusLikeName, workloadReady } from '../kube-display.js';
 import { cronHumanText, cronNextRun } from '../cron.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
@@ -526,6 +526,42 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     width: 220,
     valueGetter: (_v, row) => ((obj(row).spec as { providerID?: string })?.providerID ?? ''),
     renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
+  }),
+  crdKind: () => ({
+    field: 'crdKind',
+    headerName: 'Kind',
+    flex: 1,
+    minWidth: 160,
+    valueGetter: (_v, row) => (obj(row).spec as { names?: { kind?: string } })?.names?.kind ?? '',
+  }),
+  crdGroup: () => ({
+    field: 'crdGroup',
+    headerName: 'Group',
+    flex: 1,
+    minWidth: 170,
+    valueGetter: (_v, row) => (obj(row).spec as { group?: string })?.group ?? '',
+    renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
+  }),
+  crdScope: () => ({
+    field: 'crdScope',
+    headerName: 'Scope',
+    width: 105,
+    valueGetter: (_v, row) => (obj(row).spec as { scope?: string })?.scope ?? '',
+  }),
+  crdVersions: () => ({
+    field: 'crdVersions',
+    headerName: 'Versions',
+    description: 'Served versions; * marks the storage version',
+    width: 120,
+    valueGetter: (_v, row) => crdVersions(obj(row)),
+    renderCell: (params) => <TextCell value={String(params.value ?? '')} />,
+  }),
+  crdStatus: () => ({
+    field: 'crdStatus',
+    headerName: 'Status',
+    width: 105,
+    valueGetter: (_v, row) => crdStatus(obj(row)),
+    renderCell: (params) => <StatusChip status={String(params.value ?? '')} />,
   }),
   nsStatus: () => ({
     field: 'nsStatus',

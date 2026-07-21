@@ -43,8 +43,12 @@ import { GROUP_ICONS } from './tab-meta.js';
 const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
 const ITEM_INDENT = '42px';
+// Two deeper steps for the Custom Resources tree (domain → API group → kind).
+const SUB_INDENT = '54px';
+const KIND_INDENT = '66px';
 const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
 const CUSTOM_GROUP_PREFIX = 'custom:';
+const CRD_LIST_PATH = '/r/apiextensions.k8s.io/v1/customresourcedefinitions';
 
 
 /**
@@ -164,6 +168,50 @@ function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   return [...byKind.values()];
 }
 
+interface CustomSubgroup {
+  /** Full API group, e.g. `appstore.eda.nokia.com`. */
+  group: string;
+  /** Group with the shared domain stripped, e.g. `appstore.eda`. */
+  label: string;
+  kinds: ResourceKindInfo[];
+}
+
+/**
+ * One top-level entry under Custom Resources: a lone API group shown by its
+ * full name, or a domain (last two dot-labels, e.g. `nokia.com`) folding the
+ * groups that share it. A group named exactly like the domain contributes its
+ * kinds directly to the domain entry rather than an empty-labelled subgroup.
+ */
+interface CustomNavNode {
+  label: string;
+  kinds: ResourceKindInfo[];
+  subgroups: CustomSubgroup[];
+}
+
+function buildCustomNav(customKinds: Array<[string, ResourceKindInfo[]]>): CustomNavNode[] {
+  const byDomain = new Map<string, Array<{ group: string; kinds: ResourceKindInfo[] }>>();
+  for (const [group, kinds] of customKinds) {
+    const domain = group.split('.').slice(-2).join('.');
+    const list = byDomain.get(domain) ?? [];
+    list.push({ group, kinds });
+    byDomain.set(domain, list);
+  }
+  const nodes: CustomNavNode[] = [];
+  for (const [domain, groups] of byDomain) {
+    if (groups.length === 1) {
+      nodes.push({ label: groups[0]!.group, kinds: groups[0]!.kinds, subgroups: [] });
+      continue;
+    }
+    const own = groups.find((g) => g.group === domain);
+    const subgroups = groups
+      .filter((g) => g.group !== domain)
+      .map((g) => ({ group: g.group, label: g.group.slice(0, -(domain.length + 1)), kinds: g.kinds }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    nodes.push({ label: domain, kinds: own?.kinds ?? [], subgroups });
+  }
+  return nodes.sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function NavEntry({
   to,
   label,
@@ -173,6 +221,7 @@ function NavEntry({
   favoriteAction,
   hotkey,
   onIntent,
+  indent,
 }: {
   to: string;
   label: string;
@@ -184,6 +233,8 @@ function NavEntry({
   hotkey?: string;
   /** Fired on hover/focus — used to preload the target's heavy chunks. */
   onIntent?: () => void;
+  /** Left padding override for entries nested below the default group level. */
+  indent?: string;
 }) {
   const location = useLocation();
   const active = location.pathname === to;
@@ -200,7 +251,7 @@ function NavEntry({
       onMouseEnter={onIntent}
       onFocus={onIntent}
       {...newTabHandlers}
-      sx={{ pl: icon ? 1.5 : ITEM_INDENT, py: subtitle ? 0.25 : 0.375, pr: favorite ? (favoriteAction ? 7 : 4) : undefined }}
+      sx={{ pl: icon ? 1.5 : (indent ?? ITEM_INDENT), py: subtitle ? 0.25 : 0.375, pr: favorite ? (favoriteAction ? 7 : 4) : undefined }}
     >
       {icon && (
         <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
@@ -357,6 +408,86 @@ function GroupHeader({
         />
       </ListItemButton>
     </ListItem>
+  );
+}
+
+/** Collapsible domain / API-group header inside the Custom Resources tree. */
+function CustomGroupHeader({
+  label,
+  title,
+  count,
+  indent,
+  open,
+  active,
+  subordinate,
+  onClick,
+}: {
+  label: string;
+  /** Hover hint; defaults to the label (subgroups pass their full API group). */
+  title?: string;
+  count?: number;
+  indent: string;
+  open: boolean;
+  /** The current page lives inside this branch — color it as the active trail. */
+  active?: boolean;
+  /** Nested one level down; rendered lighter than top-level entries. */
+  subordinate?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <ListItemButton
+      dense
+      aria-expanded={open}
+      onClick={onClick}
+      sx={{ pl: indent, pr: 1.5, py: 0.25, mt: 0.5, color: active ? 'primary.main' : open ? 'text.primary' : 'text.secondary' }}
+    >
+      <ListItemText
+        primary={label}
+        slotProps={{ primary: { variant: 'caption', noWrap: true, title: title ?? label, sx: { fontWeight: subordinate ? 600 : 700, lineHeight: 1.4 } } }}
+      />
+      {count !== undefined && (
+        <Typography variant="caption" aria-hidden sx={{ ml: 0.5, color: 'text.disabled', fontVariantNumeric: 'tabular-nums' }}>
+          {count}
+        </Typography>
+      )}
+      <ExpandMoreIcon
+        sx={{ ml: 0.5, fontSize: 15, opacity: 0.6, flexShrink: 0, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
+      />
+    </ListItemButton>
+  );
+}
+
+/**
+ * Children of an expanded Custom Resources level: a faint panel tint plus,
+ * on the first level only, an indent guide rail aligned under the parent
+ * label — a second rail per nesting level reads as clutter. The rail takes
+ * the accent color while the branch contains the current page.
+ */
+function TreeChildren({ railLeft, active, children }: { railLeft?: string; active?: boolean; children: ReactNode }) {
+  return (
+    <Box
+      sx={{
+        position: 'relative',
+        bgcolor: (theme) => (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.02)'),
+        ...(railLeft && {
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            left: railLeft,
+            top: 3,
+            bottom: 3,
+            width: '2px',
+            borderRadius: 1,
+            bgcolor: active ? 'primary.main' : 'divider',
+            opacity: active ? 0.55 : 1,
+            pointerEvents: 'none',
+            zIndex: 1,
+          },
+        }),
+      }}
+    >
+      {children}
+    </Box>
   );
 }
 
@@ -548,6 +679,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     }
     return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [apiResources]);
+  const customNav = useMemo(() => buildCustomNav(customKinds), [customKinds]);
 
   // Group chain (outermost first) containing each kind path, used to reveal
   // the entry for the active resource after a cross-kind jump.
@@ -556,13 +688,18 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     for (const group of BUILTIN_NAV_GROUPS) {
       for (const k of group.kinds) map.set(kindPath(k.group, k.version, k.plural), [group.title]);
     }
-    for (const [groupName, kinds] of customKinds) {
-      for (const k of kinds) {
-        map.set(kindPath(k.group, k.version, k.plural), ['Custom Resources', `${CUSTOM_GROUP_PREFIX}${groupName}`]);
+    map.set(CRD_LIST_PATH, ['Custom Resources']);
+    for (const node of customNav) {
+      const nodeKey = `${CUSTOM_GROUP_PREFIX}${node.label}`;
+      for (const k of node.kinds) map.set(kindPath(k.group, k.version, k.plural), ['Custom Resources', nodeKey]);
+      for (const sg of node.subgroups) {
+        for (const k of sg.kinds) {
+          map.set(kindPath(k.group, k.version, k.plural), ['Custom Resources', nodeKey, `${CUSTOM_GROUP_PREFIX}${sg.group}`]);
+        }
       }
     }
     return map;
-  }, [customKinds]);
+  }, [customNav]);
 
   const listRef = useRef<HTMLUListElement | null>(null);
   // Bring the active entry into view. A just-expanded Collapse animates open,
@@ -655,6 +792,8 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
 
   const f = deferredFilter.toLowerCase();
   const matches = (label: string) => !f || label.toLowerCase().includes(f);
+  // Branch containing the current page, for active-trail coloring in the tree.
+  const activeChain = groupChainByPath.get(location.pathname) ?? [];
   // While filtering, always expand so matches are visible. CRD API groups are
   // discovered dynamically, so they use the set as an explicit open override.
   const isOpen = (title: string) => !!f || (title.startsWith(CUSTOM_GROUP_PREFIX) ? collapsed.has(title) : !collapsed.has(title));
@@ -866,42 +1005,80 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               favorite={{ active: isFav('category:Custom Resources'), onToggle: () => toggleCategory('Custom Resources') }}
             />
             <Collapse in={isOpen('Custom Resources')}>
-              {customKinds.map(([groupName, kinds]) => {
-                const groupMatches = matches(groupName);
-                const visible = groupMatches ? kinds : kinds.filter((k) => matches(k.kind));
-                if (!visible.length) return null;
-                const collapseKey = `${CUSTOM_GROUP_PREFIX}${groupName}`;
+              {(!f || 'crd definitions customresourcedefinitions'.includes(f)) && (
+                <NavEntry
+                  to={CRD_LIST_PATH}
+                  label="Definitions"
+                  favorite={kindFavorite({
+                    group: 'apiextensions.k8s.io',
+                    version: 'v1',
+                    plural: 'customresourcedefinitions',
+                    kind: 'CustomResourceDefinition',
+                    label: 'CRD Definitions',
+                  })}
+                />
+              )}
+              {customNav.map((node) => {
+                const nodeKey = `${CUSTOM_GROUP_PREFIX}${node.label}`;
+                const nodeMatches = matches(node.label);
+                const ownKinds = nodeMatches ? node.kinds : node.kinds.filter((k) => matches(k.kind));
+                const subgroups = node.subgroups
+                  .map((sg) => ({ ...sg, kinds: nodeMatches || matches(sg.group) ? sg.kinds : sg.kinds.filter((k) => matches(k.kind)) }))
+                  .filter((sg) => sg.kinds.length > 0);
+                if (!ownKinds.length && !subgroups.length) return null;
+                const kindCount = node.kinds.length + node.subgroups.reduce((n, sg) => n + sg.kinds.length, 0);
                 return (
-                  <Box key={groupName}>
-                    <ListItemButton
-                      dense
-                      aria-expanded={isOpen(collapseKey)}
-                      onClick={() => toggleGroup(collapseKey)}
-                      sx={{ pl: ITEM_INDENT, pr: 1.5, py: 0.25, mt: 0.5, color: 'text.secondary' }}
-                    >
-                      <ListItemText
-                        primary={groupName}
-                        slotProps={{ primary: { variant: 'caption', noWrap: true, title: groupName, sx: { fontWeight: 700, lineHeight: 1.4 } } }}
-                      />
-                      <ExpandMoreIcon
-                        sx={{
-                          ml: 0.5,
-                          fontSize: 15,
-                          opacity: 0.6,
-                          transform: isOpen(collapseKey) ? 'none' : 'rotate(-90deg)',
-                          transition: 'transform 120ms ease',
-                        }}
-                      />
-                    </ListItemButton>
-                    <Collapse in={isOpen(collapseKey)}>
-                      {visible.map((k) => (
-                        <NavEntry
-                          key={`${k.group}/${k.version}/${k.plural}`}
-                          to={kindPath(k.group, k.version, k.plural)}
-                          label={k.kind}
-                          favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
-                        />
-                      ))}
+                  <Box key={node.label}>
+                    <CustomGroupHeader
+                      label={node.label}
+                      count={kindCount}
+                      indent={ITEM_INDENT}
+                      open={isOpen(nodeKey)}
+                      active={activeChain.includes(nodeKey)}
+                      onClick={() => toggleGroup(nodeKey)}
+                    />
+                    <Collapse in={isOpen(nodeKey)}>
+                      <TreeChildren railLeft="45px" active={activeChain.includes(nodeKey)}>
+                        {ownKinds.map((k) => (
+                          <NavEntry
+                            key={`${k.group}/${k.version}/${k.plural}`}
+                            to={kindPath(k.group, k.version, k.plural)}
+                            label={k.kind}
+                            indent={SUB_INDENT}
+                            favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
+                          />
+                        ))}
+                        {subgroups.map((sg) => {
+                          const sgKey = `${CUSTOM_GROUP_PREFIX}${sg.group}`;
+                          return (
+                            <Box key={sg.group}>
+                              <CustomGroupHeader
+                                label={sg.label}
+                                title={sg.group}
+                                count={sg.kinds.length}
+                                indent={SUB_INDENT}
+                                open={isOpen(sgKey)}
+                                active={activeChain.includes(sgKey)}
+                                subordinate
+                                onClick={() => toggleGroup(sgKey)}
+                              />
+                              <Collapse in={isOpen(sgKey)}>
+                                <TreeChildren>
+                                  {sg.kinds.map((k) => (
+                                    <NavEntry
+                                      key={`${k.group}/${k.version}/${k.plural}`}
+                                      to={kindPath(k.group, k.version, k.plural)}
+                                      label={k.kind}
+                                      indent={KIND_INDENT}
+                                      favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
+                                    />
+                                  ))}
+                                </TreeChildren>
+                              </Collapse>
+                            </Box>
+                          );
+                        })}
+                      </TreeChildren>
                     </Collapse>
                   </Box>
                 );

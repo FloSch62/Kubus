@@ -152,6 +152,26 @@ export function dataKeyCount(obj: KubeObject): number {
   return Object.keys((obj.data as Record<string, unknown> | undefined) ?? {}).length;
 }
 
+/** Served CRD versions in spec order, the storage version marked with an asterisk. */
+export function crdVersions(crd: KubeObject): string {
+  const versions = (crd.spec as { versions?: Array<{ name: string; served?: boolean; storage?: boolean }> })?.versions ?? [];
+  const served = versions.filter((v) => v.served !== false);
+  return (served.length ? served : versions).map((v) => `${v.name}${v.storage ? '*' : ''}`).join(', ');
+}
+
+/**
+ * Coarse CRD lifecycle status for the list Status column. Empty until the
+ * apiserver reports conditions so a just-created CRD shows no chip.
+ */
+export function crdStatus(crd: KubeObject): string {
+  if (crd.metadata.deletionTimestamp) return 'Terminating';
+  const conditions = (crd.status as { conditions?: Array<{ type?: string; status?: string }> } | undefined)?.conditions ?? [];
+  const has = (type: string, status: string) => conditions.some((c) => c.type === type && c.status === status);
+  if (has('Established', 'True')) return 'Active';
+  if (has('NamesAccepted', 'False')) return 'NameConflict';
+  return conditions.length ? 'NotEstablished' : '';
+}
+
 /**
  * Coarse Job lifecycle phase for the list Status column. Terminal conditions
  * win; otherwise suspension beats activity so a paused Job doesn't read as

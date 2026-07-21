@@ -741,6 +741,8 @@ export interface OverviewWarningEvent {
   message: string;
   involvedKind: string;
   involvedName: string;
+  /** List GVR and scope of the involved object, resolved via discovery — undefined when the kind is unknown (e.g. uninstalled CRD). */
+  involvedGvr?: { group: string; version: string; plural: string; namespaced: boolean };
   count: number;
   lastTimestamp?: string;
 }

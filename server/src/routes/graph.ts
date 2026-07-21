@@ -460,28 +460,40 @@ function focusGraph(graph: RelationshipGraph, query: FocusQuery): RelationshipGr
       : graph;
   }
   const depth = Math.max(1, Math.min(4, Number(query.depth ?? 2)));
-  const adjacency = new Map<string, Set<string>>();
-  const neighborsOf = (id: string): Set<string> => {
-    let set = adjacency.get(id);
-    if (!set) {
-      set = new Set();
-      adjacency.set(id, set);
+  // Walking schedules/mounts edges backwards enumerates every consumer of a
+  // shared resource (all pods on a node, all pods mounting a configmap), which
+  // would flood a focused pod's map with unrelated siblings. Keep such shared
+  // resources as leaves — unless the focus itself is the shared resource,
+  // where listing its consumers is the point.
+  const fanInKinds = new Set<GraphEdge['kind']>(['schedules', 'mounts']);
+  const adjacency = new Map<string, Array<{ id: string; fanIn: boolean }>>();
+  const neighborsOf = (id: string): Array<{ id: string; fanIn: boolean }> => {
+    let list = adjacency.get(id);
+    if (!list) {
+      list = [];
+      adjacency.set(id, list);
     }
-    return set;
+    return list;
   };
   for (const edge of graph.edges) {
-    neighborsOf(edge.source).add(edge.target);
-    neighborsOf(edge.target).add(edge.source);
+    neighborsOf(edge.source).push({ id: edge.target, fanIn: false });
+    neighborsOf(edge.target).push({ id: edge.source, fanIn: fanInKinds.has(edge.kind) });
   }
+  // Cluster nodes are terminal for the same reason: expanding through one
+  // reaches its static pods (mirror pods are owner-referenced by the Node).
+  const infraLeafIds = new Set(
+    graph.nodes.filter((node) => node.id !== focus.id && node.ref.group === '' && node.ref.plural === 'nodes').map((node) => node.id),
+  );
   const keep = new Set<string>([focus.id]);
   let frontier = new Set<string>([focus.id]);
   for (let i = 0; i < depth; i++) {
     const next = new Set<string>();
     for (const id of frontier) {
-      for (const neighbor of adjacency.get(id) ?? []) {
-        if (keep.has(neighbor)) continue;
-        keep.add(neighbor);
-        next.add(neighbor);
+      for (const step of adjacency.get(id) ?? []) {
+        if (step.fanIn && id !== focus.id) continue;
+        if (keep.has(step.id)) continue;
+        keep.add(step.id);
+        if (!infraLeafIds.has(step.id)) next.add(step.id);
       }
     }
     frontier = next;

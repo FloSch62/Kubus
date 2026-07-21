@@ -416,8 +416,8 @@ export default function TopologyGraphImpl({
   );
 
   const edges = useMemo<TopologyFlowEdge[]>(
-    () =>
-      flow.edges.map((edge) => {
+    () => {
+      const styled = flow.edges.map((edge) => {
         const connected = !activeSelectedNodeId || edge.source === activeSelectedNodeId || edge.target === activeSelectedNodeId;
         return {
           ...edge,
@@ -425,7 +425,13 @@ export default function TopologyGraphImpl({
           style: { ...edge.style, strokeWidth: activeSelectedNodeId && connected ? 2.8 : edge.style?.strokeWidth, opacity: connected ? 1 : 0.1 },
           labelStyle: { ...edge.labelStyle, opacity: connected ? 1 : 0.1 },
         };
-      }),
+      });
+      // Edges paint in array order within the edge layer, and every edge
+      // carries a background-colored halo, so a dimmed edge drawn later would
+      // mask a highlighted one. Keep the selected node's edges on top (stable
+      // sort preserves order within each group).
+      return activeSelectedNodeId ? styled.sort((a, b) => Number(a.selected) - Number(b.selected)) : styled;
+    },
     [activeSelectedNodeId, flow.edges],
   );
   const { warnings, problemNodes } = flow;
