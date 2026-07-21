@@ -118,6 +118,14 @@ const LEVEL_STYLE: Record<LogLevel, { letter: string; color: string }> = {
   trace: { letter: 'T', color: '#6b7089' },
 };
 
+/** Toolbar chip accents. The log body is always dark, but the toolbar follows
+ *  the app theme — the dark-tuned LEVEL_STYLE hues wash out on the light
+ *  toolbar, so light mode uses darker equivalents. */
+const LEVEL_CHIP_COLOR: Record<'light' | 'dark', Record<LogLevel, string>> = {
+  dark: { error: '#f7768e', warn: '#e0af68', info: '#7aa2f7', debug: '#9aa0b5', trace: '#6b7089' },
+  light: { error: '#b91c1c', warn: '#8f6209', info: '#1d4ed8', debug: '#52525b', trace: '#71717a' },
+};
+
 /** Row tint for lines that demand attention while scanning. */
 const LEVEL_ROW_TINT: Partial<Record<LogLevel, string>> = {
   error: 'rgba(247,118,142,0.08)',
@@ -860,7 +868,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
         )}
         {LOG_LEVELS.filter((level) => levelCounts[level] > 0 || levelFilter.has(level)).map((level) => {
           const active = levelFilter.has(level);
-          const { letter, color } = LEVEL_STYLE[level];
+          const { letter } = LEVEL_STYLE[level];
           return (
             <Tooltip key={level} title={`${active ? 'Stop filtering by' : 'Only show'} ${level} lines`}>
               <Chip
@@ -869,13 +877,16 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
                 variant={active ? 'filled' : 'outlined'}
                 onClick={() => toggleLevel(level)}
                 aria-label={`Filter ${level} logs`}
-                sx={{
-                  fontFamily: 'monospace',
-                  fontWeight: 600,
-                  color: active ? '#1a1a1e' : color,
-                  bgcolor: active ? color : undefined,
-                  borderColor: color,
-                  '&:hover': { bgcolor: active ? color : undefined },
+                sx={(theme) => {
+                  const color = LEVEL_CHIP_COLOR[theme.palette.mode][level];
+                  return {
+                    fontFamily: 'monospace',
+                    fontWeight: 600,
+                    color: active ? (theme.palette.mode === 'dark' ? '#1a1a1e' : '#ffffff') : color,
+                    bgcolor: active ? color : undefined,
+                    borderColor: color,
+                    '&:hover': { bgcolor: active ? color : undefined },
+                  };
                 }}
               />
             </Tooltip>

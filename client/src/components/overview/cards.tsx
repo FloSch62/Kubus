@@ -17,6 +17,7 @@ import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { useApiResources } from '../../api/queries.js';
 import { kindListPath } from '../../resource-links.js';
+import { statusTextColor } from '../../theme.js';
 
 export { kindListPath };
 
@@ -78,7 +79,7 @@ export function WarningEventsCard({ ctx, events }: { ctx: string; events: Overvi
           const label = `${e.involvedKind}/${namespace ? `${namespace}/` : ''}${e.involvedName}`;
           return (
             <Typography key={`${e.namespace}/${e.involvedKind}/${e.involvedName}/${e.reason}/${e.lastTimestamp ?? ''}/${e.message}`} variant="body2">
-              <Typography component="span" variant="body2" sx={{ color: 'warning.main', fontWeight: 600 }}>
+              <Typography component="span" variant="body2" sx={{ color: statusTextColor('warning'), fontWeight: 600 }}>
                 {e.reason}
               </Typography>
               {e.count > 1 && (
@@ -126,8 +127,10 @@ export function StatCard({
   icon?: React.ReactElement;
   onClick?: () => void;
 }) {
+  // Six-up only on wide screens; mid widths get four-up so the values never
+  // ellipsize before the labels do.
   return (
-    <Grid size={{ xs: 6, sm: 4, md: 2 }}>
+    <Grid size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
       <Card
         variant="outlined"
         onClick={onClick}
@@ -162,7 +165,7 @@ export function StatCard({
                 return {
                   width: 36,
                   height: 36,
-                  borderRadius: 2,
+                  borderRadius: 1.5,
                   flexShrink: 0,
                   display: 'grid',
                   placeItems: 'center',

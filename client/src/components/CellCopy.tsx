@@ -4,6 +4,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import type { GridColDef, GridEventListener, GridValidRowModel } from '@mui/x-data-grid';
 import { copyToClipboard } from '../clipboard.js';
+import { TruncationTooltip } from './truncation.js';
 
 /** The text a cell copies: the raw (unformatted) value the grid computed. */
 export function cellCopyText(value: unknown): string {
@@ -116,14 +117,17 @@ export function withCellCopy<R extends GridValidRowModel>(column: GridColDef<R>)
     display: column.display ?? 'flex',
     renderCell: (params) => {
       const text = cellCopyText(params.value);
+      const display = String(params.formattedValue ?? params.value ?? '');
       return (
         <>
           {original ? (
             original(params)
           ) : (
-            <span className="kubus-cell-text" style={{ textAlign: align }}>
-              {String(params.formattedValue ?? params.value ?? '')}
-            </span>
+            <TruncationTooltip text={display}>
+              <span className="kubus-cell-text" style={{ textAlign: align }}>
+                {display}
+              </span>
+            </TruncationTooltip>
           )}
           {text ? <CellCopyButton text={text} /> : null}
         </>

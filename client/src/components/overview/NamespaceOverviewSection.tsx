@@ -15,6 +15,7 @@ import { FailingPodsCard, ProblemCard, WarningEventsCard, kindListPath } from '.
 import { OperatorSection } from './OperatorSection.js';
 import { PodUsagePanels } from './PodUsagePanels.js';
 import { WorkloadHealthSection } from './WorkloadHealthSection.js';
+import { statusTextColor } from '../../theme.js';
 
 /**
  * The overview body while the global namespace filter is active: a

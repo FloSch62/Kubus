@@ -54,7 +54,7 @@ export function ApiResourceDrawer({ open, ctx, resource, onClose, onOpenCrd }: P
             <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
               {ctx ? `${ctx} · ` : ''}API Resource
             </Typography>
-            <Typography variant="subtitle1" noWrap sx={{ fontWeight: 650, lineHeight: 1.3 }}>
+            <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, lineHeight: 1.3 }}>
               {pluralLabel(resource.kind)}
             </Typography>
           </Box>
@@ -145,7 +145,7 @@ function InfoRow({ label, value }: { label: string; value: string | undefined })
   return (
     <TableRow>
       <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{label}</TableCell>
-      <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>{value}</TableCell>
+      <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>{value}</TableCell>
     </TableRow>
   );
 }

@@ -15,6 +15,7 @@ import { crdStatus, crdVersions, dataKeyCount, eventFields, hasRunningDebugConta
 import { cronHumanText, cronNextRun } from '../cron.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
+import { statusTextColor } from '../theme.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
 export type NodeAllocationLookup = (ctx: string, nodeName: string) => NodeAllocationSummary;
@@ -102,7 +103,12 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Ready',
     width: 75,
     valueGetter: (_v, row) => podSummary(obj(row)).ready,
-    renderCell: (params) => <ReadyCounter value={String(params.value ?? '')} />,
+    renderCell: (params) => (
+      <ReadyCounter
+        value={String(params.value ?? '')}
+        muted={/^(succeeded|completed)$/i.test(podSummary(obj(params.row)).status)}
+      />
+    ),
   }),
   podStatus: () => ({
     field: 'podStatus',
@@ -575,7 +581,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Type',
     width: 90,
     valueGetter: (_v, row) => eventFields(obj(row)).type,
-    renderCell: (params) => <StatusChip status={eventFields(obj(params.row)).type === 'Warning' ? 'Error' : 'Ready'} />,
+    renderCell: (params) => <StatusChip status={eventFields(obj(params.row)).type ?? ''} />,
   }),
   eventReason: () => ({
     field: 'eventReason',
@@ -645,7 +651,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
       const text = String(params.value ?? '');
       return text ? (
         <Tooltip title={text}>
-          <Typography variant="body2" color="warning.main" noWrap sx={{ minWidth: 0 }}>
+          <Typography variant="body2" noWrap sx={{ minWidth: 0, color: statusTextColor('warning') }}>
             {text}
           </Typography>
         </Tooltip>

@@ -101,6 +101,7 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
                   <IconButton
                     component="span"
                     size="small"
+                    aria-label={`Close ${tab.title}`}
                     sx={{ p: 0.25, ml: 0.5 }}
                     onClick={(e) => {
                       e.stopPropagation();

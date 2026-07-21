@@ -13,6 +13,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
+import { statusTextColor } from '../../theme.js';
 
 interface JsonSchema {
   $ref?: string;
@@ -168,7 +169,7 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
         {version.deprecated && <Chip label="deprecated" color="warning" variant="outlined" />}
       </Stack>
       {version.deprecationWarning && (
-        <Typography variant="body2" color="warning.main">
+        <Typography variant="body2" sx={{ color: statusTextColor('warning') }}>
           {version.deprecationWarning}
         </Typography>
       )}
@@ -194,8 +195,8 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
                 {printerColumns.map((column, index) => (
                   <TableRow key={`${column.name ?? index}:${column.jsonPath ?? ''}`}>
                     <TableCell sx={{ width: 180, color: 'text.secondary', border: 0 }}>{column.name ?? ''}</TableCell>
-                    <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>
-                      <Typography component="span" variant="body2" sx={{ fontWeight: 650, mr: 1, color: typeColor(column.type ?? 'string') }}>
+                    <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>
+                      <Typography component="span" variant="body2" sx={{ fontWeight: 600, mr: 1, color: typeColor(column.type ?? 'string') }}>
                         {column.type ?? 'string'}
                       </Typography>
                       <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12 }}>
@@ -245,7 +246,7 @@ function InfoRow({ label, value }: { label: string; value: string | undefined })
   return (
     <TableRow>
       <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{label}</TableCell>
-      <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>{value}</TableCell>
+      <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>{value}</TableCell>
     </TableRow>
   );
 }
@@ -322,7 +323,7 @@ function SchemaField({
               <Typography component="span" variant="body2" sx={{ fontWeight: 700, color: 'text.primary', fontFamily: depth ? 'monospace' : undefined }}>
                 {name}
               </Typography>
-              <Typography component="span" variant="body2" sx={{ fontWeight: 650, color: typeColor(typeLabel) }}>
+              <Typography component="span" variant="body2" sx={{ fontWeight: 600, color: typeColor(typeLabel) }}>
                 {typeLabel}
               </Typography>
               {required && <Chip label="required" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />}

@@ -38,6 +38,7 @@ import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { MetricsChart } from './MetricsChart.js';
 import { RowActions, RowLogsButton } from './RowActions.js';
+import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
 import { useDetailStore } from '../state/detail.js';
 
@@ -203,7 +204,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
         >
           <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
             {onBack && (
-              <IconButton onClick={() => guardLeave(onBack)} sx={{ mr: 1 }}>
+              <IconButton aria-label="Back" onClick={() => guardLeave(onBack)} sx={{ mr: 1 }}>
                 <ArrowBackIcon />
               </IconButton>
             )}
@@ -233,14 +234,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                   </>
                 )}
               </Typography>
-              <Typography variant="subtitle1" noWrap sx={{ fontWeight: 650, lineHeight: 1.3 }}>
-                {sel.namespace && (
-                  <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
-                    {sel.namespace}{' / '}
-                  </Typography>
-                )}
-                {sel.name}
-              </Typography>
+              <TruncationTooltip text={sel.namespace ? `${sel.namespace} / ${sel.name}` : sel.name}>
+                <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+                  {sel.namespace && (
+                    <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
+                      {sel.namespace}{' / '}
+                    </Typography>
+                  )}
+                  {sel.name}
+                </Typography>
+              </TruncationTooltip>
             </Box>
             <Box sx={{ flex: 1 }} />
             {obj && <RowLogsButton target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
@@ -389,7 +392,7 @@ function EventsList({ events }: { events: KubeObject[] }) {
       {events.map((e) => {
         const ev = e as KubeObject & { type?: string; reason?: string; message?: string; count?: number; lastTimestamp?: string };
         return (
-          <Box key={e.metadata.uid} sx={{ borderLeft: 3, borderColor: ev.type === 'Warning' ? 'error.main' : 'success.main', pl: 1.5, py: 0.25 }}>
+          <Box key={e.metadata.uid} sx={{ borderLeft: 3, borderColor: ev.type === 'Warning' ? 'warning.main' : 'success.main', pl: 1.5, py: 0.25 }}>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {ev.reason} {ev.count && ev.count > 1 ? `×${ev.count}` : ''}{' '}
               <Typography component="span" variant="caption" color="text.secondary">

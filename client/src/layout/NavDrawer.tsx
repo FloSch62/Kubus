@@ -39,6 +39,7 @@ import { useNavigationStore } from '../state/navigation.js';
 import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
+import { TruncationTooltip } from '../components/truncation.js';
 
 const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
@@ -256,15 +257,17 @@ function NavEntry({
       {icon && (
         <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
       )}
-      <ListItemText
-        primary={label}
-        secondary={subtitle}
-        sx={{ my: subtitle ? 0.25 : undefined }}
-        slotProps={{
-          primary: { variant: 'body2', noWrap: true, sx: subtitle ? { lineHeight: 1.25 } : undefined },
-          secondary: { noWrap: true, title: subtitle, sx: { fontSize: 10.5, fontStyle: 'italic', lineHeight: 1.1 } },
-        }}
-      />
+      <TruncationTooltip text={label} measureSelector=".MuiListItemText-primary">
+        <ListItemText
+          primary={label}
+          secondary={subtitle}
+          sx={{ my: subtitle ? 0.25 : undefined }}
+          slotProps={{
+            primary: { variant: 'body2', noWrap: true, sx: subtitle ? { lineHeight: 1.25 } : undefined },
+            secondary: { noWrap: true, title: subtitle, sx: { fontSize: 10.5, fontStyle: 'italic', lineHeight: 1.1 } },
+          }}
+        />
+      </TruncationTooltip>
     </ListItemButton>
   );
   if (!favorite) return button;
@@ -439,12 +442,23 @@ function CustomGroupHeader({
       dense
       aria-expanded={open}
       onClick={onClick}
-      sx={{ pl: indent, pr: 1.5, py: 0.25, mt: 0.5, color: active ? 'primary.main' : open ? 'text.primary' : 'text.secondary' }}
+      sx={{ pl: indent, pr: 1.5, py: 0.375, mt: 0.5, color: active ? 'primary.main' : open ? 'text.primary' : 'text.secondary' }}
     >
-      <ListItemText
-        primary={label}
-        slotProps={{ primary: { variant: 'caption', noWrap: true, title: title ?? label, sx: { fontWeight: subordinate ? 600 : 700, lineHeight: 1.4 } } }}
-      />
+      {/* Same body2 size as the kind rows below — hierarchy comes from the
+          600 weight, indent and rail, not from switching to a smaller bold
+          caption face that reads as foreign next to the rest of the nav.
+          Subgroups tooltip their full API group even untruncated (`always`),
+          since the visible label is only the domain-stripped suffix. */}
+      <TruncationTooltip
+        text={title ?? label}
+        always={!!title && title !== label}
+        measureSelector=".MuiListItemText-primary"
+      >
+        <ListItemText
+          primary={label}
+          slotProps={{ primary: { variant: 'body2', noWrap: true, sx: { fontWeight: 600, lineHeight: 1.4 } } }}
+        />
+      </TruncationTooltip>
       {count !== undefined && (
         <Typography variant="caption" aria-hidden sx={{ ml: 0.5, color: 'text.disabled', fontVariantNumeric: 'tabular-nums' }}>
           {count}
@@ -853,7 +867,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
           borderColor: 'divider',
           overflowY: 'auto',
           overflowX: 'hidden',
-          bgcolor: (theme) => (theme.palette.mode === 'dark' ? '#151518' : '#f4f4f5'),
+          bgcolor: (theme) => theme.palette.sidebar,
           ...(overlay
             ? { top: `${layout.topBarHeight}px`, height: `calc(100% - ${layout.topBarHeight}px)` }
             : { position: 'relative', transition: 'width 150ms ease' }),

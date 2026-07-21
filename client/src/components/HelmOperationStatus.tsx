@@ -107,7 +107,7 @@ export function HelmOperationStatus({
 
       {running && operation.waitingFor?.length ? (
         <Box sx={{ mt: 0.75 }}>
-          <Typography variant="caption" sx={{ fontWeight: 650 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600 }}>
             Waiting for
           </Typography>
           {operation.waitingFor.slice(0, compact ? 3 : 8).map((item) => (

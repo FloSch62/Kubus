@@ -30,6 +30,7 @@ import { usePodEnv, useResourceMetrics, useStopDebug } from '../../api/queries.j
 import { useDetailStore } from '../../state/detail.js';
 import { showToast } from '../../state/toast.js';
 import { useDockStore, dockTabId } from '../../state/dock.js';
+import { statusTextColor } from '../../theme.js';
 
 interface Probe {
   httpGet?: { path?: string; port?: number | string; scheme?: string };
@@ -317,10 +318,12 @@ function ProbesSection({ spec, statusByName, terminal }: { spec: PodSpec | undef
         <TableBody>
           {rows.map((r) => (
             <TableRow key={`${r.container}:${r.kind}`}>
-              <TableCell sx={{ wordBreak: 'break-all' }}>{r.container}</TableCell>
+              <TableCell sx={{ wordBreak: 'break-word' }}>{r.container}</TableCell>
               <TableCell>{r.kind}</TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{r.target}</TableCell>
-              <TableCell sx={{ whiteSpace: 'nowrap' }}>
+              {/* Target gets the width priority — nowrap on Timing would starve
+                  it into breaking URLs mid-token. */}
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-word', minWidth: 170 }}>{r.target}</TableCell>
+              <TableCell>
                 <Typography variant="caption" color="text.secondary">
                   {r.timing}
                 </Typography>
@@ -378,10 +381,10 @@ function EnvSection({ ctx, namespace, pod, onOpenRef }: { ctx: string; namespace
                 const source = envSourceLabel(env);
                 return (
                   <TableRow key={`${env.name}:${i}`}>
-                    <TableCell sx={{ width: 220, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{env.name}</TableCell>
-                    <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 280, wordBreak: 'break-all' }}>
+                    <TableCell sx={{ width: 220, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-word' }}>{env.name}</TableCell>
+                    <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 280, wordBreak: 'break-word' }}>
                       {env.error ? (
-                        <Typography component="span" variant="caption" color="warning.main">
+                        <Typography component="span" variant="caption" sx={{ color: statusTextColor('warning') }}>
                           {env.error}
                         </Typography>
                       ) : (
@@ -459,7 +462,7 @@ function VolumesSection({ spec, onOpenRef }: { spec: PodSpec | undefined; onOpen
             const info = volumeInfo(v);
             return (
               <TableRow key={v.name}>
-                <TableCell sx={{ wordBreak: 'break-all' }}>{v.name}</TableCell>
+                <TableCell sx={{ wordBreak: 'break-word' }}>{v.name}</TableCell>
                 <TableCell>
                   {info.refKind && info.refName ? (
                     <Link component="button" variant="body2" sx={{ textAlign: 'left' }} onClick={() => onOpenRef(info.refKind!, info.refName!)}>
@@ -469,7 +472,7 @@ function VolumesSection({ spec, onOpenRef }: { spec: PodSpec | undefined; onOpen
                     `${info.type}${info.detail ? `/${info.detail}` : ''}`
                   )}
                 </TableCell>
-                <TableCell sx={{ whiteSpace: 'pre-line', wordBreak: 'break-all' }}>{(mountsByVolume.get(v.name) ?? []).join('\n')}</TableCell>
+                <TableCell sx={{ whiteSpace: 'pre-line', wordBreak: 'break-word' }}>{(mountsByVolume.get(v.name) ?? []).join('\n')}</TableCell>
               </TableRow>
             );
           })}

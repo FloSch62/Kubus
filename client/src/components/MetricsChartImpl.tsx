@@ -1,14 +1,17 @@
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { useMetricsHistory } from '../api/queries.js';
 import { formatBytes, formatCpu } from './format.js';
+import { SERIES_DARK, SERIES_LIGHT, timeTickFormatter } from './chart-theme.js';
 
 import type { MetricsChartProps } from './MetricsChart.js';
 
 export default function MetricsChartImpl({ ctx, kind, name, namespace }: MetricsChartProps) {
   const { data } = useMetricsHistory({ ctx, kind, name, namespace });
+  const series = useTheme().palette.mode === 'dark' ? SERIES_DARK : SERIES_LIGHT;
 
   if (!data?.available) {
     return (
@@ -41,18 +44,20 @@ export default function MetricsChartImpl({ ctx, kind, name, namespace }: Metrics
         <Typography variant="subtitle2">CPU — {formatCpu(latest.cpuMilli)}</Typography>
         <LineChart
           height={180}
-          series={[{ data: cpuValues, label: 'mCPU', area: true, showMark: false, color: '#7aa2f7' }]}
-          xAxis={[{ data: times, scaleType: 'time' }]}
+          series={[{ data: cpuValues, label: 'mCPU', area: true, showMark: false, color: series[0] }]}
+          xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
           hideLegend
+          sx={{ '& .MuiLineChart-area': { fillOpacity: 0.25 } }}
         />
       </Box>
       <Box>
         <Typography variant="subtitle2">Memory — {formatBytes(latest.memBytes)}</Typography>
         <LineChart
           height={180}
-          series={[{ data: memValues, label: 'MiB', area: true, showMark: false, color: '#9ece6a' }]}
-          xAxis={[{ data: times, scaleType: 'time' }]}
+          series={[{ data: memValues, label: 'MiB', area: true, showMark: false, color: series[1] }]}
+          xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
           hideLegend
+          sx={{ '& .MuiLineChart-area': { fillOpacity: 0.25 } }}
         />
       </Box>
     </Stack>

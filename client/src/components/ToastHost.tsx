@@ -8,11 +8,15 @@ import Snackbar from '@mui/material/Snackbar';
 import CloseIcon from '@mui/icons-material/Close';
 import { copyToClipboard } from '../clipboard.js';
 import { useToastStore } from '../state/toast.js';
+import { useDockStore } from '../state/dock.js';
 
 /** The single snackbar for all `showToast` notifications; mounted once in App. */
 export function ToastHost() {
   const toast = useToastStore((s) => s.toast);
   const dismiss = useToastStore((s) => s.dismiss);
+  const dockOpen = useDockStore((s) => s.open);
+  const dockHeight = useDockStore((s) => s.height);
+  const dockMaximized = useDockStore((s) => s.maximized);
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -34,6 +38,10 @@ export function ToastHost() {
         dismiss();
       }}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      // Sit above the terminal/logs dock instead of covering the very lines
+      // the toast is talking about (a maximized dock leaves no room, so the
+      // default overlay position stands there).
+      sx={dockOpen && !dockMaximized ? { bottom: `${dockHeight + 12}px` } : undefined}
     >
       <Alert
         severity={toast?.severity ?? 'info'}

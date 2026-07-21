@@ -13,3 +13,8 @@ export function formatBps(bytesPerSec: number): string {
   if (bytesPerSec > 0 && bytesPerSec < 1) return '<1B/s';
   return `${formatBytes(Math.round(bytesPerSec))}/s`;
 }
+
+/** "3 items" / "1 item" — count with a naively pluralized noun. */
+export function countLabel(count: number, noun: string): string {
+  return `${count} ${count === 1 ? noun : `${noun}s`}`;
+}

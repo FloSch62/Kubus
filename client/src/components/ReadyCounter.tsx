@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import { statusTextColor } from '../theme.js';
 
 const READY_RE = /^(\d+)\/(\d+)$/;
 
@@ -8,9 +9,11 @@ function isNotReady(value: string): boolean {
   return Number(match[1]) < Number(match[2]);
 }
 
-export function ReadyCounter({ value }: { value: string }) {
+/** `muted` suppresses the not-ready highlight, e.g. for Succeeded pods
+ *  where 0/1 is the expected terminal state, not a problem. */
+export function ReadyCounter({ value, muted = false }: { value: string; muted?: boolean }) {
   return (
-    <Box component="span" sx={{ color: isNotReady(value) ? 'warning.main' : 'inherit' }}>
+    <Box component="span" sx={{ color: !muted && isNotReady(value) ? statusTextColor('warning') : 'inherit' }}>
       {value}
     </Box>
   );

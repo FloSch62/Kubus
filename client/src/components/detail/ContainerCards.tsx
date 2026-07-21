@@ -10,6 +10,7 @@ import { StatusChip } from '../StatusChip.js';
 import { UsageMeter } from '../UsageMeter.js';
 import { formatBytes, formatCpu } from '../format.js';
 import type { ContainerResources } from '../../kube-display.js';
+import { statusTextColor } from '../../theme.js';
 
 export interface ContainerCardData {
   name: string;
@@ -94,7 +95,7 @@ function ContainerCard({ c, onForwardPort, onEditImage }: { c: ContainerCardData
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
             wordBreak: 'break-word',
-            color: 'warning.main',
+            color: statusTextColor('warning'),
             mt: 0.25,
           }}
         >
@@ -102,7 +103,7 @@ function ContainerCard({ c, onForwardPort, onEditImage }: { c: ContainerCardData
         </Typography>
       )}
       {showRestarts && (
-        <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: 'warning.main' }}>
+        <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: statusTextColor('warning') }}>
           {`Restarts ${c.restarts ?? 0}`}
           {c.lastRestart && (
             <>

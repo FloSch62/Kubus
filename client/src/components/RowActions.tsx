@@ -169,6 +169,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
     <>
       <IconButton
         size="small"
+        aria-label={`Actions for ${target.obj.metadata.name}`}
         onClick={(e) => {
           e.stopPropagation();
           setAnchor(e.currentTarget);

@@ -13,6 +13,7 @@ import { useInstallNetworkAgent, useUninstallNetworkAgent } from '../api/queries
 import { useIsProtected } from '../state/clusters.js';
 import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { statusTextColor } from '../theme.js';
 
 /**
  * One-click network-agent install for a cluster: a confirmation dialog that
@@ -42,7 +43,7 @@ export function InstallNetworkAgentButton({ ctx, size = 'small' }: { ctx: string
             Linux nodes. Traffic rates appear about a minute after the pods are ready.
           </Typography>
           {isProtected && (
-            <Typography variant="body2" color="warning.main" sx={{ mt: 1 }}>
+            <Typography variant="body2" sx={{ mt: 1, color: statusTextColor('warning') }}>
               This cluster is marked protected — make sure installing cluster components here is intended.
             </Typography>
           )}
