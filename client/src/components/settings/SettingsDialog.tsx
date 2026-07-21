@@ -171,7 +171,7 @@ function ClusterRow({ c, isProtected, onToggleProtected }: { c: ContextInfo; isP
 }
 
 function ClustersSection() {
-  const { data: contexts } = useContexts();
+  const { data: contexts } = useContexts({ poll: false });
   const { data: kubeconfig } = useKubeconfigSettings();
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const setContextSetting = useClustersStore((s) => s.setContextSetting);

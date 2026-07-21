@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
   ClusterMetricsSummary,
@@ -114,10 +114,11 @@ export function useContextsInvalidation() {
 }
 
 /**
- * The shared context list. Poll from long-lived single mounts (the cluster
- * picker); per-cluster instances (section headers) pass poll: false and ride
- * on the cache — each polling observer runs its own interval timer, so N
- * headers would otherwise multiply the refetches.
+ * The shared context list. The always-mounted cluster picker is the sole
+ * poller; every other observer passes poll: false and rides on the cache —
+ * each polling observer runs its own interval timer, so N observers would
+ * otherwise multiply the refetches. Kubeconfig changes reach non-polling
+ * observers anyway via the contexts-changed broadcast invalidation.
  */
 export function useContexts({ poll = true }: { poll?: boolean } = {}) {
   const interval = useRefetchInterval(30_000);
@@ -755,23 +756,46 @@ export function useNodeMetrics(ctx: string) {
   });
 }
 
-/** Per-context usage snapshots for the Pod or Node list views. */
+/**
+ * Per-context usage snapshots for the Pod or Node list views. One cache entry
+ * per context (not per context list), so a single-cluster detail view shares
+ * the multi-cluster list page's snapshot instead of starting a second poll
+ * loop for the same data.
+ *
+ * The observer memoizes the combined result on the `combine` identity and the
+ * raw results, so both are kept stable here (callers pass fresh context
+ * arrays every render): an inline combine would rebuild the Map — new `data`
+ * identity — on every render, cascading into rebuilt metric grid columns on
+ * each watch flush.
+ */
 export function useResourceMetrics(contexts: string[], kind: 'pods' | 'nodes') {
-  return useQuery({
-    queryKey: ['metrics-snapshot', kind, contexts],
-    queryFn: async () => {
-      const result = new Map<string, MetricsSnapshot>();
-      await Promise.all(
-        contexts.map(async (ctx) => {
-          const snap = await apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/${kind}`).catch(() => ({ available: false, items: [] }) as MetricsSnapshot);
-          result.set(ctx, snap);
-        }),
-      );
-      return result;
+  const interval = useRefetchInterval(20_000);
+  const contextsKey = contexts.join('\n');
+  const queries = useMemo(
+    () =>
+      (contextsKey ? contextsKey.split('\n') : []).map((ctx) => ({
+        queryKey: ['metrics-snapshot', kind, ctx] as const,
+        queryFn: () =>
+          apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/${kind}`).catch(
+            () => ({ available: false, items: [] }) as MetricsSnapshot,
+          ),
+        refetchInterval: interval,
+      })),
+    [contextsKey, kind, interval],
+  );
+  const combine = useCallback(
+    (results: Array<{ data?: MetricsSnapshot }>) => {
+      const ctxs = contextsKey ? contextsKey.split('\n') : [];
+      if (!ctxs.length) return { data: undefined as Map<string, MetricsSnapshot> | undefined };
+      const data = new Map<string, MetricsSnapshot>();
+      results.forEach((result, i) => {
+        if (result.data) data.set(ctxs[i]!, result.data);
+      });
+      return { data };
     },
-    enabled: contexts.length > 0,
-    refetchInterval: useRefetchInterval(20_000),
-  });
+    [contextsKey],
+  );
+  return useQueries({ queries, combine });
 }
 
 export function useMetricsHistory(sel: { ctx: string; kind: 'pod' | 'node'; name: string; namespace?: string } | undefined) {
@@ -798,11 +822,18 @@ export function useMetricsSummary(ctx: string) {
 
 // ---- metrics-server install / uninstall ----
 
-export function useMetricsServerStatus(ctx: string, opts?: { refetchMs?: number }) {
+export function useMetricsServerStatus(ctx: string) {
+  const interval = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['metrics-server-status', ctx],
     queryFn: () => apiFetch<MetricsServerStatus>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`),
-    refetchInterval: useRefetchInterval(opts?.refetchMs ?? 30_000),
+    // Install status is near-static; poll fast only while an install is
+    // settling (manifests applied → Deployment ready → metrics flowing).
+    refetchInterval: (query) => {
+      if (interval === false) return false;
+      const s = query.state.data;
+      return s?.installed && (!s.ready || !s.metricsAvailable) ? Math.min(interval, 5_000) : interval;
+    },
     retry: false,
   });
 }
@@ -816,10 +847,10 @@ export function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>, c
   void qc.invalidateQueries({ queryKey: ctx ? ['metrics-server-status', ctx] : ['metrics-server-status'] });
   void qc.invalidateQueries({ queryKey: ctx ? ['metrics-summary', ctx] : ['metrics-summary'] });
   void qc.invalidateQueries({ queryKey: ctx ? ['metrics-nodes', ctx] : ['metrics-nodes'] });
-  // ctx sits deeper in these keys: snapshots batch a context list, history keys a selector object.
+  // ctx sits deeper in these keys: snapshots key ['metrics-snapshot', kind, ctx], history keys a selector object.
   void qc.invalidateQueries({
     queryKey: ['metrics-snapshot'],
-    predicate: (q) => !ctx || ((q.queryKey[2] as string[] | undefined) ?? []).includes(ctx),
+    predicate: (q) => !ctx || q.queryKey[2] === ctx,
   });
   void qc.invalidateQueries({
     queryKey: ['metrics-history'],
@@ -862,11 +893,19 @@ export function useNetworkSummary(ctx: string) {
   });
 }
 
-export function useNetworkAgentStatus(ctx: string, opts?: { refetchMs?: number }) {
+export function useNetworkAgentStatus(ctx: string) {
+  const interval = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['network-agent-status', ctx],
     queryFn: () => apiFetch<NetworkAgentStatus>(`/api/contexts/${encodeURIComponent(ctx)}/network-agent`),
-    refetchInterval: useRefetchInterval(opts?.refetchMs ?? 30_000),
+    // Same idea as useMetricsServerStatus: fast cadence only while the
+    // DaemonSet rollout or first traffic samples are still settling.
+    refetchInterval: (query) => {
+      if (interval === false) return false;
+      const s = query.state.data;
+      const settling = !!s?.installed && (!s.ready || !s.metricsAvailable || s.nodesReady < s.nodesDesired);
+      return settling ? Math.min(interval, 5_000) : interval;
+    },
     retry: false,
   });
 }
