@@ -40,6 +40,9 @@ import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
 
+// Wide, rarely-needed builtin columns start hidden; the column menu re-enables them.
+const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID'] };
+
 /**
  * Renderless bridge between this page's URL params and the shared detail
  * selection. Pages stay mounted (and live) in hidden tab panes, so everything
@@ -504,7 +507,10 @@ export function ResourceListPage() {
     }
     return merged;
   }, [staticColumns, metricColumns, columnIds]);
-  const hiddenFields = useMemo(() => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : []), [isCustomKind, printerCols]);
+  const hiddenFields = useMemo(
+    () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
+    [isCustomKind, printerCols, behaviorKind],
+  );
 
   const discoveryMissing = useMemo(() => {
     if (!apiResources) return [];
@@ -517,6 +523,7 @@ export function ResourceListPage() {
   const unavailableContexts = new Set(unavailable.map(([ctx]) => ctx));
   const discoveryOnlyMissing = discoveryMissing.filter((ctx) => !unavailableContexts.has(ctx));
   const errors = Object.entries(list.status).filter(([, s]) => s.state === 'error');
+  const reconnecting = Object.entries(list.status).filter(([, s]) => s.state === 'reconnecting');
   const activeRowId = useMemo(() => {
     if (!sel) return undefined;
     return list.rows.find(
@@ -590,6 +597,11 @@ export function ResourceListPage() {
         {errors.map(([ctx, s]) => (
           <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>
             {ctx}: {s.message ?? 'watch error'}
+          </Alert>
+        ))}
+        {reconnecting.map(([ctx]) => (
+          <Alert key={ctx} severity="warning" sx={{ mt: 0.5 }}>
+            {ctx}: connection lost — reconnecting, the list may be stale.
           </Alert>
         ))}
         {unavailable.map(([ctx, s]) => (

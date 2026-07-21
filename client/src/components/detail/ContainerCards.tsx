@@ -1,8 +1,10 @@
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { UsageMeter } from '../UsageMeter.js';
@@ -28,18 +30,26 @@ export interface ContainerCardData {
 }
 
 /** Card grid for a pod's (or workload template's) containers. */
-export function ContainerCards({ items, onForwardPort }: { items: ContainerCardData[]; onForwardPort?: (port: number) => void }) {
+export function ContainerCards({
+  items,
+  onForwardPort,
+  onEditImage,
+}: {
+  items: ContainerCardData[];
+  onForwardPort?: (port: number) => void;
+  onEditImage?: (container: string) => void;
+}) {
   if (!items.length) return null;
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 1.5 }}>
       {items.map((c) => (
-        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} onForwardPort={onForwardPort} />
+        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} onForwardPort={onForwardPort} onEditImage={onEditImage} />
       ))}
     </Box>
   );
 }
 
-function ContainerCard({ c, onForwardPort }: { c: ContainerCardData; onForwardPort?: (port: number) => void }) {
+function ContainerCard({ c, onForwardPort, onEditImage }: { c: ContainerCardData; onForwardPort?: (port: number) => void; onEditImage?: (container: string) => void }) {
   const showRestarts = (c.restarts ?? 0) > 0 || c.lastRestart;
   return (
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5, minWidth: 0 }}>
@@ -56,15 +66,23 @@ function ContainerCard({ c, onForwardPort }: { c: ContainerCardData; onForwardPo
         )}
       </Stack>
       {c.image && (
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          noWrap
-          title={c.image}
-          sx={{ display: 'block', fontFamily: 'monospace', fontSize: 11, mt: 0.25 }}
-        >
-          {c.image}
-        </Typography>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 0.25, minWidth: 0, mt: 0.25 }}>
+          <Typography variant="caption" color="text.secondary" noWrap title={c.image} sx={{ fontFamily: 'monospace', fontSize: 11, minWidth: 0 }}>
+            {c.image}
+          </Typography>
+          {onEditImage && (
+            <Tooltip title="Change image">
+              <IconButton
+                size="small"
+                aria-label={`Change image of ${c.name}`}
+                onClick={() => onEditImage(c.name)}
+                sx={{ p: 0.25, flexShrink: 0 }}
+              >
+                <EditOutlinedIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Stack>
       )}
       {c.stateMessage && (
         <Typography
@@ -143,6 +161,13 @@ function ContainerCard({ c, onForwardPort }: { c: ContainerCardData; onForwardPo
           podCount={c.podCount}
         />
       </Box>
+      {(c.resources.ephemeralRequestBytes !== undefined || c.resources.ephemeralLimitBytes !== undefined) && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          {`Ephemeral storage · req ${c.resources.ephemeralRequestBytes !== undefined ? formatBytes(c.resources.ephemeralRequestBytes) : '—'} · lim ${
+            c.resources.ephemeralLimitBytes !== undefined ? formatBytes(c.resources.ephemeralLimitBytes) : '—'
+          }`}
+        </Typography>
+      )}
     </Box>
   );
 }

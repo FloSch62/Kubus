@@ -17,8 +17,8 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import KeyboardCommandKeyIcon from '@mui/icons-material/KeyboardCommandKey';
 import type { FavoriteItem, ResourceRef, SearchResult, SearchResultKind } from '@kubus/shared';
-import { groupToPath } from '@kubus/shared';
 import { useNavigate } from 'react-router';
+import { detailPathForRef } from '../resource-links.js';
 import { useGlobalSearch } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -29,15 +29,6 @@ import { toggleNavRail } from '../shortcuts.js';
 import { showToast } from '../state/toast.js';
 import { actionsForRef, usePaletteRunner, type PaletteAction } from '../actions/resource-actions.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
-
-function pathForRef(ref: ResourceRef): string {
-  return `/r/${groupToPath(ref.group)}/${ref.version}/${ref.plural}`;
-}
-
-function detailPathForRef(ref: ResourceRef): string {
-  const sel = `${ref.ctx}|${ref.namespace ?? ''}|${ref.name}`;
-  return `${pathForRef(ref)}?sel=${encodeURIComponent(sel)}`;
-}
 
 function favoriteFromResult(result: SearchResult): FavoriteItem {
   return {

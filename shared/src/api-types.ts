@@ -368,7 +368,7 @@ export interface RerunJobRequest {
 }
 
 export interface RolloutUndoRequest {
-  kind: 'Deployment' | 'StatefulSet';
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet';
   namespace: string;
   name: string;
   /** Omitted: roll back to the latest non-current revision. */
@@ -393,6 +393,9 @@ export interface RolloutRevision {
   replicas?: number;
 }
 
+/** kubectl-debug style security profile applied to the ephemeral container. */
+export type DebugProfile = 'general' | 'restricted' | 'netadmin' | 'sysadmin';
+
 export interface DebugPodRequest {
   namespace: string;
   pod: string;
@@ -400,6 +403,8 @@ export interface DebugPodRequest {
   image?: string;
   /** Container whose process namespace the debug container targets. */
   target?: string;
+  /** Security profile; defaults to general (no extra privileges). */
+  profile?: DebugProfile;
 }
 
 export interface DebugPodResponse {
@@ -457,6 +462,10 @@ export interface TlsCertInfo {
   sans: string[];
   isCA: boolean;
   selfSigned: boolean;
+  /** Public key algorithm and strength, e.g. "RSA 2048" / "ECDSA prime256v1". */
+  publicKeyAlgorithm?: string;
+  /** Secret data key the certificate came from (tls.crt, ca.crt or ca.tls). */
+  source?: string;
 }
 
 export interface SecretTlsResponse {

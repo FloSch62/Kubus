@@ -14,6 +14,7 @@ import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
 import { SmartFilterInput } from './SmartFilterInput.js';
 import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
 import type { MetricsLookup } from './columns.js';
+import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useQuickSearchShortcut } from './quick-search.js';
 
@@ -109,15 +110,17 @@ export function ResourceTable({
   // Visibility and sort are driven straight from the prefs store (keyed by
   // tableId), so instance reuse across tables resolves the right model and
   // external writes — a saved-view restore — apply to a mounted table
-  // immediately. A saved model wins over the default-hidden set. Tables
+  // immediately. A saved model wins per field, but default-hidden columns it
+  // has never seen (added after the model was saved) stay hidden. Tables
   // without a tableId fall back to local state.
   const storedVisibility = useUiPrefsStore((s) => (tableId ? s.columnVisibility[tableId] : undefined));
   const setStoredVisibility = useUiPrefsStore((s) => s.setColumnVisibility);
   const [localVisibility, setLocalVisibility] = useState<GridColumnVisibilityModel | undefined>(undefined);
-  const visibility = useMemo<GridColumnVisibilityModel>(
-    () => (tableId ? storedVisibility : localVisibility) ?? Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []),
-    [tableId, storedVisibility, localVisibility, hiddenKey],
-  );
+  const visibility = useMemo<GridColumnVisibilityModel>(() => {
+    const defaults: GridColumnVisibilityModel = Object.fromEntries(hiddenKey ? hiddenKey.split(',').map((f) => [f, false]) : []);
+    const saved = tableId ? storedVisibility : localVisibility;
+    return saved ? { ...defaults, ...saved } : defaults;
+  }, [tableId, storedVisibility, localVisibility, hiddenKey]);
   const handleVisibilityChange = useCallback(
     (model: GridColumnVisibilityModel) => {
       if (tableId) setStoredVisibility(tableId, model);
@@ -261,7 +264,17 @@ export function ResourceTable({
         columns={gridColumns}
         loading={loading}
         getRowId={(r) => r.obj.metadata.uid}
-        getRowClassName={(params) => (params.id === activeRowId ? 'kubus-active-resource-row' : '')}
+        getRowClassName={(params) => {
+          const classes: string[] = [];
+          if (params.id === activeRowId) classes.push('kubus-active-resource-row');
+          // Finished pods stay listed (and filterable) but recede visually so
+          // the running set stands out; hover restores full contrast.
+          if (kind === 'Pod') {
+            const status = podSummary(params.row.obj).status;
+            if (status === 'Succeeded' || status === 'Completed') classes.push('kubus-muted-row');
+          }
+          return classes.join(' ');
+        }}
         density={tableDensity === 'comfortable' ? 'standard' : 'compact'}
         // On overlay-scrollbar platforms the grid measures the native
         // scrollbar as 0px and floats its own on top of the last column;
@@ -329,6 +342,8 @@ export function ResourceTable({
             bgcolor: 'action.selected',
             '&:hover': { bgcolor: 'action.selected' },
           },
+          '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
+          '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
           ...copyCellGridSx,
         }}
       />

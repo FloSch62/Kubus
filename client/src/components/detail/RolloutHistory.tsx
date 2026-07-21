@@ -16,7 +16,7 @@ import { showToast } from '../../state/toast.js';
 import { AgeCell } from '../AgeCell.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 
-export function RolloutHistory({ ctx, kind, obj }: { ctx: string; kind: 'Deployment' | 'StatefulSet'; obj: KubeObject }) {
+export function RolloutHistory({ ctx, kind, obj }: { ctx: string; kind: 'Deployment' | 'StatefulSet' | 'DaemonSet'; obj: KubeObject }) {
   const name = obj.metadata.name;
   const namespace = obj.metadata.namespace ?? '';
   const { data: history, isLoading, error } = useRolloutHistory({ ctx, kind, namespace, name });

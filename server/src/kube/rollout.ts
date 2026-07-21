@@ -3,7 +3,9 @@ import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { HttpProblem } from '../util/errors.js';
 
-type RolloutKind = 'Deployment' | 'StatefulSet';
+type RolloutKind = 'Deployment' | 'StatefulSet' | 'DaemonSet';
+
+const ROLLOUT_PLURALS: Record<RolloutKind, string> = { Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets' };
 
 interface WorkloadSpec {
   selector?: { matchLabels?: Record<string, string> };
@@ -12,8 +14,7 @@ interface WorkloadSpec {
 }
 
 async function getWorkload(handle: ClusterHandle, kind: RolloutKind, namespace: string, name: string): Promise<KubeObject> {
-  const plural = kind === 'Deployment' ? 'deployments' : 'statefulsets';
-  return handle.raw.json<KubeObject>(resourcePath('apps', 'v1', plural, { namespace, name }));
+  return handle.raw.json<KubeObject>(resourcePath('apps', 'v1', ROLLOUT_PLURALS[kind], { namespace, name }));
 }
 
 /** List children (ReplicaSets / ControllerRevisions) owned by the workload. */
@@ -54,20 +55,24 @@ export async function getRolloutHistory(handle: ClusterHandle, kind: RolloutKind
       })
       .sort((a, b) => b.revision - a.revision);
   }
-  // StatefulSet: ControllerRevisions carry the revision as a first-class field
-  // and the pod template inside .data (a strategic-merge patch).
-  const updateRevisionName = (workload.status as { updateRevision?: string })?.updateRevision;
+  // StatefulSet / DaemonSet: ControllerRevisions carry the revision as a
+  // first-class field and the pod template inside .data (a strategic-merge
+  // patch). StatefulSets name their live revision in status.updateRevision;
+  // DaemonSets don't, so there the newest revision is the current one.
+  const updateRevisionName = kind === 'StatefulSet' ? (workload.status as { updateRevision?: string })?.updateRevision : undefined;
   const children = await listOwnedChildren(handle, workload, namespace, 'controllerrevisions');
+  const maxRevision = children.reduce((max, cr) => Math.max(max, Number((cr as { revision?: number }).revision ?? 0)), 0);
   return children
     .map((cr): RolloutRevision => {
       const data = (cr as { data?: { spec?: { template?: WorkloadSpec['template'] } } }).data;
+      const revision = Number((cr as { revision?: number }).revision ?? 0);
       return {
-        revision: Number((cr as { revision?: number }).revision ?? 0),
+        revision,
         name: cr.metadata.name,
         createdAt: cr.metadata.creationTimestamp,
         images: templateImages(data?.spec?.template as WorkloadSpec['template']),
         changeCause: cr.metadata.annotations?.['kubernetes.io/change-cause'],
-        current: cr.metadata.name === updateRevisionName,
+        current: updateRevisionName ? cr.metadata.name === updateRevisionName : revision === maxRevision,
         replicas: undefined,
       };
     })
@@ -104,10 +109,10 @@ export async function rolloutUndo(handle: ClusterHandle, kind: RolloutKind, name
     return;
   }
 
-  // StatefulSet: the ControllerRevision's .data is itself the patch to apply.
+  // StatefulSet / DaemonSet: the ControllerRevision's .data is itself the patch to apply.
   const cr = await handle.raw.json<KubeObject & { data?: unknown }>(resourcePath('apps', 'v1', 'controllerrevisions', { namespace, name: target.name }));
   if (!cr.data) throw new HttpProblem(422, 'controller revision has no data');
-  await handle.raw.json(resourcePath('apps', 'v1', 'statefulsets', { namespace, name }), {
+  await handle.raw.json(resourcePath('apps', 'v1', ROLLOUT_PLURALS[kind], { namespace, name }), {
     method: 'PATCH',
     headers: { 'content-type': 'application/strategic-merge-patch+json' },
     body: JSON.stringify(cr.data),

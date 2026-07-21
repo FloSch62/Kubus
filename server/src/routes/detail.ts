@@ -11,6 +11,23 @@ import { HttpProblem, sendError } from '../util/errors.js';
 
 const CERT_BLOCK_RE = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
 
+/** Secret data keys that may hold public certificate chains. */
+const TLS_CERT_KEYS = ['tls.crt', 'ca.crt', 'ca.tls'];
+
+function publicKeyAlgorithm(cert: X509Certificate): string | undefined {
+  try {
+    const key = cert.publicKey;
+    const details = key.asymmetricKeyDetails;
+    if (key.asymmetricKeyType === 'rsa' || key.asymmetricKeyType === 'rsa-pss') {
+      return details?.modulusLength ? `RSA ${details.modulusLength}` : 'RSA';
+    }
+    if (key.asymmetricKeyType === 'ec') return details?.namedCurve ? `ECDSA ${details.namedCurve}` : 'ECDSA';
+    return key.asymmetricKeyType?.toUpperCase();
+  } catch {
+    return undefined;
+  }
+}
+
 export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string; name?: string; reveal?: string } }>(
     '/api/contexts/:ctx/detail/pod-env',
@@ -60,7 +77,7 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
       try {
         const { kind, namespace, name } = req.query;
         if (!kind || !namespace || !name) throw new HttpProblem(422, 'kind, namespace and name are required');
-        if (kind !== 'Deployment' && kind !== 'StatefulSet') throw new HttpProblem(422, 'kind must be Deployment or StatefulSet');
+        if (kind !== 'Deployment' && kind !== 'StatefulSet' && kind !== 'DaemonSet') throw new HttpProblem(422, 'kind must be Deployment, StatefulSet or DaemonSet');
         const handle = ctx.clusters.get(req.params.ctx);
         return await getRolloutHistory(handle, kind, namespace, name);
       } catch (err) {
@@ -79,24 +96,38 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
         const handle = ctx.clusters.get(req.params.ctx);
         const secret = await handle.raw.json<KubeObject>(resourcePath('', 'v1', 'secrets', { namespace, name }));
         if (secret.type !== 'kubernetes.io/tls') throw new HttpProblem(422, 'secret is not of type kubernetes.io/tls');
-        const crt = (secret.data as Record<string, string> | undefined)?.['tls.crt'];
-        if (!crt) throw new HttpProblem(422, 'secret has no tls.crt');
-        // Only the public certificate chain is parsed; tls.key is never read.
-        const pem = Buffer.from(crt, 'base64').toString('utf8');
-        const blocks = pem.match(CERT_BLOCK_RE) ?? [];
-        const certificates: TlsCertInfo[] = blocks.map((block) => {
-          const cert = new X509Certificate(block);
-          return {
-            subject: cert.subject,
-            issuer: cert.issuer,
-            serialNumber: cert.serialNumber,
-            notBefore: new Date(cert.validFrom).toISOString(),
-            notAfter: new Date(cert.validTo).toISOString(),
-            sans: cert.subjectAltName ? cert.subjectAltName.split(',').map((s) => s.trim()) : [],
-            isCA: cert.ca,
-            selfSigned: cert.subject === cert.issuer,
-          };
-        });
+        const data = secret.data as Record<string, string> | undefined;
+        if (!data?.['tls.crt']) throw new HttpProblem(422, 'secret has no tls.crt');
+        // Only public certificate chains are parsed; tls.key is never read.
+        // Additional CA entries (ca.crt, or ca.tls as some tools write) ride along.
+        const certificates: TlsCertInfo[] = [];
+        for (const key of TLS_CERT_KEYS) {
+          const encoded = data[key];
+          if (!encoded) continue;
+          const pem = Buffer.from(encoded, 'base64').toString('utf8');
+          for (const block of pem.match(CERT_BLOCK_RE) ?? []) {
+            let cert: X509Certificate;
+            try {
+              cert = new X509Certificate(block);
+            } catch {
+              // A malformed block (often a hand-edited ca.crt) must not hide
+              // the certificates that did parse.
+              continue;
+            }
+            certificates.push({
+              subject: cert.subject,
+              issuer: cert.issuer,
+              serialNumber: cert.serialNumber,
+              notBefore: new Date(cert.validFrom).toISOString(),
+              notAfter: new Date(cert.validTo).toISOString(),
+              sans: cert.subjectAltName ? cert.subjectAltName.split(',').map((s) => s.trim()) : [],
+              isCA: cert.ca,
+              selfSigned: cert.subject === cert.issuer,
+              publicKeyAlgorithm: publicKeyAlgorithm(cert),
+              source: key,
+            });
+          }
+        }
         const response: SecretTlsResponse = { certificates };
         return response;
       } catch (err) {

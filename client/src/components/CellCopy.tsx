@@ -21,6 +21,32 @@ export function cellCopyText(value: unknown): string {
   return '';
 }
 
+/** Standalone always-visible copy button for detail views (the grid variant below hides until hover). */
+export const CopyValueButton = memo(function CopyValueButton({ text, label = 'Copy value' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const resetRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(resetRef.current), []);
+  return (
+    <IconButton
+      size="small"
+      aria-label={label}
+      title="Copy"
+      onClick={(event) => {
+        event.stopPropagation();
+        void copyToClipboard(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          clearTimeout(resetRef.current);
+          resetRef.current = setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+      sx={{ p: 0.25 }}
+    >
+      {copied ? <CheckIcon sx={{ fontSize: 14 }} color="success" /> : <ContentCopyIcon sx={{ fontSize: 14 }} />}
+    </IconButton>
+  );
+});
+
 const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const resetRef = useRef<ReturnType<typeof setTimeout>>(undefined);

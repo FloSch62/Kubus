@@ -56,13 +56,14 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         )}
         {isTls &&
           (tls.data?.certificates ?? []).map((cert, i) => (
-            <Card key={cert.serialNumber || i} variant="outlined">
+            <Card key={`${cert.source ?? ''}:${cert.serialNumber || i}`} variant="outlined">
               <CardContent sx={{ '&:last-child': { pb: 2 } }}>
                 <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Typography variant="subtitle2">{commonName(cert.subject)}</Typography>
                   {expiryChip(cert)}
                   {cert.isCA && <Chip label="CA" variant="outlined" />}
                   {cert.selfSigned && <Chip label="self-signed" variant="outlined" />}
+                  {cert.source && cert.source !== 'tls.crt' && <Chip label={cert.source} variant="outlined" color="secondary" />}
                 </Stack>
                 <Typography variant="body2" color="text.secondary">
                   Issuer: {commonName(cert.issuer)}
@@ -70,6 +71,11 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
                 <Typography variant="body2" color="text.secondary">
                   Valid: {new Date(cert.notBefore).toLocaleDateString()} → {new Date(cert.notAfter).toLocaleDateString()}
                 </Typography>
+                {cert.publicKeyAlgorithm && (
+                  <Typography variant="body2" color="text.secondary">
+                    Algorithm: {cert.publicKeyAlgorithm}
+                  </Typography>
+                )}
                 <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
                   Serial: {cert.serialNumber}
                 </Typography>

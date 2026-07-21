@@ -350,11 +350,19 @@ export function GlobalShortcuts() {
     const desktop = window.kubusDesktop;
     const offClose = desktop?.onCloseTab?.(closeActiveTab);
     const offCycle = desktop?.onCycleTab?.((backwards) => cycleTab(backwards ? -1 : 1));
+    // kubus:// deep links land here as in-app routes. With the listener
+    // attached, drain any link the OS delivered before the UI was ready
+    // (cold start) — the pull also tells the main process pushes are safe now.
+    const offRoute = desktop?.onOpenRoute?.((route) => void navRef.current(route));
+    void desktop?.getPendingRoute?.().then((route) => {
+      if (route) void navRef.current(route);
+    });
     return () => {
       window.removeEventListener('keydown', onCapture, true);
       window.removeEventListener('keydown', onBubble);
       offClose?.();
       offCycle?.();
+      offRoute?.();
     };
   }, []);
 

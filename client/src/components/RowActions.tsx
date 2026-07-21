@@ -20,6 +20,8 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import TextField from '@mui/material/TextField';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -41,7 +43,10 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import DownhillSkiingIcon from '@mui/icons-material/DownhillSkiing';
 import SpeedIcon from '@mui/icons-material/Speed';
-import { gvkForResource, type KubeObject, type LogTargetKind } from '@kubus/shared';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import LinkIcon from '@mui/icons-material/Link';
+import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
   useCordon,
@@ -59,13 +64,16 @@ import {
 import { watchClient } from '../api/ws/watch-client.js';
 import { useDockStore, dockTabId, type DockTab } from '../state/dock.js';
 import { useIsProtected } from '../state/clusters.js';
-import { showToast } from '../state/toast.js';
+import { useNavigationStore } from '../state/navigation.js';
+import { showErrorToast, showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
 import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { podContainerNames } from '../kube-display.js';
-import { kindListPath } from '../resource-links.js';
+import { splitImageRef } from '../image-ref.js';
+import { copyToClipboard } from '../clipboard.js';
+import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -193,8 +201,14 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const isProtected = useIsProtected(ctx);
   const close = onClose;
 
+  const resourceRef = { ctx, group: target.group, version: target.version, plural: target.plural, kind, name, namespace };
+  const favorite = favoriteForRef(resourceRef);
+  const isFav = useNavigationStore((s) => s.isFavorite(favorite.id));
+  const addFavorite = useNavigationStore((s) => s.addFavorite);
+  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+
   const ok = (text: string) => showToast('success', text);
-  const fail = (err: unknown) => showToast('error', err instanceof Error ? err.message : String(err));
+  const fail = (err: unknown) => showErrorToast(err);
 
   const scalable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'ReplicaSet';
   const navigate = useNavigate();
@@ -477,6 +491,29 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ListItemText>Drain…</ListItemText>
           </MenuItem>
         )}
+        <MenuItem
+          onClick={() => {
+            if (isFav) removeFavorite(favorite.id);
+            else addFavorite(favorite);
+            close();
+          }}
+        >
+          <ListItemIcon>{isFav ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}</ListItemIcon>
+          <ListItemText>{isFav ? 'Remove favorite' : 'Add to favorites'}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            void copyToClipboard(shareLinkForPath(detailPathForRef(resourceRef))).then((copied) =>
+              copied ? ok('Link copied') : showToast('error', 'Copy to clipboard failed'),
+            );
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <LinkIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Copy link</ListItemText>
+        </MenuItem>
         <Divider />
         <MenuItem
           onClick={() => {
@@ -770,16 +807,33 @@ interface PodTemplateContainer {
   image?: string;
 }
 
-function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
+export function SetImageDialog({
+  target,
+  initialContainer,
+  onClose,
+  onDone,
+  onError,
+}: {
+  target: RowActionTarget;
+  initialContainer?: string;
+  onClose: () => void;
+  onDone: (t: string) => void;
+  onError: (e: unknown) => void;
+}) {
   const setImage = useSetImage();
   const podSpec = (target.obj.spec as { template?: { spec?: { containers?: PodTemplateContainer[]; initContainers?: PodTemplateContainer[] } } })?.template?.spec;
   const containers = [
     ...(podSpec?.containers ?? []).map((c) => ({ ...c, init: false })),
     ...(podSpec?.initContainers ?? []).map((c) => ({ ...c, init: true })),
   ];
-  const [selected, setSelected] = useState(containers[0]?.name ?? '');
+  const first = containers.find((c) => c.name === initialContainer) ?? containers[0];
+  const [selected, setSelected] = useState(first?.name ?? '');
   const chosen = containers.find((c) => c.name === selected);
-  const [image, setImageValue] = useState(chosen?.image ?? '');
+  const parsed = chosen?.image ? splitImageRef(chosen.image) : undefined;
+  const [mode, setMode] = useState<'tag' | 'image'>(first?.image ? 'tag' : 'image');
+  const [tag, setTag] = useState(first?.image ? splitImageRef(first.image).tag ?? '' : '');
+  const [image, setImageValue] = useState(first?.image ?? '');
+  const finalImage = mode === 'tag' && parsed ? (tag.trim() ? `${parsed.repo}:${tag.trim()}` : '') : image.trim();
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Set image — {target.obj.metadata.name}</DialogTitle>
@@ -793,7 +847,10 @@ function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActio
             onChange={(e) => {
               const name = e.target.value;
               setSelected(name);
-              setImageValue(containers.find((c) => c.name === name)?.image ?? '');
+              const img = containers.find((c) => c.name === name)?.image;
+              setImageValue(img ?? '');
+              setTag(img ? splitImageRef(img).tag ?? '' : '');
+              if (!img) setMode('image');
             }}
           >
             {containers.map((c) => (
@@ -804,13 +861,37 @@ function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActio
             ))}
           </Select>
         </FormControl>
-        <TextField autoFocus fullWidth label="Image" value={image} onChange={(e) => setImageValue(e.target.value)} helperText={chosen?.image ? `Current: ${chosen.image}` : undefined} />
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={mode}
+          onChange={(_e, v) => {
+            if (v) setMode(v as 'tag' | 'image');
+          }}
+        >
+          <ToggleButton value="tag" disabled={!parsed}>
+            Tag only
+          </ToggleButton>
+          <ToggleButton value="image">Full image</ToggleButton>
+        </ToggleButtonGroup>
+        {mode === 'tag' && parsed ? (
+          <TextField
+            autoFocus
+            fullWidth
+            label="Tag"
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            helperText={`Applies ${parsed.repo}:${tag.trim() || '<tag>'}${parsed.digest ? ' — replaces the digest pin' : ''}`}
+          />
+        ) : (
+          <TextField autoFocus fullWidth label="Image" value={image} onChange={(e) => setImageValue(e.target.value)} helperText={chosen?.image ? `Current: ${chosen.image}` : undefined} />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={setImage.isPending || !image.trim() || !chosen}
+          disabled={setImage.isPending || !finalImage || !chosen}
           onClick={() =>
             setImage.mutate(
               {
@@ -820,14 +901,14 @@ function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActio
                   namespace: target.obj.metadata.namespace ?? '',
                   name: target.obj.metadata.name,
                   container: selected,
-                  image: image.trim(),
+                  image: finalImage,
                   initContainer: chosen?.init || undefined,
                 },
               },
               {
                 onSuccess: () => {
                   onClose();
-                  onDone(`Set ${selected} image to ${image.trim()}`);
+                  onDone(`Set ${selected} image to ${finalImage}`);
                 },
                 onError: (e) => {
                   onClose();
@@ -844,12 +925,20 @@ function SetImageDialog({ target, onClose, onDone, onError }: { target: RowActio
   );
 }
 
+const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }> = [
+  { value: 'general', label: 'General', hint: 'No extra privileges — inherits the namespace defaults.' },
+  { value: 'restricted', label: 'Restricted', hint: 'Non-root, all capabilities dropped — for PodSecurity-restricted namespaces (needs a non-root image).' },
+  { value: 'netadmin', label: 'Network admin', hint: 'Adds NET_ADMIN and NET_RAW — tcpdump, iptables, ping.' },
+  { value: 'sysadmin', label: 'System admin', hint: 'Privileged container — full access, rejected in restricted namespaces.' },
+];
+
 function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
   const debug = useDebugPod();
   const addTab = useDockStore((s) => s.addTab);
   const containers = podContainerNames(target.obj);
   const [image, setImage] = useState('busybox:1.36');
   const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
+  const [profile, setProfile] = useState<DebugProfile>('general');
   const name = target.obj.metadata.name;
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
@@ -871,6 +960,19 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
             ))}
           </Select>
         </FormControl>
+        <FormControl size="small" fullWidth>
+          <InputLabel id="debug-profile">Profile</InputLabel>
+          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfile(e.target.value as DebugProfile)}>
+            {DEBUG_PROFILES.map((p) => (
+              <MenuItem key={p.value} value={p.value}>
+                {p.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+          {DEBUG_PROFILES.find((p) => p.value === profile)?.hint}
+        </Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={debug.isPending}>
@@ -881,7 +983,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           disabled={debug.isPending || !image.trim()}
           onClick={() =>
             debug.mutate(
-              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined } },
+              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined, profile } },
               {
                 onSuccess: ({ containerName }) => {
                   onClose();

@@ -6,13 +6,39 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { ExecServerControl } from '@kubus/shared';
 import { wsUrl } from '../api/http.js';
+import { copyToClipboard, readFromClipboard } from '../clipboard.js';
 import type { NodeShellTab, TerminalTab } from '../state/dock.js';
 import { useUiPrefsStore } from '../state/prefs.js';
+import { showToast } from '../state/toast.js';
 
 export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | NodeShellTab; active: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const termRef = useRef<Terminal | null>(null);
   const theme = useTheme();
+
+  // Right-click copies the selection when there is one, otherwise pastes —
+  // the common terminal-emulator convention. Paste goes through term.paste()
+  // so bracketed-paste mode reaches the remote shell intact.
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const term = termRef.current;
+    if (!term) return;
+    const selection = term.getSelection();
+    if (selection) {
+      void copyToClipboard(selection).then((ok) => {
+        if (ok) term.clearSelection();
+      });
+      return;
+    }
+    void readFromClipboard().then((text) => {
+      if (text === null) {
+        showToast('warning', 'Clipboard read unavailable or denied — allow clipboard access, or paste with the keyboard.');
+        return;
+      }
+      if (text) term.paste(text);
+    });
+  };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -27,6 +53,7 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
     });
     const fit = new FitAddon();
     fitRef.current = fit;
+    termRef.current = term;
     term.loadAddon(fit);
     term.open(el);
     fit.fit();
@@ -82,6 +109,7 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
       onResize.dispose();
       ws.close();
       term.dispose();
+      termRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.id]);
@@ -95,6 +123,7 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
     <Box sx={{ height: '100%', p: 1, pt: 0.75 }}>
       <Box
         ref={containerRef}
+        onContextMenu={onContextMenu}
         sx={{
           height: '100%',
           bgcolor: '#16161e',

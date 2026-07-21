@@ -125,7 +125,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const schemaSource = isCrd ? obj : backingCrd;
   const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
   const hasMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node';
-  const hasRolloutHistory = behaviorKind === 'Deployment' || behaviorKind === 'StatefulSet';
+  const hasRolloutHistory = behaviorKind === 'Deployment' || behaviorKind === 'StatefulSet' || behaviorKind === 'DaemonSet';
   const showMap = !isCrd;
   const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
@@ -326,7 +326,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
               <MetricsChart ctx={sel.ctx} kind={behaviorKind === 'Pod' ? 'pod' : 'node'} name={sel.name} namespace={sel.namespace} />
             )}
             {tab === 'history' && hasRolloutHistory && obj && (
-              <RolloutHistory ctx={sel.ctx} kind={sel.kind as 'Deployment' | 'StatefulSet'} obj={obj} />
+              <RolloutHistory ctx={sel.ctx} kind={sel.kind as 'Deployment' | 'StatefulSet' | 'DaemonSet'} obj={obj} />
             )}
           </Box>
           <ConfirmDialog

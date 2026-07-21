@@ -3,6 +3,7 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
@@ -22,6 +23,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
   const [dryRunText, setDryRunText] = useState<string>();
   const [dryRun, setDryRun] = useState<ResourceDryRunResponse>();
   const [copied, setCopied] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const copyResetRef = useRef<number | undefined>(undefined);
   const schemaRef = useYamlSchema(schema);
   // Per-mount model path under the schema's glob prefix, so the registered
@@ -93,8 +95,52 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
     }
   };
 
+  // A dropped YAML file replaces the editor content and goes through the
+  // normal edit flow (dirty → dry-run gate → apply). Capture-phase handlers
+  // keep Monaco's own text drag-and-drop from swallowing file drops.
+  const editable = !(readOnly ?? !onApply);
+  const MAX_DROP_BYTES = 2 * 1024 * 1024;
+
+  const loadDroppedFile = async (file: File) => {
+    if (file.size > MAX_DROP_BYTES) {
+      setError(`${file.name} is too large to load (${Math.round(file.size / 1024)} KiB)`);
+      return;
+    }
+    try {
+      const content = await file.text();
+      setText(content);
+      onChange?.(content);
+      setCopied(false);
+      setDryRun(undefined);
+      setDryRunText(undefined);
+      setError(undefined);
+    } catch {
+      setError(`Could not read ${file.name}`);
+    }
+  };
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <Box
+      sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
+      onDragOverCapture={(e) => {
+        if (!editable || !e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        setDragOver(true);
+      }}
+      onDragLeaveCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+      }}
+      onDropCapture={(e) => {
+        const file = e.dataTransfer.files[0];
+        if (!editable || !file) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(false);
+        void loadDroppedFile(file);
+      }}
+    >
       <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0 }}>
         {toolbar}
         <Box sx={{ flex: 1 }} />
@@ -139,7 +185,28 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
           Server dry-run accepted this manifest.
         </Alert>
       ) : null}
-      <Box sx={{ flex: 1, minHeight: 0 }}>
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {dragOver && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'action.hover',
+              border: 2,
+              borderStyle: 'dashed',
+              borderColor: 'primary.main',
+              pointerEvents: 'none',
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ bgcolor: 'background.paper', px: 1.5, py: 0.5, borderRadius: 1, boxShadow: 1 }}>
+              Drop YAML file to load
+            </Typography>
+          </Box>
+        )}
         <Editor
           language="yaml"
           path={modelPath}

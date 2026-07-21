@@ -86,9 +86,14 @@ import { showToast } from '../state/toast.js';
 
 // ---- Contexts ----
 
-export function useContexts() {
+/**
+ * Mounted once at the app root: re-fetches the context list on server
+ * kubeconfig broadcasts and refreshes discovery-derived queries when a
+ * cluster's CRD set changes. One shared subscription serves every
+ * useContexts() observer, so the hook itself stays subscription-free.
+ */
+export function useContextsInvalidation() {
   const qc = useQueryClient();
-  // Re-fetch the context list whenever the server reports kubeconfig changes.
   useEffect(
     () =>
       watchClient.onBroadcast((msg) => {
@@ -106,10 +111,20 @@ export function useContexts() {
       }),
     [qc],
   );
+}
+
+/**
+ * The shared context list. Poll from long-lived single mounts (the cluster
+ * picker); per-cluster instances (section headers) pass poll: false and ride
+ * on the cache — each polling observer runs its own interval timer, so N
+ * headers would otherwise multiply the refetches.
+ */
+export function useContexts({ poll = true }: { poll?: boolean } = {}) {
+  const interval = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['contexts'],
     queryFn: () => apiFetch<ContextInfo[]>('/api/contexts'),
-    refetchInterval: useRefetchInterval(30_000),
+    refetchInterval: poll ? interval : false,
   });
 }
 
@@ -714,7 +729,7 @@ export function useRolloutHistory(sel: { ctx: string; kind: string; namespace?: 
       const params = new URLSearchParams({ kind: sel!.kind, namespace: sel!.namespace ?? '', name: sel!.name });
       return apiFetch<RolloutRevision[]>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/detail/rollout-history?${params}`);
     },
-    enabled: !!sel && (sel.kind === 'Deployment' || sel.kind === 'StatefulSet'),
+    enabled: !!sel && (sel.kind === 'Deployment' || sel.kind === 'StatefulSet' || sel.kind === 'DaemonSet'),
     refetchInterval: useRefetchInterval(15_000),
   });
 }
@@ -792,11 +807,24 @@ export function useMetricsServerStatus(ctx: string, opts?: { refetchMs?: number 
   });
 }
 
-function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>): void {
-  void qc.invalidateQueries({ queryKey: ['metrics-server-status'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-summary'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-nodes'] });
-  void qc.invalidateQueries({ queryKey: ['metrics-snapshot'] });
+/**
+ * One-shot refetch of metrics queries — also the "refresh now" action, so it
+ * works while polling is paused. Scoped to one cluster when ctx is given so a
+ * per-cluster refresh doesn't fan out to every selected cluster.
+ */
+export function invalidateMetricsServer(qc: ReturnType<typeof useQueryClient>, ctx?: string): void {
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-server-status', ctx] : ['metrics-server-status'] });
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-summary', ctx] : ['metrics-summary'] });
+  void qc.invalidateQueries({ queryKey: ctx ? ['metrics-nodes', ctx] : ['metrics-nodes'] });
+  // ctx sits deeper in these keys: snapshots batch a context list, history keys a selector object.
+  void qc.invalidateQueries({
+    queryKey: ['metrics-snapshot'],
+    predicate: (q) => !ctx || ((q.queryKey[2] as string[] | undefined) ?? []).includes(ctx),
+  });
+  void qc.invalidateQueries({
+    queryKey: ['metrics-history'],
+    predicate: (q) => !ctx || (q.queryKey[1] as { ctx?: string } | undefined)?.ctx === ctx,
+  });
 }
 
 export function useInstallMetricsServer() {
@@ -809,7 +837,7 @@ export function useInstallMetricsServer() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateMetricsServer(qc),
+    onSuccess: (_result, { ctx }) => invalidateMetricsServer(qc, ctx),
   });
 }
 
@@ -819,7 +847,7 @@ export function useUninstallMetricsServer() {
     meta: LOCAL_ERROR_HANDLING_META,
     mutationFn: ({ ctx }: { ctx: string }) =>
       apiFetch<MetricsServerUninstallResult>(`/api/contexts/${encodeURIComponent(ctx)}/metrics-server`, { method: 'DELETE' }),
-    onSuccess: () => invalidateMetricsServer(qc),
+    onSuccess: (_result, { ctx }) => invalidateMetricsServer(qc, ctx),
   });
 }
 

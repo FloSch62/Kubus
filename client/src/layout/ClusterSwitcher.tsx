@@ -28,27 +28,14 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import type { ContextHealth, ContextInfo } from '@kubus/shared';
 import { useConnectContext, useContexts, useReconnectContext } from '../api/queries.js';
+import { HEALTH_COLOR, healthTitle } from '../components/ContextHealthDot.js';
 import { fuzzyMatch } from '../fuzzy.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { useClustersStore, type ContextSettings } from '../state/clusters.js';
 
-const HEALTH_COLOR: Record<ContextHealth, 'success' | 'error' | 'warning' | 'disabled'> = {
-  connected: 'success',
-  error: 'error',
-  connecting: 'warning',
-  unknown: 'disabled',
-};
-
 const GRID_COLS = 3;
 
 const PRESET_ICONS = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🏭', '🧪', '🛠️', '🚀', '🏠', '🌍', '☁️', '⚡', '📦', '🔒', '🐳', '🎯'];
-
-function healthTitle(c: ContextInfo): string {
-  if (c.health === 'connected') return c.kubernetesVersion ? `Connected · ${c.kubernetesVersion}` : 'Connected';
-  if (c.health === 'connecting') return 'Checking connectivity';
-  if (c.health === 'error') return c.healthMessage ?? 'Connection failed';
-  return 'Not checked yet';
-}
 
 function selectedHealth(contexts: ContextInfo[] | undefined, selected: string[]): ContextHealth | undefined {
   if (!selected.length) return undefined;
