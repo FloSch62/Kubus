@@ -422,7 +422,6 @@ function CustomGroupHeader({
   indent,
   open,
   active,
-  subordinate,
   onClick,
 }: {
   label: string;
@@ -433,8 +432,6 @@ function CustomGroupHeader({
   open: boolean;
   /** The current page lives inside this branch — color it as the active trail. */
   active?: boolean;
-  /** Nested one level down; rendered lighter than top-level entries. */
-  subordinate?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -1073,7 +1070,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                                 indent={SUB_INDENT}
                                 open={isOpen(sgKey)}
                                 active={activeChain.includes(sgKey)}
-                                subordinate
                                 onClick={() => toggleGroup(sgKey)}
                               />
                               <Collapse in={isOpen(sgKey)}>
