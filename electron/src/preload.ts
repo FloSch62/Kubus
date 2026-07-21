@@ -47,6 +47,11 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
     ipcRenderer.on('kubus:open-route', listener);
     return () => ipcRenderer.removeListener('kubus:open-route', listener);
   },
+  // Call once after onOpenRoute: marks the renderer ready for pushed links and
+  // returns any deep link the OS delivered before the UI was up.
+  getPendingRoute(): Promise<string | null> {
+    return ipcRenderer.invoke('kubus:get-pending-route') as Promise<string | null>;
+  },
   closeWindow(): void {
     ipcRenderer.send('kubus:close-window');
   },

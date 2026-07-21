@@ -20,6 +20,8 @@ declare global {
       onCycleTab(callback: (backwards: boolean) => void): () => void;
       /** Subscribe to kubus:// deep links; the payload is an in-app route. Returns unsubscribe. */
       onOpenRoute(callback: (route: string) => void): () => void;
+      /** Fetch a deep link delivered before the UI was ready (cold start); marks the renderer ready for pushes. */
+      getPendingRoute(): Promise<string | null>;
       /** Close the main window (fallback when no dock tab is open). */
       closeWindow(): void;
     };

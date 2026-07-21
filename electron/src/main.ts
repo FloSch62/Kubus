@@ -45,6 +45,10 @@ let updateCheck: Promise<UpdateCheckResult> | undefined;
 
 const PROTOCOL = 'kubus';
 let pendingRoute: string | undefined;
+// True once the renderer has called kubus:get-pending-route, i.e. its route
+// listener is attached. Pushing before that (did-finish-load fires before the
+// SPA mounts) would drop the link on cold start.
+let rendererRouteReady = false;
 
 /** kubus://r/apps/v1/deployments?sel=… → "/r/apps/v1/deployments?sel=…". */
 function routeFromDeepLink(raw: string): string | undefined {
@@ -57,13 +61,15 @@ function routeFromDeepLink(raw: string): string | undefined {
 
 function openRoute(route: string): void {
   const win = mainWindow;
-  if (win && !win.webContents.isLoading()) {
+  if (win && rendererRouteReady) {
     win.webContents.send('kubus:open-route', route);
+  } else {
+    // Cold start or mid-boot: held until the renderer pulls it.
+    pendingRoute = route;
+  }
+  if (win) {
     if (win.isMinimized()) win.restore();
     win.focus();
-  } else {
-    // Cold start: delivered once the renderer finishes loading.
-    pendingRoute = route;
   }
 }
 
@@ -321,6 +327,11 @@ function createWindow(url: string): void {
   });
   mainWindow.on('closed', () => {
     mainWindow = undefined;
+    rendererRouteReady = false;
+  });
+  // A reload restarts the SPA; hold routes until it re-registers.
+  mainWindow.webContents.on('did-start-loading', () => {
+    rendererRouteReady = false;
   });
   mainWindow.webContents.setWindowOpenHandler(({ url: external }) => {
     void shell.openExternal(external);
@@ -348,12 +359,6 @@ function createWindow(url: string): void {
     if (isMac && input.meta && input.shift && !input.control && !input.alt && (input.code === 'BracketLeft' || input.code === 'BracketRight')) {
       event.preventDefault();
       mainWindow?.webContents.send('kubus:cycle-tab', input.code === 'BracketLeft');
-    }
-  });
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (pendingRoute) {
-      mainWindow?.webContents.send('kubus:open-route', pendingRoute);
-      pendingRoute = undefined;
     }
   });
   void mainWindow.loadURL(url);
@@ -407,6 +412,16 @@ ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
   } catch {
     event.returnValue = false;
   }
+});
+
+// The renderer pulls the pending deep link once its route listener is
+// attached; from then on links are pushed over kubus:open-route.
+ipcMain.handle('kubus:get-pending-route', (event): string | null => {
+  if (!isMainWindowSender(event)) return null;
+  rendererRouteReady = true;
+  const route = pendingRoute ?? null;
+  pendingRoute = undefined;
+  return route;
 });
 
 ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
