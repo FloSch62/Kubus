@@ -760,7 +760,7 @@ export function ResourceListPage() {
           crdSelection
             ? () => {
                 setApiResourceOpen(false);
-                pushDetail(crdSelection);
+                pushDetail(crdSelection, { embedded: true });
               }
             : undefined
         }

@@ -29,7 +29,7 @@ interface DetailState {
   /** Action stalled behind the discard confirmation while dataDirty. */
   pendingDiscard?: () => void;
   open: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
-  push: (sel: ResourceSelection) => void;
+  push: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
   back: () => void;
   close: () => void;
   setCollapsed: (collapsed: boolean) => void;
@@ -71,8 +71,12 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     else get().guard(() => set({ stack: [sel], embedded }));
   },
   // Pushes can come from outside the panel (e.g. the API-resource drawer's
-  // CRD link), so surface the result even if the panel was collapsed.
-  push: (sel) => get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false }))),
+  // CRD link), so surface the result even if the panel was collapsed. A push
+  // extends whichever surface owns the stack, so the embedded flag is kept
+  // unless the caller states ownership — needed when a push seeds an empty
+  // stack (list pages can open their CRD with no row selected).
+  push: (sel, opts) =>
+    get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false, embedded: opts?.embedded ?? s.embedded }))),
   back: () => set((s) => ({ stack: s.stack.slice(0, -1) })),
   // Bail when already closed — close() is called liberally (e.g. on page
   // unmounts), and a fresh [] would re-render every stack subscriber.
