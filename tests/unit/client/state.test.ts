@@ -4,6 +4,7 @@ import { clampDockHeight } from '../../../client/src/state/dock';
 import { forwardPrefKey } from '../../../client/src/state/portforward-prefs';
 import { errorDetails } from '../../../client/src/state/toast';
 import { namespaceVisible } from '../../../client/src/state/clusters';
+import { useNavigationStore } from '../../../client/src/state/navigation';
 import { useTabsStore, type PageTab } from '../../../client/src/state/tabs';
 
 function setViewport(width: number, height: number): void {
@@ -91,6 +92,69 @@ describe('namespaceVisible', () => {
   it('filters namespaced items by the selection', () => {
     expect(namespaceVisible('default', ['default', 'dev'])).toBe(true);
     expect(namespaceVisible('prod', ['default', 'dev'])).toBe(false);
+  });
+});
+
+describe('useNavigationStore', () => {
+  beforeEach(() => {
+    useNavigationStore.setState({ favorites: [], savedViews: [] });
+    localStorage.clear();
+  });
+
+  it('adds favorites at the front, replaces duplicates, and reports membership', () => {
+    useNavigationStore.getState().addFavorite({ id: 'pods', title: 'Pods', path: '/pods' });
+    useNavigationStore.getState().addFavorite({ id: 'deployments', title: 'Deployments', path: '/deployments' });
+    useNavigationStore.getState().addFavorite({ id: 'pods', title: 'All Pods', path: '/pods?all=true' });
+
+    expect(useNavigationStore.getState().favorites).toEqual([
+      { id: 'pods', title: 'All Pods', path: '/pods?all=true' },
+      { id: 'deployments', title: 'Deployments', path: '/deployments' },
+    ]);
+    expect(useNavigationStore.getState().isFavorite('pods')).toBe(true);
+    expect(useNavigationStore.getState().isFavorite('services')).toBe(false);
+  });
+
+  it('moves favorites before and after another entry', () => {
+    for (const id of ['a', 'b', 'c']) useNavigationStore.getState().addFavorite({ id, title: id });
+    expect(useNavigationStore.getState().favorites.map((item) => item.id)).toEqual(['c', 'b', 'a']);
+
+    useNavigationStore.getState().moveFavorite('a', 'c', 'before');
+    expect(useNavigationStore.getState().favorites.map((item) => item.id)).toEqual(['a', 'c', 'b']);
+
+    useNavigationStore.getState().moveFavorite('a', 'b', 'after');
+    expect(useNavigationStore.getState().favorites.map((item) => item.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('ignores invalid favorite moves and removes entries', () => {
+    useNavigationStore.getState().addFavorite({ id: 'a', title: 'A' });
+    const before = useNavigationStore.getState();
+    useNavigationStore.getState().moveFavorite('a', 'a', 'before');
+    expect(useNavigationStore.getState()).toBe(before);
+
+    useNavigationStore.getState().moveFavorite('missing', 'a', 'before');
+    useNavigationStore.getState().moveFavorite('a', 'missing', 'after');
+    expect(useNavigationStore.getState().favorites.map((item) => item.id)).toEqual(['a']);
+
+    useNavigationStore.getState().removeFavorite('a');
+    expect(useNavigationStore.getState().favorites).toEqual([]);
+  });
+
+  it('bounds favorites and saved views while replacing duplicate ids', () => {
+    for (let i = 0; i < 45; i += 1) {
+      useNavigationStore.getState().addFavorite({ id: `f${i}`, title: `Favorite ${i}` });
+    }
+    expect(useNavigationStore.getState().favorites).toHaveLength(40);
+    expect(useNavigationStore.getState().favorites[0]?.id).toBe('f44');
+
+    for (let i = 0; i < 35; i += 1) {
+      useNavigationStore.getState().addSavedView({ id: `v${i}`, title: `View ${i}`, path: `/view/${i}` });
+    }
+    useNavigationStore.getState().addSavedView({ id: 'v34', title: 'Updated', path: '/updated' });
+    expect(useNavigationStore.getState().savedViews).toHaveLength(30);
+    expect(useNavigationStore.getState().savedViews[0]).toEqual({ id: 'v34', title: 'Updated', path: '/updated' });
+
+    useNavigationStore.getState().removeSavedView('v34');
+    expect(useNavigationStore.getState().savedViews.some((view) => view.id === 'v34')).toBe(false);
   });
 });
 

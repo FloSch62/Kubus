@@ -19,6 +19,10 @@ const sharedSrcAlias = [
 ];
 
 export default defineConfig({
+  // Keep the repository as the Vitest root. Coverage discovers untested files
+  // relative to this value; when the root was tests/, sibling package sources
+  // were only reported if a test happened to import them.
+  root: repoRoot,
   test: {
     projects: [
       {
@@ -26,7 +30,7 @@ export default defineConfig({
         test: {
           name: 'shared',
           environment: 'node',
-          include: ['unit/shared/**/*.test.ts'],
+          include: ['tests/unit/shared/**/*.test.ts'],
         },
       },
       {
@@ -34,7 +38,7 @@ export default defineConfig({
         test: {
           name: 'server',
           environment: 'node',
-          include: ['unit/server/**/*.test.ts'],
+          include: ['tests/unit/server/**/*.test.ts'],
         },
       },
       {
@@ -43,8 +47,8 @@ export default defineConfig({
         test: {
           name: 'client',
           environment: 'jsdom',
-          include: ['unit/client/**/*.test.{ts,tsx}'],
-          setupFiles: ['setup/client.ts'],
+          include: ['tests/unit/client/**/*.test.{ts,tsx}'],
+          setupFiles: ['tests/setup/client.ts'],
           // Testing Library's auto-cleanup hooks into the global afterEach.
           globals: true,
         },
@@ -52,12 +56,27 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      reporter: ['text-summary', 'html'],
-      reportsDirectory: 'coverage',
-      // The code under test lives in the sibling packages, outside this
-      // package's root.
-      allowExternal: true,
-      include: ['**/shared/src/**', '**/server/src/**', '**/client/src/**'],
+      reporter: ['text-summary', 'html', 'json-summary'],
+      reportsDirectory: 'tests/coverage',
+      include: [
+        'shared/src/**/*.ts',
+        'server/src/**/*.ts',
+        'client/src/**/*.{ts,tsx}',
+        'electron/src/**/*.ts',
+      ],
+      exclude: ['**/*.d.ts'],
+      // Start with honest, achievable non-regression floors and ratchet them
+      // upward as high-risk areas gain tests. Package floors prevent strong
+      // shared coverage from hiding a client or server regression.
+      thresholds: {
+        statements: 13,
+        branches: 12,
+        functions: 9,
+        lines: 13,
+        'client/src/**': { statements: 11, branches: 9, functions: 7, lines: 11 },
+        'server/src/**': { statements: 14, branches: 15, functions: 14, lines: 14 },
+        'shared/src/**': { statements: 95, branches: 90, functions: 90, lines: 95 },
+      },
     },
   },
 });

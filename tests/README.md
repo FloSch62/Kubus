@@ -1,8 +1,10 @@
 # Kubus test suite
 
 All automated tests live in this workspace package (`@kubus/tests`): Vitest
-unit suites for every package plus a Playwright end-to-end suite that drives
-the built app against a real kind cluster.
+unit suites for shared, server, and client code plus a Playwright end-to-end
+suite that drives the built app against a real kind cluster. Coverage scans
+all TypeScript production packages, including Electron, so untested files are
+counted instead of disappearing from the report.
 
 ## Layout
 
@@ -30,6 +32,12 @@ pnpm test              # from the repo root (or `pnpm test` inside tests/)
 pnpm test:watch
 pnpm test:coverage     # writes tests/coverage/
 ```
+
+Coverage is rooted at the repository rather than this package. The report
+therefore includes unimported production files from `shared/src`, `server/src`,
+`client/src`, and `electron/src`. Modest global and per-package thresholds
+protect the current baseline; raise them as new behavior is covered. Electron
+is deliberately visible at 0% until desktop main/preload tests are added.
 
 No build step needed: tests import package TypeScript sources directly, and
 `@kubus/shared` is aliased to `shared/src`. Server/shared tests run in node,
@@ -61,7 +69,8 @@ What a run does:
 2. `global-setup.ts` applies `fixtures/e2e-workloads.yaml` into the
    `kubus-e2e` namespace (idempotent) and waits for rollout: an nginx
    deployment, a service, config/secret objects, a pod that logs a numbered
-   line every 2s, and a crash-looping pod.
+   line every 2s, and a crash-looping pod. Mutation specs restore fixture
+   values in teardown so later tests see the original state.
 3. Specs run serially (`workers: 1` — the server's settings/kubeconfig state
    is global) against `http://127.0.0.1:3399`.
 
@@ -77,6 +86,8 @@ aria-hidden; scope queries to the dialog by text.
 
 ## CI
 
-The `build` matrix job runs the unit suites on every OS; the `e2e` job builds
-the web surface, creates a kind cluster named `kubus-a` via `helm/kind-action`,
-and runs the Playwright suite, uploading traces on failure.
+The `build` matrix job runs the unit suites on every OS. Linux runs the
+repository-wide coverage command, enforces its thresholds, and uploads the
+HTML report; macOS and Windows run the faster unit command. The `e2e` job
+builds the web surface, creates a kind cluster named `kubus-a` via
+`helm/kind-action`, and runs the Playwright suite, uploading traces on failure.

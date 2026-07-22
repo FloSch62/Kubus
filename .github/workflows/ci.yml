@@ -48,7 +48,22 @@ jobs:
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm build:helm-engine
-      - run: pnpm test
+      # One platform collects repository-wide coverage and enforces the
+      # non-regression floors; the other packaging platforms still run the
+      # faster unit command so OS-specific behavior remains exercised.
+      - name: Unit tests with coverage
+        if: runner.os == 'Linux'
+        run: pnpm test:coverage
+      - name: Unit tests
+        if: runner.os != 'Linux'
+        run: pnpm test
+      - name: Upload coverage report
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: tests/coverage
+          retention-days: 7
       # Type-aware linting also resolves workspace package declarations.
       - run: pnpm lint
       - run: pnpm typecheck
