@@ -12,7 +12,9 @@
     "types": ["node", "vite/client"],
     "paths": {
       "@kubus/shared": ["../shared/src/index.ts"],
-      "@kubus/shared/ws-protocol": ["../shared/src/ws-protocol.ts"]
+      "@kubus/shared/ws-protocol": ["../shared/src/ws-protocol.ts"],
+      "@mui/x-data-grid": ["../client/node_modules/@mui/x-data-grid"],
+      "react-router": ["../client/node_modules/react-router/dist/production/index.d.ts"]
     }
   },
   "include": [

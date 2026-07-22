@@ -35,9 +35,10 @@ pnpm test:coverage     # writes tests/coverage/
 
 Coverage is rooted at the repository rather than this package. The report
 therefore includes unimported production files from `shared/src`, `server/src`,
-`client/src`, and `electron/src`. Modest global and per-package thresholds
-protect the current baseline; raise them as new behavior is covered. Electron
-is deliberately visible at 0% until desktop main/preload tests are added.
+`client/src`, and `electron/src`. A 50% floor on every repository-wide metric
+protects the current baseline; per-package floors keep improvements in one
+package from hiding regressions in another. Electron is deliberately visible
+at 0% until desktop main/preload tests are added.
 
 No build step needed: tests import package TypeScript sources directly, and
 `@kubus/shared` is aliased to `shared/src`. Server/shared tests run in node,

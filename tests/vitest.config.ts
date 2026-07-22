@@ -43,7 +43,27 @@ export default defineConfig({
       },
       {
         plugins: [react()],
-        resolve: { alias: sharedSrcAlias },
+        resolve: {
+          alias: [
+            ...sharedSrcAlias,
+            {
+              find: 'elkjs/lib/elk-api.js',
+              replacement: path.join(repoRoot, 'tests/setup/mock-elk.ts'),
+            },
+            {
+              find: '@tanstack/react-query',
+              replacement: path.join(repoRoot, 'tests/setup/mock-react-query.tsx'),
+            },
+            {
+              find: '@monaco-editor/react',
+              replacement: path.join(repoRoot, 'tests/setup/mock-monaco.tsx'),
+            },
+            {
+              find: 'react-router',
+              replacement: path.join(repoRoot, 'client/node_modules/react-router/dist/development/index.js'),
+            },
+          ],
+        },
         test: {
           name: 'client',
           environment: 'jsdom',
@@ -65,14 +85,14 @@ export default defineConfig({
         'electron/src/**/*.ts',
       ],
       exclude: ['**/*.d.ts'],
-      // Start with honest, achievable non-regression floors and ratchet them
-      // upward as high-risk areas gain tests. Package floors prevent strong
-      // shared coverage from hiding a client or server regression.
+      // Keep every repository-wide metric at or above 50%. Package floors
+      // also prevent strong shared coverage from hiding a large client or
+      // server regression while those packages continue to improve.
       thresholds: {
-        statements: 13,
-        branches: 12,
-        functions: 9,
-        lines: 13,
+        statements: 50,
+        branches: 50,
+        functions: 50,
+        lines: 50,
         'client/src/**': { statements: 11, branches: 9, functions: 7, lines: 11 },
         'server/src/**': { statements: 14, branches: 15, functions: 14, lines: 14 },
         'shared/src/**': { statements: 95, branches: 90, functions: 90, lines: 95 },
