@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/unbound-method -- this test intentionally inspects a mocked method. */
 import fs from 'node:fs';
+import path from 'node:path';
 import type { User } from '@kubernetes/client-node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RawClient } from '../../../server/src/kube/raw-client';
@@ -29,7 +30,10 @@ function rawJson(value: unknown, reject = false): RawClient {
 }
 
 describe('credential classification and proactive warnings', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it('classifies each kubeconfig credential style in priority order', () => {
     expect(authTypeOf(undefined)).toBe('none');
@@ -89,11 +93,11 @@ describe('credential classification and proactive warnings', () => {
 
   it('searches PATH and gives legacy warnings precedence over exec checks', () => {
     vi.spyOn(fs, 'accessSync').mockImplementation((candidate) => {
-      if (String(candidate).endsWith('/found-tool')) return;
+      if (path.basename(String(candidate)) === 'found-tool') return;
       throw new Error('missing');
     });
     vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as fs.Stats);
-    vi.stubEnv('PATH', '/one:/two');
+    vi.stubEnv('PATH', ['/one', '/two'].join(path.delimiter));
 
     expect(isCommandOnPath(`found-tool-${Math.random()}`)).toBe(false);
     expect(isCommandOnPath('found-tool')).toBe(true);

@@ -48,15 +48,11 @@ jobs:
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm build:helm-engine
-      # One platform collects repository-wide coverage and enforces the
-      # non-regression floors; the other packaging platforms still run the
-      # faster unit command so OS-specific behavior remains exercised.
-      - name: Unit tests with coverage
-        if: runner.os == 'Linux'
-        run: pnpm test:coverage
+      # One platform also collects repository-wide coverage and enforces the
+      # non-regression floors; every matrix job exposes the same always-running
+      # test step so OS-specific behavior is visible without misleading skips.
       - name: Unit tests
-        if: runner.os != 'Linux'
-        run: pnpm test
+        run: pnpm ${{ runner.os == 'Linux' && 'test:coverage' || 'test' }}
       - name: Upload coverage report
         if: runner.os == 'Linux' && always()
         uses: actions/upload-artifact@v7

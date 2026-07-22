@@ -29,7 +29,16 @@ export default function globalSetup() {
     '--timeout=180s',
   ]);
   kubectl(['wait', '--for=condition=Ready', 'pod/logger', '-n', namespace, '--timeout=180s']);
-  // The crasher pod is intentionally never Ready — don't wait on it.
+  // The crasher pod is intentionally never Ready. Wait for the failure state
+  // the overview test asserts instead of racing its first restart/backoff.
+  kubectl([
+    'wait',
+    '--for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=CrashLoopBackOff',
+    'pod/crasher',
+    '-n',
+    namespace,
+    '--timeout=180s',
+  ]);
 
   console.log(`e2e: fixtures ready in namespace "${namespace}" on kind cluster "${clusterName}"`);
 }

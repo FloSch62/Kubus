@@ -8,8 +8,8 @@ import type { KubeConfig } from '@kubernetes/client-node';
  * connectivity. `proxy-url` in the kubeconfig always wins.
  */
 
-function isNoProxy(host: string): boolean {
-  const raw = process.env.NO_PROXY ?? process.env.no_proxy;
+function isNoProxy(host: string, env: NodeJS.ProcessEnv): boolean {
+  const raw = env.NO_PROXY ?? env.no_proxy;
   if (!raw) return false;
   for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
     if (entry === '*') return true;
@@ -20,15 +20,14 @@ function isNoProxy(host: string): boolean {
 }
 
 /** Resolve a proxy URL for a server URL from env vars, honoring NO_PROXY. */
-export function envProxyForServer(server: string): string | undefined {
+export function envProxyForServer(server: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   let host: string;
   try {
     host = new URL(server).hostname;
   } catch {
     return undefined;
   }
-  if (isNoProxy(host)) return undefined;
-  const env = process.env;
+  if (isNoProxy(host, env)) return undefined;
   const pick = (name: string) => env[name] || env[name.toLowerCase()] || undefined;
   // Scheme-specific var first, then ALL_PROXY which applies to any scheme.
   const schemeProxy = server.startsWith('https') ? pick('HTTPS_PROXY') : pick('HTTP_PROXY');

@@ -37,9 +37,12 @@ describe('envProxyForServer', () => {
   });
 
   it('prefers the uppercase variant over the lowercase one', () => {
-    vi.stubEnv('HTTPS_PROXY', 'http://upper:3128');
-    vi.stubEnv('https_proxy', 'http://lower:3128');
-    expect(envProxyForServer('https://api.example.com:6443')).toBe('http://upper:3128');
+    expect(
+      envProxyForServer('https://api.example.com:6443', {
+        HTTPS_PROXY: 'http://upper:3128',
+        https_proxy: 'http://lower:3128',
+      }),
+    ).toBe('http://upper:3128');
   });
 
   it('falls back to ALL_PROXY for any scheme', () => {
