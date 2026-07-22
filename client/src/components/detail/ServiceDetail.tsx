@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -13,9 +12,10 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CableIcon from '@mui/icons-material/Cable';
 import type { KubeObject } from '@kubus/shared';
-import { GenericDetail, KeyValueChips } from './GenericDetail.js';
+import { GenericDetail, KeyValueSection } from './GenericDetail.js';
 import { PodMiniList } from './PodMiniList.js';
 import { PortForwardDialog } from '../PortForwardDialog.js';
+import { Section } from './Section.js';
 import { useResourceList } from '../../api/queries.js';
 
 interface ServiceSpec {
@@ -60,17 +60,14 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       </Stack>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
         {!!spec.ports?.length && (
-          <Box>
-            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-              Ports
-            </Typography>
+          <Section title="Ports" count={spec.ports.length}>
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Name</TableCell>
+                  {spec.ports.some((p) => p.name) && <TableCell>Name</TableCell>}
                   <TableCell>Port</TableCell>
                   <TableCell>Target</TableCell>
-                  <TableCell>NodePort</TableCell>
+                  {spec.ports.some((p) => p.nodePort !== undefined) && <TableCell>NodePort</TableCell>}
                   <TableCell>Protocol</TableCell>
                   <TableCell padding="none" />
                 </TableRow>
@@ -78,10 +75,10 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
               <TableBody>
                 {spec.ports.map((p, i) => (
                   <TableRow key={p.name ?? i}>
-                    <TableCell>{p.name ?? ''}</TableCell>
+                    {spec.ports!.some((q) => q.name) && <TableCell>{p.name ?? ''}</TableCell>}
                     <TableCell>{p.port}</TableCell>
                     <TableCell>{p.targetPort ?? p.port}</TableCell>
-                    <TableCell>{p.nodePort ?? ''}</TableCell>
+                    {spec.ports!.some((q) => q.nodePort !== undefined) && <TableCell>{p.nodePort ?? ''}</TableCell>}
                     <TableCell>{p.protocol ?? 'TCP'}</TableCell>
                     <TableCell padding="none" align="right">
                       {(p.protocol ?? 'TCP') === 'TCP' && (
@@ -96,13 +93,14 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
                 ))}
               </TableBody>
             </Table>
-          </Box>
+          </Section>
         )}
         {labelSelector ? (
           <>
-            <KeyValueChips title="Selector" entries={selector} />
-            <Divider />
-            <PodMiniList ctx={ctx} pods={podsQuery.data?.items ?? []} title="Matching pods" loading={podsQuery.isLoading} emptyText="No pods match the selector." />
+            <KeyValueSection title="Selector" entries={selector} />
+            <Section title="Matching pods" count={podsQuery.isLoading ? undefined : (podsQuery.data?.items ?? []).length}>
+              <PodMiniList ctx={ctx} pods={podsQuery.data?.items ?? []} loading={podsQuery.isLoading} emptyText="No pods match the selector." hideNamespace />
+            </Section>
           </>
         ) : (
           <Typography variant="body2" color="text.secondary">

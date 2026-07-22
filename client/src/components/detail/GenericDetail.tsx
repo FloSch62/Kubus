@@ -122,16 +122,13 @@ export function ConditionChips({ obj, goodWhen }: { obj: KubeObject; goodWhen?: 
   );
 }
 
-export function ConditionsTable({ obj, goodWhen }: { obj: KubeObject; goodWhen?: (type: string) => 'True' | 'False' }) {
+export function ConditionsTable({ obj, goodWhen, defaultOpen = true }: { obj: KubeObject; goodWhen?: (type: string) => 'True' | 'False'; defaultOpen?: boolean }) {
   const conditions = objConditions(obj);
   if (!conditions.length) return null;
   return (
-    <Box>
-      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-        Conditions
-      </Typography>
+    <Section title="Conditions" count={conditions.length} defaultOpen={defaultOpen}>
       <ConditionRows conditions={conditions} goodWhen={goodWhen} />
-    </Box>
+    </Section>
   );
 }
 
@@ -159,8 +156,8 @@ export function ConditionRows({ conditions, goodWhen }: { conditions: Condition[
                 <StatusChip status={display} label={c.status} />
               </TableCell>
               <TableCell>{c.reason ?? ''}</TableCell>
-              <TableCell sx={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.message}>
-                {c.message ?? ''}
+              <TableCell title={c.message}>
+                <Box sx={{ maxWidth: 320, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.message ?? ''}</Box>
               </TableCell>
               <TableCell>
                 <AgeCell timestamp={c.lastTransitionTime} />

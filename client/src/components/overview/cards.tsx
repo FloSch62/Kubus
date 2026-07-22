@@ -50,8 +50,8 @@ export function FailingPodsCard({ ctx, pods, hideNamespace }: { ctx: string; pod
                 <StatusChip status={p.reason} />
               </TableCell>
               <TableCell>{p.restarts}</TableCell>
-              <TableCell sx={{ maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.message}>
-                {p.message ?? ''}
+              <TableCell title={p.message}>
+                <Box sx={{ maxWidth: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.message ?? ''}</Box>
               </TableCell>
             </TableRow>
           ))}

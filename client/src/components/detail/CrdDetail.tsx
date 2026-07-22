@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -13,6 +12,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
+import { Section } from './Section.js';
 import { statusTextColor } from '../../theme.js';
 
 interface JsonSchema {
@@ -121,11 +121,7 @@ export function CrdDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <GenericDetail obj={obj} ctx={ctx} hideConditions>
-      <Divider />
-      <Box>
-        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-          Definition
-        </Typography>
+      <Section title="Definition">
         <Table size="small">
           <TableBody>
             <InfoRow label="Group" value={spec.group} />
@@ -139,7 +135,7 @@ export function CrdDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
             <InfoRow label="Categories" value={(names.categories ?? []).join(', ')} />
           </TableBody>
         </Table>
-      </Box>
+      </Section>
     </GenericDetail>
   );
 }
@@ -184,36 +180,30 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
         ))}
       </Box>
       {printerColumns.length > 0 && (
-        <>
-          <Divider />
-          <Box>
-            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-              Printer columns
-            </Typography>
-            <Table size="small">
-              <TableBody>
-                {printerColumns.map((column, index) => (
-                  <TableRow key={`${column.name ?? index}:${column.jsonPath ?? ''}`}>
-                    <TableCell sx={{ width: 180, color: 'text.secondary', border: 0 }}>{column.name ?? ''}</TableCell>
-                    <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>
-                      <Typography component="span" variant="body2" sx={{ fontWeight: 600, mr: 1, color: typeColor(column.type ?? 'string') }}>
-                        {column.type ?? 'string'}
+        <Section title="Printer columns" count={printerColumns.length}>
+          <Table size="small">
+            <TableBody>
+              {printerColumns.map((column, index) => (
+                <TableRow key={`${column.name ?? index}:${column.jsonPath ?? ''}`}>
+                  <TableCell sx={{ width: 180, color: 'text.secondary', border: 0 }}>{column.name ?? ''}</TableCell>
+                  <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>
+                    <Typography component="span" variant="body2" sx={{ fontWeight: 600, mr: 1, color: typeColor(column.type ?? 'string') }}>
+                      {column.type ?? 'string'}
+                    </Typography>
+                    <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12 }}>
+                      {column.jsonPath ?? ''}
+                    </Typography>
+                    {column.description && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {column.description}
                       </Typography>
-                      <Typography component="span" variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {column.jsonPath ?? ''}
-                      </Typography>
-                      {column.description && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          {column.description}
-                        </Typography>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Box>
-        </>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Section>
       )}
     </Stack>
   );
