@@ -1,4 +1,6 @@
 coverage/
 e2e/.state/
 e2e/.results/
+electron/.results/
 playwright-report/
+electron-report/

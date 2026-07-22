@@ -91,7 +91,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client build
+      - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
+      # Launches the actual Electron main/preload/renderer stack with isolated
+      # user data and an empty kubeconfig. Ozone headless needs no X server.
+      - name: Electron end-to-end tests
+        run: pnpm test:electron
       # Cluster name kubus-a matches the local dev clusters, so the suite
       # runs unchanged in both places (context kind-kubus-a).
       - name: Create kind cluster
@@ -108,4 +112,6 @@ jobs:
           path: |
             tests/playwright-report
             tests/e2e/.results
+            tests/electron-report
+            tests/electron/.results
           retention-days: 7

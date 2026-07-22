@@ -19,6 +19,7 @@
     "test:watch": "pnpm --filter @kubus/tests test:watch",
     "test:coverage": "pnpm --filter @kubus/tests test:coverage",
     "test:e2e": "pnpm --filter @kubus/tests test:e2e",
+    "test:electron": "pnpm --filter @kubus/tests test:electron",
     "smoke": "node hack/smoke-server.mjs",
     "lint": "oxlint . --deny-warnings",
     "lint:perf": "oxlint client/src -W perf",

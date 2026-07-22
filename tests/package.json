@@ -1,6 +1,6 @@
 {
   "name": "@kubus/tests",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:electron": "playwright test --config playwright.electron.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -21,6 +22,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^43.1.1",
     "fastify": "^5.10.0",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^29.1.1",

@@ -42,6 +42,26 @@ export default defineConfig({
         },
       },
       {
+        resolve: {
+          alias: [
+            ...sharedSrcAlias,
+            {
+              find: '@kubus/server',
+              replacement: path.join(repoRoot, 'server/src/server.ts'),
+            },
+            {
+              find: 'fix-path',
+              replacement: path.join(repoRoot, 'electron/node_modules/fix-path/index.js'),
+            },
+          ],
+        },
+        test: {
+          name: 'electron',
+          environment: 'node',
+          include: ['tests/unit/electron/**/*.test.ts'],
+        },
+      },
+      {
         plugins: [react()],
         resolve: {
           alias: [
@@ -94,6 +114,7 @@ export default defineConfig({
         functions: 50,
         lines: 50,
         'client/src/**': { statements: 11, branches: 9, functions: 7, lines: 11 },
+        'electron/src/**': { statements: 80, branches: 60, functions: 85, lines: 85 },
         'server/src/**': { statements: 14, branches: 15, functions: 14, lines: 14 },
         'shared/src/**': { statements: 95, branches: 90, functions: 90, lines: 95 },
       },
