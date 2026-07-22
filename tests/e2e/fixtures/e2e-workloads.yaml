@@ -1,0 +1,102 @@
+# Deterministic workloads the e2e suite asserts against. Applied idempotently
+# into the kubus-e2e namespace by global-setup; safe to re-apply at any time.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubus-e2e
+  labels:
+    app.kubernetes.io/part-of: kubus-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: kubus-e2e
+  labels:
+    app: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: kubus-e2e
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: kubus-e2e
+data:
+  MODE: production
+  GREETING: hello from kubus e2e
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: web-secret
+  namespace: kubus-e2e
+type: Opaque
+stringData:
+  API_KEY: super-secret-value
+---
+# Emits one numbered line every 2s: log-view tests assert on this stream.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: logger
+  namespace: kubus-e2e
+  labels:
+    app: logger
+spec:
+  restartPolicy: Always
+  containers:
+    - name: logger
+      image: busybox:1.37
+      command:
+        - sh
+        - -c
+        - 'i=0; while true; do echo "kubus-e2e log line $i"; i=$((i+1)); sleep 2; done'
+---
+# Exits immediately so it settles into CrashLoopBackOff: error-state tests
+# assert the UI surfaces the failure.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crasher
+  namespace: kubus-e2e
+  labels:
+    app: crasher
+spec:
+  restartPolicy: Always
+  containers:
+    - name: crasher
+      image: busybox:1.37
+      command:
+        - sh
+        - -c
+        - 'echo boom; exit 1'
