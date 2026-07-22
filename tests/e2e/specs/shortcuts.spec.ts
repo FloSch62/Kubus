@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { gotoApp } from '../helpers/app.js';
+import { contextName } from '../helpers/cluster.mjs';
 
 test('command palette opens with mod+k and closes with escape', async ({ page }) => {
   await gotoApp(page);
-  await expect(page.getByRole('button', { name: 'kind-kubus-a' })).toBeVisible();
+  await expect(page.getByRole('button', { name: contextName })).toBeVisible();
 
   await page.keyboard.press('ControlOrMeta+k');
   const palette = page.getByPlaceholder(/Search resources, pages, kinds/);
@@ -15,7 +16,7 @@ test('command palette opens with mod+k and closes with escape', async ({ page })
 
 test('g-sequences jump between pages', async ({ page }) => {
   await gotoApp(page);
-  await expect(page.getByRole('button', { name: 'kind-kubus-a' })).toBeVisible();
+  await expect(page.getByRole('button', { name: contextName })).toBeVisible();
 
   await page.keyboard.press('g');
   await page.keyboard.press('p');

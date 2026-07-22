@@ -1,7 +1,24 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import type { KeyboardInputEvent } from 'electron';
+import { expect, test, type ElectronApplication } from '@playwright/test';
 import { launchElectron } from '../helpers/app.js';
+
+type AcceleratorInput = Omit<KeyboardInputEvent, 'type'>;
+
+async function sendAccelerator(
+  app: ElectronApplication,
+  input: AcceleratorInput,
+): Promise<void> {
+  await app.evaluate(
+    ({ BrowserWindow }, accelerator) => {
+      const webContents = BrowserWindow.getAllWindows()[0]?.webContents;
+      webContents?.sendInputEvent({ type: 'keyDown', ...accelerator });
+      webContents?.sendInputEvent({ type: 'keyUp', ...accelerator });
+    },
+    input,
+  );
+}
 
 test('boots the real desktop shell behind the restricted preload bridge', async () => {
   const launched = await launchElectron();
@@ -95,34 +112,19 @@ test('delivers native window accelerators through main and preload without closi
       );
     });
 
-    await launched.app.evaluate(
-      ({ BrowserWindow }, input) => {
-        const webContents = BrowserWindow.getAllWindows()[0]?.webContents;
-        webContents?.sendInputEvent({ type: 'keyDown', ...input });
-        webContents?.sendInputEvent({ type: 'keyUp', ...input });
-      },
+    await sendAccelerator(
+      launched.app,
       { keyCode: 'w', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] },
     );
     await expect(launched.page.locator('html')).toHaveAttribute('data-native-close', 'received');
     expect(launched.page.isClosed()).toBe(false);
 
-    await launched.app.evaluate(
-      ({ BrowserWindow }, input) => {
-        const webContents = BrowserWindow.getAllWindows()[0]?.webContents;
-        webContents?.sendInputEvent({ type: 'keyDown', ...input });
-        webContents?.sendInputEvent({ type: 'keyUp', ...input });
-      },
-      { keyCode: 'Tab', modifiers: ['control'] },
-    );
+    await sendAccelerator(launched.app, { keyCode: 'Tab', modifiers: ['control'] });
     await expect(launched.page.locator('html')).toHaveAttribute('data-native-cycle', 'forwards');
-    await launched.app.evaluate(
-      ({ BrowserWindow }, input) => {
-        const webContents = BrowserWindow.getAllWindows()[0]?.webContents;
-        webContents?.sendInputEvent({ type: 'keyDown', ...input });
-        webContents?.sendInputEvent({ type: 'keyUp', ...input });
-      },
-      { keyCode: 'Tab', modifiers: ['control', 'shift'] },
-    );
+    await sendAccelerator(launched.app, {
+      keyCode: 'Tab',
+      modifiers: ['control', 'shift'],
+    });
     await expect(launched.page.locator('html')).toHaveAttribute('data-native-cycle', 'backwards');
   } finally {
     await launched.close();

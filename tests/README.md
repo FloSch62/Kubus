@@ -88,7 +88,8 @@ What a run does:
 Failures keep traces/screenshots under `e2e/.results/`; open a trace with
 `pnpm exec playwright show-trace <trace.zip>`.
 
-Cleanup (optional): `kubectl --context kind-kubus-a delete namespace kubus-e2e`.
+Cleanup (optional):
+`kubectl --context "kind-${KUBUS_E2E_KIND_CLUSTER:-kubus-a}" delete namespace kubus-e2e`.
 
 Selector conventions: production builds strip `data-testid`, so locate by
 role/text/placeholder. Grids virtualize rows — filter via the search box

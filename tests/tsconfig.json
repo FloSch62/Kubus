@@ -20,9 +20,11 @@
   "include": [
     "unit",
     "e2e",
+    "electron",
     "setup",
     "vitest.config.ts",
     "playwright.config.ts",
+    "playwright.electron.config.ts",
     "../client/src/desktop.d.ts"
   ]
 }

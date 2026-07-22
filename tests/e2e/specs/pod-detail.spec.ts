@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { detailLink, gotoApp } from '../helpers/app.js';
+import { contextName } from '../helpers/cluster.mjs';
 
 test('pod detail drawer opens from a row click and deep-links via ?sel=', async ({ page }) => {
   await gotoApp(page, '/r/core/v1/pods');
@@ -8,7 +9,9 @@ test('pod detail drawer opens from a row click and deep-links via ?sel=', async 
   await row.first().getByRole('gridcell').nth(1).click();
 
   await expect(page.getByText('kubus-e2e / logger')).toBeVisible();
-  await expect(page).toHaveURL(/sel=kind-kubus-a%7Ckubus-e2e%7Clogger/);
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get('sel') === `${contextName}|kubus-e2e|logger`,
+  );
 
   // Live pod facts from the cluster.
   await expect(page.getByText('Ready 1/1')).toBeVisible();
