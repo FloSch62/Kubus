@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@kubus/server": "workspace:*",
-    "@types/node": "^24.13.3",
+    "@types/node": "^25.9.5",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
