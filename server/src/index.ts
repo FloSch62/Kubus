@@ -1,7 +1,13 @@
 import { loadConfig } from './config.js';
 import { startServer } from './server.js';
 
-const config = loadConfig();
+let config;
+try {
+  config = loadConfig();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
 
 let server;
 try {

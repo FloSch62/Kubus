@@ -47,6 +47,14 @@ function parseArgs(argv: string[]): Map<string, string> {
   return out;
 }
 
+function parsePort(raw: string | number): number {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid port "${raw}" — expected an integer between 1 and 65535`);
+  }
+  return port;
+}
+
 export function loadConfig(): ServerConfig {
   const args = parseArgs(process.argv.slice(2));
   const dev = process.env.NODE_ENV !== 'production' && process.env.KUBUS_DEV === '1';
@@ -54,7 +62,7 @@ export function loadConfig(): ServerConfig {
   // well-known one; the server still only listens on 127.0.0.1.
   const devToken = dev ? 'dev' : undefined;
   return resolveConfig({
-    port: Number(args.get('port') ?? process.env.PORT ?? 3001),
+    port: parsePort(args.get('port') ?? process.env.PORT ?? 3001),
     devToken,
     openBrowser: !dev && args.get('no-open') !== 'true' && process.env.KUBUS_NO_OPEN !== '1',
     kubeconfigOverride: args.get('kubeconfig') ?? undefined,
