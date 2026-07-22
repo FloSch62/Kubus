@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import Table from '@mui/material/Table';
@@ -59,11 +60,13 @@ export function RolloutHistory({ ctx, kind, obj }: { ctx: string; kind: 'Deploym
                 {rev.revision}
                 {rev.current && <Chip label="current" size="small" color="primary" variant="outlined" sx={{ ml: 1, height: 18 }} />}
               </TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {rev.images.join(', ') || '—'}
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }} title={rev.images.join(', ')}>
+                <Box sx={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rev.images.join(', ') || '—'}</Box>
               </TableCell>
               <TableCell>{rev.createdAt ? <AgeCell timestamp={rev.createdAt} /> : '—'}</TableCell>
-              <TableCell sx={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rev.changeCause ?? ''}</TableCell>
+              <TableCell title={rev.changeCause}>
+                <Box sx={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rev.changeCause ?? ''}</Box>
+              </TableCell>
               <TableCell align="right">
                 {!rev.current && (
                   <Button size="small" startIcon={<UndoIcon />} onClick={() => setConfirmRevision(rev.revision)}>

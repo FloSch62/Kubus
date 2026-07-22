@@ -31,6 +31,7 @@ export function PodMiniList({
   title?: string;
   loading?: boolean;
   emptyText?: string;
+  /** Hide the namespace caption under pod names (single-namespace callers). */
   hideNamespace?: boolean;
 }) {
   const push = useDetailStore((s) => s.push);
@@ -56,15 +57,14 @@ export function PodMiniList({
           {emptyText ?? 'No pods.'}
         </Typography>
       ) : (
-        <Table size="small">
+        <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
           <TableHead>
             <TableRow>
-              {!hideNamespace && <TableCell>Namespace</TableCell>}
               <TableCell>Name</TableCell>
               <TableCell>Ready</TableCell>
               <TableCell>Status</TableCell>
-              {usageByPod && <TableCell sx={{ minWidth: 110 }}>CPU</TableCell>}
-              {usageByPod && <TableCell sx={{ minWidth: 110 }}>Memory</TableCell>}
+              {usageByPod && <TableCell sx={{ minWidth: 96 }}>CPU</TableCell>}
+              {usageByPod && <TableCell sx={{ minWidth: 96 }}>Memory</TableCell>}
               <TableCell>Restarts</TableCell>
             </TableRow>
           </TableHead>
@@ -80,9 +80,13 @@ export function PodMiniList({
                   sx={{ cursor: 'pointer' }}
                   onClick={() => push({ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: pod.metadata.name, namespace: pod.metadata.namespace })}
                 >
-                  {!hideNamespace && <TableCell>{pod.metadata.namespace}</TableCell>}
-                  <TableCell sx={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }} title={pod.metadata.name}>
+                  <TableCell sx={{ minWidth: 140, wordBreak: 'break-word' }} title={pod.metadata.name}>
                     {pod.metadata.name}
+                    {!hideNamespace && pod.metadata.namespace && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {pod.metadata.namespace}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     <ReadyCounter value={summary.ready} />

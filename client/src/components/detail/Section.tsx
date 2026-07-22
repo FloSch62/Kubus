@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Collapse from '@mui/material/Collapse';
@@ -23,6 +23,14 @@ export function Section({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  // Callers pass live values (e.g. conditions collapse while healthy). When
+  // the value flips on a later render — a node turning unhealthy in an open
+  // drawer — follow it; between flips, manual toggles win.
+  const prevDefault = useRef(defaultOpen);
+  if (prevDefault.current !== defaultOpen) {
+    prevDefault.current = defaultOpen;
+    if (open !== defaultOpen) setOpen(defaultOpen);
+  }
   return (
     <Box>
       <Stack direction="row" sx={{ alignItems: 'center', minHeight: 28 }}>

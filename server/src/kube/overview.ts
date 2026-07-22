@@ -43,6 +43,10 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       nodesWatcher.watcher.ready(),
       namespacesWatcher.watcher.ready(),
     ]);
+    // The rejection is re-observed at the `await coreReady` below; without this
+    // parked handler a core LIST failure while the optional await is still
+    // pending is an unhandled rejection and takes down the whole process.
+    void coreReady.catch(() => {});
     const [persistentVolumesResult, crdsResult, ...healthResults] = await Promise.all([
       optionalItems(pvsWatcher.watcher),
       optionalItems(crdsWatcher.watcher),
