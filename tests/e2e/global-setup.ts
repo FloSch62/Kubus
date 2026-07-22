@@ -29,8 +29,8 @@ export default function globalSetup() {
     '--timeout=180s',
   ]);
   kubectl(['wait', '--for=condition=Ready', 'pod/logger', '-n', namespace, '--timeout=180s']);
-  // The crasher pod is intentionally never Ready. Wait for the failure state
-  // the overview test asserts instead of racing its first restart/backoff.
+  // The crasher pod is intentionally never Ready. Wait for its backoff state
+  // so the overview's warning event and deep link are deterministic.
   kubectl([
     'wait',
     '--for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=CrashLoopBackOff',

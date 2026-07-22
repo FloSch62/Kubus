@@ -10,9 +10,11 @@ test('overview page renders cluster health panels from live data', async ({ page
 
   // Workload rollup buttons carry live counts.
   await expect(page.getByRole('button', { name: /^Deployments/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Failing pods/ })).toBeVisible();
 
-  // The overview refreshes every 10s, so allow the live pod state to reach the
-  // conditional failing-pods panel and assert against that table specifically.
-  await expect(page.getByRole('heading', { name: 'Failing pods' })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('row').filter({ hasText: 'kubus-e2e/crasher' })).toBeVisible();
+  // The intentionally crashing fixture produces a warning event with a pod
+  // deep link. The separate failing-pods panel is conditional on a state
+  // snapshot and may be absent while Kubernetes transitions between restarts.
+  await expect(page.getByRole('heading', { name: 'Warning events (1h)' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('link', { name: /Pod\/kubus-e2e\/crasher/ }).first()).toBeVisible();
 });
