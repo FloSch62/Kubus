@@ -154,7 +154,8 @@ export function pluralLabel(kind: string): string {
   if (kind === 'Endpoints') return 'Endpoints';
   if (kind === kind.toLowerCase()) return kind.charAt(0).toUpperCase() + kind.slice(1);
   if (kind.endsWith('Policy')) return `${kind.slice(0, -6)}Policies`;
-  if (kind.endsWith('y')) return `${kind.slice(0, -1)}ies`;
+  // Only consonant + y takes "ies"; vowel + y (Gateway) just appends an s.
+  if (kind.endsWith('y') && !/[aeiou]y$/.test(kind)) return `${kind.slice(0, -1)}ies`;
   if (kind.endsWith('s')) return kind.endsWith('ss') ? `${kind}es` : kind;
   if (kind.endsWith('x') || kind.endsWith('ch') || kind.endsWith('sh')) return `${kind}es`;
   return `${kind}s`;

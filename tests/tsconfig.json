@@ -1,0 +1,30 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2025", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "declaration": false,
+    "allowJs": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@kubus/shared": ["../shared/src/index.ts"],
+      "@kubus/shared/ws-protocol": ["../shared/src/ws-protocol.ts"],
+      "@mui/x-data-grid": ["../client/node_modules/@mui/x-data-grid"],
+      "react-router": ["../client/node_modules/react-router/dist/production/index.d.ts"]
+    }
+  },
+  "include": [
+    "unit",
+    "e2e",
+    "electron",
+    "setup",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "playwright.electron.config.ts",
+    "../client/src/desktop.d.ts"
+  ]
+}

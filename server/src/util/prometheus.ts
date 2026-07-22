@@ -33,7 +33,14 @@ export function parsePrometheusText(text: string, families: ReadonlySet<string>)
       rest = line.slice(nameEnd);
     }
     // Value is the first whitespace-separated token; an optional timestamp follows.
-    const value = Number.parseFloat(rest.trim().split(/\s+/, 1)[0] ?? '');
+    // The exposition format spells infinity "+Inf"/"-Inf", which parseFloat
+    // reads as NaN.
+    const token = rest.trim().split(/\s+/, 1)[0] ?? '';
+    const value = /^[+-]?inf(inity)?$/i.test(token)
+      ? token.startsWith('-')
+        ? -Infinity
+        : Infinity
+      : Number.parseFloat(token);
     if (Number.isNaN(value)) continue;
     samples.push({ name, labels, value });
   }

@@ -48,7 +48,18 @@ jobs:
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm build:helm-engine
-      - run: pnpm --filter @kubus/server test
+      # One platform also collects repository-wide coverage and enforces the
+      # non-regression floors; every matrix job exposes the same always-running
+      # test step so OS-specific behavior is visible without misleading skips.
+      - name: Unit tests
+        run: pnpm ${{ runner.os == 'Linux' && 'test:coverage' || 'test' }}
+      - name: Upload coverage report
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: tests/coverage
+          retention-days: 7
       # Type-aware linting also resolves workspace package declarations.
       - run: pnpm lint
       - run: pnpm typecheck
@@ -61,3 +72,42 @@ jobs:
       # (won't listen, missing static assets, crash-on-boot) that packaging
       # alone misses. Headless, so it needs no display on any runner.
       - run: pnpm smoke
+
+  # Full-stack Playwright suite: built client + real server + a kind cluster
+  # seeded with the fixtures in tests/e2e/fixtures.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
+      # Launches the actual Electron main/preload/renderer stack with isolated
+      # user data and an empty kubeconfig. Ozone headless needs no X server.
+      - name: Electron end-to-end tests
+        run: pnpm test:electron
+      # Cluster name kubus-a matches the local dev clusters, so the suite
+      # runs unchanged in both places (context kind-kubus-a).
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: kubus-a
+      # The suite drives the system Chrome that ships on ubuntu runners.
+      - run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            tests/playwright-report
+            tests/e2e/.results
+            tests/electron-report
+            tests/electron/.results
+          retention-days: 7
