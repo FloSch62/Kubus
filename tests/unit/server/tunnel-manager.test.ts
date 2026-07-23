@@ -15,6 +15,16 @@ function managerWith(mapping: Record<string, string>) {
 }
 
 describe('SshTunnelManager context mapping', () => {
+  it('stores different hosts independently for different context keys', () => {
+    const { manager } = managerWith({});
+
+    manager.setHostForContextKey('context-a', 'jump-a');
+    manager.setHostForContextKey('context-b', 'jump-b');
+
+    expect(manager.hostForContextKey('context-a')).toBe('jump-a');
+    expect(manager.hostForContextKey('context-b')).toBe('jump-b');
+  });
+
   it('moves a mapping to a context new key and persists it once', () => {
     const { manager, save, internals } = managerWith({ old: 'jump' });
 

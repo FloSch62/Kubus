@@ -437,10 +437,16 @@ describe('ClusterManager file watching and reloads', () => {
     expect(internals.kubeconfigPaths()[0]).toContain(path.join('.kube', 'config'));
   });
 
-  it('keeps an SSH jump host when a multi-file reload moves a context to another file', () => {
+  it('keeps distinct SSH jump hosts when a multi-file reload moves contexts to another file', () => {
     const first = writeFixture(kubeconfigYaml({ contexts: [{ name: 'other', cluster: 'cluster-a', user: 'user-a' }], current: 'other' }));
     const second = writeFixture(
-      kubeconfigYaml({ contexts: [{ name: 'kind-a', cluster: 'cluster-a', user: 'user-a' }], current: 'kind-a' })
+      kubeconfigYaml({
+        contexts: [
+          { name: 'kind-a', cluster: 'cluster-a', user: 'user-a' },
+          { name: 'kind-b', cluster: 'cluster-a', user: 'user-a' },
+        ],
+        current: 'kind-a',
+      })
         .replaceAll('cluster-a', 'cluster-kind-a')
         .replaceAll('user-a', 'user-kind-a'),
     );
@@ -449,8 +455,10 @@ describe('ClusterManager file watching and reloads', () => {
     const manager = new ClusterManager(logger(), undefined, tunnel);
     managers.push(manager);
     const internals = manager as unknown as ManagerInternals;
-    const oldKey = internals.sshTunnelKeyForContext('kind-a')!;
+    const oldKeyA = internals.sshTunnelKeyForContext('kind-a')!;
+    const oldKeyB = internals.sshTunnelKeyForContext('kind-b')!;
     manager.setSshHost('kind-a', 'jump');
+    manager.setSshHost('kind-b', 'other-jump');
 
     fs.writeFileSync(
       first.file,
@@ -458,22 +466,52 @@ describe('ClusterManager file watching and reloads', () => {
         contexts: [
           { name: 'other', cluster: 'cluster-a', user: 'user-a' },
           { name: 'kind-a', cluster: 'cluster-a', user: 'user-a' },
+          { name: 'kind-b', cluster: 'cluster-a', user: 'user-a' },
         ],
         current: 'other',
       }),
     );
     manager.reload();
 
-    const newKey = internals.sshTunnelKeyForContext('kind-a')!;
-    expect(newKey).not.toBe(oldKey);
-    expect(hosts.has(oldKey)).toBe(false);
-    expect(hosts.get(newKey)).toBe('jump');
+    const newKeyA = internals.sshTunnelKeyForContext('kind-a')!;
+    const newKeyB = internals.sshTunnelKeyForContext('kind-b')!;
+    expect(newKeyA).not.toBe(oldKeyA);
+    expect(newKeyB).not.toBe(oldKeyB);
+    expect(hosts.has(oldKeyA)).toBe(false);
+    expect(hosts.has(oldKeyB)).toBe(false);
+    expect(hosts.get(newKeyA)).toBe('jump');
+    expect(hosts.get(newKeyB)).toBe('other-jump');
     expect(manager.listContexts().find((context) => context.name === 'kind-a')?.sshHost).toBe('jump');
-    expect(tunnel.rekeyContext).toHaveBeenCalledWith(oldKey, newKey);
+    expect(manager.listContexts().find((context) => context.name === 'kind-b')?.sshHost).toBe('other-jump');
+    expect(tunnel.rekeyContext).toHaveBeenCalledWith(oldKeyA, newKeyA);
+    expect(tunnel.rekeyContext).toHaveBeenCalledWith(oldKeyB, newKeyB);
   });
 });
 
 describe('ClusterManager connections and SSH', () => {
+  it('keeps different SSH jumps isolated for contexts that share one cluster entry', async () => {
+    const { file } = writeFixture();
+    const { tunnel } = sshHarness();
+    const manager = createManager(file, tunnel);
+    await vi.waitFor(() => expect(manager.listContexts().every((context) => context.health === 'connected')).toBe(true));
+
+    manager.setSshHost('kind-a', 'jump');
+    manager.setSshHost('kind-b', 'other-jump');
+    (tunnel.ensure as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    const [handleA, handleB] = await Promise.all([manager.connect('kind-a'), manager.connect('kind-b')]);
+
+    expect(handleA.kc).not.toBe(handleB.kc);
+    expect(handleA.kc.getCurrentContext()).toBe('kind-a');
+    expect(handleB.kc.getCurrentContext()).toBe('kind-b');
+    expect(handleA.kc.getCurrentCluster()?.name).toBe('cluster-a');
+    expect(handleB.kc.getCurrentCluster()?.name).toBe('cluster-a');
+    expect(handleA.kc.getCurrentCluster()?.proxyUrl).toBe('socks5h://127.0.0.1:4100');
+    expect(handleB.kc.getCurrentCluster()?.proxyUrl).toBe('socks5h://127.0.0.1:4200');
+    expect(tunnel.ensure).toHaveBeenCalledWith('jump');
+    expect(tunnel.ensure).toHaveBeenCalledWith('other-jump');
+  });
+
   it('reuses active/in-flight connects, activates healthy handles, relays discovery, disconnects, and reconnects', async () => {
     const { file } = writeFixture();
     const manager = createManager(file);
