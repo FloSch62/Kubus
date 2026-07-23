@@ -320,6 +320,22 @@ describe('ResourceListPage', () => {
     fireEvent.click(screen.getByLabelText('Expand resource details'));
   });
 
+  it('resizes from the visible detail handle without collapsing it', () => {
+    renderPage('/r/core/v1/pods?sel=dev%7Cteam-a%7Cpod-a');
+
+    const handle = screen.getByLabelText('Collapse resource details');
+    fireEvent.mouseDown(handle, { button: 0, clientX: 700 });
+    fireEvent.mouseMove(window, { clientX: 650 });
+    fireEvent.mouseUp(window, { clientX: 650 });
+    // Browsers dispatch click after mouseup when the pointer is released over
+    // the button; the drag must consume it instead of collapsing the panel.
+    fireEvent.click(handle, { detail: 1 });
+
+    expect(useDetailStore.getState().width).toBe(690);
+    expect(useDetailStore.getState().collapsed).toBe(false);
+    expect(document.body.style.cursor).toBe('');
+  });
+
   it('uses the guided create flow for Jobs and CronJobs', () => {
     for (const [plural, kind] of [['jobs', 'Job'], ['cronjobs', 'CronJob']] as const) {
       const info = resource('batch', 'v1', plural, kind);
