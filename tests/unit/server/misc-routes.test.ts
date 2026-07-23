@@ -510,7 +510,25 @@ describe('settings routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(fs.readFileSync(target, 'utf8')).toContain('proxy-url: socks5h://proxy.example.test:1080');
-    expect(harness.clusters.setSshHost).not.toHaveBeenCalled();
+    expect(harness.clusters.setSshHost).toHaveBeenCalledWith('proxied', null);
+  });
+
+  it('clears an existing SSH mapping when a proxy import overwrites an unchanged context', async () => {
+    const target = tempKubeconfig(kubeconfig('same'));
+    const harness = createHarness();
+    harness.clusters.primaryKubeconfigPath.mockReturnValue(target);
+    const app = await buildApp(harness);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/settings/kubeconfig/import',
+      payload: { yaml: kubeconfig('same'), proxyUrl: 'socks5://proxy.example.test:1080', overwrite: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().added.contexts).toEqual([]);
+    expect(harness.clusters.setSshHost).toHaveBeenCalledWith('same', null);
+    expect(fs.readFileSync(target, 'utf8')).toContain('proxy-url: socks5://proxy.example.test:1080');
   });
 
   it('rejects imports with invalid bodies, unresolved targets, and conflicts', async () => {

@@ -93,6 +93,7 @@ describe('mergeKubeconfig', () => {
       clusters: ['first-cluster'],
       users: ['first-user'],
     });
+    expect(result.connectionContexts).toEqual(['first']);
     expect(result.skipped).toEqual([]);
     expect(result.conflicts).toEqual([]);
   });
@@ -108,6 +109,7 @@ describe('mergeKubeconfig', () => {
       clusters: ['beta-cluster'],
       users: ['beta-user'],
     });
+    expect(result.connectionContexts).toEqual(['beta']);
   });
 
   it('applies an imported proxy URL to every incoming cluster', () => {

@@ -110,9 +110,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
       }
       const backupPath = writeKubeconfig(target, result.merged);
       ctx.clusters.reload();
-      if (parsed.data.sshHost) {
-        for (const contextName of result.added.contexts) {
-          ctx.clusters.setSshHost(contextName, parsed.data.sshHost);
+      if (parsed.data.sshHost || parsed.data.proxyUrl) {
+        for (const contextName of result.connectionContexts) {
+          // A managed SSH tunnel overrides proxy-url at runtime, so selecting a
+          // proxy must clear any external jump mapping left from an earlier import.
+          ctx.clusters.setSshHost(contextName, parsed.data.sshHost ?? null);
         }
       }
       const response: KubeconfigImportResponse = {

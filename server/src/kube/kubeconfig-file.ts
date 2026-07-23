@@ -22,6 +22,8 @@ interface KubeconfigDoc {
 export interface MergeResult {
   merged: string;
   added: { contexts: string[]; clusters: string[]; users: string[] };
+  /** Incoming contexts whose cluster entries receive the selected connection mode. */
+  connectionContexts: string[];
   skipped: string[];
   conflicts: string[];
 }
@@ -51,6 +53,11 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   if (probe.getContexts().length === 0) {
     throw new HttpProblem(400, 'kubeconfig contains no contexts', 'BadRequest');
   }
+  const incomingClusterNames = new Set(probe.getClusters().map((cluster) => cluster.name));
+  const connectionContexts = probe
+    .getContexts()
+    .filter((context) => incomingClusterNames.has(context.cluster))
+    .map((context) => context.name);
 
   const incoming = (loadYaml(incomingYaml) ?? {}) as KubeconfigDoc;
   const existing: KubeconfigDoc | null = existingYaml?.trim() ? ((loadYaml(existingYaml) ?? {}) as KubeconfigDoc) : null;
@@ -75,7 +82,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
     added.contexts = asEntries(incoming.contexts).map((e) => e.name);
     added.clusters = asEntries(incoming.clusters).map((e) => e.name);
     added.users = asEntries(incoming.users).map((e) => e.name);
-    return { merged: dumpYaml(doc, { lineWidth: -1 }), added, skipped, conflicts };
+    return { merged: dumpYaml(doc, { lineWidth: -1 }), added, connectionContexts, skipped, conflicts };
   }
 
   for (const section of ['clusters', 'users', 'contexts'] as const) {
@@ -99,7 +106,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   }
 
   // Never touch current-context of an existing file.
-  return { merged: dumpYaml(existing, { lineWidth: -1 }), added, skipped, conflicts };
+  return { merged: dumpYaml(existing, { lineWidth: -1 }), added, connectionContexts, skipped, conflicts };
 }
 
 export interface ClusterEditPatch {
