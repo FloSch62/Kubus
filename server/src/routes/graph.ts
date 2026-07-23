@@ -355,54 +355,87 @@ async function listFocusedRelatedItems(handle: ClusterHandle, focus: Item, names
   return (await Promise.all(candidates.map((spec) => listKind(handle, spec, namespaces, warnings)))).flat();
 }
 
-function metadataMentions(obj: KubeObject, name: string): boolean {
-  const values = [
-    ...Object.values(obj.metadata.labels ?? {}),
-    ...Object.values(obj.metadata.annotations ?? {}),
+function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
+  return [
+    ...Object.entries(obj.metadata.labels ?? {}).map(([key, value]) => ({ path: `metadata.labels.${key}`, value })),
+    ...Object.entries(obj.metadata.annotations ?? {}).map(([key, value]) => ({ path: `metadata.annotations.${key}`, value })),
   ];
-  return values.some((value) => value === name);
 }
 
-function addFocusedResourceEdges(edges: GraphEdge[], focus: Item | undefined, nodeItems: Map<string, Item>, nodes: Map<string, GraphNode>, byUid: Map<string, string>): void {
+function relationPathScore(path: string, target: KindSpec): number {
+  const targetTerms = new Set(tokens(`${target.kind} ${target.plural}`));
+  return new Set(tokens(path).filter((term) => targetTerms.has(term))).size;
+}
+
+function bestTypedHint(hints: RelationHint[], target: KindSpec): RelationHint | undefined {
+  return hints
+    .flatMap((hint) => {
+      const score = relationPathScore(hint.path, target);
+      return score > 0 ? [{ hint, score }] : [];
+    })
+    .sort((a, b) => b.score - a.score || a.hint.path.length - b.hint.path.length || a.hint.path.localeCompare(b.hint.path))[0]?.hint;
+}
+
+function sameReferenceScope(a: Item, b: Item): boolean {
+  return !a.spec.namespaced || !b.spec.namespaced || (a.obj.metadata.namespace ?? '') === (b.obj.metadata.namespace ?? '');
+}
+
+// A matching value is not enough: commonName/displayName-style fields often
+// happen to equal an object name. Require the field (or metadata key) to name
+// the target kind, and keep only the strongest evidence for each object pair.
+function inferredRelation(focus: Item, item: Item, focusHints: RelationHint[]): { kind: 'manages' | 'selects'; label: string } | undefined {
+  if (!sameReferenceScope(focus, item)) return undefined;
+
+  const directName = bestTypedHint(focusHints.filter((hint) => hint.value === item.obj.metadata.name), item.spec);
+  if (directName) return { kind: 'manages', label: hintLabel(directName.path) };
+
+  const directSelector = bestTypedHint(
+    focusHints.filter((hint) => hint.selector && selectorMatches(hint.selector, item.obj.metadata.labels)),
+    item.spec,
+  );
+  if (directSelector) return { kind: 'selects', label: hintLabel(directSelector.path) };
+
+  const reverseHints = collectRelationHints({ spec: item.obj.spec, status: item.obj.status });
+  const reverseName = bestTypedHint(reverseHints.filter((hint) => hint.value === focus.obj.metadata.name), focus.spec);
+  if (reverseName) return { kind: 'manages', label: hintLabel(reverseName.path) };
+
+  const reverseSelector = bestTypedHint(
+    reverseHints.filter((hint) => hint.selector && selectorMatches(hint.selector, focus.obj.metadata.labels)),
+    focus.spec,
+  );
+  if (reverseSelector) return { kind: 'selects', label: hintLabel(reverseSelector.path) };
+
+  const directMetadata = bestTypedHint(
+    collectMetadataRelationHints(focus.obj).filter((hint) => hint.value === item.obj.metadata.name),
+    item.spec,
+  );
+  if (directMetadata) return { kind: 'manages', label: 'metadata' };
+
+  const reverseMetadata = bestTypedHint(
+    collectMetadataRelationHints(item.obj).filter((hint) => hint.value === focus.obj.metadata.name),
+    focus.spec,
+  );
+  if (reverseMetadata) return { kind: 'manages', label: 'metadata' };
+
+  return undefined;
+}
+
+function addFocusedResourceEdges(edges: GraphEdge[], focus: Item | undefined, nodeItems: Map<string, Item>, nodes: Map<string, GraphNode>): void {
   if (!focus) return;
   const actualFocusId = [...nodeItems.entries()].find(([, item]) => sameGvr(item.spec, focus.spec) && item.obj.metadata.name === focus.obj.metadata.name && (item.obj.metadata.namespace ?? '') === (focus.obj.metadata.namespace ?? ''))?.[0];
   if (!actualFocusId) return;
   const focusHints = collectRelationHints({ spec: focus.obj.spec, status: focus.obj.status });
-  const focusLabelValues = Object.values(focus.obj.metadata.labels ?? {});
-  const focusAnnotationValues = Object.values(focus.obj.metadata.annotations ?? {});
+  const focusOwnerUids = new Set((focus.obj.metadata.ownerReferences ?? []).map((owner) => owner.uid));
 
   for (const [id, item] of nodeItems) {
     if (id === actualFocusId) continue;
-    const labels = item.obj.metadata.labels ?? {};
-    for (const hint of focusHints) {
-      if (hint.value === item.obj.metadata.name) {
-        addEdge(edges, actualFocusId, id, 'manages', hintLabel(hint.path));
-      }
-      if (hint.selector && selectorMatches(hint.selector, labels)) {
-        addEdge(edges, actualFocusId, id, 'selects', hintLabel(hint.path));
-      }
-    }
+    const ownershipPair =
+      (item.obj.metadata.ownerReferences ?? []).some((owner) => owner.uid === focus.obj.metadata.uid) ||
+      (!!item.obj.metadata.uid && focusOwnerUids.has(item.obj.metadata.uid));
+    if (ownershipPair) continue;
 
-    if (metadataMentions(item.obj, focus.obj.metadata.name)) {
-      addEdge(edges, actualFocusId, id, 'manages', 'metadata');
-    }
-
-    if (focusLabelValues.includes(item.obj.metadata.name) || focusAnnotationValues.includes(item.obj.metadata.name)) {
-      addEdge(edges, actualFocusId, id, 'manages', 'metadata');
-    }
-
-    const reverseHints = collectRelationHints({ spec: item.obj.spec, status: item.obj.status });
-    if (reverseHints.some((hint) => hint.value === focus.obj.metadata.name || (hint.selector && selectorMatches(hint.selector, focus.obj.metadata.labels)))) {
-      addEdge(edges, actualFocusId, id, 'manages', item.spec.kind);
-    }
-
-    for (const owner of item.obj.metadata.ownerReferences ?? []) {
-      if (owner.uid === focus.obj.metadata.uid) addEdge(edges, actualFocusId, id, 'owns', owner.kind);
-    }
-    for (const owner of focus.obj.metadata.ownerReferences ?? []) {
-      const ownerId = byUid.get(owner.uid);
-      if (ownerId) addEdge(edges, ownerId, actualFocusId, 'owns', owner.kind);
-    }
+    const relation = inferredRelation(focus, item, focusHints);
+    if (relation) addEdge(edges, actualFocusId, id, relation.kind, relation.label);
   }
 
   if (nodes.has(actualFocusId)) {
@@ -556,7 +589,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
       addEdge(edges, byUid.get(owner.uid), id, 'owns', owner.kind);
     }
   }
-  addFocusedResourceEdges(edges, focusItems[0], nodeItems, nodes, byUid);
+  addFocusedResourceEdges(edges, focusItems[0], nodeItems, nodes);
 
   for (const svc of services) {
     const svcId = nodeId(handle.contextName, svc.spec, svc.obj);

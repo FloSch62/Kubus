@@ -245,6 +245,7 @@ describe('topology graph routes', () => {
           'widget-a',
           'team-a',
           {
+            displayName: 'router-a',
             routerRef: 'router-a',
             peerSelector: 'role=peer',
             targetPools: ['pool-a'],
@@ -256,7 +257,12 @@ describe('topology graph routes', () => {
         );
       }
       if (path.includes('/routers')) {
-        return { items: [object('Router', 'router-a', 'team-a', { widgetName: 'widget-a' }, { state: 'down' })] };
+        return {
+          items: [
+            object('Router', 'router-a', 'team-a', { widgetName: 'widget-a' }, { state: 'down' }),
+            object('Router', 'router-a', 'team-b', { widgetName: 'widget-a' }, { state: 'down' }),
+          ],
+        };
       }
       if (path.includes('/peers')) {
         return {
@@ -268,19 +274,33 @@ describe('topology graph routes', () => {
         };
       }
       if (path.includes('/pools')) return { items: [object('ResourcePool', 'pool-a', 'team-a', {}, { conditions: [{ type: 'Ready', status: 'False', message: 'warming' }] })] };
-      if (path.includes('/monitors')) return { items: [object('HealthMonitor', 'monitor-a', 'team-a', {}, { conditions: [{ type: 'Ready', status: 'True' }] })] };
+      if (path.includes('/monitors')) {
+        return {
+          items: [
+            object('HealthMonitor', 'monitor-a', 'team-a', {}, { conditions: [{ type: 'Ready', status: 'True' }] }, {
+              metadata: { name: 'monitor-a', namespace: 'team-a', uid: 'uid-monitor', labels: { 'example.io/widget': 'widget-a' } },
+            }),
+          ],
+        };
+      }
       const plural = pluralFromPath(path);
       return { items: plural ? fixtures[plural] : [] };
     });
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/contexts/dev/graph?namespace=team-a&focusGroup=example.io&focusVersion=v1&focusPlural=widgets&focusKind=Widget&focusNamespace=team-a&focusName=widget-a&depth=2',
+      url: '/api/contexts/dev/graph?focusGroup=example.io&focusVersion=v1&focusPlural=widgets&focusKind=Widget&focusNamespace=team-a&focusName=widget-a&depth=2',
     });
     const graph = response.json();
     expect(response.statusCode).toBe(200);
-    expect(graph.nodes.find((node: { ref: { kind: string } }) => node.ref.kind === 'Widget')).toMatchObject({ status: 'success', layer: 'other' });
-    expect(graph.nodes.some((node: { ref: { kind: string } }) => node.ref.kind === 'Router')).toBe(true);
+    const node = (kind: string) => graph.nodes.find((candidate: { ref: { kind: string } }) => candidate.ref.kind === kind);
+    const relations = (targetKind: string) =>
+      graph.edges.filter((edge: { source: string; target: string }) => edge.source === node('Widget').id && edge.target === node(targetKind).id);
+    expect(node('Widget')).toMatchObject({ status: 'success', layer: 'other' });
+    expect(relations('Router')).toEqual([expect.objectContaining({ kind: 'manages', label: 'spec.routerRef' })]);
+    expect(relations('Peer')).toEqual([expect.objectContaining({ kind: 'selects', label: 'spec.peerSelector' })]);
+    expect(relations('ResourcePool')).toEqual([expect.objectContaining({ kind: 'manages', label: 'spec.targetPools' })]);
+    expect(relations('HealthMonitor')).toEqual([expect.objectContaining({ kind: 'manages', label: 'metadata' })]);
     expect(graph.edges.map((edge: { kind: string }) => edge.kind)).toEqual(expect.arrayContaining(['manages', 'selects']));
   });
 
