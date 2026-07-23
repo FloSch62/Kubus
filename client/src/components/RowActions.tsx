@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -19,6 +20,7 @@ import ListItemText from '@mui/material/ListItemText';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
+import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
@@ -926,6 +928,20 @@ export function SetImageDialog({
   );
 }
 
+/**
+ * Version-pinned so a preset never silently changes underneath a user; the
+ * field stays free-text for anything else. `profile` marks presets whose
+ * tooling is useless without extra capabilities — selecting one adjusts the
+ * profile dropdown.
+ */
+const DEBUG_IMAGE_PRESETS: Array<{ label: string; image: string; hint: string; profile?: DebugProfile }> = [
+  { label: 'busybox', image: 'busybox:1.36', hint: 'Minimal shell and coreutils (~2 MB).' },
+  { label: 'DebugBox lite', image: 'ghcr.io/ibtisam-iq/debugbox:lite-1.2.0', hint: 'curl, dig, jq, yq (~15 MB) — DNS and HTTP checks.' },
+  { label: 'DebugBox balanced', image: 'ghcr.io/ibtisam-iq/debugbox:1.2.0', hint: 'Adds bash, vim, tcpdump, strace, openssl (~47 MB).' },
+  { label: 'DebugBox power', image: 'ghcr.io/ibtisam-iq/debugbox:power-1.2.0', hint: 'tshark, nmap, iptables, nftables (~91 MB) — needs the network admin profile.', profile: 'netadmin' },
+  { label: 'netshoot', image: 'nicolaka/netshoot:v0.16', hint: 'The kitchen-sink network toolbox (~200 MB).' },
+];
+
 const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }> = [
   { value: 'general', label: 'General', hint: 'No extra privileges — inherits the namespace defaults.' },
   { value: 'restricted', label: 'Restricted', hint: 'Non-root, all capabilities dropped — for PodSecurity-restricted namespaces (needs a non-root image).' },
@@ -941,6 +957,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
   const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
   const [profile, setProfile] = useState<DebugProfile>('general');
   const name = target.obj.metadata.name;
+  const imagePreset = DEBUG_IMAGE_PRESETS.find((p) => p.image === image);
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Debug container — {name}</DialogTitle>
@@ -950,6 +967,25 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           container stays in the pod spec until the pod is recreated.
         </Typography>
         <TextField autoFocus fullWidth label="Image" value={image} onChange={(e) => setImage(e.target.value)} />
+        <Stack direction="row" spacing={1} sx={{ mt: -1, flexWrap: 'wrap' }}>
+          {DEBUG_IMAGE_PRESETS.map((p) => (
+            <Chip
+              key={p.image}
+              label={p.label}
+              size="small"
+              variant={image === p.image ? 'filled' : 'outlined'}
+              onClick={() => {
+                setImage(p.image);
+                if (p.profile) setProfile(p.profile);
+              }}
+            />
+          ))}
+        </Stack>
+        {imagePreset && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+            {imagePreset.hint}
+          </Typography>
+        )}
         <FormControl size="small" fullWidth>
           <InputLabel id="debug-target">Target container (shared process namespace)</InputLabel>
           <Select labelId="debug-target" label="Target container (shared process namespace)" value={targetContainer} onChange={(e) => setTargetContainer(e.target.value)}>
