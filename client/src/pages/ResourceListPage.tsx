@@ -128,6 +128,7 @@ function EmbeddedResourceDetail() {
   const focusSeq = useDetailStore((s) => s.focusSeq);
   const [searchParams, setSearchParams] = useSearchParams();
   const asideRef = useRef<HTMLElement>(null);
+  const collapseHandleDraggedRef = useRef(false);
 
   // Keyboard row activation asks for focus here; Escape hands it back.
   useEffect(() => {
@@ -154,18 +155,28 @@ function EmbeddedResourceDetail() {
 
   // Same drag pattern as BottomDock: width goes straight to the DOM (one
   // write per frame) and the store is committed once on mouseup.
-  const startResize = (e: React.MouseEvent) => {
+  const startResize = (e: React.MouseEvent, fromCollapseHandle = false) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     const el = asideRef.current;
     if (!el) return;
     const startX = e.clientX;
     const startWidth = useDetailStore.getState().width;
+    if (fromCollapseHandle) collapseHandleDraggedRef.current = false;
     let pending = startWidth;
     let frame = 0;
     el.style.transition = 'none';
     document.body.style.cursor = 'col-resize';
     const onMove = (ev: MouseEvent) => {
-      pending = clampDetailWidth(startWidth + (startX - ev.clientX));
+      const delta = startX - ev.clientX;
+      // Preserve the handle's click-to-collapse behavior when the pointer only
+      // jitters by a couple of pixels. Once it is a drag, keep tracking every
+      // move so reversing toward the starting point cannot commit stale width.
+      if (fromCollapseHandle && !collapseHandleDraggedRef.current) {
+        if (Math.abs(delta) < 4) return;
+        collapseHandleDraggedRef.current = true;
+      }
+      pending = clampDetailWidth(startWidth + delta);
       if (!frame) {
         frame = requestAnimationFrame(() => {
           frame = 0;
@@ -258,7 +269,18 @@ function EmbeddedResourceDetail() {
         )}
         <Tooltip title={collapsed ? 'Expand details' : 'Collapse details'} placement="left">
           <ButtonBase
-            onClick={() => setCollapsed(!collapsed)}
+            disableRipple
+            onMouseDown={collapsed ? undefined : (e) => startResize(e, true)}
+            onClick={(e) => {
+              // A mouse drag ends in a click when it is released over the
+              // handle. Consume that click, while keeping keyboard activation.
+              if (e.detail > 0 && collapseHandleDraggedRef.current) {
+                collapseHandleDraggedRef.current = false;
+                return;
+              }
+              collapseHandleDraggedRef.current = false;
+              setCollapsed(!collapsed);
+            }}
             aria-label={collapsed ? 'Expand resource details' : 'Collapse resource details'}
             aria-expanded={!collapsed}
             sx={{
@@ -276,7 +298,12 @@ function EmbeddedResourceDetail() {
               bgcolor: 'background.paper',
               boxShadow: 2,
               color: 'text.secondary',
-              '&:hover': { bgcolor: 'action.hover', color: 'text.primary' },
+              cursor: collapsed ? 'pointer' : 'col-resize',
+              '&:hover': {
+                bgcolor: 'background.paper',
+                borderColor: 'text.secondary',
+                color: 'text.primary',
+              },
             }}
           >
             {collapsed ? <ChevronLeftIcon sx={{ fontSize: 16 }} /> : <ChevronRightIcon sx={{ fontSize: 16 }} />}
