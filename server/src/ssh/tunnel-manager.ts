@@ -71,11 +71,29 @@ export class SshTunnelManager {
     return this.mapping[contextKey];
   }
 
+  /**
+   * Move a persisted mapping when the same context starts resolving from a
+   * different kubeconfig file. This can happen after a multi-file import; the
+   * tunnel belongs to the context, not to the old file location.
+   */
+  rekeyContext(oldKey: string, newKey: string): void {
+    const oldHost = this.mapping[oldKey];
+    if (oldKey === newKey || !oldHost) return;
+    if (!this.mapping[newKey]) this.mapping[newKey] = oldHost;
+    delete this.mapping[oldKey];
+    this.settings.save({ sshTunnels: { ...this.mapping } });
+    this.stopUnreferencedTunnels();
+  }
+
   /** Update the context→host mapping, persist it, and stop tunnels nothing references anymore. */
   setHostForContextKey(contextKey: string, host: string | null): void {
     if (host) this.mapping[contextKey] = host;
     else delete this.mapping[contextKey];
     this.settings.save({ sshTunnels: { ...this.mapping } });
+    this.stopUnreferencedTunnels();
+  }
+
+  private stopUnreferencedTunnels(): void {
     const referenced = new Set(Object.values(this.mapping));
     for (const [tunnelHost, tunnel] of this.tunnels) {
       if (!referenced.has(tunnelHost)) {

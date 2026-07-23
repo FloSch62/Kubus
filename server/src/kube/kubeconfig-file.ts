@@ -40,7 +40,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * objects are merged (not KubeConfig.exportConfig output) so unknown fields
  * and the existing file's structure are preserved faithfully.
  */
-export function mergeKubeconfig(existingYaml: string | null, incomingYaml: string, overwrite: boolean): MergeResult {
+export function mergeKubeconfig(existingYaml: string | null, incomingYaml: string, overwrite: boolean, proxyUrl?: string | null): MergeResult {
   // Validate with the real parser first: garbage in → 400 out.
   const probe = new KubeConfig();
   try {
@@ -54,6 +54,12 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
 
   const incoming = (loadYaml(incomingYaml) ?? {}) as KubeconfigDoc;
   const existing: KubeconfigDoc | null = existingYaml?.trim() ? ((loadYaml(existingYaml) ?? {}) as KubeconfigDoc) : null;
+  if (proxyUrl !== undefined) {
+    for (const entry of asEntries(incoming.clusters)) {
+      const cluster = (entry.cluster && typeof entry.cluster === 'object' ? entry.cluster : (entry.cluster = {})) as Record<string, unknown>;
+      setString(cluster, 'proxy-url', proxyUrl);
+    }
+  }
 
   const added = { contexts: [] as string[], clusters: [] as string[], users: [] as string[] };
   const skipped: string[] = [];

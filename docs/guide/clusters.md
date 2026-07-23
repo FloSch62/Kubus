@@ -59,8 +59,9 @@ namespace simply contribute nothing to the list.
 Open **Settings → Clusters** to manage the entries in your kubeconfig:
 
 - **Add cluster** — paste a kubeconfig snippet, or fill in a short form (name, API server,
-  CA, and either a bearer token or a client certificate). It's merged into your kubeconfig,
-  and a backup is written first.
+  CA, and either a bearer token or a client certificate). For either path you can choose
+  direct access, a Kubus-managed SSH jump host, or an existing SOCKS/HTTP proxy. It's
+  merged into your kubeconfig, and a backup is written first.
 - **Edit** (:material-pencil: on any row) — change a cluster's **API server**,
   **credentials**, TLS settings, and the connection options below (SSH jump host /
   proxy). Cloud-provider clusters that

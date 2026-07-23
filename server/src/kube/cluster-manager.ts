@@ -162,6 +162,8 @@ export class ClusterHandle {
 
 export class ClusterManager extends EventEmitter {
   private kc = new KubeConfig();
+  /** File that supplied each context at the last load; retained until the next load completes. */
+  private contextFiles = new Map<string, string>();
   private handles = new Map<string, ClusterHandle>();
   private connecting = new Map<string, Promise<ClusterHandle>>();
   private fsWatchers: fs.FSWatcher[] = [];
@@ -204,6 +206,7 @@ export class ClusterManager extends EventEmitter {
     }
     // Bridge standard proxy env vars (client-node only reads kubeconfig proxy-url).
     this.envProxyClusters = applyEnvProxy(this.kc);
+    this.contextFiles = this.scanContextFiles();
   }
 
   private kubeconfigPaths(): string[] {
@@ -301,8 +304,10 @@ export class ClusterManager extends EventEmitter {
   reload(): void {
     this.log.info('kubeconfig changed, reloading');
     const before = this.contextFingerprints();
+    const sshAssociations = this.sshAssociations();
     this.kc = new KubeConfig();
     this.loadKubeconfig();
+    this.restoreMovedSshAssociations(sshAssociations);
     this.probeClients.clear();
     const after = this.contextFingerprints();
     for (const [name, handle] of this.handles) {
@@ -592,13 +597,43 @@ export class ClusterManager extends EventEmitter {
   }
 
   private sshTunnelKeyForContext(contextName: string): string | null {
-    const contextFile = this.findEntryFile('context', contextName);
+    const contextFile = this.contextFiles.get(contextName);
     if (!contextFile) return null;
     return sshTunnelKeyFor(contextFile, contextName);
   }
 
-  /** The kubeconfig file defining each context, loading every watched path once. */
-  private contextFilesByName(): Map<string, string> {
+  /** Capture enough identity to carry a jump host across a context's file move. */
+  private sshAssociations(): Map<string, { key: string; server?: string }> {
+    const associations = new Map<string, { key: string; server?: string }>();
+    if (!this.sshTunnels) return associations;
+    for (const context of this.kc.getContexts()) {
+      const contextFile = this.contextFiles.get(context.name);
+      if (!contextFile) continue;
+      const key = sshTunnelKeyFor(contextFile, context.name);
+      const host = this.sshTunnels.hostForContextKey(key);
+      if (host) associations.set(context.name, { key, server: this.kc.getCluster(context.cluster)?.server });
+    }
+    return associations;
+  }
+
+  /**
+   * An import into the first file of a multi-file KUBECONFIG can move which
+   * file supplies an existing context. Keep its external SSH metadata attached
+   * when the context still names the same API server.
+   */
+  private restoreMovedSshAssociations(before: Map<string, { key: string; server?: string }>): void {
+    if (!this.sshTunnels || before.size === 0) return;
+    for (const context of this.kc.getContexts()) {
+      const previous = before.get(context.name);
+      const contextFile = this.contextFiles.get(context.name);
+      if (!previous || !contextFile || previous.server !== this.kc.getCluster(context.cluster)?.server) continue;
+      const nextKey = sshTunnelKeyFor(contextFile, context.name);
+      this.sshTunnels.rekeyContext(previous.key, nextKey);
+    }
+  }
+
+  /** Scan the kubeconfig file defining each context, loading every watched path once. */
+  private scanContextFiles(): Map<string, string> {
     const files = new Map<string, string>();
     for (const p of this.kubeconfigPaths()) {
       try {
@@ -614,14 +649,19 @@ export class ClusterManager extends EventEmitter {
     return files;
   }
 
+  /** Snapshot of the context origins established by the last completed load. */
+  private contextFilesByName(): Map<string, string> {
+    return new Map(this.contextFiles);
+  }
+
   /** Locate the kubeconfig file (among the watched paths) that defines an entry. */
   private findEntryFile(kind: 'context' | 'cluster' | 'user', name: string | undefined): string | null {
     if (!name) return null;
+    if (kind === 'context') return this.contextFiles.get(name) ?? null;
     for (const p of this.kubeconfigPaths()) {
       try {
         const kc = new KubeConfig();
         kc.loadFromFile(p);
-        if (kind === 'context' && kc.getContexts().some((c) => c.name === name)) return p;
         if (kind === 'cluster' && kc.getClusters().some((c) => c.name === name)) return p;
         if (kind === 'user' && kc.getUsers().some((u) => u.name === name)) return p;
       } catch {

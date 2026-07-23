@@ -22,6 +22,7 @@ import { WatcherRegistry } from '../../../server/src/kube/watcher';
 
 interface ManagerInternals {
   kc: KubeConfig;
+  contextFiles: Map<string, string>;
   handles: Map<string, ClusterHandle>;
   connecting: Map<string, Promise<ClusterHandle>>;
   fsWatchers: Array<{ close(): void }>;
@@ -48,6 +49,7 @@ interface ManagerInternals {
   refreshCachedHealthNow(): Promise<void>;
   sshTunnelKeyForContext(contextName: string): string | null;
   contextFilesByName(): Map<string, string>;
+  scanContextFiles(): Map<string, string>;
   findEntryFile(kind: 'context' | 'cluster' | 'user', name: string | undefined): string | null;
   disconnectHandlesForEntries(clusterName: string, userName: string | undefined): void;
   connectFresh(contextName: string): Promise<ClusterHandle>;
@@ -143,6 +145,12 @@ function sshHarness() {
   const hosts = new Map<string, string>();
   const tunnel = {
     hostForContextKey: vi.fn((key: string) => hosts.get(key)),
+    rekeyContext: vi.fn((oldKey: string, newKey: string) => {
+      const host = hosts.get(oldKey);
+      if (!host) return;
+      if (!hosts.has(newKey)) hosts.set(newKey, host);
+      hosts.delete(oldKey);
+    }),
     setHostForContextKey: vi.fn((key: string, value: string | null) => {
       if (value === null) hosts.delete(key);
       else hosts.set(key, value);
@@ -427,6 +435,41 @@ describe('ClusterManager file watching and reloads', () => {
     expect(internals.kubeconfigPaths()).toEqual([first.file, second.file]);
     vi.stubEnv('KUBECONFIG', '');
     expect(internals.kubeconfigPaths()[0]).toContain(path.join('.kube', 'config'));
+  });
+
+  it('keeps an SSH jump host when a multi-file reload moves a context to another file', () => {
+    const first = writeFixture(kubeconfigYaml({ contexts: [{ name: 'other', cluster: 'cluster-a', user: 'user-a' }], current: 'other' }));
+    const second = writeFixture(
+      kubeconfigYaml({ contexts: [{ name: 'kind-a', cluster: 'cluster-a', user: 'user-a' }], current: 'kind-a' })
+        .replaceAll('cluster-a', 'cluster-kind-a')
+        .replaceAll('user-a', 'user-kind-a'),
+    );
+    vi.stubEnv('KUBECONFIG', `${first.file}${path.delimiter}${second.file}`);
+    const { tunnel, hosts } = sshHarness();
+    const manager = new ClusterManager(logger(), undefined, tunnel);
+    managers.push(manager);
+    const internals = manager as unknown as ManagerInternals;
+    const oldKey = internals.sshTunnelKeyForContext('kind-a')!;
+    manager.setSshHost('kind-a', 'jump');
+
+    fs.writeFileSync(
+      first.file,
+      kubeconfigYaml({
+        contexts: [
+          { name: 'other', cluster: 'cluster-a', user: 'user-a' },
+          { name: 'kind-a', cluster: 'cluster-a', user: 'user-a' },
+        ],
+        current: 'other',
+      }),
+    );
+    manager.reload();
+
+    const newKey = internals.sshTunnelKeyForContext('kind-a')!;
+    expect(newKey).not.toBe(oldKey);
+    expect(hosts.has(oldKey)).toBe(false);
+    expect(hosts.get(newKey)).toBe('jump');
+    expect(manager.listContexts().find((context) => context.name === 'kind-a')?.sshHost).toBe('jump');
+    expect(tunnel.rekeyContext).toHaveBeenCalledWith(oldKey, newKey);
   });
 });
 

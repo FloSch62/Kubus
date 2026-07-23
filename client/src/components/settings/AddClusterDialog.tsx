@@ -19,7 +19,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { dump as dumpYaml } from 'js-yaml';
 import type { KubeconfigImportResponse } from '@kubus/shared';
-import { useImportKubeconfig, useSetSshHost } from '../../api/queries.js';
+import { useImportKubeconfig } from '../../api/queries.js';
 import { ApiError } from '../../api/http.js';
 import { SshJumpHostField, SSH_DESTINATION_RE } from './SshJumpHostField.js';
 import { normalizePemInput } from './pem.js';
@@ -58,7 +58,6 @@ function buildKubeconfigYaml(form: { name: string; server: string; ca: string; s
 /** Merge a new cluster into the kubeconfig file: paste a config or fill in the form. */
 export function AddClusterDialog({ primaryPath, onClose }: Props) {
   const importKubeconfig = useImportKubeconfig();
-  const setSshHost = useSetSshHost();
   const [mode, setMode] = useState(0);
   const [pasted, setPasted] = useState('');
   const [form, setForm] = useState({ name: '', server: '', ca: '', skipTls: false, auth: 'token' as AuthMethod, token: '', cert: '', key: '' });
@@ -67,28 +66,19 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
   const [proxyUrl, setProxyUrl] = useState('');
   const [conflicts, setConflicts] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sshWarning, setSshWarning] = useState<string | null>(null);
   const [result, setResult] = useState<KubeconfigImportResponse | null>(null);
 
   const sshSelected = connMode === 'ssh';
-  // The proxy URL lands in the generated kubeconfig, so it's manual-form-only;
-  // for pasted configs put `proxy-url` in the YAML itself.
-  const proxySelected = connMode === 'proxy' && mode === 1;
+  const proxySelected = connMode === 'proxy';
   const connValid = (!sshSelected || SSH_DESTINATION_RE.test(sshHost.trim())) && (!proxySelected || PROXY_URL_RE.test(proxyUrl.trim()));
   const formValid =
     !!form.name.trim() &&
     !!form.server.trim() &&
     (form.auth === 'token' ? !!form.token.trim() : !!form.cert.trim() && !!form.key.trim());
 
-  const switchTab = (v: number) => {
-    setMode(v);
-    if (v === 0 && connMode === 'proxy') setConnMode('direct');
-  };
-
   const submit = (overwrite: boolean) => {
     setError(null);
     setConflicts(null);
-    setSshWarning(null);
     setResult(null);
     let yamlBody: string;
     try {
@@ -98,21 +88,14 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
       return;
     }
     importKubeconfig.mutate(
-      { yaml: yamlBody, overwrite },
       {
-        onSuccess: async (resp) => {
-          // Attach the managed tunnel to every context the import created.
-          if (sshSelected && sshHost.trim()) {
-            for (const ctxName of resp.added.contexts) {
-              try {
-                await setSshHost.mutateAsync({ ctx: ctxName, body: { sshHost: sshHost.trim() } });
-              } catch (err) {
-                setSshWarning(`Imported, but setting the SSH jump host on "${ctxName}" failed: ${err instanceof Error ? err.message : String(err)}`);
-              }
-            }
-          }
-          setResult(resp);
-        },
+        yaml: yamlBody,
+        overwrite,
+        sshHost: sshSelected ? sshHost.trim() : undefined,
+        proxyUrl: mode === 0 && proxySelected ? proxyUrl.trim() : undefined,
+      },
+      {
+        onSuccess: setResult,
         onError: (err) => {
           if (err instanceof ApiError && err.status === 409) setConflicts(err.message);
           else setError(err instanceof Error ? err.message : String(err));
@@ -122,14 +105,14 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
   };
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
-  const busy = importKubeconfig.isPending || setSshHost.isPending;
+  const busy = importKubeconfig.isPending;
   const addedContexts = result?.added.contexts ?? [];
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Add cluster</DialogTitle>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
-        <Tabs value={mode} onChange={(_, v: number) => switchTab(v)} sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}>
+        <Tabs value={mode} onChange={(_, v: number) => setMode(v)} sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}>
           <Tab label="Paste kubeconfig" />
           <Tab label="Manual" />
         </Tabs>
@@ -209,7 +192,7 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
           <Select labelId="add-conn" label="Connection" value={connMode} onChange={(e) => setConnMode(e.target.value as ConnMode)}>
             <MenuItem value="direct">Direct — the API server is reachable from this machine</MenuItem>
             <MenuItem value="ssh">SSH jump host — Kubus opens the tunnel for you</MenuItem>
-            {mode === 1 && <MenuItem value="proxy">Proxy URL — an existing SOCKS or HTTP proxy</MenuItem>}
+            <MenuItem value="proxy">Proxy URL — an existing SOCKS or HTTP proxy</MenuItem>
           </Select>
         </FormControl>
         {sshSelected && <SshJumpHostField value={sshHost} onChange={setSshHostValue} />}
@@ -226,7 +209,7 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
             onChange={(e) => setProxyUrl(e.target.value)}
             placeholder="socks5://host:port"
             error={!!proxyUrl.trim() && !PROXY_URL_RE.test(proxyUrl.trim())}
-            helperText="Written into the kubeconfig as proxy-url"
+            helperText={mode === 0 ? 'Written into every imported cluster as proxy-url' : 'Written into the kubeconfig as proxy-url'}
           />
         )}
         <Typography variant="caption" color="text.secondary">
@@ -245,11 +228,11 @@ export function AddClusterDialog({ primaryPath, onClose }: Props) {
           </Alert>
         )}
         {error && <Alert severity="error">{error}</Alert>}
-        {sshWarning && <Alert severity="warning">{sshWarning}</Alert>}
         {result && (
           <Alert severity="success">
             {addedContexts.length > 0 ? `Added context${addedContexts.length > 1 ? 's' : ''}: ${addedContexts.join(', ')}.` : 'Nothing new to add.'}
-            {sshSelected && !sshWarning && addedContexts.length > 0 && ` SSH tunnel via ${sshHost.trim()} configured.`}
+            {sshSelected && addedContexts.length > 0 && ` SSH tunnel via ${sshHost.trim()} configured.`}
+            {proxySelected && addedContexts.length > 0 && ` Proxy ${proxyUrl.trim()} configured.`}
             {result.skipped.length > 0 && ` Skipped ${result.skipped.length} identical entr${result.skipped.length > 1 ? 'ies' : 'y'}.`}
             {result.backupPath && ` Backup: ${result.backupPath}`}
           </Alert>

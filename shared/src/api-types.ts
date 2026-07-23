@@ -146,6 +146,10 @@ export interface KubeconfigImportRequest {
   yaml: string;
   /** Replace existing entries with the same name instead of failing with 409. */
   overwrite?: boolean;
+  /** Apply a Kubus-managed SSH jump host to every context added/replaced by the import. */
+  sshHost?: string;
+  /** Write this proxy URL into every cluster added/replaced by the import. */
+  proxyUrl?: string;
 }
 
 export interface KubeconfigImportResponse {
