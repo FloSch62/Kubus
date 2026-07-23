@@ -40,6 +40,8 @@ interface RelationHint {
   path: string;
   value: string;
   selector?: Record<string, string>;
+  referenceKind?: string;
+  referenceNamespace?: string;
 }
 
 interface FocusQuery {
@@ -201,17 +203,33 @@ function parseEqualitySelector(value: string): Record<string, string> | undefine
 
 const URL_VALUE_RE = /^https?:\/\//i;
 
-function collectRelationHints(value: unknown, prefix = ''): RelationHint[] {
+interface RelationContext {
+  referenceKind?: string;
+  referenceNamespace?: string;
+}
+
+function trimmedString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function collectRelationHints(value: unknown, prefix = '', context: RelationContext = {}): RelationHint[] {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (!trimmed || trimmed.length > 120 || URL_VALUE_RE.test(trimmed)) return [];
-    return [{ path: prefix, value: trimmed, selector: parseEqualitySelector(trimmed) }];
+    return [{ path: prefix, value: trimmed, selector: parseEqualitySelector(trimmed), ...context }];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item, i) => collectRelationHints(item, `${prefix}[${i}]`));
+    return value.flatMap((item, i) => collectRelationHints(item, `${prefix}[${i}]`, context));
   }
   if (value && typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key));
+    const record = value as Record<string, unknown>;
+    const siblingContext = {
+      referenceKind: trimmedString(record.kind),
+      referenceNamespace: trimmedString(record.namespace),
+    };
+    return Object.entries(record).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext));
   }
   return [];
 }
@@ -338,7 +356,7 @@ function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hintTer
 
 function pickDynamicCandidateSpecs(kinds: ResourceKindInfo[], focusSpec: KindSpec, focusObj: KubeObject): KindSpec[] {
   const hints = collectRelationHints({ spec: focusObj.spec, status: focusObj.status });
-  const hintTerms = new Set(hints.flatMap((hint) => tokens(hint.path)));
+  const hintTerms = new Set(hints.flatMap((hint) => [...tokens(hint.path), ...tokens(hint.referenceKind ?? '')]));
   return dedupeResourceKinds(kinds)
     .flatMap((kind) => {
       const score = scoreCandidateKind(kind, focusSpec, hintTerms);
@@ -362,60 +380,81 @@ function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
   ];
 }
 
-function relationPathScore(path: string, target: KindSpec): number {
+const REFERENCE_CONTEXT_FIELDS = new Set(['apiversion', 'group', 'kind', 'namespace', 'version']);
+
+function canonicalKind(kind: string): string {
+  return kind.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function relationPathScore(hint: RelationHint, target: KindSpec): number {
+  const leaf = hint.path.replace(ARRAY_INDEX_RE, '').split('.').at(-1)?.toLowerCase();
+  if (leaf && REFERENCE_CONTEXT_FIELDS.has(leaf)) return 0;
   const targetTerms = new Set(tokens(`${target.kind} ${target.plural}`));
-  return new Set(tokens(path).filter((term) => targetTerms.has(term))).size;
+  const pathScore = new Set(tokens(hint.path).filter((term) => targetTerms.has(term))).size;
+  if (!hint.referenceKind) return pathScore;
+  return canonicalKind(hint.referenceKind) === canonicalKind(target.kind) ? 100 + pathScore : 0;
 }
 
 function bestTypedHint(hints: RelationHint[], target: KindSpec): RelationHint | undefined {
   return hints
     .flatMap((hint) => {
-      const score = relationPathScore(hint.path, target);
+      const score = relationPathScore(hint, target);
       return score > 0 ? [{ hint, score }] : [];
     })
     .sort((a, b) => b.score - a.score || a.hint.path.length - b.hint.path.length || a.hint.path.localeCompare(b.hint.path))[0]?.hint;
 }
 
-function sameReferenceScope(a: Item, b: Item): boolean {
-  return !a.spec.namespaced || !b.spec.namespaced || (a.obj.metadata.namespace ?? '') === (b.obj.metadata.namespace ?? '');
+function referenceScopeMatches(source: Item, target: Item, hint?: RelationHint): boolean {
+  if (!target.spec.namespaced) return true;
+  const explicitNamespace = hint?.referenceNamespace;
+  if (explicitNamespace) return target.obj.metadata.namespace === explicitNamespace;
+  return !source.spec.namespaced || (source.obj.metadata.namespace ?? '') === (target.obj.metadata.namespace ?? '');
 }
 
 // A matching value is not enough: commonName/displayName-style fields often
 // happen to equal an object name. Require the field (or metadata key) to name
 // the target kind, and keep only the strongest evidence for each object pair.
 function inferredRelation(focus: Item, item: Item, focusHints: RelationHint[]): { kind: 'manages' | 'selects'; label: string } | undefined {
-  if (!sameReferenceScope(focus, item)) return undefined;
-
-  const directName = bestTypedHint(focusHints.filter((hint) => hint.value === item.obj.metadata.name), item.spec);
+  const directName = bestTypedHint(
+    focusHints.filter((hint) => hint.value === item.obj.metadata.name && referenceScopeMatches(focus, item, hint)),
+    item.spec,
+  );
   if (directName) return { kind: 'manages', label: hintLabel(directName.path) };
 
   const directSelector = bestTypedHint(
-    focusHints.filter((hint) => hint.selector && selectorMatches(hint.selector, item.obj.metadata.labels)),
+    focusHints.filter((hint) => hint.selector && selectorMatches(hint.selector, item.obj.metadata.labels) && referenceScopeMatches(focus, item, hint)),
     item.spec,
   );
   if (directSelector) return { kind: 'selects', label: hintLabel(directSelector.path) };
 
   const reverseHints = collectRelationHints({ spec: item.obj.spec, status: item.obj.status });
-  const reverseName = bestTypedHint(reverseHints.filter((hint) => hint.value === focus.obj.metadata.name), focus.spec);
+  const reverseName = bestTypedHint(
+    reverseHints.filter((hint) => hint.value === focus.obj.metadata.name && referenceScopeMatches(item, focus, hint)),
+    focus.spec,
+  );
   if (reverseName) return { kind: 'manages', label: hintLabel(reverseName.path) };
 
   const reverseSelector = bestTypedHint(
-    reverseHints.filter((hint) => hint.selector && selectorMatches(hint.selector, focus.obj.metadata.labels)),
+    reverseHints.filter((hint) => hint.selector && selectorMatches(hint.selector, focus.obj.metadata.labels) && referenceScopeMatches(item, focus, hint)),
     focus.spec,
   );
   if (reverseSelector) return { kind: 'selects', label: hintLabel(reverseSelector.path) };
 
-  const directMetadata = bestTypedHint(
-    collectMetadataRelationHints(focus.obj).filter((hint) => hint.value === item.obj.metadata.name),
-    item.spec,
-  );
-  if (directMetadata) return { kind: 'manages', label: 'metadata' };
+  if (referenceScopeMatches(focus, item)) {
+    const directMetadata = bestTypedHint(
+      collectMetadataRelationHints(focus.obj).filter((hint) => hint.value === item.obj.metadata.name),
+      item.spec,
+    );
+    if (directMetadata) return { kind: 'manages', label: 'metadata' };
+  }
 
-  const reverseMetadata = bestTypedHint(
-    collectMetadataRelationHints(item.obj).filter((hint) => hint.value === focus.obj.metadata.name),
-    focus.spec,
-  );
-  if (reverseMetadata) return { kind: 'manages', label: 'metadata' };
+  if (referenceScopeMatches(item, focus)) {
+    const reverseMetadata = bestTypedHint(
+      collectMetadataRelationHints(item.obj).filter((hint) => hint.value === focus.obj.metadata.name),
+      focus.spec,
+    );
+    if (reverseMetadata) return { kind: 'manages', label: 'metadata' };
+  }
 
   return undefined;
 }
