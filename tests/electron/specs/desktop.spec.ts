@@ -27,6 +27,7 @@ test('boots the real desktop shell behind the restricted preload bridge', async 
 
   try {
     await expect(launched.page).toHaveTitle('Kubus');
+    // The title is static HTML; token removal proves the renderer bootstrap completed.
     await expect(launched.page).toHaveURL((url) => !url.searchParams.has('token'));
     const surface = await launched.page.evaluate(async () => {
       const desktop = window.kubusDesktop;
