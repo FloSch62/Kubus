@@ -10,7 +10,9 @@ export function registerExecSocket(app: FastifyInstance, ctx: AppContext): void 
     try {
       const handle = ctx.clusters.get(q.ctx ?? '');
       const shell = q.shell;
-      const command = shell ? [shell] : ['/bin/sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'];
+      // Login shells (-l) so /etc/profile.d is sourced — debug images
+      // (debugbox, netshoot) define their helper functions there.
+      const command = shell ? [shell] : ['/bin/sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l'];
       void runExecBridge(socket, handle, {
         namespace: q.namespace ?? '',
         pod: q.pod ?? '',

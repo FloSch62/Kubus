@@ -246,6 +246,18 @@ describe('pod actions', () => {
     view.unmount();
   });
 
+  it('debug image presets fill the field and pair the power tier with netadmin', () => {
+    const view = clickMenuAction(pod, 'Debug container…');
+    fireEvent.click(screen.getByText('DebugBox power'));
+    expect(screen.getByLabelText('Image')).toHaveValue('ghcr.io/ibtisam-iq/debugbox:power-1.2.0');
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'ghcr.io/ibtisam-iq/debugbox:power-1.2.0', profile: 'netadmin' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+  });
+
   it('favorites, copies, and confirms deletion of protected resources', async () => {
     let view = clickMenuAction(pod, 'Add to favorites');
     expect(useNavigationStore.getState().favorites).toHaveLength(1);
