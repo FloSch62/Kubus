@@ -170,9 +170,12 @@ function EmbeddedResourceDetail() {
     const onMove = (ev: MouseEvent) => {
       const delta = startX - ev.clientX;
       // Preserve the handle's click-to-collapse behavior when the pointer only
-      // jitters by a couple of pixels.
-      if (fromCollapseHandle && Math.abs(delta) < 4) return;
-      if (fromCollapseHandle) collapseHandleDraggedRef.current = true;
+      // jitters by a couple of pixels. Once it is a drag, keep tracking every
+      // move so reversing toward the starting point cannot commit stale width.
+      if (fromCollapseHandle && !collapseHandleDraggedRef.current) {
+        if (Math.abs(delta) < 4) return;
+        collapseHandleDraggedRef.current = true;
+      }
       pending = clampDetailWidth(startWidth + delta);
       if (!frame) {
         frame = requestAnimationFrame(() => {

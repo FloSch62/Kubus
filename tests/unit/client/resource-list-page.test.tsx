@@ -326,12 +326,15 @@ describe('ResourceListPage', () => {
     const handle = screen.getByLabelText('Collapse resource details');
     fireEvent.mouseDown(handle, { button: 0, clientX: 700 });
     fireEvent.mouseMove(window, { clientX: 650 });
-    fireEvent.mouseUp(window, { clientX: 650 });
+    // Once classified as a drag, returning inside the original dead zone must
+    // track the final pointer position instead of committing the 690px peak.
+    fireEvent.mouseMove(window, { clientX: 698 });
+    fireEvent.mouseUp(window, { clientX: 698 });
     // Browsers dispatch click after mouseup when the pointer is released over
     // the button; the drag must consume it instead of collapsing the panel.
     fireEvent.click(handle, { detail: 1 });
 
-    expect(useDetailStore.getState().width).toBe(690);
+    expect(useDetailStore.getState().width).toBe(642);
     expect(useDetailStore.getState().collapsed).toBe(false);
     expect(document.body.style.cursor).toBe('');
   });
