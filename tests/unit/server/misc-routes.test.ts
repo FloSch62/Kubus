@@ -484,14 +484,51 @@ describe('settings routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/settings/kubeconfig/import',
-      payload: { yaml: incoming },
+      payload: { yaml: incoming, sshHost: 'jump-host' },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().added.contexts).toEqual(['imported']);
     expect(response.json().warnings[0]).toContain('was not found on PATH');
     expect(response.json().backupPath).toContain('.kubus.bak');
     expect(harness.clusters.reload).toHaveBeenCalled();
+    expect(harness.clusters.setSshHost).toHaveBeenCalledWith('imported', 'jump-host');
     expect(fs.readFileSync(target, 'utf8')).toContain('name: imported');
+  });
+
+  it('writes a proxy URL into clusters imported from pasted kubeconfig YAML', async () => {
+    const target = tempKubeconfig(kubeconfig('base'));
+    const incoming = kubeconfig('proxied').replaceAll('cluster-a', 'cluster-proxied').replaceAll('user-a', 'user-proxied');
+    const harness = createHarness();
+    harness.clusters.primaryKubeconfigPath.mockReturnValue(target);
+    const app = await buildApp(harness);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/settings/kubeconfig/import',
+      payload: { yaml: incoming, proxyUrl: 'socks5h://proxy.example.test:1080' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(fs.readFileSync(target, 'utf8')).toContain('proxy-url: socks5h://proxy.example.test:1080');
+    expect(harness.clusters.setSshHost).toHaveBeenCalledWith('proxied', null);
+  });
+
+  it('clears an existing SSH mapping when a proxy import overwrites an unchanged context', async () => {
+    const target = tempKubeconfig(kubeconfig('same'));
+    const harness = createHarness();
+    harness.clusters.primaryKubeconfigPath.mockReturnValue(target);
+    const app = await buildApp(harness);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/settings/kubeconfig/import',
+      payload: { yaml: kubeconfig('same'), proxyUrl: 'socks5://proxy.example.test:1080', overwrite: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().added.contexts).toEqual([]);
+    expect(harness.clusters.setSshHost).toHaveBeenCalledWith('same', null);
+    expect(fs.readFileSync(target, 'utf8')).toContain('proxy-url: socks5://proxy.example.test:1080');
   });
 
   it('rejects imports with invalid bodies, unresolved targets, and conflicts', async () => {
@@ -513,6 +550,15 @@ describe('settings routes', () => {
       payload: { yaml: kubeconfig('same').replace('token: token', 'token: different') },
     });
     expect(conflict.statusCode).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/settings/kubeconfig/import',
+          payload: { yaml: kubeconfig('new'), sshHost: 'jump', proxyUrl: 'socks5://proxy:1080' },
+        })
+      ).statusCode,
+    ).toBe(400);
   });
 });
 

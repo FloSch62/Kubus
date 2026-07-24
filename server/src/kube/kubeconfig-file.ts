@@ -22,6 +22,8 @@ interface KubeconfigDoc {
 export interface MergeResult {
   merged: string;
   added: { contexts: string[]; clusters: string[]; users: string[] };
+  /** Incoming contexts whose cluster entries receive the selected connection mode. */
+  connectionContexts: string[];
   skipped: string[];
   conflicts: string[];
 }
@@ -40,7 +42,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * objects are merged (not KubeConfig.exportConfig output) so unknown fields
  * and the existing file's structure are preserved faithfully.
  */
-export function mergeKubeconfig(existingYaml: string | null, incomingYaml: string, overwrite: boolean): MergeResult {
+export function mergeKubeconfig(existingYaml: string | null, incomingYaml: string, overwrite: boolean, proxyUrl?: string | null): MergeResult {
   // Validate with the real parser first: garbage in → 400 out.
   const probe = new KubeConfig();
   try {
@@ -51,9 +53,20 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   if (probe.getContexts().length === 0) {
     throw new HttpProblem(400, 'kubeconfig contains no contexts', 'BadRequest');
   }
+  const incomingClusterNames = new Set(probe.getClusters().map((cluster) => cluster.name));
+  const connectionContexts = probe
+    .getContexts()
+    .filter((context) => incomingClusterNames.has(context.cluster))
+    .map((context) => context.name);
 
   const incoming = (loadYaml(incomingYaml) ?? {}) as KubeconfigDoc;
   const existing: KubeconfigDoc | null = existingYaml?.trim() ? ((loadYaml(existingYaml) ?? {}) as KubeconfigDoc) : null;
+  if (proxyUrl !== undefined) {
+    for (const entry of asEntries(incoming.clusters)) {
+      const cluster = (entry.cluster && typeof entry.cluster === 'object' ? entry.cluster : (entry.cluster = {})) as Record<string, unknown>;
+      setString(cluster, 'proxy-url', proxyUrl);
+    }
+  }
 
   const added = { contexts: [] as string[], clusters: [] as string[], users: [] as string[] };
   const skipped: string[] = [];
@@ -69,7 +82,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
     added.contexts = asEntries(incoming.contexts).map((e) => e.name);
     added.clusters = asEntries(incoming.clusters).map((e) => e.name);
     added.users = asEntries(incoming.users).map((e) => e.name);
-    return { merged: dumpYaml(doc, { lineWidth: -1 }), added, skipped, conflicts };
+    return { merged: dumpYaml(doc, { lineWidth: -1 }), added, connectionContexts, skipped, conflicts };
   }
 
   for (const section of ['clusters', 'users', 'contexts'] as const) {
@@ -93,7 +106,7 @@ export function mergeKubeconfig(existingYaml: string | null, incomingYaml: strin
   }
 
   // Never touch current-context of an existing file.
-  return { merged: dumpYaml(existing, { lineWidth: -1 }), added, skipped, conflicts };
+  return { merged: dumpYaml(existing, { lineWidth: -1 }), added, connectionContexts, skipped, conflicts };
 }
 
 export interface ClusterEditPatch {

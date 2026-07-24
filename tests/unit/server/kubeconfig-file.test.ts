@@ -93,6 +93,7 @@ describe('mergeKubeconfig', () => {
       clusters: ['first-cluster'],
       users: ['first-user'],
     });
+    expect(result.connectionContexts).toEqual(['first']);
     expect(result.skipped).toEqual([]);
     expect(result.conflicts).toEqual([]);
   });
@@ -108,6 +109,31 @@ describe('mergeKubeconfig', () => {
       clusters: ['beta-cluster'],
       users: ['beta-user'],
     });
+    expect(result.connectionContexts).toEqual(['beta']);
+  });
+
+  it('applies an imported proxy URL to every incoming cluster', () => {
+    const incoming = configDoc('proxied');
+    incoming.clusters!.push({
+      name: 'second-cluster',
+      cluster: { server: 'https://second.example.test', 'proxy-url': 'http://old-proxy' },
+    });
+
+    const result = mergeKubeconfig(null, yaml(incoming), false, 'socks5h://jump.example.test:1080');
+
+    expect(parse(result.merged).clusters?.map((entry) => entry.cluster['proxy-url'])).toEqual([
+      'socks5h://jump.example.test:1080',
+      'socks5h://jump.example.test:1080',
+    ]);
+  });
+
+  it('removes imported proxy URLs when an SSH jump host will own the connection', () => {
+    const incoming = configDoc('jumped');
+    incoming.clusters![0]!.cluster['proxy-url'] = 'socks5://old-proxy:1080';
+
+    const result = mergeKubeconfig(null, yaml(incoming), false, null);
+
+    expect(parse(result.merged).clusters?.[0]?.cluster['proxy-url']).toBeUndefined();
   });
 
   it('separates identical entries from conflicting entries', () => {

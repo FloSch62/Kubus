@@ -29,7 +29,25 @@ function importAuthWarnings(incomingYaml: string, addedUsers: string[]): string[
 }
 
 const setKubeconfigSchema = z.object({ path: z.string().min(1).nullable() });
-const importSchema = z.object({ yaml: z.string().min(1), overwrite: z.boolean().optional() });
+const sshHostSchema = z
+  .string()
+  .trim()
+  .max(256)
+  .regex(/^(ssh:\/\/)?[A-Za-z0-9][A-Za-z0-9._~%@:[\]-]*$/, 'SSH jump host must be an ssh config alias, user@host or ssh://user@host:port');
+const proxyUrlSchema = z
+  .string()
+  .trim()
+  .regex(/^(socks5?|socks5h|https?):\/\//i, 'proxy URL must start with socks5://, socks5h://, http:// or https://');
+const importSchema = z
+  .object({
+    yaml: z.string().min(1),
+    overwrite: z.boolean().optional(),
+    sshHost: sshHostSchema.optional(),
+    proxyUrl: proxyUrlSchema.optional(),
+  })
+  .refine((value) => !(value.sshHost && value.proxyUrl), {
+    message: 'choose either an SSH jump host or a proxy URL, not both',
+  });
 
 export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): void {
   const kubeconfigSettings = (): KubeconfigSettings => {
@@ -81,12 +99,24 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
       const target = ctx.clusters.primaryKubeconfigPath();
       if (!target) throw new HttpProblem(400, 'no kubeconfig path could be resolved', 'BadRequest');
       const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
-      const result = mergeKubeconfig(existing, parsed.data.yaml, parsed.data.overwrite ?? false);
+      const result = mergeKubeconfig(
+        existing,
+        parsed.data.yaml,
+        parsed.data.overwrite ?? false,
+        parsed.data.sshHost ? null : parsed.data.proxyUrl,
+      );
       if (result.conflicts.length) {
         throw new HttpProblem(409, `entries already exist with different content: ${result.conflicts.join(', ')}`, 'Conflict');
       }
       const backupPath = writeKubeconfig(target, result.merged);
       ctx.clusters.reload();
+      if (parsed.data.sshHost || parsed.data.proxyUrl) {
+        for (const contextName of result.connectionContexts) {
+          // A managed SSH tunnel overrides proxy-url at runtime, so selecting a
+          // proxy must clear any external jump mapping left from an earlier import.
+          ctx.clusters.setSshHost(contextName, parsed.data.sshHost ?? null);
+        }
+      }
       const response: KubeconfigImportResponse = {
         added: result.added,
         skipped: result.skipped,
