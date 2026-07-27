@@ -38,7 +38,8 @@ import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import { BUILTIN_NAV_GROUPS, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts, useContexts } from '../api/queries.js';
-import { favoriteContext, favoriteScopes, visibleFavorites } from '../favorite-scope.js';
+import { favoriteContext, favoriteScopes, resolveFavorites } from '../favorite-scope.js';
+import { preferVersion, preferredKind } from '../kind-versions.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -106,12 +107,17 @@ function kindFavorite(k: NavKind): FavoriteItem {
   };
 }
 
-/** Resolve old persisted kind favorites to a full GVK once discovery is available. */
+/**
+ * Resolve old persisted kind favorites to a full GVK once discovery is
+ * available. A favorite whose stored version is gone falls back to the served
+ * one, matching the link `resolveFavorites` repoints it at.
+ */
 function favoriteGvk(favorite: FavoriteItem, resources: ResourceKindInfo[]): string | undefined {
   if (!favorite.id.startsWith('kind:')) return favorite.subtitle;
   const [group, version, plural] = favorite.id.slice('kind:'.length).split('/');
   if (group === undefined || !version || !plural) return favorite.subtitle;
-  const discovered = resources.find((r) => r.group === group && r.version === version && r.plural === plural);
+  const discovered =
+    resources.find((r) => r.group === group && r.version === version && r.plural === plural) ?? preferredKind(group, plural, resources);
   const resource = discovered ?? gvkForResource(group, version, plural);
   return resource ? gvkLabel(resource) : favorite.subtitle;
 }
@@ -151,24 +157,6 @@ function FavStar({ active, onToggle, onManage, label }: { active: boolean; onTog
 // The topology impl chunk (@xyflow/react + elkjs) is heavy; warm it when the
 // user shows intent instead of unconditionally at idle for every session.
 const preloadTopology = () => void import('../components/TopologyGraphImpl.js');
-
-const VERSION_RE = /^v(\d+)(?:(alpha|beta)(\d+))?$/;
-
-function versionScore(version: string): [number, number, number] {
-  const match = VERSION_RE.exec(version);
-  if (!match) return [0, 0, 0];
-  const stability = match[2] === 'alpha' ? 1 : match[2] === 'beta' ? 2 : 3;
-  return [stability, Number(match[1]), Number(match[3] ?? 0)];
-}
-
-function preferVersion(candidate: ResourceKindInfo, current: ResourceKindInfo): ResourceKindInfo {
-  const a = versionScore(candidate.version);
-  const b = versionScore(current.version);
-  if (a[0] !== b[0]) return a[0] > b[0] ? candidate : current;
-  if (a[1] !== b[1]) return a[1] > b[1] ? candidate : current;
-  if (a[2] !== b[2]) return a[2] > b[2] ? candidate : current;
-  return candidate.version.localeCompare(current.version) > 0 ? candidate : current;
-}
 
 function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   const byKind = new Map<string, ResourceKindInfo>();
@@ -802,9 +790,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
 
   // Favorites scoped to other clusters — and kinds no connected cluster serves
   // — drop out of the sidebar entirely, so everything below works off the
-  // visible list: ordering, hotkeys and the empty check alike.
+  // resolved list: ordering, hotkeys and the empty check alike.
   const visibleFavs = useMemo(
-    () => visibleFavorites(favorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
+    () => resolveFavorites(favorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
     [favorites, selected, apiResources],
   );
   const visibleFavsRef = useRef(visibleFavs);

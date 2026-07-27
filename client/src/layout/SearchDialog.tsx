@@ -20,7 +20,7 @@ import type { FavoriteItem, ResourceRef, SearchResult, SearchResultKind } from '
 import { useNavigate } from 'react-router';
 import { detailPathForRef } from '../resource-links.js';
 import { useApiResourcesForContexts, useGlobalSearch } from '../api/queries.js';
-import { visibleFavorites } from '../favorite-scope.js';
+import { resolveFavorites } from '../favorite-scope.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { useDockStore } from '../state/dock.js';
@@ -104,7 +104,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   // The empty palette lists favorites, so it follows the same cluster scoping
   // as the sidebar — otherwise another cluster's CRDs come back here.
   const favorites = useMemo(
-    () => visibleFavorites(storedFavorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
+    () => resolveFavorites(storedFavorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
     [storedFavorites, selected, apiResources],
   );
   const addFavorite = useNavigationStore((s) => s.addFavorite);
