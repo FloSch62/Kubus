@@ -243,6 +243,13 @@ export interface FavoriteItem {
   subtitle?: string;
   path?: string;
   ref?: ResourceRef;
+  /**
+   * Contexts this favorite belongs to; unset or empty means every cluster.
+   * A scoped favorite is listed only while one of its contexts is connected,
+   * so cluster-specific entries (an operator's CRDs, a per-cluster page) stay
+   * out of the way everywhere else.
+   */
+  scopes?: string[];
 }
 
 /** Grid state snapshotted with a saved view so restoring brings back the exact table. */

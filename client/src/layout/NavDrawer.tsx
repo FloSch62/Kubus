@@ -2,6 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
+import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -10,6 +11,8 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -30,9 +33,13 @@ import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import CheckIcon from '@mui/icons-material/Check';
+import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import { BUILTIN_NAV_GROUPS, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
-import { useApiResourcesForContexts } from '../api/queries.js';
+import { useApiResourcesForContexts, useContexts } from '../api/queries.js';
+import { favoriteContext, favoriteScopes, resolveFavorites } from '../favorite-scope.js';
+import { preferVersion, preferredKind } from '../kind-versions.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
@@ -100,20 +107,29 @@ function kindFavorite(k: NavKind): FavoriteItem {
   };
 }
 
-/** Resolve old persisted kind favorites to a full GVK once discovery is available. */
+/**
+ * Resolve old persisted kind favorites to a full GVK once discovery is
+ * available. A favorite whose stored version is gone falls back to the served
+ * one, matching the link `resolveFavorites` repoints it at.
+ */
 function favoriteGvk(favorite: FavoriteItem, resources: ResourceKindInfo[]): string | undefined {
   if (!favorite.id.startsWith('kind:')) return favorite.subtitle;
   const [group, version, plural] = favorite.id.slice('kind:'.length).split('/');
   if (group === undefined || !version || !plural) return favorite.subtitle;
-  const discovered = resources.find((r) => r.group === group && r.version === version && r.plural === plural);
+  const discovered =
+    resources.find((r) => r.group === group && r.version === version && r.plural === plural) ?? preferredKind(group, plural, resources);
   const resource = discovered ?? gvkForResource(group, version, plural);
   return resource ? gvkLabel(resource) : favorite.subtitle;
 }
 
-// Star toggle revealed on row hover; filled vs outlined shows favorite state.
-function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () => void; label: string }) {
+/**
+ * Star toggle revealed on row hover; filled vs outlined shows favorite state.
+ * Inside the Favorites group the star opens the favorite's menu instead —
+ * removing is one of the things you can do to a favorite, not the only one.
+ */
+function FavStar({ active, onToggle, onManage, label }: { active: boolean; onToggle: () => void; onManage?: (e: React.MouseEvent) => void; label: string }) {
   return (
-    <Tooltip title={active ? 'Remove favorite' : 'Add favorite'}>
+    <Tooltip title={onManage ? 'Remove or edit favorite' : active ? 'Remove favorite' : 'Add favorite'}>
       <IconButton
         aria-label={label}
         size="small"
@@ -121,7 +137,8 @@ function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () =>
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          onToggle();
+          if (onManage) onManage(e);
+          else onToggle();
         }}
         sx={{
           opacity: 0,
@@ -140,24 +157,6 @@ function FavStar({ active, onToggle, label }: { active: boolean; onToggle: () =>
 // The topology impl chunk (@xyflow/react + elkjs) is heavy; warm it when the
 // user shows intent instead of unconditionally at idle for every session.
 const preloadTopology = () => void import('../components/TopologyGraphImpl.js');
-
-const VERSION_RE = /^v(\d+)(?:(alpha|beta)(\d+))?$/;
-
-function versionScore(version: string): [number, number, number] {
-  const match = VERSION_RE.exec(version);
-  if (!match) return [0, 0, 0];
-  const stability = match[2] === 'alpha' ? 1 : match[2] === 'beta' ? 2 : 3;
-  return [stability, Number(match[1]), Number(match[3] ?? 0)];
-}
-
-function preferVersion(candidate: ResourceKindInfo, current: ResourceKindInfo): ResourceKindInfo {
-  const a = versionScore(candidate.version);
-  const b = versionScore(current.version);
-  if (a[0] !== b[0]) return a[0] > b[0] ? candidate : current;
-  if (a[1] !== b[1]) return a[1] > b[1] ? candidate : current;
-  if (a[2] !== b[2]) return a[2] > b[2] ? candidate : current;
-  return candidate.version.localeCompare(current.version) > 0 ? candidate : current;
-}
 
 function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   const byKind = new Map<string, ResourceKindInfo>();
@@ -220,6 +219,7 @@ function NavEntry({
   icon,
   favorite,
   favoriteAction,
+  onManageFavorite,
   hotkey,
   onIntent,
   indent,
@@ -230,6 +230,8 @@ function NavEntry({
   icon?: React.ReactElement;
   favorite?: FavoriteItem;
   favoriteAction?: ReactNode;
+  /** Set for rows in the Favorites group: the star opens the favorite's menu. */
+  onManageFavorite?: (e: React.MouseEvent) => void;
   /** Shortcut hint (e.g. ⌘1) shown at rest; hover swaps it for the row actions. */
   hotkey?: string;
   /** Fired on hover/focus — used to preload the target's heavy chunks. */
@@ -279,7 +281,8 @@ function NavEntry({
           {favoriteAction}
           <FavStar
             active={isFav}
-            label={`${isFav ? 'Remove' : 'Add'} favorite ${label}`}
+            onManage={onManageFavorite}
+            label={`${onManageFavorite ? 'Remove or edit' : isFav ? 'Remove' : 'Add'} favorite ${label}`}
             onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
           />
           {hotkey && (
@@ -374,7 +377,7 @@ function GroupHeader({
   icon?: React.ReactElement;
   open: boolean;
   onClick: () => void;
-  favorite?: { active: boolean; onToggle: () => void };
+  favorite?: { active: boolean; onToggle: () => void; onManage?: (e: React.MouseEvent) => void };
   favoriteAction?: ReactNode;
 }) {
   return (
@@ -388,7 +391,8 @@ function GroupHeader({
               <FavStar
                 active={favorite.active}
                 onToggle={favorite.onToggle}
-                label={`${favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
+                onManage={favorite.onManage}
+                label={`${favorite.onManage ? 'Remove or edit' : favorite.active ? 'Remove' : 'Add'} favorite category ${title}`}
               />
             )}
           </Box>
@@ -596,6 +600,149 @@ function FavoriteDragShell({
   );
 }
 
+type ScopeMenuState = { favorite: FavoriteItem; position: { top: number; left: number } };
+
+const SCOPE_ROW_SX = { mx: 0.75, borderRadius: 1.5, minHeight: 34, px: 1 } as const;
+
+/** Uppercase section label separating the menu's two halves. */
+function ScopeSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <Typography
+      variant="caption"
+      sx={{ display: 'block', px: 1.75, pt: 0.75, pb: 0.5, color: 'text.disabled', fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase' }}
+    >
+      {children}
+    </Typography>
+  );
+}
+
+/** Connection dot in a fixed slot so every row's label lines up. */
+function ScopeRowIcon({ children, connected }: { children?: ReactNode; connected?: boolean }) {
+  return (
+    <Box sx={{ width: 18, mr: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'text.secondary' }}>
+      {children ?? <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: connected ? 'success.main' : 'action.disabled' }} />}
+    </Box>
+  );
+}
+
+/**
+ * The menu behind a favorite's star (and its right-click): which clusters the
+ * favorite belongs to, and removing it. Unscoped favorites stay listed
+ * everywhere they are relevant; scoping one to a context keeps it out of every
+ * other cluster's sidebar for good.
+ */
+function FavoriteScopeMenu({
+  state,
+  contexts,
+  connected,
+  subtitle,
+  onClose,
+}: {
+  state: ScopeMenuState | null;
+  contexts: string[];
+  connected: string[];
+  /** GVK line for the header, resolved by the caller from discovery. */
+  subtitle?: string;
+  onClose: () => void;
+}) {
+  const id = state?.favorite.id;
+  // Read scopes from the store, not the captured item, so the ticks follow
+  // along while the menu stays open for several toggles. The selector returns
+  // the stored item itself — a derived array would be a new snapshot on every
+  // render and re-subscribe forever.
+  const stored = useNavigationStore((s) => (id ? s.favorites.find((f) => f.id === id) : undefined));
+  const scopes = stored?.scopes ?? [];
+  const setFavoriteScopes = useNavigationStore((s) => s.setFavoriteScopes);
+  const removeFavorite = useNavigationStore((s) => s.removeFavorite);
+  const contextSettings = useClustersStore((s) => s.contextSettings);
+  const pinnedContext = state ? favoriteContext(state.favorite) : undefined;
+  // Offer every known context, plus any the favorite still points at after it
+  // vanished from the kubeconfig, so a stale scope can be cleared.
+  const options = [...contexts, ...scopes.filter((ctx) => !contexts.includes(ctx))];
+  const toggle = (ctx: string) => setFavoriteScopes(id!, scopes.includes(ctx) ? scopes.filter((name) => name !== ctx) : [...scopes, ctx]);
+  const tick = <CheckIcon sx={{ fontSize: 16, ml: 1, color: 'primary.main', flexShrink: 0 }} />;
+  return (
+    <Menu
+      open={!!state}
+      onClose={onClose}
+      anchorReference="anchorPosition"
+      anchorPosition={state?.position}
+      slotProps={{ list: { dense: true, sx: { py: 0.5, width: 262 } }, paper: { sx: { maxHeight: 440 } } }}
+    >
+      <Box sx={{ px: 1.75, pt: 0.5, pb: 0.75 }}>
+        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+          {state?.favorite.title ?? ''}
+        </Typography>
+        {subtitle && (
+          <Typography variant="caption" noWrap sx={{ display: 'block', color: 'text.secondary' }}>
+            {subtitle}
+          </Typography>
+        )}
+      </Box>
+      <Divider />
+      <ScopeSectionLabel>{pinnedContext ? 'Cluster' : 'Show in'}</ScopeSectionLabel>
+      {pinnedContext ? (
+        <Box sx={{ px: 1.75, pb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <ScopeRowIcon connected={connected.includes(pinnedContext)} />
+            <Typography variant="body2" noWrap>
+              {pinnedContext}
+            </Typography>
+          </Box>
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+            This object lives in one cluster, so it is listed only while that cluster is connected.
+          </Typography>
+        </Box>
+      ) : (
+        [
+          <MenuItem
+            key="all"
+            selected={scopes.length === 0}
+            sx={SCOPE_ROW_SX}
+            onClick={() => {
+              setFavoriteScopes(id!, []);
+              onClose();
+            }}
+          >
+            <ScopeRowIcon>
+              <PublicOutlinedIcon sx={{ fontSize: 16 }} />
+            </ScopeRowIcon>
+            <ListItemText primary="All clusters" slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
+            {scopes.length === 0 && tick}
+          </MenuItem>,
+          ...options.map((ctx) => (
+            <MenuItem key={ctx} selected={scopes.includes(ctx)} sx={SCOPE_ROW_SX} onClick={() => toggle(ctx)}>
+              <ScopeRowIcon connected={connected.includes(ctx)} />
+              {contextSettings[ctx]?.icon && (
+                <Box component="span" sx={{ mr: 0.75, fontSize: 13 }}>
+                  {contextSettings[ctx]?.icon}
+                </Box>
+              )}
+              <ListItemText primary={ctx} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
+              {scopes.includes(ctx) && tick}
+            </MenuItem>
+          )),
+        ]
+      )}
+      <Divider sx={{ my: 0.5 }} />
+      {/* Removing a favorite is undone with one click of the star, so it only
+          turns destructive-red under the pointer. */}
+      <MenuItem
+        sx={{ ...SCOPE_ROW_SX, '&:hover': { color: 'error.main', '& svg': { color: 'error.main' } } }}
+        onClick={() => {
+          removeFavorite(id!);
+          onClose();
+        }}
+      >
+        <ScopeRowIcon>
+          <StarBorderIcon sx={{ fontSize: 16 }} />
+        </ScopeRowIcon>
+        <ListItemText primary="Remove favorite" slotProps={{ primary: { variant: 'body2' } }} />
+      </MenuItem>
+    </Menu>
+  );
+}
+
 interface NavDrawerProps {
   /** Render as a temporary overlay (narrow viewports) instead of a pinned rail. */
   overlay: boolean;
@@ -608,6 +755,9 @@ interface NavDrawerProps {
 export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClose }: NavDrawerProps) {
   const selected = useClustersStore((s) => s.selected);
   const { data: apiResources } = useApiResourcesForContexts(selected);
+  // Contexts offered by the scope menu; the picker keeps this query warm, so
+  // this observer only reads it.
+  const { data: contexts } = useContexts({ poll: false });
   const favorites = useNavigationStore((s) => s.favorites);
   const savedViews = useNavigationStore((s) => s.savedViews);
   const removeSavedView = useNavigationStore((s) => s.removeSavedView);
@@ -626,6 +776,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   const [filter, setFilter] = useState('');
   const [draggingFavoriteId, setDraggingFavoriteId] = useState<string | null>(null);
   const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
+  const [scopeMenu, setScopeMenu] = useState<ScopeMenuState | null>(null);
   const deferredFilter = useDeferredValue(filter);
   const navigate = useNavigate();
 
@@ -637,6 +788,16 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close on navigation only
   }, [currentPath]);
 
+  // Favorites scoped to other clusters — and kinds no connected cluster serves
+  // — drop out of the sidebar entirely, so everything below works off the
+  // resolved list: ordering, hotkeys and the empty check alike.
+  const visibleFavs = useMemo(
+    () => resolveFavorites(favorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
+    [favorites, selected, apiResources],
+  );
+  const visibleFavsRef = useRef(visibleFavs);
+  visibleFavsRef.current = visibleFavs;
+
   // Cmd/Ctrl+1–9 jumps to the corresponding favorite. Digits come from
   // e.code so the physical number row works on any keyboard layout. Note the
   // browser may reserve Ctrl/Cmd+1–8 for its own tab switching; the desktop
@@ -646,7 +807,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
       if (!digit) return;
-      const fav = hotkeyFavorites(useNavigationStore.getState().favorites)[Number(digit) - 1];
+      const fav = hotkeyFavorites(visibleFavsRef.current)[Number(digit) - 1];
       if (!fav?.path) return;
       e.preventDefault();
       void navigate(fav.path);
@@ -657,9 +818,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
 
   const hotkeyByFavorite = useMemo(() => {
     const map = new Map<string, string>();
-    hotkeyFavorites(favorites).forEach((fav, i) => map.set(fav.id, `${HOTKEY_MOD_LABEL}${i + 1}`));
+    hotkeyFavorites(visibleFavs).forEach((fav, i) => map.set(fav.id, `${HOTKEY_MOD_LABEL}${i + 1}`));
     return map;
-  }, [favorites]);
+  }, [visibleFavs]);
 
   const toggleGroup = (title: string) =>
     setCollapsed((prev) => {
@@ -808,7 +969,12 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // While filtering, always expand so matches are visible. CRD API groups are
   // discovered dynamically, so they use the set as an explicit open override.
   const isOpen = (title: string) => !!f || (title.startsWith(CUSTOM_GROUP_PREFIX) ? collapsed.has(title) : !collapsed.has(title));
-  const canReorderFavorites = favorites.length > 1 && !f;
+  const canReorderFavorites = visibleFavs.length > 1 && !f;
+  const openScopeMenu = (fav: FavoriteItem, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setScopeMenu({ favorite: fav, position: { top: e.clientY, left: e.clientX } });
+  };
   const clearFavoriteDrag = () => {
     setDraggingFavoriteId(null);
     setFavoriteDropTarget(null);
@@ -918,11 +1084,15 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
         <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
         <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
-        {favorites.length > 0 && (
+        {visibleFavs.length > 0 && (
           <Box>
             <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
             <Collapse in={isOpen('Favorites')}>
-              {favorites.map((fav) => {
+              {visibleFavs.map((fav) => {
+                // The star opens this favorite's menu; right-click anywhere on
+                // the row is the shortcut to the same thing.
+                const scopeHandlers = { onContextMenu: (e: React.MouseEvent) => openScopeMenu(fav, e) };
+                const manageFavorite = (e: React.MouseEvent) => openScopeMenu(fav, e);
                 if (fav.id.startsWith('category:')) {
                   const all = categoryKindsMap.get(fav.title) ?? [];
                   const titleMatch = matches(fav.title);
@@ -930,7 +1100,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                   if (f && !titleMatch && kinds.length === 0) return null;
                   const key = `fav:${fav.title}`;
                   return (
-                    <Box key={fav.id}>
+                    <Box key={fav.id} {...scopeHandlers}>
                       {favoriteDragShell(
                         fav,
                         <GroupHeader
@@ -938,7 +1108,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                           icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
                           open={isOpen(key)}
                           onClick={() => toggleGroup(key)}
-                          favorite={{ active: true, onToggle: () => removeFavorite(fav.id) }}
+                          favorite={{ active: true, onToggle: () => removeFavorite(fav.id), onManage: manageFavorite }}
                           favoriteAction={favoriteDragHandle(fav)}
                         />,
                       )}
@@ -950,10 +1120,14 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                     </Box>
                   );
                 }
-                const subtitle = favoriteGvk(fav, apiResources?.resources ?? []);
-                if (!matches(fav.title) && !(subtitle && matches(subtitle))) return null;
+                const gvk = favoriteGvk(fav, apiResources?.resources ?? []);
+                if (!matches(fav.title) && !(gvk && matches(gvk))) return null;
+                // A scoped favorite names its clusters on the subtitle line —
+                // the only hint that it is missing from the other sidebars.
+                const scopes = favoriteScopes(fav);
+                const subtitle = [gvk, ...(scopes.length ? [scopes.join(', ')] : [])].filter(Boolean).join(' · ') || undefined;
                 return (
-                  <Box key={fav.id}>
+                  <Box key={fav.id} {...scopeHandlers}>
                     {favoriteDragShell(
                       fav,
                       <NavEntry
@@ -962,6 +1136,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                         subtitle={subtitle}
                         favorite={fav}
                         favoriteAction={favoriteDragHandle(fav)}
+                        onManageFavorite={manageFavorite}
                         hotkey={hotkeyByFavorite.get(fav.id)}
                       />,
                     )}
@@ -1097,6 +1272,13 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
           </>
         )}
       </List>
+      <FavoriteScopeMenu
+        state={scopeMenu}
+        contexts={(contexts ?? []).map((c) => c.name)}
+        connected={selected}
+        subtitle={scopeMenu ? favoriteGvk(scopeMenu.favorite, apiResources?.resources ?? []) : undefined}
+        onClose={() => setScopeMenu(null)}
+      />
     </Drawer>
   );
 });
