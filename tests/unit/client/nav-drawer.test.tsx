@@ -8,12 +8,15 @@ import { useTabsStore } from '../../../client/src/state/tabs';
 
 const queryMocks = vi.hoisted(() => ({
   resources: [] as Array<Record<string, unknown>>,
+  byContext: {} as Record<string, Array<Record<string, unknown>>>,
+  contexts: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useApiResourcesForContexts: () => ({
-    data: { resources: queryMocks.resources, byContext: {}, errors: {} },
+    data: { resources: queryMocks.resources, byContext: queryMocks.byContext, errors: {} },
   }),
+  useContexts: () => ({ data: queryMocks.contexts }),
 }));
 
 function LocationProbe() {
@@ -32,6 +35,8 @@ const customResources = [
 
 beforeEach(() => {
   queryMocks.resources = customResources;
+  queryMocks.byContext = {};
+  queryMocks.contexts = [{ name: 'dev' }, { name: 'eda' }];
   useClustersStore.setState({ selected: ['dev'], namespaces: [] });
   useNavigationStore.setState({
     favorites: [
@@ -122,6 +127,46 @@ describe('NavDrawer', () => {
     fireEvent.dragEnd(source, { dataTransfer });
     expect(useNavigationStore.getState().favorites.map((favorite) => favorite.id)).toContain('kind:/v1/pods');
   }, 15_000);
+
+  it('scopes a favorite to a cluster from its menu and hides it elsewhere', async () => {
+    const legacy = () => useNavigationStore.getState().favorites.find((favorite) => favorite.id === 'legacy');
+    const { unmount } = renderDrawer('/');
+    // The star on a favorite opens its menu rather than removing it outright.
+    fireEvent.click(screen.getByLabelText('Remove or edit favorite Legacy'));
+    fireEvent.click(await screen.findByText('eda'));
+    expect(legacy()?.scopes).toEqual(['eda']);
+    // Scoped away from the connected cluster, the entry leaves the sidebar.
+    // (Its title lives on in the open menu's header, so match links only.)
+    await waitFor(() => expect(screen.queryAllByRole('link', { name: /Legacy/ })).toHaveLength(0));
+    unmount();
+
+    useClustersStore.setState({ selected: ['eda'] });
+    renderDrawer('/');
+    expect(screen.getAllByText('Legacy')[0]).toBeInTheDocument();
+    // Reverting to all clusters puts it back everywhere.
+    fireEvent.contextMenu(screen.getAllByText('Legacy')[0]!);
+    fireEvent.click(await screen.findByText('All clusters'));
+    expect(legacy()?.scopes).toBeUndefined();
+    // Removing is now an item in the same menu.
+    fireEvent.click(screen.getByLabelText('Remove or edit favorite Legacy'));
+    fireEvent.click(await screen.findByText('Remove favorite'));
+    expect(legacy()).toBeUndefined();
+  }, 15_000);
+
+  it('drops kind favorites no connected cluster serves', () => {
+    useNavigationStore.setState({
+      favorites: [
+        { id: 'kind:topo.eda.nokia.com/v1/links', title: 'TopoLinks', path: '/r/topo.eda.nokia.com/v1/links' },
+        { id: 'kind:/v1/pods', title: 'Pods', path: '/r/core/v1/pods' },
+      ],
+      savedViews: [],
+    });
+    // Discovery for the connected cluster knows nothing of the eda CRD.
+    queryMocks.byContext = { dev: [{ group: '', version: 'v1', plural: 'pods', kind: 'Pod', namespaced: true, verbs: ['list'] }] };
+    renderDrawer('/');
+    expect(screen.queryByText('TopoLinks')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Pods').length).toBeGreaterThan(0);
+  });
 
   it('supports overlay close behavior and the hidden permanent rail', async () => {
     const overlay = renderDrawer('/events', { overlay: true, open: true });

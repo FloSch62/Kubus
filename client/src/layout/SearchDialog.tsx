@@ -19,7 +19,8 @@ import KeyboardCommandKeyIcon from '@mui/icons-material/KeyboardCommandKey';
 import type { FavoriteItem, ResourceRef, SearchResult, SearchResultKind } from '@kubus/shared';
 import { useNavigate } from 'react-router';
 import { detailPathForRef } from '../resource-links.js';
-import { useGlobalSearch } from '../api/queries.js';
+import { useApiResourcesForContexts, useGlobalSearch } from '../api/queries.js';
+import { visibleFavorites } from '../favorite-scope.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { useDockStore } from '../state/dock.js';
@@ -98,7 +99,14 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const commandMode = query.startsWith('>');
   const searchQuery = stage || commandMode ? '' : query;
   const { data: results, isFetching } = useGlobalSearch(selected, searchQuery);
-  const favorites = useNavigationStore((s) => s.favorites);
+  const { data: apiResources } = useApiResourcesForContexts(selected);
+  const storedFavorites = useNavigationStore((s) => s.favorites);
+  // The empty palette lists favorites, so it follows the same cluster scoping
+  // as the sidebar — otherwise another cluster's CRDs come back here.
+  const favorites = useMemo(
+    () => visibleFavorites(storedFavorites, { selected, byContext: apiResources?.byContext, errors: apiResources?.errors }),
+    [storedFavorites, selected, apiResources],
+  );
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
   const isFavorite = useNavigationStore((s) => s.isFavorite);

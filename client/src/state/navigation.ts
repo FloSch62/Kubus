@@ -9,6 +9,8 @@ interface NavigationState {
   addFavorite: (item: FavoriteItem) => void;
   removeFavorite: (id: string) => void;
   moveFavorite: (id: string, targetId: string, position: 'before' | 'after') => void;
+  /** Restrict a favorite to the given contexts; an empty list means all clusters. */
+  setFavoriteScopes: (id: string, scopes: string[]) => void;
   isFavorite: (id: string) => boolean;
   addSavedView: (view: SavedView) => void;
   removeSavedView: (id: string) => void;
@@ -36,6 +38,10 @@ export const useNavigationStore = create<NavigationState>()(
           next.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, moving);
           return { favorites: next };
         }),
+      setFavoriteScopes: (id, scopes) =>
+        set((s) => ({
+          favorites: s.favorites.map((f) => (f.id === id ? { ...f, scopes: scopes.length ? [...new Set(scopes)] : undefined } : f)),
+        })),
       isFavorite: (id) => get().favorites.some((f) => f.id === id),
       addSavedView: (view) =>
         set((s) => ({
