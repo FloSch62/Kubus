@@ -1,6 +1,7 @@
 import type { KubeObject } from '@kubus/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  execTargetContainer,
   hpaProblems,
   ingressHosts,
   jobPhase,
@@ -131,6 +132,57 @@ describe('podSummary', () => {
   it('caches per object identity', () => {
     const pod = kobj({ status: { phase: 'Running' } });
     expect(podSummary(pod)).toBe(podSummary(pod));
+  });
+});
+
+describe('execTargetContainer', () => {
+  const spec = { containers: [{ name: 'app' }, { name: 'sidecar' }], initContainers: [{ name: 'setup' }] };
+
+  it('skips a crashlooping first container for one that is running', () => {
+    const pod = kobj({
+      spec,
+      status: {
+        containerStatuses: [
+          { name: 'app', state: { waiting: { reason: 'CrashLoopBackOff' } } },
+          { name: 'sidecar', state: { running: {} } },
+        ],
+      },
+    });
+    expect(execTargetContainer(pod)).toBe('sidecar');
+  });
+
+  it('accepts a running sidecar from the init statuses', () => {
+    const pod = kobj({
+      spec,
+      status: {
+        containerStatuses: [{ name: 'app', state: { terminated: {} } }],
+        initContainerStatuses: [{ name: 'setup', state: { running: {} } }],
+      },
+    });
+    expect(execTargetContainer(pod)).toBe('setup');
+  });
+
+  it('falls back to the first declared container without status', () => {
+    expect(execTargetContainer(kobj({ spec }))).toBe('app');
+    expect(execTargetContainer(kobj({}))).toBe('');
+  });
+
+  it('does not fall back when status has loaded without a running container', () => {
+    expect(
+      execTargetContainer(
+        kobj({
+          spec,
+          status: {
+            phase: 'Succeeded',
+            containerStatuses: [
+              { name: 'app', state: { terminated: {} } },
+              { name: 'sidecar', state: { terminated: {} } },
+            ],
+          },
+        }),
+      ),
+    ).toBe('');
+    expect(execTargetContainer(kobj({ spec, status: {} }))).toBe('');
   });
 });
 

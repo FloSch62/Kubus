@@ -1,15 +1,17 @@
-import Chip from '@mui/material/Chip';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import Tooltip from '@mui/material/Tooltip';
 import type { ContainerUsage, KubeObject } from '@kubus/shared';
 import { useMemo, useState } from 'react';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { SetImageDialog } from '../RowActions.js';
 import { useResourceList, useResourceMetrics } from '../../api/queries.js';
-import { containerResources, workloadReady } from '../../kube-display.js';
+import { containerResources, podContainerNames, runningContainerNames, workloadReady } from '../../kube-display.js';
+import { useDockStore, dockTabId } from '../../state/dock.js';
 import { showToast } from '../../state/toast.js';
 import { ReadyCounter } from '../ReadyCounter.js';
-import { ConditionChips, ConditionRows, KeyValueSection, MetadataSection, hasUnhealthyCondition } from './GenericDetail.js';
+import { ConditionRows, KeyValueSection, MetadataSection, hasUnhealthyCondition } from './GenericDetail.js';
+import { Fact, Facts } from './Facts.js';
+import { statusTextColor } from '../../theme.js';
 import { ContainerCards, type ContainerCardData } from './ContainerCards.js';
 import { PodMiniList } from './PodMiniList.js';
 import { Section } from './Section.js';
@@ -97,6 +99,19 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
     return totals;
   }, [metricsQuery.data, ctx, namespace, pods]);
 
+  // Which template containers are live somewhere, and in which pod — a shell
+  // has to land in a concrete pod, so the card offers one only when a pod is
+  // actually running that container.
+  const podByContainer = useMemo(() => {
+    const map = new Map<string, KubeObject>();
+    for (const pod of pods) {
+      for (const container of runningContainerNames(pod)) {
+        if (!map.has(container)) map.set(container, pod);
+      }
+    }
+    return map;
+  }, [pods]);
+
   const cards = useMemo(() => {
     const toCard = (c: TemplateContainer, kind?: 'init' | 'sidecar'): ContainerCardData => {
       const usage = containerUsage.get(c.name);
@@ -104,6 +119,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
         name: c.name,
         image: c.image,
         kind,
+        shellable: podByContainer.has(c.name),
         ports: (c.ports ?? []).map((p) => ({ port: p.containerPort, protocol: p.protocol, name: p.name })),
         resources: containerResources(c),
         usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
@@ -114,26 +130,101 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
       ...(spec?.template?.spec?.containers ?? []).map((c) => toCard(c)),
       ...(spec?.template?.spec?.initContainers ?? []).map((c) => toCard(c, c.restartPolicy === 'Always' ? 'sidecar' : 'init')),
     ];
-  }, [spec, containerUsage]);
+  }, [spec, containerUsage, podByContainer]);
+
+  // One container's logs across every pod of this Deployment — the picker
+  // still lists the rest, they just start unselected.
+  const addTab = useDockStore((s) => s.addTab);
+  const openContainerLogs = (container: string) => {
+    if (!pods.length) {
+      showToast('error', `No running pods for ${obj.metadata.name}`);
+      return;
+    }
+    addTab({
+      kind: 'logs',
+      id: dockTabId(),
+      title: `logs: ${obj.metadata.name}/${container}`,
+      ctx,
+      namespace: namespace ?? '',
+      pods: pods.map((pod) => pod.metadata.name),
+      sources: pods.map((pod) => ({ pod: pod.metadata.name, containers: podContainerNames(pod) })),
+      target: { kind: 'Deployment', name: obj.metadata.name },
+      container,
+      follow: true,
+    });
+  };
+
+  // Any pod running the container will do — the tab title names the one you
+  // landed in, and the Pods section below is there to pick a specific one.
+  const openContainerShell = (container: string) => {
+    const pod = podByContainer.get(container);
+    if (!pod) {
+      showToast('error', `No running pod for container ${container}`);
+      return;
+    }
+    addTab({
+      kind: 'terminal',
+      id: dockTabId(),
+      title: `sh: ${pod.metadata.name}/${container}`,
+      ctx,
+      namespace: namespace ?? '',
+      pod: pod.metadata.name,
+      container,
+    });
+  };
 
   const strategy = spec?.strategy?.type;
   const rolling = spec?.strategy?.rollingUpdate;
   const hasConditions = ((obj.status as { conditions?: unknown[] } | undefined)?.conditions?.length ?? 0) > 0;
+  const dstatus = obj.status as { updatedReplicas?: number; availableReplicas?: number; unavailableReplicas?: number } | undefined;
 
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
-      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
-        <Chip label={<>Ready <ReadyCounter value={workloadReady(obj)} /></>} variant="outlined" />
-        {strategy && (
-          <Tooltip title={rolling ? `maxUnavailable ${rolling.maxUnavailable ?? '-'} · maxSurge ${rolling.maxSurge ?? '-'}` : ''}>
-            <Chip label={`Strategy ${strategy}`} variant="outlined" />
-          </Tooltip>
-        )}
-        {spec?.paused && <Chip label="Paused" color="warning" size="small" />}
-        <ConditionChips obj={obj} goodWhen={deploymentGoodWhen} />
-      </Stack>
+      <Facts>
+        <Fact label="Ready">
+          <ReadyCounter value={workloadReady(obj)} />
+        </Fact>
+        <Fact label="Replicas">
+          {dstatus &&
+            [
+              dstatus.updatedReplicas !== undefined ? `${dstatus.updatedReplicas} updated` : undefined,
+              dstatus.availableReplicas !== undefined ? `${dstatus.availableReplicas} available` : undefined,
+              dstatus.unavailableReplicas ? `${dstatus.unavailableReplicas} unavailable` : undefined,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+        </Fact>
+        <Fact label="Strategy">
+          {strategy && (
+            <>
+              {strategy}
+              {rolling && (
+                <Box component="span" sx={{ color: 'text.secondary' }}>
+                  {` · max unavailable ${rolling.maxUnavailable ?? '-'} · max surge ${rolling.maxSurge ?? '-'}`}
+                </Box>
+              )}
+            </>
+          )}
+        </Fact>
+        <Fact label="Selector" mono>
+          {labelSelector}
+        </Fact>
+        <Fact label="Rollout">
+          {spec?.paused && (
+            <Box component="span" sx={{ fontWeight: 550, color: statusTextColor('warning') }}>
+              Paused
+            </Box>
+          )}
+        </Fact>
+      </Facts>
       <Section title="Containers" count={cards.length}>
-        <ContainerCards items={cards} onForwardPort={setForwardPort} onEditImage={setEditImageContainer} />
+        <ContainerCards
+          items={cards}
+          onLogs={openContainerLogs}
+          onShell={openContainerShell}
+          onForwardPort={setForwardPort}
+          onEditImage={setEditImageContainer}
+        />
       </Section>
       <Section title="Pods" count={pods.length}>
         <PodMiniList

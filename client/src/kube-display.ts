@@ -256,6 +256,26 @@ export function podContainerNames(pod: KubeObject): string[] {
   return [...(spec?.containers ?? []), ...(spec?.initContainers ?? [])].map((c) => c.name);
 }
 
+/** Containers of a pod with a live process — the ones exec can attach to. */
+export function runningContainerNames(pod: KubeObject): string[] {
+  const status = pod.status as
+    | { containerStatuses?: Array<{ name: string; state?: { running?: unknown } }>; initContainerStatuses?: Array<{ name: string; state?: { running?: unknown } }> }
+    | undefined;
+  return [...(status?.containerStatuses ?? []), ...(status?.initContainerStatuses ?? [])].filter((c) => c.state?.running).map((c) => c.name);
+}
+
+/**
+ * Container a pod-level shell should attach to: the first one actually
+ * running, since exec needs a live process — `containers[0]` may be the very
+ * container that is crashlooping. Falls back to the first declared container
+ * when no status is available yet.
+ */
+export function execTargetContainer(pod: KubeObject): string {
+  const running = runningContainerNames(pod)[0];
+  if (running) return running;
+  return pod.status === undefined ? (podContainerNames(pod)[0] ?? '') : '';
+}
+
 export interface DebugContainerInfo {
   name: string;
   image?: string;

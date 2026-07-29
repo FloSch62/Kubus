@@ -7,12 +7,12 @@ import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import type { KubeObject } from '@kubus/shared';
-import { AgeCell, formatAge } from '../AgeCell.js';
+import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
+import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
 
 export function KeyValueChips({ title, entries }: { title: string; entries: Record<string, string> | undefined }) {
@@ -88,40 +88,6 @@ export function hasUnhealthyCondition(obj: KubeObject, goodWhen?: (type: string)
   return objConditions(obj).some((c) => c.status !== (goodWhen?.(c.type) ?? 'True'));
 }
 
-/**
- * Compact one-chip-per-condition row; reason/message/age live in the
- * tooltip. Healthy conditions are subtle, unhealthy ones pop.
- */
-export function ConditionChips({ obj, goodWhen }: { obj: KubeObject; goodWhen?: (type: string) => 'True' | 'False' }) {
-  const conditions = objConditions(obj);
-  if (!conditions.length) return null;
-  return (
-    <>
-      {conditions.map((c) => {
-        const expected = goodWhen?.(c.type) ?? 'True';
-        const healthy = c.status === expected;
-        const unknown = c.status === 'Unknown';
-        const tip = [`${c.type}: ${c.status}`, c.reason, c.message, c.lastTransitionTime ? `for ${formatAge(c.lastTransitionTime)}` : undefined]
-          .filter(Boolean)
-          .join(' · ');
-        return (
-          <Tooltip key={c.type} title={tip}>
-            <Chip
-              // A red "Available" reads as a contradiction — spell out the
-              // status whenever the condition is off its healthy value.
-              label={healthy ? c.type : `${c.type}: ${c.status}`}
-              size="small"
-              variant="outlined"
-              color={unknown ? 'default' : healthy ? 'success' : 'error'}
-              sx={healthy && !unknown ? { color: 'text.secondary' } : undefined}
-            />
-          </Tooltip>
-        );
-      })}
-    </>
-  );
-}
-
 export function ConditionsTable({ obj, goodWhen, defaultOpen = true }: { obj: KubeObject; goodWhen?: (type: string) => 'True' | 'False'; defaultOpen?: boolean }) {
   const conditions = objConditions(obj);
   if (!conditions.length) return null;
@@ -173,21 +139,18 @@ export function ConditionRows({ conditions, goodWhen }: { conditions: Condition[
 export function MetadataSection({ obj, ctx, defaultOpen = true }: { obj: KubeObject; ctx: string; defaultOpen?: boolean }) {
   return (
     <Section title="Metadata" defaultOpen={defaultOpen}>
-      <Table size="small">
-        <TableBody>
-          <Row label="Name" value={obj.metadata.name} />
-          {obj.metadata.namespace && <Row label="Namespace" value={obj.metadata.namespace} />}
-          <Row label="Cluster" value={ctx} />
-          <Row label="Kind" value={`${obj.kind ?? ''} (${obj.apiVersion ?? ''})`} />
-          <TableRow>
-            <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>Created</TableCell>
-            <TableCell sx={{ border: 0 }}>
-              <AgeCell timestamp={obj.metadata.creationTimestamp} /> ago
-            </TableCell>
-          </TableRow>
-          <Row label="UID" value={obj.metadata.uid} />
-        </TableBody>
-      </Table>
+      <Facts>
+        <Fact label="Name">{obj.metadata.name}</Fact>
+        <Fact label="Namespace">{obj.metadata.namespace}</Fact>
+        <Fact label="Cluster">{ctx}</Fact>
+        <Fact label="Kind">{`${obj.kind ?? ''} (${obj.apiVersion ?? ''})`}</Fact>
+        <Fact label="Created">
+          <AgeCell timestamp={obj.metadata.creationTimestamp} /> ago
+        </Fact>
+        <Fact label="UID" mono>
+          {obj.metadata.uid}
+        </Fact>
+      </Facts>
     </Section>
   );
 }
@@ -204,11 +167,3 @@ export function GenericDetail({ obj, ctx, hideConditions, children }: { obj: Kub
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <TableRow>
-      <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{label}</TableCell>
-      <TableCell sx={{ border: 0, wordBreak: 'break-word' }}>{value}</TableCell>
-    </TableRow>
-  );
-}

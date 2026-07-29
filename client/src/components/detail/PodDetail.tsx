@@ -18,7 +18,8 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { ContainerUsage, KubeObject, PodEnvVar } from '@kubus/shared';
 import { gvkForKind } from '@kubus/shared';
-import { ConditionChips, KeyValueChips, KeyValueSection, MetadataSection } from './GenericDetail.js';
+import { ConditionsTable, KeyValueChips, KeyValueSection, MetadataSection } from './GenericDetail.js';
+import { Fact, FactLink, Facts } from './Facts.js';
 import { CopyValueButton } from '../CellCopy.js';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { PodProblems } from './PodProblems.js';
@@ -27,7 +28,7 @@ import { ContainerCards, type ContainerCardData } from './ContainerCards.js';
 import { ReadyCounter } from '../ReadyCounter.js';
 import { StatusChip } from '../StatusChip.js';
 import { AgeCell } from '../AgeCell.js';
-import { containerResources, podDebugContainers, podSummary } from '../../kube-display.js';
+import { containerResources, ownerReference, podContainerNames, podDebugContainers, podSummary } from '../../kube-display.js';
 import { usePodEnv, useResourceMetrics, useStopDebug } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
 import { showToast } from '../../state/toast.js';
@@ -100,6 +101,7 @@ function containerCard(c: ContainerSpec, st: ContainerStatus | undefined, usage:
     image: c.image,
     kind,
     state: reason ? (reason === 'running' ? 'Running' : reason === 'waiting' ? 'Waiting' : reason === 'terminated' ? 'Terminated' : reason) : undefined,
+    shellable: stateKey === 'running',
     stateMessage: stateKey && stateKey !== 'running' ? st!.state![stateKey]?.message : undefined,
     restarts: st?.restartCount,
     lastRestart: last ? { reason: last.reason, at: last.finishedAt } : undefined,
@@ -111,7 +113,9 @@ function containerCard(c: ContainerSpec, st: ContainerStatus | undefined, usage:
 
 export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const spec = obj.spec as PodSpec | undefined;
-  const status = obj.status as { phase?: string; podIP?: string; containerStatuses?: ContainerStatus[]; initContainerStatuses?: ContainerStatus[]; qosClass?: string } | undefined;
+  const status = obj.status as
+    | { phase?: string; podIP?: string; hostIP?: string; containerStatuses?: ContainerStatus[]; initContainerStatuses?: ContainerStatus[]; qosClass?: string }
+    | undefined;
   // Conditions on finished pods are stale (Ready=False is expected there).
   const terminal = status?.phase === 'Succeeded' || status?.phase === 'Failed';
   const summary = podSummary(obj);
@@ -134,6 +138,26 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
     if (!gvk) return;
     push({ ctx, group: gvk.group, version: gvk.version, plural: gvk.plural, kind, name, namespace: gvk.namespaced ? namespace : undefined });
   };
+  const owner = ownerReference(obj);
+  const ownerGvk = owner ? gvkForKind(owner.kind) : undefined;
+
+  // Per-container logs/shell: the pod-level actions cover every container at
+  // once, so these exist to isolate one of a multi-container pod.
+  const addTab = useDockStore((s) => s.addTab);
+  const openContainerLogs = (container: string) =>
+    addTab({
+      kind: 'logs',
+      id: dockTabId(),
+      title: `logs: ${obj.metadata.name}/${container}`,
+      ctx,
+      namespace: namespace ?? '',
+      pods: [obj.metadata.name],
+      sources: [{ pod: obj.metadata.name, containers: podContainerNames(obj) }],
+      container,
+      follow: true,
+    });
+  const openContainerShell = (container: string) =>
+    addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${obj.metadata.name}/${container}`, ctx, namespace: namespace ?? '', pod: obj.metadata.name, container });
 
   // Restartable init containers are sidecars: they run alongside the app
   // containers, so they card with them; one-shot inits get their own section.
@@ -147,27 +171,73 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
-      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
-        <StatusChip status={summary.status} />
-        <Chip label={<>Ready <ReadyCounter value={summary.ready} /></>} variant="outlined" />
-        <Chip label={`Restarts ${summary.restarts}`} variant="outlined" />
-        {status?.podIP && <Chip label={`IP ${status.podIP}`} variant="outlined" />}
-        {spec?.nodeName && (
-          <Chip label={`Node ${spec.nodeName}`} variant="outlined" clickable onClick={() => openRelated('Node', spec.nodeName!)} />
-        )}
-        {status?.qosClass && <Chip label={`QoS ${status.qosClass}`} variant="outlined" />}
-        {spec?.serviceAccountName && (
-          <Chip label={`SA ${spec.serviceAccountName}`} variant="outlined" clickable onClick={() => openRelated('ServiceAccount', spec.serviceAccountName!)} />
-        )}
-        {!terminal && <ConditionChips obj={obj} />}
-      </Stack>
+      <Facts>
+        <Fact label="Status">
+          <StatusChip status={summary.status} />
+        </Fact>
+        <Fact label="Ready">
+          <ReadyCounter value={summary.ready} />
+        </Fact>
+        <Fact label="Restarts">{summary.restarts}</Fact>
+        <Fact label="Node">
+          {spec?.nodeName && (
+            <FactLink title={`Open node ${spec.nodeName}`} onClick={() => openRelated('Node', spec.nodeName!)}>
+              {spec.nodeName}
+            </FactLink>
+          )}
+        </Fact>
+        <Fact label="Pod IP" mono>
+          {status?.podIP}
+        </Fact>
+        <Fact label="Host IP" mono>
+          {status?.hostIP}
+        </Fact>
+        <Fact label="QoS class" hint="Guaranteed: all containers have limits = requests. Burstable: some requests set. BestEffort: none.">
+          {status?.qosClass}
+        </Fact>
+        <Fact label="Service account">
+          {spec?.serviceAccountName && (
+            <FactLink title={`Open ServiceAccount ${spec.serviceAccountName}`} onClick={() => openRelated('ServiceAccount', spec.serviceAccountName!)}>
+              {spec.serviceAccountName}
+            </FactLink>
+          )}
+        </Fact>
+        <Fact label="Controlled by">
+          {owner &&
+            (ownerGvk ? (
+              <FactLink
+                title={`Open ${owner.kind} ${owner.name}`}
+                onClick={() =>
+                  push({
+                    ctx,
+                    group: ownerGvk.group,
+                    version: ownerGvk.version,
+                    plural: ownerGvk.plural,
+                    kind: owner.kind,
+                    name: owner.name,
+                    namespace: ownerGvk.namespaced ? namespace : undefined,
+                  })
+                }
+              >
+                {owner.kind}/{owner.name}
+              </FactLink>
+            ) : (
+              `${owner.kind}/${owner.name}`
+            ))}
+        </Fact>
+      </Facts>
       <PodProblems obj={obj} ctx={ctx} />
       <Section title="Containers" count={mainCards.length}>
-        <ContainerCards items={mainCards} onForwardPort={terminal ? undefined : setForwardPort} />
+        <ContainerCards
+          items={mainCards}
+          onLogs={openContainerLogs}
+          onShell={terminal ? undefined : openContainerShell}
+          onForwardPort={terminal ? undefined : setForwardPort}
+        />
       </Section>
       {initCards.length > 0 && (
         <Section title="Init containers" count={initCards.length}>
-          <ContainerCards items={initCards} />
+          <ContainerCards items={initCards} onLogs={openContainerLogs} />
         </Section>
       )}
       <DebugContainersSection obj={obj} ctx={ctx} />
@@ -175,6 +245,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       {namespace && <EnvSection ctx={ctx} namespace={namespace} pod={obj.metadata.name} onOpenRef={openRelated} />}
       <VolumesSection spec={spec} onOpenRef={openRelated} />
       <SchedulingSection spec={spec} />
+      {!terminal && <ConditionsTable obj={obj} defaultOpen={false} />}
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
       <MetadataSection obj={obj} ctx={ctx} defaultOpen={false} />

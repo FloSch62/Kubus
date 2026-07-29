@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -13,6 +12,7 @@ import Typography from '@mui/material/Typography';
 import CableIcon from '@mui/icons-material/Cable';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, KeyValueSection } from './GenericDetail.js';
+import { Fact, Facts } from './Facts.js';
 import { PodMiniList } from './PodMiniList.js';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { Section } from './Section.js';
@@ -22,6 +22,9 @@ interface ServiceSpec {
   type?: string;
   clusterIP?: string;
   externalIPs?: string[];
+  externalName?: string;
+  sessionAffinity?: string;
+  externalTrafficPolicy?: string;
   selector?: Record<string, string>;
   ports?: Array<{ name?: string; port: number; targetPort?: number | string; nodePort?: number; protocol?: string }>;
 }
@@ -48,16 +51,25 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <Box>
-      <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
-        {spec.type && <Chip label={spec.type} variant="outlined" color="primary" />}
-        {spec.clusterIP && <Chip label={`ClusterIP ${spec.clusterIP}`} variant="outlined" />}
-        {(spec.externalIPs ?? []).map((ip) => (
-          <Chip key={ip} label={`External ${ip}`} variant="outlined" />
-        ))}
-        {lbAddresses.map((addr) => (
-          <Chip key={addr} label={`LB ${addr}`} variant="outlined" />
-        ))}
-      </Stack>
+      <Box sx={{ px: 2, pt: 2 }}>
+        <Facts>
+          <Fact label="Type">{spec.type}</Fact>
+          <Fact label="Cluster IP" mono>
+            {spec.clusterIP}
+          </Fact>
+          <Fact label="External name" mono>
+            {spec.externalName}
+          </Fact>
+          <Fact label="External IPs" mono>
+            {(spec.externalIPs ?? []).join(', ')}
+          </Fact>
+          <Fact label="Load balancer" mono>
+            {lbAddresses.join(', ')}
+          </Fact>
+          <Fact label="Session affinity">{spec.sessionAffinity !== 'None' ? spec.sessionAffinity : undefined}</Fact>
+          <Fact label="Traffic policy">{spec.externalTrafficPolicy}</Fact>
+        </Facts>
+      </Box>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
         {!!spec.ports?.length && (
           <Section title="Ports" count={spec.ports.length}>

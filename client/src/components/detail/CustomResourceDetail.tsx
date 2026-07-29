@@ -1,10 +1,5 @@
 import { useMemo } from 'react';
 import Stack from '@mui/material/Stack';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableRow from '@mui/material/TableRow';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { KubeObject } from '@kubus/shared';
 import { evalPrinterColumnPath } from '@kubus/shared';
@@ -12,6 +7,7 @@ import { RelativeTimeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { statusLikeName } from '../../kube-display.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
+import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
 import { crdVersions } from './CrdDetail.js';
 
@@ -74,26 +70,13 @@ export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObje
     <Stack spacing={2} sx={{ p: 2 }}>
       {rows.length > 0 && (
         <Section title="Status">
-          <Table size="small">
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.label}>
-                  <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>
-                    {row.description ? (
-                      <Tooltip title={row.description}>
-                        <span>{row.label}</span>
-                      </Tooltip>
-                    ) : (
-                      row.label
-                    )}
-                  </TableCell>
-                  <TableCell sx={{ border: 0, wordBreak: 'break-all' }}>
-                    <StatusRowValue row={row} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <Facts>
+            {rows.map((row) => (
+              <Fact key={row.label} label={row.label} hint={row.description}>
+                <StatusRowValue row={row} />
+              </Fact>
+            ))}
+          </Facts>
         </Section>
       )}
       <ConditionsTable obj={obj} />

@@ -14,7 +14,9 @@ test('pod detail drawer opens from a row click and deep-links via ?sel=', async 
   );
 
   // Live pod facts from the cluster.
-  await expect(page.getByText('Ready 1/1')).toBeVisible();
+  const readyLabel = page.locator('.MuiDrawer-paper').getByText('Ready', { exact: true }).first();
+  await expect(readyLabel).toBeVisible();
+  await expect(readyLabel.locator('xpath=following-sibling::*[1]')).toHaveText('1/1');
   await expect(page.getByText('busybox:1.37')).toBeVisible();
 });
 

@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import {
+  DetailQuickActions,
   isLogTargetKind,
   RowActionMenu,
   RowActions,
@@ -207,10 +208,14 @@ describe('row action helpers', () => {
 });
 
 describe('pod actions', () => {
-  const pod = target('Pod', {
-    containers: [{ name: 'app', ports: [{ containerPort: 8080, name: 'http' }] }],
-    initContainers: [{ name: 'setup' }],
-  });
+  const pod = target(
+    'Pod',
+    {
+      containers: [{ name: 'app', ports: [{ containerPort: 8080, name: 'http' }] }],
+      initContainers: [{ name: 'setup' }],
+    },
+    { status: { containerStatuses: [{ name: 'app', state: { running: {} } }] } },
+  );
 
   it('opens logs, a shell, files, debug, and port-forward flows', async () => {
     let view = clickMenuAction(pod, 'Logs');
@@ -243,6 +248,59 @@ describe('pod actions', () => {
     fireEvent.click(screen.getByLabelText('Open in browser when started'));
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(queryMocks.startPort.mutate).toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('hides shell actions when status has loaded without a running container', () => {
+    const completed = target(
+      'Pod',
+      { containers: [{ name: 'app' }] },
+      { status: { phase: 'Succeeded', containerStatuses: [{ name: 'app', state: { terminated: {} } }] } },
+    );
+
+    let view = render(
+      <MemoryRouter>
+        <DetailQuickActions target={completed} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('button', { name: 'Shell' })).not.toBeInTheDocument();
+    view.unmount();
+
+    view = renderMenu(completed);
+    expect(screen.queryByRole('menuitem', { name: 'Shell' })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('keeps shell available before status arrives and targets a running sidecar once it does', () => {
+    const pendingStatus = target('Pod', { containers: [{ name: 'app' }] }, { status: undefined });
+    let view = render(
+      <MemoryRouter>
+        <DetailQuickActions target={pendingStatus} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Shell' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'terminal', container: 'app' });
+    view.unmount();
+
+    const sidecarRunning = target(
+      'Pod',
+      { containers: [{ name: 'app' }, { name: 'sidecar' }] },
+      {
+        status: {
+          containerStatuses: [
+            { name: 'app', state: { waiting: { reason: 'CrashLoopBackOff' } } },
+            { name: 'sidecar', state: { running: {} } },
+          ],
+        },
+      },
+    );
+    view = render(
+      <MemoryRouter>
+        <DetailQuickActions target={sidecarRunning} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Shell' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'terminal', container: 'sidecar' });
     view.unmount();
   });
 
