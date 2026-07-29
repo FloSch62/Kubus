@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clampDetailWidth } from '../../../client/src/state/detail';
-import { clampDockHeight } from '../../../client/src/state/dock';
+import { clampDockHeight, useDockStore, type DockTab } from '../../../client/src/state/dock';
 import { forwardPrefKey } from '../../../client/src/state/portforward-prefs';
 import { errorDetails } from '../../../client/src/state/toast';
 import { namespaceVisible } from '../../../client/src/state/clusters';
@@ -35,6 +35,55 @@ describe('clampDockHeight', () => {
     expect(clampDockHeight(10)).toBe(160);
     expect(clampDockHeight(300)).toBe(300);
     expect(clampDockHeight(9999)).toBe(600);
+  });
+});
+
+describe('useDockStore terminal focus requests', () => {
+  const terminal: DockTab = {
+    kind: 'terminal',
+    id: 'terminal',
+    title: 'shell',
+    ctx: 'kind-a',
+    namespace: 'default',
+    pod: 'web',
+    container: 'web',
+  };
+  const logs: DockTab = {
+    kind: 'logs',
+    id: 'logs',
+    title: 'logs',
+    ctx: 'kind-a',
+    namespace: 'default',
+    pods: ['web'],
+  };
+
+  beforeEach(() => {
+    useDockStore.setState({
+      tabs: [terminal, logs],
+      activeId: logs.id,
+      open: false,
+      maximized: false,
+      terminalFocusRequest: undefined,
+    });
+  });
+
+  it('opens, activates, and issues a fresh request for an existing terminal', () => {
+    useDockStore.getState().requestTerminalFocus(terminal.id);
+    const first = useDockStore.getState();
+    expect(first.open).toBe(true);
+    expect(first.activeId).toBe(terminal.id);
+    expect(first.terminalFocusRequest).toEqual({ tabId: terminal.id, sequence: 1 });
+
+    first.setOpen(false);
+    useDockStore.getState().requestTerminalFocus(terminal.id);
+    expect(useDockStore.getState().terminalFocusRequest).toEqual({ tabId: terminal.id, sequence: 2 });
+  });
+
+  it('ignores log tabs and unknown ids', () => {
+    const before = useDockStore.getState();
+    before.requestTerminalFocus(logs.id);
+    before.requestTerminalFocus('missing');
+    expect(useDockStore.getState()).toBe(before);
   });
 });
 

@@ -6,7 +6,7 @@ const TerminalPaneImpl = lazy(() => import('./TerminalPaneImpl.js'));
 
 const terminalLoading = <Box sx={{ height: '100%', bgcolor: '#16161e' }} />;
 
-export function TerminalPane(props: { tab: TerminalTab | NodeShellTab; active: boolean }) {
+export function TerminalPane(props: { tab: TerminalTab | NodeShellTab; active: boolean; focusRequest: number }) {
   return (
     <Suspense fallback={terminalLoading}>
       <TerminalPaneImpl {...props} />

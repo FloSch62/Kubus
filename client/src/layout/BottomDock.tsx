@@ -24,10 +24,13 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
   const setHeight = useDockStore((s) => s.setHeight);
   const maximized = useDockStore((s) => s.maximized);
   const setMaximized = useDockStore((s) => s.setMaximized);
+  const terminalFocusRequest = useDockStore((s) => s.terminalFocusRequest);
 
   // Escape restores a maximized dock via the global dismiss chain in
   // GlobalShortcuts — guarded there so a focused terminal keeps its Escape.
-  if (!open || tabs.length === 0) return null;
+  // Keep existing tabs mounted while collapsed. In particular, an exec
+  // terminal's WebSocket and remote shell must survive hiding the dock.
+  if (tabs.length === 0) return null;
 
   // Resize by writing the container height directly to the DOM (one write per
   // frame), keeping React out of the drag loop; the store is committed once on
@@ -63,7 +66,18 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
   };
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+    <Box
+      className="kubus-bottom-dock"
+      sx={{
+        height: '100%',
+        display: 'flex',
+        visibility: open ? 'visible' : 'hidden',
+        flexDirection: 'column',
+        borderTop: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+      }}
+    >
       {!maximized && (
         <Box
           onMouseDown={startResize}
@@ -129,7 +143,15 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {tabs.map((tab) => (
           <Box key={tab.id} sx={{ position: 'absolute', inset: 0, display: tab.id === activeId ? 'block' : 'none' }}>
-            {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalPane tab={tab} active={tab.id === activeId} /> : <LogViewer tab={tab} />}
+            {tab.kind === 'terminal' || tab.kind === 'node-shell' ? (
+              <TerminalPane
+                tab={tab}
+                active={open && tab.id === activeId}
+                focusRequest={terminalFocusRequest?.tabId === tab.id ? terminalFocusRequest.sequence : 0}
+              />
+            ) : open ? (
+              <LogViewer tab={tab} />
+            ) : null}
           </Box>
         ))}
       </Box>
