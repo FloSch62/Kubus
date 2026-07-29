@@ -258,6 +258,7 @@ export function DetailQuickActions({ target }: { target: RowActionTarget }) {
   const canViewLogs = isLogTargetKind(actionKind ?? '');
   const canForward = isForwardableKind(actionKind);
   const isPod = actionKind === 'Pod';
+  const podExecContainer = isPod ? execTargetContainer(obj) : '';
   const isNode = actionKind === 'Node';
   const isJob = actionKind === 'Job';
   const isCronJob = actionKind === 'CronJob';
@@ -275,13 +276,13 @@ export function DetailQuickActions({ target }: { target: RowActionTarget }) {
 
   return (
     <Stack direction="row" sx={{ px: 2, pt: 1.25, pb: 1, gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
-      {isPod && (
+      {podExecContainer && (
         <QuickActionButton
           emphasis
           icon={<TerminalIcon />}
           label="Shell"
           onClick={() => {
-            addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: execTargetContainer(obj) });
+            addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: podExecContainer });
           }}
         />
       )}
@@ -417,6 +418,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const restartable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'DaemonSet';
   const isReplicaSet = actionKind === 'ReplicaSet';
   const isPod = actionKind === 'Pod';
+  const podExecContainer = isPod ? execTargetContainer(obj) : '';
   const isNode = actionKind === 'Node';
   const isCronJob = actionKind === 'CronJob';
   const isJob = actionKind === 'Job';
@@ -462,10 +464,10 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ListItemText>Logs</ListItemText>
           </MenuItem>
         )}
-        {isPod && (
+        {podExecContainer && (
           <MenuItem
             onClick={() => {
-              addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: execTargetContainer(obj) });
+              addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: podExecContainer });
               close();
             }}
           >

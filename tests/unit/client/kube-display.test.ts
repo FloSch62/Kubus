@@ -166,6 +166,24 @@ describe('execTargetContainer', () => {
     expect(execTargetContainer(kobj({ spec }))).toBe('app');
     expect(execTargetContainer(kobj({}))).toBe('');
   });
+
+  it('does not fall back when status has loaded without a running container', () => {
+    expect(
+      execTargetContainer(
+        kobj({
+          spec,
+          status: {
+            phase: 'Succeeded',
+            containerStatuses: [
+              { name: 'app', state: { terminated: {} } },
+              { name: 'sidecar', state: { terminated: {} } },
+            ],
+          },
+        }),
+      ),
+    ).toBe('');
+    expect(execTargetContainer(kobj({ spec, status: {} }))).toBe('');
+  });
 });
 
 describe('workloadReady', () => {

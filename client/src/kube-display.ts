@@ -271,7 +271,9 @@ export function runningContainerNames(pod: KubeObject): string[] {
  * when no status is available yet.
  */
 export function execTargetContainer(pod: KubeObject): string {
-  return runningContainerNames(pod)[0] ?? podContainerNames(pod)[0] ?? '';
+  const running = runningContainerNames(pod)[0];
+  if (running) return running;
+  return pod.status === undefined ? (podContainerNames(pod)[0] ?? '') : '';
 }
 
 export interface DebugContainerInfo {
