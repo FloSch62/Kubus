@@ -255,8 +255,8 @@ describe('PodDetail', () => {
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pending').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByText('Node node-a'));
-    fireEvent.click(screen.getByText('SA workload-sa'));
+    fireEvent.click(screen.getByRole('button', { name: 'node-a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workload-sa' }));
     fireEvent.click(screen.getByRole('button', { name: 'configmap/app-config → feature' }));
     fireEvent.click(screen.getByRole('button', { name: 'persistentVolumeClaim/data-pvc' }));
     expect(useDetailStore.getState().stack.map((selection) => selection.kind)).toEqual([
@@ -279,6 +279,31 @@ describe('PodDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close forward' }));
     expect(screen.queryByText('Forward 8080')).not.toBeInTheDocument();
   }, 15_000);
+
+  it('opens logs and a shell scoped to a single container', () => {
+    render(<PodDetail obj={richPod()} ctx="dev" />);
+
+    // Only the running container can be exec'd into; the crashlooping one and
+    // the finished init container still expose their logs.
+    expect(screen.getByRole('button', { name: 'Shell into container app' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shell into container worker' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shell into container migrate' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Logs for container worker' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({
+      kind: 'logs',
+      title: 'logs: web-0/worker',
+      namespace: 'team-a',
+      pods: ['web-0'],
+      container: 'worker',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Logs for container migrate' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'logs', container: 'migrate' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Shell into container app' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'terminal', pod: 'web-0', container: 'app' });
+  });
 
   it('handles unavailable metrics, loading and empty environment data, and stop failures', () => {
     queries.metrics = new Map([['dev', { available: false, items: [] }]]);

@@ -1,5 +1,4 @@
 import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -8,6 +7,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, ConditionsTable, hasUnhealthyCondition } from './GenericDetail.js';
+import { Fact, Facts } from './Facts.js';
 import { PodMiniList } from './PodMiniList.js';
 import { Section } from './Section.js';
 import { CopyValueButton } from '../CellCopy.js';
@@ -44,35 +44,36 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <Box>
-      <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
-        <StatusChip status={nodeStatus(obj)} />
-        {roles && <Chip label={roles} variant="outlined" />}
-        {status.nodeInfo?.kubeletVersion && <Chip label={status.nodeInfo.kubeletVersion} variant="outlined" />}
-        {status.nodeInfo?.osImage && <Chip label={status.nodeInfo.osImage} variant="outlined" />}
-        {status.nodeInfo?.architecture && <Chip label={status.nodeInfo.architecture} variant="outlined" />}
-        {status.nodeInfo?.containerRuntimeVersion && <Chip label={status.nodeInfo.containerRuntimeVersion} variant="outlined" />}
-      </Stack>
+      <Box sx={{ px: 2, pt: 2 }}>
+        <Facts>
+          <Fact label="Status">
+            <StatusChip status={nodeStatus(obj)} />
+          </Fact>
+          <Fact label="Roles">{roles}</Fact>
+          <Fact label="Kubelet">{status.nodeInfo?.kubeletVersion}</Fact>
+          <Fact label="OS">{status.nodeInfo?.osImage}</Fact>
+          <Fact label="Architecture">{status.nodeInfo?.architecture}</Fact>
+          <Fact label="Runtime">{status.nodeInfo?.containerRuntimeVersion}</Fact>
+          <Fact label="Kernel">{status.nodeInfo?.kernelVersion}</Fact>
+        </Facts>
+      </Box>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
         {(!!status.addresses?.length || providerID) && (
           <Section title="Addresses">
-            <Table size="small">
-              <TableBody>
-                {(status.addresses ?? []).map((a) => (
-                  <TableRow key={`${a.type}:${a.address}`}>
-                    <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>{a.type}</TableCell>
-                    <TableCell sx={{ border: 0 }}>{a.address}</TableCell>
-                  </TableRow>
-                ))}
+            <Facts>
+              {(status.addresses ?? []).map((a) => (
+                <Fact key={`${a.type}:${a.address}`} label={a.type}>
+                  {a.address}
+                </Fact>
+              ))}
+              <Fact label="Provider ID" mono>
                 {providerID && (
-                  <TableRow>
-                    <TableCell sx={{ width: 140, color: 'text.secondary', border: 0 }}>Provider ID</TableCell>
-                    <TableCell sx={{ border: 0, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-word' }}>
-                      {providerID} <CopyValueButton text={providerID} label="Copy provider ID" />
-                    </TableCell>
-                  </TableRow>
+                  <>
+                    {providerID} <CopyValueButton text={providerID} label="Copy provider ID" />
+                  </>
                 )}
-              </TableBody>
-            </Table>
+              </Fact>
+            </Facts>
           </Section>
         )}
         {resourceKeys.length > 0 && (

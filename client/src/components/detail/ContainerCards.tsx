@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
@@ -5,6 +6,8 @@ import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import SubjectIcon from '@mui/icons-material/Subject';
+import TerminalIcon from '@mui/icons-material/Terminal';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { UsageMeter } from '../UsageMeter.js';
@@ -19,6 +22,12 @@ export interface ContainerCardData {
   kind?: 'init' | 'sidecar';
   /** StatusChip label, e.g. Running / Completed / CrashLoopBackOff. */
   state?: string;
+  /**
+   * A live process exists for `onShell` to attach to. Pods derive it from the
+   * container's own state; workload templates from whether any of their pods
+   * currently runs this container.
+   */
+  shellable?: boolean;
   /** Why the container is in `state` (waiting/terminated message). */
   stateMessage?: string;
   restarts?: number;
@@ -30,40 +39,70 @@ export interface ContainerCardData {
   podCount?: number;
 }
 
-/** Card grid for a pod's (or workload template's) containers. */
-export function ContainerCards({
-  items,
-  onForwardPort,
-  onEditImage,
-}: {
-  items: ContainerCardData[];
+export interface ContainerActions {
+  /** Stream this container's logs. */
+  onLogs?: (container: string) => void;
+  /** Open a shell in this container (pods only — a template has no process). */
+  onShell?: (container: string) => void;
   onForwardPort?: (port: number) => void;
   onEditImage?: (container: string) => void;
-}) {
+}
+
+/** Card grid for a pod's (or workload template's) containers. */
+export function ContainerCards({ items, ...actions }: { items: ContainerCardData[] } & ContainerActions) {
   if (!items.length) return null;
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 1.5 }}>
       {items.map((c) => (
-        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} onForwardPort={onForwardPort} onEditImage={onEditImage} />
+        <ContainerCard key={`${c.kind ?? 'app'}:${c.name}`} c={c} {...actions} />
       ))}
     </Box>
   );
 }
 
-function ContainerCard({ c, onForwardPort, onEditImage }: { c: ContainerCardData; onForwardPort?: (port: number) => void; onEditImage?: (container: string) => void }) {
+/** Small square action button sized to sit inline with the container name. */
+function CardAction({ title, label, onClick, children }: { title: string; label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <Tooltip title={title}>
+      <IconButton
+        size="small"
+        aria-label={label}
+        onClick={onClick}
+        sx={{ p: 0.375, flexShrink: 0, color: 'text.secondary', '&:hover': { color: 'text.primary' }, '& svg': { fontSize: 15 } }}
+      >
+        {children}
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function ContainerCard({ c, onLogs, onShell, onForwardPort, onEditImage }: { c: ContainerCardData } & ContainerActions) {
   const showRestarts = (c.restarts ?? 0) > 0 || c.lastRestart;
+  // exec needs a live process, so only a running container gets a shell —
+  // a crashlooping one still gets logs, which is where its output is.
+  const shellable = onShell && c.shellable;
   return (
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5, minWidth: 0 }}>
-      <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+      <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5, minWidth: 0 }}>
         <Typography variant="subtitle2" noWrap title={c.name} sx={{ minWidth: 0 }}>
           {c.name}
         </Typography>
         {c.kind && <Chip label={c.kind} sx={{ height: 16, fontSize: 10, flexShrink: 0 }} />}
         <Box sx={{ flex: 1 }} />
         {c.state && (
-          <Box sx={{ flexShrink: 0 }}>
+          <Box sx={{ flexShrink: 0, mr: 0.25 }}>
             <StatusChip status={c.state} />
           </Box>
+        )}
+        {onLogs && (
+          <CardAction title={`Logs for ${c.name}`} label={`Logs for container ${c.name}`} onClick={() => onLogs(c.name)}>
+            <SubjectIcon />
+          </CardAction>
+        )}
+        {shellable && (
+          <CardAction title={`Shell into ${c.name}`} label={`Shell into container ${c.name}`} onClick={() => onShell(c.name)}>
+            <TerminalIcon />
+          </CardAction>
         )}
       </Stack>
       {c.image && (

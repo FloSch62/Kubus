@@ -1,25 +1,31 @@
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { KubeObject, TlsCertInfo } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
+import { DataKeyRows } from './ConfigMapDetail.js';
+import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
 import { useSecretTls } from '../../api/queries.js';
+import { statusTextColor } from '../../theme.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CN_RE = /(?:^|\n|,\s*)CN=([^\n,]+)/;
 const NEWLINE_RE = /\n/g;
 
-function expiryChip(cert: TlsCertInfo) {
+function CertExpiry({ cert }: { cert: TlsCertInfo }) {
   const expiresAt = Date.parse(cert.notAfter);
   const daysLeft = Math.floor((expiresAt - Date.now()) / DAY_MS);
-  if (daysLeft < 0) return <Chip label={`Expired ${-daysLeft}d ago`} color="error" />;
-  if (daysLeft < 30) return <Chip label={`Expires in ${daysLeft}d`} color="warning" />;
-  return <Chip label={`Expires in ${daysLeft}d`} color="success" variant="outlined" />;
+  const color = daysLeft < 0 ? 'error' : daysLeft < 30 ? 'warning' : 'success';
+  const text = daysLeft < 0 ? `Expired ${-daysLeft}d ago` : `Expires in ${daysLeft}d`;
+  return (
+    <Typography component="span" variant="caption" sx={{ fontWeight: 550, color: statusTextColor(color), whiteSpace: 'nowrap' }}>
+      {text}
+    </Typography>
+  );
 }
 
 /** Extract the CN from an X.509 subject/issuer string ("CN=foo\nO=bar"). */
@@ -35,18 +41,25 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <Box>
-      <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
-        {typeof obj.type === 'string' && <Chip label={obj.type} variant="outlined" color="primary" />}
-        <Chip label={`${keys.length} key${keys.length === 1 ? '' : 's'}`} variant="outlined" />
-      </Stack>
+      <Box sx={{ px: 2, pt: 2 }}>
+        <Facts>
+          <Fact label="Type" mono>
+            {typeof obj.type === 'string' ? obj.type : undefined}
+          </Fact>
+          <Fact label="Keys">{keys.length}</Fact>
+          <Fact label="Immutable" hint="Immutable Secrets cannot be edited — only replaced.">
+            {obj.immutable === true && (
+              <Box component="span" sx={{ fontWeight: 550, color: statusTextColor('warning') }}>
+                Yes
+              </Box>
+            )}
+          </Fact>
+        </Facts>
+      </Box>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
         {keys.length > 0 && (
           <Section title="Data keys" count={keys.length}>
-            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-              {keys.map((k) => (
-                <Chip key={k} label={k} variant="outlined" />
-              ))}
-            </Stack>
+            <DataKeyRows rows={keys.map((k) => ({ key: k }))} />
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
               Values are redacted — reveal, copy or edit them per key in the Data tab.
             </Typography>
@@ -56,34 +69,28 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           (tls.data?.certificates ?? []).map((cert, i) => (
             <Card key={`${cert.source ?? ''}:${cert.serialNumber || i}`} variant="outlined">
               <CardContent sx={{ '&:last-child': { pb: 2 } }}>
-                <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Stack direction="row" sx={{ mb: 1, alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
                   <Typography variant="subtitle2">{commonName(cert.subject)}</Typography>
-                  {expiryChip(cert)}
-                  {cert.isCA && <Chip label="CA" variant="outlined" />}
-                  {cert.selfSigned && <Chip label="self-signed" variant="outlined" />}
-                  {cert.source && cert.source !== 'tls.crt' && <Chip label={cert.source} variant="outlined" color="secondary" />}
+                  <CertExpiry cert={cert} />
+                  {(cert.isCA || cert.selfSigned || (cert.source && cert.source !== 'tls.crt')) && (
+                    <Typography variant="caption" color="text.secondary">
+                      {[cert.isCA ? 'CA' : undefined, cert.selfSigned ? 'self-signed' : undefined, cert.source !== 'tls.crt' ? cert.source : undefined]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Typography>
+                  )}
                 </Stack>
-                <Typography variant="body2" color="text.secondary">
-                  Issuer: {commonName(cert.issuer)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Valid: {new Date(cert.notBefore).toLocaleDateString()} → {new Date(cert.notAfter).toLocaleDateString()}
-                </Typography>
-                {cert.publicKeyAlgorithm && (
-                  <Typography variant="body2" color="text.secondary">
-                    Algorithm: {cert.publicKeyAlgorithm}
-                  </Typography>
-                )}
-                <Typography variant="body2" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-                  Serial: {cert.serialNumber}
-                </Typography>
-                {cert.sans.length > 0 && (
-                  <Stack direction="row" sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
-                    {cert.sans.map((san) => (
-                      <Chip key={san} label={san} variant="outlined" sx={{ maxWidth: 360 }} title={san} />
-                    ))}
-                  </Stack>
-                )}
+                <Facts>
+                  <Fact label="Issuer">{commonName(cert.issuer)}</Fact>
+                  <Fact label="Valid">{`${new Date(cert.notBefore).toLocaleDateString()} → ${new Date(cert.notAfter).toLocaleDateString()}`}</Fact>
+                  <Fact label="Algorithm">{cert.publicKeyAlgorithm}</Fact>
+                  <Fact label="Serial" mono>
+                    {cert.serialNumber}
+                  </Fact>
+                  <Fact label="SANs" mono>
+                    {cert.sans.length > 0 ? cert.sans.join(', ') : undefined}
+                  </Fact>
+                </Facts>
               </CardContent>
             </Card>
           ))}

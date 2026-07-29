@@ -112,8 +112,7 @@ vi.mock('../../../client/src/components/detail/RolloutHistory.js', () => ({ Roll
 vi.mock('../../../client/src/components/MetricsChart.js', () => ({ MetricsChart: ({ kind, name }: { kind: string; name: string }) => <div>Metrics {kind} {name}</div> }));
 vi.mock('../../../client/src/components/TopologyGraph.js', () => ({ TopologyGraph: ({ focus }: { focus: { name: string } }) => <div>Topology {focus.name}</div> }));
 vi.mock('../../../client/src/components/RowActions.js', () => ({
-  RowLogsButton: ({ target }: { target: { obj: KubeObject } }) => <button>Logs {target.obj.metadata.name}</button>,
-  RowActions: ({ target }: { target: { obj: KubeObject } }) => <button>Actions {target.obj.metadata.name}</button>,
+  DetailQuickActions: ({ target }: { target: { obj: KubeObject } }) => <button>Quick actions {target.obj.metadata.name}</button>,
 }));
 vi.mock('../../../client/src/components/AgeCell.js', () => ({ AgeCell: ({ timestamp }: { timestamp?: string }) => <span>{timestamp ? 'age' : 'unknown age'}</span> }));
 vi.mock('../../../client/src/components/truncation.js', () => ({ TruncationTooltip: ({ children }: { children: ReactNode }) => <>{children}</> }));

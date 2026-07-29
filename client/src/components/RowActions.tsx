@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
+import { alpha } from '@mui/material/styles';
 import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
@@ -72,7 +74,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
 import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
-import { podContainerNames } from '../kube-display.js';
+import { execTargetContainer, podContainerNames } from '../kube-display.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
@@ -157,6 +159,202 @@ export function RowLogsButton({ target }: { target: RowActionTarget }) {
         </IconButton>
       </span>
     </Tooltip>
+  );
+}
+
+function NodeShellConfirmDialog({
+  open,
+  name,
+  isProtected,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  name: string;
+  isProtected: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ConfirmDialog
+      open={open}
+      title={`Node shell — ${name}`}
+      message={
+        <>
+          This starts a <b>privileged pod</b> on <b>{name}</b> (host PID/network/IPC) and opens a root shell on the node via nsenter.
+          The pod is deleted when the terminal closes.
+        </>
+      }
+      confirmLabel="Open shell"
+      danger
+      confirmText={isProtected ? name : undefined}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
+/** Soft-tonal labeled button for the detail panel's quick-action bar. */
+function QuickActionButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  emphasis,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  emphasis?: boolean;
+}) {
+  return (
+    <Button
+      size="small"
+      startIcon={icon}
+      disabled={disabled}
+      onClick={onClick}
+      sx={(t) => {
+        const dark = t.palette.mode === 'dark';
+        const base = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+        const baseHover = dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+        return {
+          px: 1.25,
+          flexShrink: 0,
+          color: emphasis ? 'primary.main' : 'text.primary',
+          backgroundColor: emphasis ? alpha(t.palette.primary.main, dark ? 0.15 : 0.09) : base,
+          '&:hover': { backgroundColor: emphasis ? alpha(t.palette.primary.main, dark ? 0.22 : 0.14) : baseHover },
+          '& .MuiButton-startIcon': { mr: 0.5, color: emphasis ? 'inherit' : 'text.secondary', '& svg': { fontSize: 16 } },
+        };
+      }}
+    >
+      {label}
+    </Button>
+  );
+}
+
+/**
+ * The detail panel's action bar: the two or three operations someone opens a
+ * resource for, as labeled buttons, with everything else behind the `⋮` menu
+ * at the right end. Kind-specific actions lead; the first one is emphasized.
+ */
+export function DetailQuickActions({ target }: { target: RowActionTarget }) {
+  const [dialog, setDialog] = useState<'forward' | 'scale' | 'trigger' | 'node-shell' | null>(null);
+  const [logsBusy, setLogsBusy] = useState(false);
+  const addTab = useDockStore((s) => s.addTab);
+  const restart = useRolloutRestart();
+  const rerun = useRerunJob();
+  const suspendCj = useSuspendCronJob();
+  const cordon = useCordon();
+
+  const { kind, obj, ctx } = target;
+  const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === kind ? kind : undefined;
+  const name = obj.metadata.name;
+  const namespace = obj.metadata.namespace;
+  const isProtected = useIsProtected(ctx);
+  const ok = (text: string) => showToast('success', text);
+  const fail = (err: unknown) => showErrorToast(err);
+
+  const canViewLogs = isLogTargetKind(actionKind ?? '');
+  const canForward = isForwardableKind(actionKind);
+  const isPod = actionKind === 'Pod';
+  const isNode = actionKind === 'Node';
+  const isJob = actionKind === 'Job';
+  const isCronJob = actionKind === 'CronJob';
+  const restartable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'DaemonSet';
+  const scalable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'ReplicaSet';
+  const unschedulable = isNode && !!(obj.spec as { unschedulable?: boolean })?.unschedulable;
+  const cjSuspended = isCronJob && !!(obj.spec as { suspend?: boolean })?.suspend;
+
+  const openLogs = () => {
+    setLogsBusy(true);
+    openLogsForTarget(target, addTab)
+      .catch(fail)
+      .finally(() => setLogsBusy(false));
+  };
+
+  return (
+    <Stack direction="row" sx={{ px: 2, pt: 1.25, pb: 1, gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+      {isPod && (
+        <QuickActionButton
+          emphasis
+          icon={<TerminalIcon />}
+          label="Shell"
+          onClick={() => {
+            addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: execTargetContainer(obj) });
+          }}
+        />
+      )}
+      {isNode && <QuickActionButton emphasis icon={<TerminalIcon />} label="Shell" onClick={() => setDialog('node-shell')} />}
+      {isCronJob && <QuickActionButton emphasis icon={<PlayArrowIcon />} label="Trigger" onClick={() => setDialog('trigger')} />}
+      {canViewLogs && (
+        <QuickActionButton emphasis={!isPod} icon={<SubjectIcon />} label="Logs" disabled={logsBusy} onClick={openLogs} />
+      )}
+      {canForward && <QuickActionButton icon={<CableIcon />} label="Forward" onClick={() => setDialog('forward')} />}
+      {scalable && <QuickActionButton icon={<OpenInFullIcon />} label="Scale" onClick={() => setDialog('scale')} />}
+      {restartable && (
+        <QuickActionButton
+          icon={<RestartAltIcon />}
+          label="Restart"
+          disabled={restart.isPending}
+          onClick={() =>
+            restart.mutate(
+              { ctx, body: { kind: kind as 'Deployment', namespace: namespace ?? '', name } },
+              { onSuccess: () => ok(`Rollout restart triggered for ${name}`), onError: fail },
+            )
+          }
+        />
+      )}
+      {isJob && (
+        <QuickActionButton
+          icon={<ReplayIcon />}
+          label="Re-run"
+          disabled={rerun.isPending}
+          onClick={() => rerun.mutate({ ctx, body: { namespace: namespace ?? '', name } }, { onSuccess: (r) => ok(`Created job ${r.jobName}`), onError: fail })}
+        />
+      )}
+      {isCronJob && (
+        <QuickActionButton
+          icon={cjSuspended ? <PlayCircleOutlinedIcon /> : <PauseCircleOutlinedIcon />}
+          label={cjSuspended ? 'Resume' : 'Suspend'}
+          disabled={suspendCj.isPending}
+          onClick={() =>
+            suspendCj.mutate(
+              { ctx, body: { namespace: namespace ?? '', name, suspend: !cjSuspended } },
+              { onSuccess: () => ok(`${cjSuspended ? 'Resumed' : 'Suspended'} ${name}`), onError: fail },
+            )
+          }
+        />
+      )}
+      {isNode && (
+        <QuickActionButton
+          icon={<BlockIcon />}
+          label={unschedulable ? 'Uncordon' : 'Cordon'}
+          disabled={cordon.isPending}
+          onClick={() =>
+            cordon.mutate(
+              { ctx, body: { node: name, unschedulable: !unschedulable } },
+              { onSuccess: () => ok(`${unschedulable ? 'Uncordoned' : 'Cordoned'} ${name}`), onError: fail },
+            )
+          }
+        />
+      )}
+      <Box sx={{ flex: 1 }} />
+      <RowActions target={target} />
+      <NodeShellConfirmDialog
+        open={dialog === 'node-shell'}
+        name={name}
+        isProtected={isProtected}
+        onClose={() => setDialog(null)}
+        onConfirm={() => {
+          setDialog(null);
+          addTab({ kind: 'node-shell', id: dockTabId(), title: `node: ${name}`, ctx, node: name });
+        }}
+      />
+      {dialog === 'trigger' && <TriggerCronJobDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} onDone={ok} />}
+      {dialog === 'scale' && <ScaleDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
+      {dialog === 'forward' && <PortForwardDialog ctx={ctx} kind={actionKind ?? kind} obj={obj} onClose={() => setDialog(null)} />}
+    </Stack>
   );
 }
 
@@ -267,8 +465,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         {isPod && (
           <MenuItem
             onClick={() => {
-              const container = podContainerNames(obj)[0] ?? '';
-              addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container });
+              addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: execTargetContainer(obj) });
               close();
             }}
           >
@@ -595,18 +792,10 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
           )
         }
       />
-      <ConfirmDialog
+      <NodeShellConfirmDialog
         open={dialog === 'node-shell'}
-        title={`Node shell — ${name}`}
-        message={
-          <>
-            This starts a <b>privileged pod</b> on <b>{name}</b> (host PID/network/IPC) and opens a root shell on the node via nsenter.
-            The pod is deleted when the terminal closes.
-          </>
-        }
-        confirmLabel="Open shell"
-        danger
-        confirmText={isProtected ? name : undefined}
+        name={name}
+        isProtected={isProtected}
         onClose={() => setDialog(null)}
         onConfirm={() => {
           setDialog(null);

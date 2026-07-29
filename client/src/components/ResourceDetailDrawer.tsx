@@ -19,7 +19,7 @@ import type { SxProps, Theme } from '@mui/material/styles';
 import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
-import { withoutManagedFields } from '../kube-display.js';
+import { jobPhase, nodeStatus, podSummary, withoutManagedFields } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -36,8 +36,10 @@ import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
+import { CopyValueButton } from './CellCopy.js';
 import { MetricsChart } from './MetricsChart.js';
-import { RowActions, RowLogsButton } from './RowActions.js';
+import { DetailQuickActions } from './RowActions.js';
+import { StatusChip } from './StatusChip.js';
 import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
 import { useDetailStore } from '../state/detail.js';
@@ -233,21 +235,28 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                     <AgeCell timestamp={obj.metadata.creationTimestamp} variant="caption" /> old
                   </>
                 )}
+                {obj && headerStatus(behaviorKind, obj) && (
+                  <>
+                    {' · '}
+                    <StatusChip status={headerStatus(behaviorKind, obj)!} />
+                  </>
+                )}
               </Typography>
-              <TruncationTooltip text={sel.namespace ? `${sel.namespace} / ${sel.name}` : sel.name}>
-                <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, lineHeight: 1.3 }}>
-                  {sel.namespace && (
-                    <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
-                      {sel.namespace}{' / '}
-                    </Typography>
-                  )}
-                  {sel.name}
-                </Typography>
-              </TruncationTooltip>
+              <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                <TruncationTooltip text={sel.namespace ? `${sel.namespace} / ${sel.name}` : sel.name}>
+                  <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
+                    {sel.namespace && (
+                      <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
+                        {sel.namespace}{' / '}
+                      </Typography>
+                    )}
+                    {sel.name}
+                  </Typography>
+                </TruncationTooltip>
+                <CopyValueButton text={sel.name} label={`Copy name ${sel.name}`} />
+              </Stack>
             </Box>
             <Box sx={{ flex: 1 }} />
-            {obj && <RowLogsButton target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
-            {obj && <RowActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
             {(!inline || tab === 'map') && (
               <Tooltip title={fullScreen ? 'Restore drawer' : 'Full screen'}>
                 <IconButton onClick={() => setFullScreen((v) => !v)} aria-label={fullScreen ? 'Restore drawer' : 'Full screen'}>
@@ -259,6 +268,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
               <CloseIcon />
             </IconButton>
           </Stack>
+          {obj && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
           <Tabs
             value={tab}
             onChange={(_e, v) => guardLeave(() => setTab(v as string))}
@@ -349,6 +359,23 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
 
 export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
   return <ResourceDetailDrawer {...props} inline />;
+}
+
+/** Summary status word shown next to the kind in the header, for kinds with a
+ *  cheap one-word answer. Others rely on their overview's Status fact. */
+function headerStatus(kind: string | undefined, obj: KubeObject): string | undefined {
+  switch (kind) {
+    case 'Pod':
+      return podSummary(obj).status;
+    case 'Node':
+      return nodeStatus(obj);
+    case 'Job':
+      return jobPhase(obj);
+    case 'CronJob':
+      return (obj.spec as { suspend?: boolean } | undefined)?.suspend ? 'Suspended' : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | undefined; obj: KubeObject; ctx: string; crd?: KubeObject; version: string }) {
