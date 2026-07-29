@@ -32,6 +32,12 @@ pnpm start
 For development setup, release steps, architecture, security details, and test
 clusters, use the docs.
 
+## Support
+
+<a href="https://www.buymeacoffee.com/FloSch62">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png" alt="Buy Me a Coffee" height="60">
+</a>
+
 ## License
 
 [MIT](./LICENSE)
