@@ -34,9 +34,13 @@ test('g-sequences jump between pages', async ({ page }) => {
 test('alt+j focuses and mod+j toggles an existing terminal without closing its session', async ({ page }) => {
   let execSocketCount = 0;
   let execSocketClosed = false;
+  let terminalDataFrameCount = 0;
   page.on('websocket', (socket) => {
     if (!socket.url().includes('/ws/exec?')) return;
     execSocketCount += 1;
+    socket.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') terminalDataFrameCount += 1;
+    });
     socket.on('close', () => {
       execSocketClosed = true;
     });
@@ -74,6 +78,19 @@ test('alt+j focuses and mod+j toggles an existing terminal without closing its s
   await expect(searchButton).toBeFocused();
   await expect(terminal).toBeHidden();
 
+  const dataFramesBeforeRepeat = terminalDataFrameCount;
+  await page.keyboard.down('Control');
+  await page.keyboard.down('j');
+  await expect(terminal).toBeVisible();
+  await expect(terminalInput).toBeFocused();
+  await page.keyboard.down('j');
+  await page.keyboard.up('j');
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(100);
+  expect(terminalDataFrameCount).toBe(dataFramesBeforeRepeat);
+
+  await page.keyboard.press('ControlOrMeta+j');
+  await expect(terminal).toBeHidden();
   await page.keyboard.press('Alt+j');
   await expect(terminal).toBeVisible();
   await expect(terminalInput).toBeFocused();

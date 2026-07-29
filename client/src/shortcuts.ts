@@ -238,7 +238,6 @@ export function GlobalShortcuts() {
           return;
         }
         if (key === 'j') {
-          if (e.repeat) return;
           const eventTarget = e.target instanceof HTMLElement ? e.target : null;
           // Text fields and modal surfaces keep their normal keyboard
           // behavior. xterm is the exception: Cmd/Ctrl+J must be able to hide
@@ -253,6 +252,15 @@ export function GlobalShortcuts() {
           const dock = useDockStore.getState();
           const activeTab = dock.tabs.find((tab) => tab.id === dock.activeId);
           if (!activeTab) return;
+
+          // A held shortcut repeats after focus may already have moved into
+          // xterm. Consume the repeat completely so it cannot become shell
+          // input or trigger Chromium's default Ctrl+J action.
+          if (e.repeat) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
 
           e.preventDefault();
           if (isTerminalTab(activeTab)) {
