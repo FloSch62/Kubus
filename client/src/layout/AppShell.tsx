@@ -112,7 +112,13 @@ export function AppShell() {
           <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <TabPanes />
           </Box>
-          <Box ref={dockRef} style={{ height: dockOpen ? (maximized ? '100%' : dockHeight) : 0 }} sx={{ flexShrink: 0, transition: 'height 120ms ease' }}>
+          <Box
+            ref={dockRef}
+            aria-hidden={!dockOpen}
+            inert={dockOpen ? undefined : true}
+            style={{ height: dockOpen ? (maximized ? '100%' : dockHeight) : 0 }}
+            sx={{ flexShrink: 0, overflow: 'hidden', transition: 'height 120ms ease' }}
+          >
             <BottomDock containerRef={dockRef} />
           </Box>
         </Box>

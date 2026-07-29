@@ -44,12 +44,14 @@ interface DockState {
   open: boolean;
   height: number;
   maximized: boolean;
+  terminalFocusRequest?: { tabId: string; sequence: number };
   addTab: (tab: DockTab) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   setOpen: (open: boolean) => void;
   setHeight: (height: number) => void;
   setMaximized: (maximized: boolean) => void;
+  requestTerminalFocus: (id: string) => void;
 }
 
 let counter = 0;
@@ -67,6 +69,7 @@ export const useDockStore = create<DockState>((set) => ({
   open: false,
   height: 320,
   maximized: false,
+  terminalFocusRequest: undefined,
   addTab: (tab) => {
     // The detail drawer is modal and would cover the dock — close it so the
     // freshly opened terminal/log tab is actually visible.
@@ -81,10 +84,24 @@ export const useDockStore = create<DockState>((set) => ({
         activeId: s.activeId === id ? tabs[tabs.length - 1]?.id : s.activeId,
         open: tabs.length > 0 ? s.open : false,
         maximized: tabs.length > 0 ? s.maximized : false,
+        terminalFocusRequest: s.terminalFocusRequest?.tabId === id ? undefined : s.terminalFocusRequest,
       };
     }),
   setActive: (id) => set({ activeId: id, open: true }),
   setOpen: (open) => set(open ? { open } : { open, maximized: false }),
   setHeight: (height) => set({ height: clampDockHeight(height) }),
   setMaximized: (maximized) => set({ maximized }),
+  requestTerminalFocus: (id) =>
+    set((s) => {
+      const tab = s.tabs.find((candidate) => candidate.id === id);
+      if (tab?.kind !== 'terminal' && tab?.kind !== 'node-shell') return s;
+      return {
+        activeId: id,
+        open: true,
+        terminalFocusRequest: {
+          tabId: id,
+          sequence: (s.terminalFocusRequest?.sequence ?? 0) + 1,
+        },
+      };
+    }),
 }));

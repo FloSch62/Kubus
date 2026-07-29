@@ -8,13 +8,16 @@ import type { ExecServerControl } from '@kubus/shared';
 import { wsUrl } from '../api/http.js';
 import { copyToClipboard, readFromClipboard } from '../clipboard.js';
 import type { NodeShellTab, TerminalTab } from '../state/dock.js';
+import { useDockStore } from '../state/dock.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
 
-export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | NodeShellTab; active: boolean }) {
+export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: TerminalTab | NodeShellTab; active: boolean; focusRequest: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const theme = useTheme();
 
   // Right-click copies the selection when there is one, otherwise pastes —
@@ -100,7 +103,11 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'resize', cols, rows }));
     });
 
-    const observer = new ResizeObserver(() => fit.fit());
+    // Inactive tabs and a collapsed dock have zero height. Ignore those
+    // resize notifications so the remote PTY keeps its last usable size.
+    const observer = new ResizeObserver(() => {
+      if (activeRef.current) fit.fit();
+    });
     observer.observe(el);
 
     return () => {
@@ -118,6 +125,18 @@ export default function TerminalPaneImpl({ tab, active }: { tab: TerminalTab | N
   useEffect(() => {
     if (active) requestAnimationFrame(() => fitRef.current?.fit());
   }, [active]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const frame = requestAnimationFrame(() => {
+      const dock = useDockStore.getState();
+      if (dock.open && dock.activeId === tab.id) {
+        fitRef.current?.fit();
+        termRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest, tab.id]);
 
   return (
     <Box sx={{ height: '100%', p: 1, pt: 0.75 }}>

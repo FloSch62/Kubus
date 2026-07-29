@@ -6,7 +6,7 @@ import { NAV_OVERLAY_MEDIA_QUERY, useNavUiStore } from './state/nav-ui.js';
 import { useUiPrefsStore } from './state/prefs.js';
 import { useUiStore } from './state/ui.js';
 import { useTabsStore } from './state/tabs.js';
-import { useDockStore } from './state/dock.js';
+import { useDockStore, type DockTab } from './state/dock.js';
 import { useDetailStore } from './state/detail.js';
 
 /** How long a pending `g` waits for its second key (the which-key panel shows meanwhile). */
@@ -56,6 +56,10 @@ export interface ShortcutRowDef {
 
 const MOD = MOD_KEY_LABEL;
 
+function isTerminalTab(tab: DockTab | undefined): boolean {
+  return tab?.kind === 'terminal' || tab?.kind === 'node-shell';
+}
+
 /** Single source of truth for the cheatsheet — every binding below is wired here or next to its owner. */
 export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef[] }> = [
   {
@@ -64,7 +68,8 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
       { combos: [[MOD, 'K']], description: 'Command palette (toggle)' },
       { combos: [['?']], description: 'Keyboard shortcuts (this dialog)' },
       { combos: [[MOD, 'B']], description: 'Toggle the navigation rail' },
-      { combos: [[MOD, 'J']], description: 'Toggle the terminal / logs dock' },
+      { combos: [[MOD, 'J']], description: 'Focus / hide the terminal · toggle the logs dock' },
+      { combos: [['Alt', 'J']], description: 'Focus the terminal' },
       { combos: [[MOD, ',']], description: 'Open settings' },
       { combos: [[MOD, '1–9']], description: 'Open pinned favorite 1–9' },
       { combos: [['Esc']], description: 'Close dialogs & menus · close the details panel · restore a maximized dock' },
@@ -162,6 +167,11 @@ export function GlobalShortcuts() {
   navRef.current = navigate;
 
   useEffect(() => {
+    // Where focus should return when Cmd/Ctrl+J hides the terminal. Kept
+    // outside React state because it is transient interaction state and must
+    // not trigger a render on every focus handoff.
+    let terminalReturnFocus: HTMLElement | null = null;
+
     // After any tab-store mutation, land the router on the (new) active tab —
     // the same store→router sync TabsBar does for its mouse interactions.
     // Compare against window.location, not useLocation: navigate() is
@@ -227,11 +237,49 @@ export function GlobalShortcuts() {
           toggleNavRail();
           return;
         }
-        // Guarded: in a shell Ctrl+J is a real control character (linefeed).
-        if (key === 'j' && !isTextEntryTarget(e.target)) {
-          e.preventDefault();
+        if (key === 'j') {
+          const eventTarget = e.target instanceof HTMLElement ? e.target : null;
+          // Text fields and modal surfaces keep their normal keyboard
+          // behavior. xterm is the exception: Cmd/Ctrl+J must be able to hide
+          // the dock after the shortcut handed focus to the shell.
+          if (
+            (isTextEntryTarget(eventTarget) && !eventTarget?.closest('.xterm')) ||
+            eventTarget?.closest('[role="dialog"], [role="menu"], [role="listbox"]')
+          ) {
+            return;
+          }
+
           const dock = useDockStore.getState();
-          if (dock.tabs.length) dock.setOpen(!dock.open);
+          const activeTab = dock.tabs.find((tab) => tab.id === dock.activeId);
+          if (!activeTab) return;
+
+          // A held shortcut repeats after focus may already have moved into
+          // xterm. Consume the repeat completely so it cannot become shell
+          // input or trigger Chromium's default Ctrl+J action.
+          if (e.repeat) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+
+          e.preventDefault();
+          if (isTerminalTab(activeTab)) {
+            const terminalOwnsFocus = dock.open && !!eventTarget?.closest('.xterm');
+            if (terminalOwnsFocus) {
+              const fallback = document.querySelector<HTMLElement>('main');
+              const returnTarget = terminalReturnFocus?.isConnected ? terminalReturnFocus : fallback;
+              returnTarget?.focus({ preventScroll: true });
+              dock.setOpen(false);
+            } else {
+              const activeElement = document.activeElement;
+              if (activeElement instanceof HTMLElement && !activeElement.closest('.kubus-bottom-dock')) {
+                terminalReturnFocus = activeElement;
+              }
+              dock.requestTerminalFocus(activeTab.id);
+            }
+          } else {
+            dock.setOpen(!dock.open);
+          }
           return;
         }
         if (e.key === ',' && !isTextEntryTarget(e.target)) {
@@ -245,6 +293,24 @@ export function GlobalShortcuts() {
       // ctrl+alt on Windows), and never while a terminal/editor owns Alt
       // sequences (Alt+digit is an escape sequence in shells).
       if (e.altKey && !e.ctrlKey && !e.metaKey && !isEditorOrTerminalTarget(e.target)) {
+        if (!e.shiftKey && e.code === 'KeyJ') {
+          if (e.repeat) return;
+          const eventTarget = e.target instanceof HTMLElement ? e.target : null;
+          if (eventTarget?.closest('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+
+          const dock = useDockStore.getState();
+          const activeTab = dock.tabs.find((tab) => tab.id === dock.activeId);
+          const terminal = isTerminalTab(activeTab) ? activeTab : dock.tabs.findLast(isTerminalTab);
+          if (!terminal) return;
+
+          e.preventDefault();
+          const activeElement = document.activeElement;
+          if (activeElement instanceof HTMLElement && !activeElement.closest('.kubus-bottom-dock')) {
+            terminalReturnFocus = activeElement;
+          }
+          dock.requestTerminalFocus(terminal.id);
+          return;
+        }
         const digit = e.shiftKey ? undefined : /^Digit([1-9])$/.exec(e.code)?.[1];
         if (digit) {
           e.preventDefault();
