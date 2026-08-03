@@ -17,7 +17,7 @@
     "@fastify/websocket": "^11.3.0",
     "@kubernetes/client-node": "^1.4.0",
     "@kubus/shared": "workspace:*",
-    "fastify": "^5.10.0",
+    "fastify": "^5.11.0",
     "js-yaml": "^5.2.2",
     "nanoid": "^6.0.0",
     "node-fetch": "^3.3.2",
