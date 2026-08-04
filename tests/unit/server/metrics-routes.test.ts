@@ -5,7 +5,7 @@ import type { ClusterHandle } from '../../../server/src/kube/cluster-manager';
 import { registerMetricsRoutes } from '../../../server/src/routes/metrics';
 
 describe('metrics routes', () => {
-  it('returns full node capacity separately from allocatable resources', async () => {
+  it('aggregates full capacity from every watched node, including unsampled nodes', async () => {
     const handle = {
       metricsPoller: {
         available: true,
@@ -22,6 +22,13 @@ describe('metrics routes', () => {
                 allocatable: { cpu: '3500m', memory: '7Gi' },
               },
             },
+            {
+              metadata: { name: 'node-b' },
+              status: {
+                capacity: { cpu: '2', memory: '4Gi' },
+                allocatable: { cpu: '1500m', memory: '3Gi' },
+              },
+            },
           ],
         }),
       },
@@ -36,6 +43,8 @@ describe('metrics routes', () => {
       expect(response.json()).toEqual({
         available: true,
         probed: true,
+        totalCpuCapacityMilli: 6000,
+        totalMemCapacityBytes: 12 * 2 ** 30,
         items: [
           {
             name: 'node-a',
@@ -43,8 +52,6 @@ describe('metrics routes', () => {
             memBytes: 2 ** 30,
             cpuCapacityMilli: 3500,
             memCapacityBytes: 7 * 2 ** 30,
-            cpuNodeCapacityMilli: 4000,
-            memNodeCapacityBytes: 8 * 2 ** 30,
           },
         ],
       });

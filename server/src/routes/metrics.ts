@@ -26,29 +26,40 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       const handle = ctx.clusters.get(req.params.ctx);
       const poller = handle.metricsPoller;
       const items = poller.nodeSnapshot();
-      // Join both total capacity and allocatable resources from the nodes watcher.
-      // Per-node utilization remains based on allocatable resources; the overview
-      // can separately report the cluster's full capacity.
+      // Join allocatable resources per sampled node, while summing full capacity
+      // independently so nodes without a metrics-server sample still count.
       const nodesWatcher = handle.watchers.peek('', 'v1', 'nodes');
-      const resources = new Map<string, { capacity?: { cpu?: string; memory?: string }; allocatable?: { cpu?: string; memory?: string } }>();
+      const allocatableByNode = new Map<string, { cpu?: string; memory?: string }>();
+      let totalCpuCapacityMilli = 0;
+      let totalMemCapacityBytes = 0;
+      let hasCpuCapacity = false;
+      let hasMemCapacity = false;
       for (const node of nodesWatcher?.items() ?? []) {
         const status = node.status as {
           capacity?: { cpu?: string; memory?: string };
           allocatable?: { cpu?: string; memory?: string };
         };
-        resources.set(node.metadata.name, status);
+        if (status.allocatable) allocatableByNode.set(node.metadata.name, status.allocatable);
+        if (status.capacity?.cpu) {
+          totalCpuCapacityMilli += cpuToMilli(status.capacity.cpu);
+          hasCpuCapacity = true;
+        }
+        if (status.capacity?.memory) {
+          totalMemCapacityBytes += memToBytes(status.capacity.memory);
+          hasMemCapacity = true;
+        }
       }
       const snapshot: MetricsSnapshot = {
         available: poller.available,
         probed: poller.probed,
+        totalCpuCapacityMilli: hasCpuCapacity ? totalCpuCapacityMilli : undefined,
+        totalMemCapacityBytes: hasMemCapacity ? totalMemCapacityBytes : undefined,
         items: items.map((n) => {
-          const { capacity, allocatable } = resources.get(n.name) ?? {};
+          const allocatable = allocatableByNode.get(n.name);
           return {
             ...n,
             cpuCapacityMilli: allocatable?.cpu ? cpuToMilli(allocatable.cpu) : undefined,
             memCapacityBytes: allocatable?.memory ? memToBytes(allocatable.memory) : undefined,
-            cpuNodeCapacityMilli: capacity?.cpu ? cpuToMilli(capacity.cpu) : undefined,
-            memNodeCapacityBytes: capacity?.memory ? memToBytes(capacity.memory) : undefined,
           };
         }),
       };

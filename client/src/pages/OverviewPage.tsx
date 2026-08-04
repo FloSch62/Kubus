@@ -296,15 +296,20 @@ function OverviewSkeleton() {
 function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnType<typeof useNodeMetrics>['data'] }) {
   const total = useMemo(() => {
     if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return undefined;
-    return nodeMetrics.items.reduce(
+    const sampledTotal = nodeMetrics.items.reduce(
       (acc, item) => ({
         cpuMilli: acc.cpuMilli + item.cpuMilli,
         memBytes: acc.memBytes + item.memBytes,
-        cpuCapacityMilli: acc.cpuCapacityMilli + (item.cpuNodeCapacityMilli ?? item.cpuCapacityMilli ?? 0),
-        memCapacityBytes: acc.memCapacityBytes + (item.memNodeCapacityBytes ?? item.memCapacityBytes ?? 0),
+        cpuCapacityMilli: acc.cpuCapacityMilli + (item.cpuCapacityMilli ?? 0),
+        memCapacityBytes: acc.memCapacityBytes + (item.memCapacityBytes ?? 0),
       }),
       { cpuMilli: 0, memBytes: 0, cpuCapacityMilli: 0, memCapacityBytes: 0 },
     );
+    return {
+      ...sampledTotal,
+      cpuCapacityMilli: nodeMetrics.totalCpuCapacityMilli ?? sampledTotal.cpuCapacityMilli,
+      memCapacityBytes: nodeMetrics.totalMemCapacityBytes ?? sampledTotal.memCapacityBytes,
+    };
   }, [nodeMetrics]);
 
   return (

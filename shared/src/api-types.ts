@@ -526,9 +526,6 @@ export interface MetricsSnapshotEntry {
   /** Node only: allocatable totals for utilization %. */
   cpuCapacityMilli?: number;
   memCapacityBytes?: number;
-  /** Node only: total capacity reported by Kubernetes, before reservations. */
-  cpuNodeCapacityMilli?: number;
-  memNodeCapacityBytes?: number;
   /** Pod only: per-container usage breakdown. */
   containers?: ContainerUsage[];
 }
@@ -537,6 +534,9 @@ export interface MetricsSnapshot {
   available: boolean;
   /** At least one metrics probe has completed — until then `available` is provisional. */
   probed: boolean;
+  /** Node snapshot only: full capacity across every watched node, including nodes without a usage sample. */
+  totalCpuCapacityMilli?: number;
+  totalMemCapacityBytes?: number;
   items: MetricsSnapshotEntry[];
 }
 
