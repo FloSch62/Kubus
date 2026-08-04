@@ -26,22 +26,40 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       const handle = ctx.clusters.get(req.params.ctx);
       const poller = handle.metricsPoller;
       const items = poller.nodeSnapshot();
-      // Join allocatable capacity from the nodes watcher for utilization %.
+      // Join allocatable resources per sampled node, while summing full capacity
+      // independently so nodes without a metrics-server sample still count.
       const nodesWatcher = handle.watchers.peek('', 'v1', 'nodes');
-      const capacity = new Map<string, { cpu?: string; memory?: string }>();
+      const allocatableByNode = new Map<string, { cpu?: string; memory?: string }>();
+      let totalCpuCapacityMilli = 0;
+      let totalMemCapacityBytes = 0;
+      let hasCpuCapacity = false;
+      let hasMemCapacity = false;
       for (const node of nodesWatcher?.items() ?? []) {
-        const alloc = (node.status as { allocatable?: { cpu?: string; memory?: string } })?.allocatable;
-        if (alloc) capacity.set(node.metadata.name, alloc);
+        const status = node.status as {
+          capacity?: { cpu?: string; memory?: string };
+          allocatable?: { cpu?: string; memory?: string };
+        };
+        if (status.allocatable) allocatableByNode.set(node.metadata.name, status.allocatable);
+        if (status.capacity?.cpu) {
+          totalCpuCapacityMilli += cpuToMilli(status.capacity.cpu);
+          hasCpuCapacity = true;
+        }
+        if (status.capacity?.memory) {
+          totalMemCapacityBytes += memToBytes(status.capacity.memory);
+          hasMemCapacity = true;
+        }
       }
       const snapshot: MetricsSnapshot = {
         available: poller.available,
         probed: poller.probed,
+        totalCpuCapacityMilli: hasCpuCapacity ? totalCpuCapacityMilli : undefined,
+        totalMemCapacityBytes: hasMemCapacity ? totalMemCapacityBytes : undefined,
         items: items.map((n) => {
-          const alloc = capacity.get(n.name);
+          const allocatable = allocatableByNode.get(n.name);
           return {
             ...n,
-            cpuCapacityMilli: alloc?.cpu ? cpuToMilli(alloc.cpu) : undefined,
-            memCapacityBytes: alloc?.memory ? memToBytes(alloc.memory) : undefined,
+            cpuCapacityMilli: allocatable?.cpu ? cpuToMilli(allocatable.cpu) : undefined,
+            memCapacityBytes: allocatable?.memory ? memToBytes(allocatable.memory) : undefined,
           };
         }),
       };

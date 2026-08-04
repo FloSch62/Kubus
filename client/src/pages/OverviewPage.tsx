@@ -296,7 +296,7 @@ function OverviewSkeleton() {
 function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnType<typeof useNodeMetrics>['data'] }) {
   const total = useMemo(() => {
     if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return undefined;
-    return nodeMetrics.items.reduce(
+    const sampledTotal = nodeMetrics.items.reduce(
       (acc, item) => ({
         cpuMilli: acc.cpuMilli + item.cpuMilli,
         memBytes: acc.memBytes + item.memBytes,
@@ -305,6 +305,11 @@ function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnT
       }),
       { cpuMilli: 0, memBytes: 0, cpuCapacityMilli: 0, memCapacityBytes: 0 },
     );
+    return {
+      ...sampledTotal,
+      cpuCapacityMilli: nodeMetrics.totalCpuCapacityMilli ?? sampledTotal.cpuCapacityMilli,
+      memCapacityBytes: nodeMetrics.totalMemCapacityBytes ?? sampledTotal.memCapacityBytes,
+    };
   }, [nodeMetrics]);
 
   return (
@@ -342,8 +347,14 @@ function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnT
                 <Typography variant="body2" sx={{ width: 220, fontWeight: 600 }} noWrap>
                   Total
                 </Typography>
-                <UsageBar label={`CPU ${formatCpu(total.cpuMilli)}`} pct={total.cpuCapacityMilli > 0 ? (total.cpuMilli / total.cpuCapacityMilli) * 100 : undefined} />
-                <UsageBar label={`Mem ${formatBytes(total.memBytes)}`} pct={total.memCapacityBytes > 0 ? (total.memBytes / total.memCapacityBytes) * 100 : undefined} />
+                <UsageBar
+                  label={`CPU ${formatCpu(total.cpuMilli)}${total.cpuCapacityMilli > 0 ? ` / ${formatCpu(total.cpuCapacityMilli)}` : ''}`}
+                  pct={total.cpuCapacityMilli > 0 ? (total.cpuMilli / total.cpuCapacityMilli) * 100 : undefined}
+                />
+                <UsageBar
+                  label={`Mem ${formatBytes(total.memBytes)}${total.memCapacityBytes > 0 ? ` / ${formatBytes(total.memCapacityBytes)}` : ''}`}
+                  pct={total.memCapacityBytes > 0 ? (total.memBytes / total.memCapacityBytes) * 100 : undefined}
+                />
               </Box>
             )}
             {nodeMetrics.items.map((n) => (
@@ -371,7 +382,7 @@ function UsageBar({ label, pct }: { label: string; pct?: number }) {
         color={(pct ?? 0) > 90 ? 'error' : (pct ?? 0) > 75 ? 'warning' : 'primary'}
         sx={{ flex: 1, height: 6, borderRadius: 3 }}
       />
-      <Typography variant="caption" sx={{ width: 130 }} color="text.secondary">
+      <Typography variant="caption" sx={{ width: 220, flexShrink: 0 }} color="text.secondary" noWrap>
         {label}
         {pct !== undefined ? ` (${pct.toFixed(0)}%)` : ''}
       </Typography>

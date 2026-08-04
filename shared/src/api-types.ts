@@ -534,6 +534,9 @@ export interface MetricsSnapshot {
   available: boolean;
   /** At least one metrics probe has completed — until then `available` is provisional. */
   probed: boolean;
+  /** Node snapshot only: full capacity across every watched node, including nodes without a usage sample. */
+  totalCpuCapacityMilli?: number;
+  totalMemCapacityBytes?: number;
   items: MetricsSnapshotEntry[];
 }
 
