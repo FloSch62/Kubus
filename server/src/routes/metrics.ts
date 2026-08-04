@@ -26,22 +26,29 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
       const handle = ctx.clusters.get(req.params.ctx);
       const poller = handle.metricsPoller;
       const items = poller.nodeSnapshot();
-      // Join allocatable capacity from the nodes watcher for utilization %.
+      // Join both total capacity and allocatable resources from the nodes watcher.
+      // Per-node utilization remains based on allocatable resources; the overview
+      // can separately report the cluster's full capacity.
       const nodesWatcher = handle.watchers.peek('', 'v1', 'nodes');
-      const capacity = new Map<string, { cpu?: string; memory?: string }>();
+      const resources = new Map<string, { capacity?: { cpu?: string; memory?: string }; allocatable?: { cpu?: string; memory?: string } }>();
       for (const node of nodesWatcher?.items() ?? []) {
-        const alloc = (node.status as { allocatable?: { cpu?: string; memory?: string } })?.allocatable;
-        if (alloc) capacity.set(node.metadata.name, alloc);
+        const status = node.status as {
+          capacity?: { cpu?: string; memory?: string };
+          allocatable?: { cpu?: string; memory?: string };
+        };
+        resources.set(node.metadata.name, status);
       }
       const snapshot: MetricsSnapshot = {
         available: poller.available,
         probed: poller.probed,
         items: items.map((n) => {
-          const alloc = capacity.get(n.name);
+          const { capacity, allocatable } = resources.get(n.name) ?? {};
           return {
             ...n,
-            cpuCapacityMilli: alloc?.cpu ? cpuToMilli(alloc.cpu) : undefined,
-            memCapacityBytes: alloc?.memory ? memToBytes(alloc.memory) : undefined,
+            cpuCapacityMilli: allocatable?.cpu ? cpuToMilli(allocatable.cpu) : undefined,
+            memCapacityBytes: allocatable?.memory ? memToBytes(allocatable.memory) : undefined,
+            cpuNodeCapacityMilli: capacity?.cpu ? cpuToMilli(capacity.cpu) : undefined,
+            memNodeCapacityBytes: capacity?.memory ? memToBytes(capacity.memory) : undefined,
           };
         }),
       };

@@ -526,6 +526,9 @@ export interface MetricsSnapshotEntry {
   /** Node only: allocatable totals for utilization %. */
   cpuCapacityMilli?: number;
   memCapacityBytes?: number;
+  /** Node only: total capacity reported by Kubernetes, before reservations. */
+  cpuNodeCapacityMilli?: number;
+  memNodeCapacityBytes?: number;
   /** Pod only: per-container usage breakdown. */
   containers?: ContainerUsage[];
 }
