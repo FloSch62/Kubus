@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, PrinterColumn, ResourceKindInfo } from '@kubus/shared';
 import { ResourceListPage } from '../../../client/src/pages/ResourceListPage';
@@ -150,10 +150,15 @@ function row(name: string, ctx = 'dev', namespace = 'team-a', kind = 'Pod'): Row
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{location.pathname + location.search}</output>;
+  return (
+    <>
+      <output data-testid="location">{location.pathname + location.search}</output>
+      <output data-testid="location-state">{JSON.stringify(location.state)}</output>
+    </>
+  );
 }
 
-function renderPage(path: string) {
+function renderPage(path: InitialEntry) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -215,6 +220,21 @@ describe('ResourceListPage', () => {
     renderPage('/r/core/v1/pods');
     expect(screen.getByText('No cluster selected')).toBeInTheDocument();
     expect(screen.getByText(/Pick one or more clusters/)).toBeInTheDocument();
+  });
+
+  it('preserves navigation state across same-page URL updates', async () => {
+    renderPage({ pathname: '/r/core/v1/pods', search: '?field=legacy', state: { fromFavorite: true } });
+
+    await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent('field='));
+    expect(screen.getByTestId('location-state')).toHaveTextContent('{"fromFavorite":true}');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock text filter' }));
+    expect(screen.getByTestId('location-state')).toHaveTextContent('{"fromFavorite":true}');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock open row' }));
+    expect(screen.getByTestId('location-state')).toHaveTextContent('{"fromFavorite":true}');
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail mock' }));
+    expect(screen.getByTestId('location-state')).toHaveTextContent('{"fromFavorite":true}');
   });
 
   it('surfaces per-context health, filters, saves views, opens rows, and groups pod logs', async () => {
