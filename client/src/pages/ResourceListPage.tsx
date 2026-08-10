@@ -393,12 +393,22 @@ export function ResourceListPage() {
 
   const bulkRestartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
   const bulkProtected = selectedRows.some((r) => contextSettings[r.ctx]?.protected ?? protectByDefault);
-  const runBulk = async (verb: string, run: (row: ClusterRow) => Promise<unknown>) => {
+  const runBulk = async (
+    verb: string,
+    run: (row: ClusterRow) => Promise<unknown>,
+    options: { clearSucceeded?: boolean } = {},
+  ) => {
     const rows = selectedRows;
     setBulkBusy(true);
     const results = await Promise.allSettled(rows.map((row) => run(row)));
     setBulkBusy(false);
     setBulkDialog(null);
+    if (options.clearSucceeded) {
+      const succeeded = new Set(
+        rows.flatMap((row, i) => (results[i]?.status === 'fulfilled' ? [row.obj.metadata.uid] : [])),
+      );
+      setSelectedRows((current) => current.filter((row) => !succeeded.has(row.obj.metadata.uid)));
+    }
     const failures = results
       .map((result, i) => ({ result, row: rows[i]! }))
       .filter((f): f is { result: PromiseRejectedResult; row: ClusterRow } => f.result.status === 'rejected');
@@ -674,6 +684,7 @@ export function ResourceListPage() {
           setContextMenuOpen(true);
         }}
         checkboxSelection
+        selectedRows={selectedRows}
         onSelectionChange={setSelectedRows}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}
@@ -743,8 +754,11 @@ export function ResourceListPage() {
         confirmText={bulkProtected ? `delete ${selectedRows.length}` : undefined}
         onClose={() => setBulkDialog(null)}
         onConfirm={() =>
-          void runBulk('Deleted', (row) =>
-            del.mutateAsync({ ctx: row.ctx, group, version, plural, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace }),
+          void runBulk(
+            'Deleted',
+            (row) =>
+              del.mutateAsync({ ctx: row.ctx, group, version, plural, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace }),
+            { clearSucceeded: true },
           )
         }
       />
