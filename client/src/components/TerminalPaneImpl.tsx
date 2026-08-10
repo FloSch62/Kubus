@@ -1,6 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import Divider from '@mui/material/Divider';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import { useTheme } from '@mui/material/styles';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ContentPasteIcon from '@mui/icons-material/ContentPaste';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -11,29 +19,22 @@ import type { NodeShellTab, TerminalTab } from '../state/dock.js';
 import { useDockStore } from '../state/dock.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
+import { selectedTerminalText } from '../terminal-selection.js';
+import { terminalRightClickIntent, xtermRightClickSelectsWord } from '../terminal-right-click.js';
 
 export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: TerminalTab | NodeShellTab; active: boolean; focusRequest: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const rightClickSelectsWordDefaultRef = useRef(false);
+  const [contextMenu, setContextMenu] = useState<{ top: number; left: number; selection: string } | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const theme = useTheme();
 
-  // Right-click copies the selection when there is one, otherwise pastes —
-  // the common terminal-emulator convention. Paste goes through term.paste()
-  // so bracketed-paste mode reaches the remote shell intact.
-  const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const pasteFromClipboard = () => {
     const term = termRef.current;
     if (!term) return;
-    const selection = term.getSelection();
-    if (selection) {
-      void copyToClipboard(selection).then((ok) => {
-        if (ok) term.clearSelection();
-      });
-      return;
-    }
     void readFromClipboard().then((text) => {
       if (text === null) {
         showToast('warning', 'Clipboard read unavailable or denied — allow clipboard access, or paste with the keyboard.');
@@ -41,6 +42,39 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
       }
       if (text) term.paste(text);
     });
+  };
+
+  const prepareRightClick = () => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.rightClickSelectsWord = xtermRightClickSelectsWord(
+      rightClickSelectsWordDefaultRef.current,
+      useUiPrefsStore.getState().rightClickAction,
+      term.hasSelection(),
+    );
+  };
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const term = termRef.current;
+    if (!term) return;
+    const intent = terminalRightClickIntent(useUiPrefsStore.getState().rightClickAction, term.getSelection());
+    if (intent.kind === 'menu') {
+      setContextMenu({ top: e.clientY, left: e.clientX, selection: intent.selection });
+      return;
+    }
+    if (intent.kind === 'copy') {
+      void copyToClipboard(intent.selection).then((ok) => {
+        if (ok) term.clearSelection();
+      });
+      return;
+    }
+    pasteFromClipboard();
+  };
+
+  const closeContextMenu = () => {
+    setContextMenu(null);
+    termRef.current?.focus();
   };
 
   useEffect(() => {
@@ -54,6 +88,7 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
       cursorBlink: true,
       theme: { background: '#16161e' },
     });
+    rightClickSelectsWordDefaultRef.current = term.options.rightClickSelectsWord ?? false;
     const fit = new FitAddon();
     fitRef.current = fit;
     termRef.current = term;
@@ -102,6 +137,10 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
     const onResize = term.onResize(({ cols, rows }) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'resize', cols, rows }));
     });
+    const onSelection = term.onSelectionChange(() => {
+      const selection = selectedTerminalText(term, useUiPrefsStore.getState().copyOnSelect);
+      if (selection !== null) void copyToClipboard(selection);
+    });
 
     // Inactive tabs and a collapsed dock have zero height. Ignore those
     // resize notifications so the remote PTY keeps its last usable size.
@@ -114,6 +153,7 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
       observer.disconnect();
       onData.dispose();
       onResize.dispose();
+      onSelection.dispose();
       ws.close();
       term.dispose();
       termRef.current = null;
@@ -142,6 +182,10 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
     <Box sx={{ height: '100%', p: 1, pt: 0.75 }}>
       <Box
         ref={containerRef}
+        onMouseDownCapture={(event) => {
+          if (event.button === 2) prepareRightClick();
+        }}
+        onContextMenuCapture={prepareRightClick}
         onContextMenu={onContextMenu}
         sx={{
           height: '100%',
@@ -156,6 +200,54 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
           '& .xterm .xterm-viewport': { backgroundColor: 'transparent' },
         }}
       />
+      <Menu
+        open={contextMenu !== null}
+        onClose={closeContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={contextMenu ?? undefined}
+      >
+        <MenuItem
+          disabled={!contextMenu?.selection}
+          onClick={() => {
+            const selection = contextMenu?.selection;
+            const term = termRef.current;
+            if (selection && term) {
+              void copyToClipboard(selection).then((ok) => {
+                if (ok) term.clearSelection();
+              });
+            }
+            closeContextMenu();
+          }}
+        >
+          <ListItemIcon>
+            <ContentCopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Copy</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            closeContextMenu();
+            pasteFromClipboard();
+          }}
+        >
+          <ListItemIcon>
+            <ContentPasteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Paste</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            termRef.current?.selectAll();
+            closeContextMenu();
+          }}
+        >
+          <ListItemIcon>
+            <SelectAllIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Select all</ListItemText>
+        </MenuItem>
+      </Menu>
     </Box>
   );
 }
