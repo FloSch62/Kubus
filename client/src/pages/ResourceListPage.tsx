@@ -17,7 +17,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
-import { useParams, useSearchParams } from 'react-router';
+import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
@@ -45,6 +45,17 @@ import { podContainerNames } from '../kube-display.js';
 // their place there.
 const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID'], CustomResourceDefinition: ['labels'] };
 
+/** Keep navigation provenance while this page only rewrites its query string. */
+function usePreservedSearchParams(): [URLSearchParams, SetURLSearchParams] {
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const setPreservedSearchParams = useCallback<SetURLSearchParams>(
+    (nextInit, navigateOpts) => setSearchParams(nextInit, { state: location.state, ...navigateOpts }),
+    [location.state, setSearchParams],
+  );
+  return [searchParams, setPreservedSearchParams];
+}
+
 /**
  * Renderless bridge between this page's URL params and the shared detail
  * selection. Pages stay mounted (and live) in hidden tab panes, so everything
@@ -54,7 +65,7 @@ const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID
  */
 function DetailUrlSync({ sel }: { sel: ResourceSelection | undefined }) {
   const paneActive = usePaneActive();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePreservedSearchParams();
   const openDetail = useDetailStore((s) => s.open);
   const closeDetail = useDetailStore((s) => s.close);
 
@@ -126,7 +137,7 @@ function EmbeddedResourceDetail() {
   const width = useDetailStore((s) => s.width);
   const setWidth = useDetailStore((s) => s.setWidth);
   const focusSeq = useDetailStore((s) => s.focusSeq);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePreservedSearchParams();
   const asideRef = useRef<HTMLElement>(null);
   const collapseHandleDraggedRef = useRef(false);
 
@@ -343,7 +354,7 @@ export function ResourceListPage() {
     [kindInfo, group, version, plural, kind, builtinKind],
   );
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePreservedSearchParams();
   const textFilter = searchParams.get('q') ?? '';
   const labelSelector = searchParams.get('label') ?? '';
 

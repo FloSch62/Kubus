@@ -57,6 +57,11 @@ const KIND_INDENT = '66px';
 const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
 const CUSTOM_GROUP_PREFIX = 'custom:';
 const CRD_LIST_PATH = '/r/apiextensions.k8s.io/v1/customresourcedefinitions';
+const FAVORITE_NAVIGATION_STATE = { fromFavorite: true } as const;
+
+function isFavoriteNavigation(state: unknown): boolean {
+  return !!state && typeof state === 'object' && 'fromFavorite' in state && state.fromFavorite === true;
+}
 
 
 /**
@@ -73,14 +78,14 @@ function hotkeyFavorites(favorites: FavoriteItem[]): FavoriteItem[] {
  * page tab (+Shift focuses it), middle-click opens a background tab.
  * Plain clicks keep navigating the active tab via NavLink.
  */
-function useOpenInNewTab(to: string, pendingSavedView?: SavedView['grid']) {
+function useOpenInNewTab(to: string, pendingSavedView?: SavedView['grid'], fromFavorite = false) {
   const openTab = useTabsStore((s) => s.openTab);
   const navigate = useNavigate();
   const open = (e: React.MouseEvent, foreground: boolean) => {
     e.preventDefault();
     if (foreground && pendingSavedView) applySavedViewGridState(to, pendingSavedView);
     openTab(to, { activate: foreground, afterActive: true, pendingSavedView: foreground ? undefined : pendingSavedView });
-    if (foreground) void navigate(to);
+    if (foreground) void navigate(to, { state: fromFavorite ? FAVORITE_NAVIGATION_STATE : undefined });
   };
   return {
     onClick: (e: React.MouseEvent) => {
@@ -223,6 +228,7 @@ function NavEntry({
   hotkey,
   onIntent,
   indent,
+  inFavorites = false,
 }: {
   to: string;
   label: string;
@@ -238,17 +244,21 @@ function NavEntry({
   onIntent?: () => void;
   /** Left padding override for entries nested below the default group level. */
   indent?: string;
+  /** This copy lives in Favorites; navigating it must not reveal its canonical panel entry. */
+  inFavorites?: boolean;
 }) {
   const location = useLocation();
-  const active = location.pathname === to;
+  const fromFavorite = isFavoriteNavigation(location.state);
+  const active = location.pathname === to && (!fromFavorite || inFavorites);
   const isFav = useNavigationStore((s) => (favorite ? s.favorites.some((x) => x.id === favorite.id) : false));
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
-  const newTabHandlers = useOpenInNewTab(to);
+  const newTabHandlers = useOpenInNewTab(to, undefined, inFavorites);
   const button = (
     <ListItemButton
       component={NavLink}
       to={to}
+      state={inFavorites ? FAVORITE_NAVIGATION_STATE : undefined}
       dense
       selected={active}
       onMouseEnter={onIntent}
@@ -810,7 +820,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       const fav = hotkeyFavorites(visibleFavsRef.current)[Number(digit) - 1];
       if (!fav?.path) return;
       e.preventDefault();
-      void navigate(fav.path);
+      void navigate(fav.path, { state: FAVORITE_NAVIGATION_STATE });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -908,6 +918,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // arrives, so those retry once groupChainByPath fills in.
   const revealedPathRef = useRef<string | null>(null);
   useEffect(() => {
+    if (isFavoriteNavigation(location.state)) return;
     if (revealedPathRef.current === location.pathname) return;
     const chain = groupChainByPath.get(location.pathname);
     if (!chain && location.pathname.startsWith('/r/')) return;
@@ -925,7 +936,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       });
     }
     return scrollActiveEntryIntoView();
-  }, [location.pathname, groupChainByPath, scrollActiveEntryIntoView]);
+  }, [location.pathname, location.state, groupChainByPath, scrollActiveEntryIntoView]);
 
   // Clearing the filter re-collapses groups; keep the active entry in view
   // instead of letting the selection vanish with them.
@@ -1114,7 +1125,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                       )}
                       <Collapse in={isOpen(key)}>
                         {kinds.map((k) => (
-                          <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} />
+                          <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} inFavorites />
                         ))}
                       </Collapse>
                     </Box>
@@ -1138,6 +1149,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                         favoriteAction={favoriteDragHandle(fav)}
                         onManageFavorite={manageFavorite}
                         hotkey={hotkeyByFavorite.get(fav.id)}
+                        inFavorites
                       />,
                     )}
                   </Box>

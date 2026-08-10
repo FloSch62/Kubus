@@ -128,6 +128,20 @@ describe('NavDrawer', () => {
     expect(useNavigationStore.getState().favorites.map((favorite) => favorite.id)).toContain('kind:/v1/pods');
   }, 15_000);
 
+  it('keeps the canonical panel entry collapsed when navigating from a favorite', async () => {
+    renderDrawer('/');
+    const workloadHeaders = screen.getAllByRole('button', { name: 'Workloads' });
+    fireEvent.click(workloadHeaders[1]!);
+
+    await waitFor(() => expect(screen.getAllByRole('link', { name: /Pods/ })).toHaveLength(1));
+    const favorite = screen.getByRole('link', { name: /Pods/ });
+    fireEvent.click(favorite);
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/r/core/v1/pods');
+    expect(favorite).toHaveClass('Mui-selected');
+    await waitFor(() => expect(screen.getAllByRole('link', { name: /Pods/ })).toHaveLength(1));
+  });
+
   it('scopes a favorite to a cluster from its menu and hides it elsewhere', async () => {
     const legacy = () => useNavigationStore.getState().favorites.find((favorite) => favorite.id === 'legacy');
     const { unmount } = renderDrawer('/');
