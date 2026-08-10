@@ -285,6 +285,8 @@ describe('ResourceListPage', () => {
     fireEvent.change(screen.getByPlaceholderText('delete 2'), { target: { value: 'delete 2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(effects.toast).toHaveBeenCalledWith('success', 'Deleted 2 Pods'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'c' });
     expect(screen.getByText(/Create resource on dev/)).toBeInTheDocument();
@@ -315,6 +317,8 @@ describe('ResourceListPage', () => {
     fireEvent.change(screen.getByPlaceholderText('delete 2'), { target: { value: 'delete 2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(effects.toast).toHaveBeenCalledWith('error', expect.stringContaining('cannot delete web-b')));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument();
   });
 
   it('builds custom printer columns and links the API drawer to its CRD', () => {
