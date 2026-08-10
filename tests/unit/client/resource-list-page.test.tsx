@@ -255,8 +255,8 @@ describe('ResourceListPage', () => {
     useClustersStore.setState({ selected: ['dev', 'prod', 'stage', 'lab', 'loading', 'ignored'] });
     renderPage('/r/core/v1/pods?field=legacy&q=old&label=tier%3Dfrontend&sel=dev%7Cteam-a%7Cpod-a');
 
-    expect(screen.getByText(/watch denied/)).toBeInTheDocument();
-    expect(screen.getByText(/connection lost/)).toBeInTheDocument();
+    expect(screen.queryByText(/watch denied/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/connection lost/)).not.toBeInTheDocument();
     expect(screen.getByText(/not installed on this cluster/)).toBeInTheDocument();
     expect(screen.getByText(/metrics-server is not reachable/)).toBeInTheDocument();
     expect(screen.getByTestId('table-state')).toHaveTextContent('loading');

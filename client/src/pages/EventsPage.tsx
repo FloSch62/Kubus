@@ -1,5 +1,4 @@
 import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import FormControl from '@mui/material/FormControl';
@@ -239,25 +238,12 @@ export function EventsPage() {
     return <NoClustersState icon={<NotificationsNoneOutlinedIcon />} />;
   }
 
-  const errors = Object.entries(list.status).filter(([, s]) => s.state === 'error');
-  const reconnecting = Object.entries(list.status).filter(([, s]) => s.state === 'reconnecting');
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <PageHeader title="Events" icon={<NotificationsNoneOutlinedIcon />}>
           <Chip label={countLabel(rows.length, 'event')} variant="outlined" />
         </PageHeader>
-        {errors.map(([ctx, s]) => (
-          <Alert key={ctx} severity="error" sx={{ mt: 0.5 }}>
-            {ctx}: {s.message ?? 'watch error'}
-          </Alert>
-        ))}
-        {reconnecting.map(([ctx]) => (
-          <Alert key={ctx} severity="warning" sx={{ mt: 0.5 }}>
-            {ctx}: connection lost — reconnecting, events may be stale.
-          </Alert>
-        ))}
       </Box>
       <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center' }}>
         <SmartFilterInput value={text} onChange={setText} kind="Event" rows={list.rows} inputRef={searchInputRef} />
