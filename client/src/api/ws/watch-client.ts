@@ -7,6 +7,13 @@ export interface WatchHandlers {
   onStatus(state: WatchStatusState, message?: string): void;
 }
 
+export interface ContextWatchIssue {
+  state: Extract<WatchStatusState, 'reconnecting' | 'error'>;
+  message?: string;
+}
+
+export type ContextWatchIssues = ReadonlyMap<string, ContextWatchIssue>;
+
 export type BroadcastHandler = (
   msg: Extract<WatchServerMessage, { op: 'drain-progress' | 'helm-operation' | 'pf-update' | 'contexts-changed' | 'discovery-update' }>,
 ) => void;
@@ -49,10 +56,22 @@ class WatchClient {
   private subs = new Map<string, WireSub>(); // by wire id
   private byKey = new Map<string, WireSub>();
   private broadcastHandlers = new Set<BroadcastHandler>();
+  private contextStatusHandlers = new Set<(issues: ContextWatchIssues) => void>();
   private counter = 0;
   private reconnectDelay = 1000;
   private connecting = false;
   private closedByUser = false;
+
+  /**
+   * Report context-level watch failures to global UI such as the cluster
+   * switcher. Resource subscriptions remain the source of truth; this only
+   * folds their current statuses into one issue per context.
+   */
+  onContextIssues(handler: (issues: ContextWatchIssues) => void): () => void {
+    this.contextStatusHandlers.add(handler);
+    handler(this.contextIssues());
+    return () => this.contextStatusHandlers.delete(handler);
+  }
 
   constructor() {
     // Don't sit out a long backoff when we can tell connectivity is back.
@@ -99,6 +118,7 @@ class WatchClient {
     if (sub.flushTimer !== undefined) window.clearTimeout(sub.flushTimer);
     this.byKey.delete(sub.key);
     this.subs.delete(sub.id);
+    this.emitContextIssues();
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ op: 'unsub', id: sub.id }));
     }
@@ -157,6 +177,7 @@ class WatchClient {
           if (!sub) break;
           sub.lastStatus = { state: msg.state, message: msg.message };
           for (const handlers of sub.handlers) handlers.onStatus(msg.state, msg.message);
+          this.emitContextIssues();
           break;
         }
         case 'drain-progress':
@@ -192,6 +213,7 @@ class WatchClient {
         sub.lastStatus = { state: 'reconnecting', message: 'connection lost' };
         for (const handlers of sub.handlers) handlers.onStatus('reconnecting', 'connection lost');
       }
+      this.emitContextIssues();
       if (this.subs.size > 0 || this.broadcastHandlers.size > 0) {
         window.setTimeout(() => this.ensureConnected(), this.reconnectDelay);
         this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
@@ -201,6 +223,27 @@ class WatchClient {
     ws.onerror = () => {
       ws.close();
     };
+  }
+
+  private contextIssues(): ContextWatchIssues {
+    const issues = new Map<string, ContextWatchIssue>();
+    for (const sub of this.subs.values()) {
+      const status = sub.lastStatus;
+      if (status?.state !== 'reconnecting' && status?.state !== 'error') continue;
+      const current = issues.get(sub.params.ctx);
+      // A terminal watch error is more useful than a transient reconnecting
+      // message when different resource subscriptions disagree.
+      if (!current || (current.state === 'reconnecting' && status.state === 'error')) {
+        issues.set(sub.params.ctx, { state: status.state, message: status.message });
+      }
+    }
+    return issues;
+  }
+
+  private emitContextIssues(): void {
+    if (this.contextStatusHandlers.size === 0) return;
+    const issues = this.contextIssues();
+    for (const handler of this.contextStatusHandlers) handler(issues);
   }
 
   private queueEvents(id: string, events: Array<{ type: WatchEventType; object: KubeObject }>): void {

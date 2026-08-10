@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
@@ -28,6 +29,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import type { ContextHealth, ContextInfo } from '@kubus/shared';
 import { useConnectContext, useContexts, useReconnectContext } from '../api/queries.js';
+import { watchClient, type ContextWatchIssue, type ContextWatchIssues } from '../api/ws/watch-client.js';
 import { HEALTH_COLOR, healthTitle } from '../components/ContextHealthDot.js';
 import { fuzzyMatch } from '../fuzzy.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
@@ -45,6 +47,11 @@ function selectedHealth(contexts: ContextInfo[] | undefined, selected: string[])
   if (healths.includes('connecting')) return 'connecting';
   if (healths.includes('unknown')) return 'unknown';
   return 'connected';
+}
+
+function watchIssueTitle(issue: ContextWatchIssue): string {
+  const fallback = issue.state === 'reconnecting' ? 'Connection lost' : 'Watch failed';
+  return `${issue.state === 'reconnecting' ? 'Reconnecting' : 'Watch error'}: ${issue.message ?? fallback}`;
 }
 
 function groupOf(settings: Record<string, ContextSettings>, name: string): string | undefined {
@@ -225,8 +232,12 @@ export function ClusterSwitcher() {
   const [customize, setCustomize] = useState<{ ctx: string; anchor: HTMLElement } | null>(null);
   const [dragName, setDragName] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ name: string; before: boolean } | null>(null);
+  const [watchIssues, setWatchIssues] = useState<ContextWatchIssues>(() => new Map());
+  const [showConnectivityDetails, setShowConnectivityDetails] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => watchClient.onContextIssues(setWatchIssues), []);
 
   // On startup pick the persisted (or kubeconfig-current) selection; afterwards
   // keep the selection healthy on every context update: drop contexts gone from
@@ -285,6 +296,7 @@ export function ClusterSwitcher() {
     if (anchor) {
       setQuery('');
       setActiveIndex(0);
+      setShowConnectivityDetails(false);
     }
   }, [anchor]);
   useEffect(() => {
@@ -461,12 +473,25 @@ export function ClusterSwitcher() {
   const onlyProtected = only ? !!contextSettings[only]?.protected : false;
   const onlyIcon = only ? contextSettings[only]?.icon : undefined;
   const selectedConnectivity = selectedHealth(contexts, selected);
+  const connectivityIssues = useMemo(() => {
+    const byName = new Map((contexts ?? []).map((context) => [context.name, context]));
+    return selected.flatMap((name) => {
+      const context = byName.get(name);
+      const watchIssue = watchIssues.get(name);
+      const details = new Set<string>();
+      if (context?.health === 'error') details.add(context.healthMessage ?? 'Connection failed');
+      if (watchIssue) details.add(watchIssue.message ?? (watchIssue.state === 'reconnecting' ? 'Connection lost' : 'Watch failed'));
+      return details.size ? [{ name, details: [...details] }] : [];
+    });
+  }, [contexts, selected, watchIssues]);
+  const selectedHasConnectivityIssue = connectivityIssues.length > 0;
 
   const renderRow = (c: ContextInfo, idx: number) => {
     const isProtected = !!contextSettings[c.name]?.protected;
     const icon = contextSettings[c.name]?.icon;
     const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
     const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
+    const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
     const isDropTarget = !!dropHint && dropHint.name === c.name && dragName !== c.name;
     return (
       <ListItemButton
@@ -525,8 +550,8 @@ export function ClusterSwitcher() {
           {busy ? (
             <CircularProgress size={12} />
           ) : (
-            <Tooltip title={healthTitle(c)}>
-              <CircleIcon color={HEALTH_COLOR[c.health]} sx={{ fontSize: 12 }} />
+            <Tooltip title={watchIssue ? watchIssueTitle(watchIssue) : healthTitle(c)}>
+              <CircleIcon color={watchIssue ? 'warning' : HEALTH_COLOR[c.health]} sx={{ fontSize: 12 }} />
             </Tooltip>
           )}
         </ListItemIcon>
@@ -595,6 +620,7 @@ export function ClusterSwitcher() {
     const icon = contextSettings[c.name]?.icon;
     const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
     const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
+    const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
     const protectButton = (
       <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
         <IconButton
@@ -631,8 +657,8 @@ export function ClusterSwitcher() {
           {busy ? (
             <CircularProgress size={10} />
           ) : (
-            <Tooltip title={healthTitle(c)}>
-              <CircleIcon color={HEALTH_COLOR[c.health]} sx={{ fontSize: 10 }} />
+            <Tooltip title={watchIssue ? watchIssueTitle(watchIssue) : healthTitle(c)}>
+              <CircleIcon color={watchIssue ? 'warning' : HEALTH_COLOR[c.health]} sx={{ fontSize: 10 }} />
             </Tooltip>
           )}
           {icon && <Box component="span">{icon}</Box>}
@@ -722,8 +748,8 @@ export function ClusterSwitcher() {
     <>
       <Button variant="outlined" color="inherit" endIcon={<KeyboardArrowDownIcon />} onClick={(e) => setAnchor(e.currentTarget)}>
         {selectedConnectivity && (
-          <Tooltip title={selected.length === 1 ? `Connectivity: ${selectedConnectivity}` : `Selected clusters: ${selectedConnectivity}`}>
-            <CircleIcon color={HEALTH_COLOR[selectedConnectivity]} sx={{ fontSize: 10, mr: 1 }} />
+          <Tooltip title={selectedHasConnectivityIssue ? 'Connectivity issue' : selected.length === 1 ? `Connectivity: ${selectedConnectivity}` : `Selected clusters: ${selectedConnectivity}`}>
+            <CircleIcon color={selectedHasConnectivityIssue ? 'warning' : HEALTH_COLOR[selectedConnectivity]} sx={{ fontSize: 10, mr: 1 }} />
           </Tooltip>
         )}
         {onlyIcon && (
@@ -787,6 +813,36 @@ export function ClusterSwitcher() {
               </IconButton>
             </Tooltip>
           </Box>
+          {connectivityIssues.length > 0 && (
+            <Alert severity="warning" sx={{ mx: 1.5, mb: 1, py: 0, '& .MuiAlert-message': { minWidth: 0, width: '100%' } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" sx={{ flexGrow: 1, fontWeight: 700 }}>
+                  {connectivityIssues.length} selected cluster{connectivityIssues.length === 1 ? '' : 's'} {connectivityIssues.length === 1 ? 'has' : 'have'} connectivity issues
+                </Typography>
+                <Button
+                  size="small"
+                  color="inherit"
+                  aria-expanded={showConnectivityDetails}
+                  onClick={() => setShowConnectivityDetails((show) => !show)}
+                  sx={{ flexShrink: 0, minWidth: 0, px: 0.5 }}
+                >
+                  {showConnectivityDetails ? 'Hide details' : 'Show details'}
+                </Button>
+              </Box>
+              {showConnectivityDetails && (
+                <Box sx={{ maxHeight: 144, overflowY: 'auto', pr: 0.5 }}>
+                  {connectivityIssues.map((issue) => (
+                    <Typography key={issue.name} variant="caption" component="div" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
+                      <Box component="span" sx={{ fontWeight: 700 }}>
+                        {issue.name}:
+                      </Box>{' '}
+                      {issue.details.join(' · ')}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Alert>
+          )}
           <Divider />
           <Box ref={listRef} sx={{ maxHeight: 440, overflowY: 'auto', p: 0.5 }}>
             {sections.map((section, si) => (

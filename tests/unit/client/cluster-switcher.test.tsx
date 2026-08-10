@@ -9,10 +9,23 @@ const queryMocks = vi.hoisted(() => ({
   reconnect: { mutate: vi.fn(), isPending: false, variables: undefined as unknown },
 }));
 
+const watchMocks = vi.hoisted(() => ({
+  issues: new Map<string, { state: 'reconnecting' | 'error'; message?: string }>(),
+}));
+
 vi.mock('../../../client/src/api/queries.js', () => ({
   useContexts: () => ({ data: queryMocks.contexts }),
   useConnectContext: () => queryMocks.connect,
   useReconnectContext: () => queryMocks.reconnect,
+}));
+
+vi.mock('../../../client/src/api/ws/watch-client.js', () => ({
+  watchClient: {
+    onContextIssues: (handler: (issues: typeof watchMocks.issues) => void) => {
+      handler(watchMocks.issues);
+      return vi.fn();
+    },
+  },
 }));
 
 const contexts = [
@@ -30,6 +43,7 @@ beforeEach(() => {
   queryMocks.reconnect.mutate.mockClear();
   queryMocks.reconnect.isPending = false;
   queryMocks.reconnect.variables = undefined;
+  watchMocks.issues = new Map();
   useClustersStore.setState({
     selected: ['dev-eu', 'removed'],
     namespaces: [],
@@ -116,5 +130,30 @@ describe('ClusterSwitcher', () => {
     queryMocks.contexts = [];
     act(() => view.rerender(<ClusterSwitcher />));
     expect(screen.getByText(/No contexts found in kubeconfig/)).toBeInTheDocument();
+  });
+
+  it('marks affected clusters orange and collapses connectivity details behind a count', async () => {
+    useClustersStore.setState({ selected: ['dev-eu', 'prod-eu', 'stage-us'] });
+    watchMocks.issues = new Map([
+      ['dev-eu', { state: 'reconnecting', message: 'connection lost' }],
+      ['prod-eu', { state: 'error', message: 'watch denied' }],
+      ['stage-us', { state: 'reconnecting', message: 'connection reset' }],
+    ]);
+
+    render(<ClusterSwitcher />);
+    const button = await screen.findByRole('button', { name: /3 clusters/i });
+    expect(button.querySelector('svg.MuiSvgIcon-colorWarning')).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(await screen.findByText('3 selected clusters have connectivity issues')).toBeInTheDocument();
+    expect(screen.queryByText(/connection lost/)).not.toBeInTheDocument();
+
+    const devRow = screen.getByText('dev-eu').closest('.MuiListItemButton-root');
+    expect(devRow?.querySelector('svg.MuiSvgIcon-colorWarning')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show details' }));
+    expect(screen.getByText(/connection lost/)).toBeInTheDocument();
+    expect(screen.getByText(/watch denied/)).toBeInTheDocument();
+    expect(screen.getByText(/connection reset/)).toBeInTheDocument();
   });
 });
