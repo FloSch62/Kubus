@@ -6,6 +6,7 @@ import { kubusStateStorage } from './persist-storage.js';
 
 export type TableDensity = 'compact' | 'comfortable';
 export type RefreshRate = 'fast' | 'normal' | 'slow' | 'off';
+export type RightClickAction = 'copy-paste' | 'paste' | 'menu';
 export const TAIL_LINE_OPTIONS = [100, 500, 1000, 5000] as const;
 
 const REFRESH_FACTOR: Record<Exclude<RefreshRate, 'off'>, number> = { fast: 0.5, normal: 1, slow: 2 };
@@ -20,6 +21,10 @@ interface UiPrefsState {
   defaultTailLines: number;
   /** Exec shell: 'auto' lets the server pick bash-or-sh; anything else is sent verbatim. */
   defaultShell: string;
+  /** Copy terminal text to the clipboard as soon as it is selected. */
+  copyOnSelect: boolean;
+  /** Right-click behavior in embedded terminals. */
+  rightClickAction: RightClickAction;
   /** Treat contexts without an explicit protected flag as protected. */
   protectByDefault: boolean;
   /** Nav rail collapsed to reclaim width (wide viewports only). */
@@ -64,6 +69,8 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       refreshRate: 'normal',
       defaultTailLines: 500,
       defaultShell: 'auto',
+      copyOnSelect: false,
+      rightClickAction: 'copy-paste',
       protectByDefault: false,
       navCollapsed: false,
       cronHumanSchedule: false,

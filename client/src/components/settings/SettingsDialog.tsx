@@ -43,7 +43,7 @@ import { AddClusterDialog } from './AddClusterDialog.js';
 import { EditClusterDialog } from './EditClusterDialog.js';
 import { useClustersStore } from '../../state/clusters.js';
 import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
-import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type TableDensity } from '../../state/prefs.js';
+import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type RightClickAction, type TableDensity } from '../../state/prefs.js';
 import { KubeconfigSection } from './KubeconfigSection.js';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -320,7 +320,7 @@ function RefreshSection() {
 const SHELL_PRESETS = ['auto', 'sh', 'bash'] as const;
 
 function LogsTerminalSection() {
-  const { defaultTailLines, defaultShell } = useUiPrefsStore();
+  const { defaultTailLines, defaultShell, copyOnSelect, rightClickAction } = useUiPrefsStore();
   const setPrefs = useUiPrefsStore((s) => s.set);
   const { wrap, tsMode, highlight, setWrap, setTsMode, setHighlight } = useLogPrefsStore();
   const shellPreset = (SHELL_PRESETS as readonly string[]).includes(defaultShell) ? defaultShell : 'custom';
@@ -390,6 +390,30 @@ function LogsTerminalSection() {
           <Typography variant="caption" color="text.secondary">
             Applies to newly opened exec terminals
           </Typography>
+          <FormControlLabel
+            control={<Switch checked={copyOnSelect} onChange={(e) => setPrefs({ copyOnSelect: e.target.checked })} />}
+            label={
+              <Box>
+                <Typography variant="body2">Copy on select</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Copy selected terminal text to the clipboard automatically
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControl size="small" sx={{ maxWidth: 420 }}>
+            <InputLabel id="settings-terminal-right-click">Right-click</InputLabel>
+            <Select
+              labelId="settings-terminal-right-click"
+              label="Right-click"
+              value={rightClickAction}
+              onChange={(e) => setPrefs({ rightClickAction: e.target.value as RightClickAction })}
+            >
+              <MenuItem value="copy-paste">Copy selection, otherwise paste (terminal convention)</MenuItem>
+              <MenuItem value="paste">Always paste</MenuItem>
+              <MenuItem value="menu">Show context menu</MenuItem>
+            </Select>
+          </FormControl>
         </Stack>
       </Section>
     </Stack>
