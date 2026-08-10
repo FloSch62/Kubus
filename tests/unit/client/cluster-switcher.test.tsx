@@ -10,7 +10,7 @@ const queryMocks = vi.hoisted(() => ({
 }));
 
 const watchMocks = vi.hoisted(() => ({
-  issues: {} as Record<string, { state: 'reconnecting' | 'error'; message?: string }>,
+  issues: new Map<string, { state: 'reconnecting' | 'error'; message?: string }>(),
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
@@ -43,7 +43,7 @@ beforeEach(() => {
   queryMocks.reconnect.mutate.mockClear();
   queryMocks.reconnect.isPending = false;
   queryMocks.reconnect.variables = undefined;
-  watchMocks.issues = {};
+  watchMocks.issues = new Map();
   useClustersStore.setState({
     selected: ['dev-eu', 'removed'],
     namespaces: [],
@@ -134,11 +134,11 @@ describe('ClusterSwitcher', () => {
 
   it('marks affected clusters orange and collapses connectivity details behind a count', async () => {
     useClustersStore.setState({ selected: ['dev-eu', 'prod-eu', 'stage-us'] });
-    watchMocks.issues = {
-      'dev-eu': { state: 'reconnecting', message: 'connection lost' },
-      'prod-eu': { state: 'error', message: 'watch denied' },
-      'stage-us': { state: 'reconnecting', message: 'connection reset' },
-    };
+    watchMocks.issues = new Map([
+      ['dev-eu', { state: 'reconnecting', message: 'connection lost' }],
+      ['prod-eu', { state: 'error', message: 'watch denied' }],
+      ['stage-us', { state: 'reconnecting', message: 'connection reset' }],
+    ]);
 
     render(<ClusterSwitcher />);
     const button = await screen.findByRole('button', { name: /3 clusters/i });

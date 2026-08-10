@@ -52,7 +52,7 @@ describe('watch context issues', () => {
     const snapshots: ContextWatchIssues[] = [];
     const stopIssues = watchClient.onContextIssues((issues) => snapshots.push(issues));
     const stopWatch = watchClient.subscribe(
-      { ctx: 'dev', group: 'core', version: 'v1', plural: 'pods' },
+      { ctx: 'constructor', group: 'core', version: 'v1', plural: 'pods' },
       { onSnapshot: vi.fn(), onEvents: vi.fn(), onStatus: vi.fn() },
     );
     const socket = MockWebSocket.instances[0]!;
@@ -60,10 +60,10 @@ describe('watch context issues', () => {
     const subscription = JSON.parse(socket.sent[0]!) as { id: string };
 
     socket.receive({ op: 'status', id: subscription.id, state: 'reconnecting', message: 'connection lost' });
-    expect(snapshots.at(-1)).toEqual({ dev: { state: 'reconnecting', message: 'connection lost' } });
+    expect(snapshots.at(-1)).toEqual(new Map([['constructor', { state: 'reconnecting', message: 'connection lost' }]]));
 
     socket.receive({ op: 'status', id: subscription.id, state: 'live' });
-    expect(snapshots.at(-1)).toEqual({});
+    expect(snapshots.at(-1)).toEqual(new Map());
 
     stopIssues();
     stopWatch();

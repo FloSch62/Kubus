@@ -12,7 +12,7 @@ export interface ContextWatchIssue {
   message?: string;
 }
 
-export type ContextWatchIssues = Record<string, ContextWatchIssue>;
+export type ContextWatchIssues = ReadonlyMap<string, ContextWatchIssue>;
 
 export type BroadcastHandler = (
   msg: Extract<WatchServerMessage, { op: 'drain-progress' | 'helm-operation' | 'pf-update' | 'contexts-changed' | 'discovery-update' }>,
@@ -226,15 +226,15 @@ class WatchClient {
   }
 
   private contextIssues(): ContextWatchIssues {
-    const issues: ContextWatchIssues = {};
+    const issues = new Map<string, ContextWatchIssue>();
     for (const sub of this.subs.values()) {
       const status = sub.lastStatus;
       if (status?.state !== 'reconnecting' && status?.state !== 'error') continue;
-      const current = issues[sub.params.ctx];
+      const current = issues.get(sub.params.ctx);
       // A terminal watch error is more useful than a transient reconnecting
       // message when different resource subscriptions disagree.
       if (!current || (current.state === 'reconnecting' && status.state === 'error')) {
-        issues[sub.params.ctx] = { state: status.state, message: status.message };
+        issues.set(sub.params.ctx, { state: status.state, message: status.message });
       }
     }
     return issues;

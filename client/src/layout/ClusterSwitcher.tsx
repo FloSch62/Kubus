@@ -232,7 +232,7 @@ export function ClusterSwitcher() {
   const [customize, setCustomize] = useState<{ ctx: string; anchor: HTMLElement } | null>(null);
   const [dragName, setDragName] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ name: string; before: boolean } | null>(null);
-  const [watchIssues, setWatchIssues] = useState<ContextWatchIssues>({});
+  const [watchIssues, setWatchIssues] = useState<ContextWatchIssues>(() => new Map());
   const [showConnectivityDetails, setShowConnectivityDetails] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -477,7 +477,7 @@ export function ClusterSwitcher() {
     const byName = new Map((contexts ?? []).map((context) => [context.name, context]));
     return selected.flatMap((name) => {
       const context = byName.get(name);
-      const watchIssue = watchIssues[name];
+      const watchIssue = watchIssues.get(name);
       const details = new Set<string>();
       if (context?.health === 'error') details.add(context.healthMessage ?? 'Connection failed');
       if (watchIssue) details.add(watchIssue.message ?? (watchIssue.state === 'reconnecting' ? 'Connection lost' : 'Watch failed'));
@@ -491,7 +491,7 @@ export function ClusterSwitcher() {
     const icon = contextSettings[c.name]?.icon;
     const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
     const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
-    const watchIssue = selected.includes(c.name) ? watchIssues[c.name] : undefined;
+    const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
     const isDropTarget = !!dropHint && dropHint.name === c.name && dragName !== c.name;
     return (
       <ListItemButton
@@ -620,7 +620,7 @@ export function ClusterSwitcher() {
     const icon = contextSettings[c.name]?.icon;
     const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
     const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
-    const watchIssue = selected.includes(c.name) ? watchIssues[c.name] : undefined;
+    const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
     const protectButton = (
       <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
         <IconButton
