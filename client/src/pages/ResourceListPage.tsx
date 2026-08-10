@@ -684,6 +684,7 @@ export function ResourceListPage() {
           setContextMenuOpen(true);
         }}
         checkboxSelection
+        selectedRows={selectedRows}
         onSelectionChange={setSelectedRows}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}

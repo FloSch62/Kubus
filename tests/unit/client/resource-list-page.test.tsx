@@ -66,6 +66,7 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
     columns: Array<{ field: string; valueGetter?: (...args: unknown[]) => unknown; renderCell?: (params: { row: Row; value?: unknown }) => ReactNode }>;
     toolbar?: ReactNode;
     onSelectionChange?: (rows: Row[]) => void;
+    selectedRows?: Row[];
     onFilterChange?: (value: string) => void;
     onLabelSelectorChange?: (value: string) => void;
     onRowClick?: (row: Row) => void;
@@ -77,7 +78,9 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
   }) => (
     <section data-testid="resource-table">
       <div>{props.toolbar}</div>
-      <output data-testid="table-state">{JSON.stringify({ hidden: props.hiddenFields, active: props.activeRowId, loading: props.loading })}</output>
+      <output data-testid="table-state">
+        {JSON.stringify({ hidden: props.hiddenFields, active: props.activeRowId, loading: props.loading, selected: props.selectedRows?.map((row) => row.obj.metadata.name) })}
+      </output>
       <button onClick={() => props.onSelectionChange?.(props.rows)}>Mock select all</button>
       <button onClick={() => props.onSelectionChange?.([])}>Mock clear selection</button>
       <button onClick={() => props.onFilterChange?.('failed pods')}>Mock text filter</button>
@@ -287,6 +290,7 @@ describe('ResourceListPage', () => {
     await waitFor(() => expect(effects.toast).toHaveBeenCalledWith('success', 'Deleted 2 Pods'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('table-state')).toHaveTextContent('"selected":[]');
 
     fireEvent.keyDown(window, { key: 'c' });
     expect(screen.getByText(/Create resource on dev/)).toBeInTheDocument();
@@ -319,6 +323,7 @@ describe('ResourceListPage', () => {
     await waitFor(() => expect(effects.toast).toHaveBeenCalledWith('error', expect.stringContaining('cannot delete web-b')));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument();
+    expect(screen.getByTestId('table-state')).toHaveTextContent('"selected":["web-b"]');
   });
 
   it('builds custom printer columns and links the API drawer to its CRD', () => {

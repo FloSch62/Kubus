@@ -7,7 +7,7 @@ import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridSortModel } from '@mui/x-data-grid';
+import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
 import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
@@ -42,6 +42,8 @@ interface Props {
   toolbar?: ReactNode;
   /** Enable checkbox selection; returns selected rows. */
   onSelectionChange?: (rows: ClusterRow[]) => void;
+  /** Controlled checkbox selection, kept in sync with external bulk actions. */
+  selectedRows?: ClusterRow[];
   checkboxSelection?: boolean;
   /** Column fields hidden by default (user can re-enable via the column menu). */
   hiddenFields?: string[];
@@ -87,6 +89,7 @@ export function ResourceTable({
   toolbar,
   checkboxSelection,
   onSelectionChange,
+  selectedRows,
   hiddenFields,
   tableId,
   activeRowId,
@@ -196,6 +199,10 @@ export function ResourceTable({
   }, [rows, parsedFilter, kind, metricsForFilter]);
 
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
+  const rowSelectionModel = useMemo<GridRowSelectionModel | undefined>(
+    () => selectedRows && { type: 'include', ids: new Set(selectedRows.map((row) => row.obj.metadata.uid)) },
+    [selectedRows],
+  );
   // Scanning and sorting every row's labels is only worth doing while the
   // dropdown is open — not on every watch flush of a large list.
   const [labelsOpen, setLabelsOpen] = useState(false);
@@ -336,6 +343,7 @@ export function ResourceTable({
         // reserve a real gutter instead.
         scrollbarSize={layout.scrollbarSize}
         checkboxSelection={checkboxSelection}
+        rowSelectionModel={rowSelectionModel}
         slots={{ noRowsOverlay: NoRowsOverlay }}
         onRowSelectionModelChange={
           onSelectionChange
