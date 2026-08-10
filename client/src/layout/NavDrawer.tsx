@@ -412,6 +412,7 @@ function GroupHeader({
     >
       <ListItemButton
         dense
+        aria-expanded={open}
         onClick={onClick}
         sx={{ py: 0.25, color: 'text.secondary', pr: favoriteAction ? 8 : favorite ? 5.5 : undefined }}
       >
