@@ -2,13 +2,19 @@ import { expect, test } from '@playwright/test';
 import { gotoApp } from '../helpers/app.js';
 import { contextName } from '../helpers/cluster.mjs';
 
-test('command palette opens with mod+k and closes with escape', async ({ page }) => {
+test('command palette stays top-aligned while results change and closes with escape', async ({ page }) => {
   await gotoApp(page);
   await expect(page.getByRole('button', { name: contextName })).toBeVisible();
 
   await page.keyboard.press('ControlOrMeta+k');
   const palette = page.getByPlaceholder(/Search resources, pages, kinds/);
   await expect(palette).toBeVisible();
+
+  const dialog = page.getByRole('dialog');
+  const topBeforeSearch = await dialog.evaluate((element) => element.getBoundingClientRect().top);
+  await palette.fill('po');
+  await expect(dialog.getByText(/\d+ results/)).toBeVisible();
+  await expect.poll(() => dialog.evaluate((element) => element.getBoundingClientRect().top)).toBe(topBeforeSearch);
 
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);

@@ -290,7 +290,16 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <>
-      <Dialog open={open} onClose={closeAll} maxWidth="sm" fullWidth slotProps={{ transition: { onEntered: focusInput } }}>
+      <Dialog
+        open={open}
+        onClose={closeAll}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{
+          container: { sx: { alignItems: 'flex-start' } },
+          transition: { onEntered: focusInput },
+        }}
+      >
         <DialogContent sx={{ p: 1.25 }}>
           <TextField
             autoFocus
