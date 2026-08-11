@@ -362,8 +362,14 @@ function NodeUsageCard({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: ReturnT
                 <Typography variant="body2" sx={{ width: 220 }} noWrap>
                   {n.name}
                 </Typography>
-                <UsageBar label={`CPU ${formatCpu(n.cpuMilli)}`} pct={n.cpuCapacityMilli ? (n.cpuMilli / n.cpuCapacityMilli) * 100 : undefined} />
-                <UsageBar label={`Mem ${formatBytes(n.memBytes)}`} pct={n.memCapacityBytes ? (n.memBytes / n.memCapacityBytes) * 100 : undefined} />
+                <UsageBar
+                  label={`CPU ${formatCpu(n.cpuMilli)}${n.cpuCapacityMilli ? ` / ${formatCpu(n.cpuCapacityMilli)}` : ''}`}
+                  pct={n.cpuCapacityMilli ? (n.cpuMilli / n.cpuCapacityMilli) * 100 : undefined}
+                />
+                <UsageBar
+                  label={`Mem ${formatBytes(n.memBytes)}${n.memCapacityBytes ? ` / ${formatBytes(n.memCapacityBytes)}` : ''}`}
+                  pct={n.memCapacityBytes ? (n.memBytes / n.memCapacityBytes) * 100 : undefined}
+                />
               </Box>
             ))}
           </Stack>
