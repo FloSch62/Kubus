@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { StateStorage } from 'zustand/middleware';
 import { usePaneActive } from '../layout/pane-context.js';
-import { kubusStateStorage } from './persist-storage.js';
+import { kubusStateStorage, skipUnchangedStorageWrites } from './persist-storage.js';
+import { windowScopeId } from '../window-management.js';
 
 export type TableDensity = 'compact' | 'comfortable';
 export type RefreshRate = 'fast' | 'normal' | 'slow' | 'off';
@@ -56,6 +58,38 @@ interface UiPrefsState {
 
 export type TableSortModel = ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
 
+const sessionStateStorage: StateStorage = {
+  getItem: (name) => sessionStorage.getItem(name),
+  setItem: (name, value) => sessionStorage.setItem(name, value),
+  removeItem: (name) => sessionStorage.removeItem(name),
+};
+
+const prefsWindowScope = windowScopeId();
+const prefsWindowStorage = prefsWindowScope === 'main' ? kubusStateStorage : sessionStateStorage;
+const prefsWindowKey = `kubus-window-ui:${prefsWindowScope}`;
+const sharedPrefsStorage = skipUnchangedStorageWrites(kubusStateStorage);
+
+function syncStorageValue(storage: StateStorage, name: string): string | null {
+  const value = storage.getItem(name);
+  return typeof value === 'string' || value === null ? value : null;
+}
+
+function storedNavCollapsed(): boolean {
+  try {
+    const scoped = JSON.parse(syncStorageValue(prefsWindowStorage, prefsWindowKey) ?? 'null') as { navCollapsed?: unknown } | null;
+    if (typeof scoped?.navCollapsed === 'boolean') return scoped.navCollapsed;
+    if (prefsWindowScope !== 'main') return false;
+    const legacy = JSON.parse(syncStorageValue(kubusStateStorage, 'kubus-prefs') ?? 'null') as {
+      state?: { navCollapsed?: unknown };
+    } | null;
+    return typeof legacy?.state?.navCollapsed === 'boolean' ? legacy.state.navCollapsed : false;
+  } catch {
+    return false;
+  }
+}
+
+const initialNavCollapsed = storedNavCollapsed();
+
 function replaceTableValue<T>(values: Record<string, T>, tableId: string, value: T | undefined): Record<string, T> {
   const next = { ...values };
   if (value === undefined) delete next[tableId];
@@ -74,7 +108,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       copyOnSelect: false,
       rightClickAction: 'copy-paste',
       protectByDefault: false,
-      navCollapsed: false,
+      navCollapsed: initialNavCollapsed,
       cronHumanSchedule: false,
       highUsagePct: 80,
       underRequestedFactor: 2,
@@ -102,9 +136,52 @@ export const useUiPrefsStore = create<UiPrefsState>()(
           sortModels: replaceTableValue(s.sortModels, tableId, state.sort),
         })),
     }),
-    { name: 'kubus-prefs', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
+    {
+      name: 'kubus-prefs',
+      version: 0,
+      storage: createJSONStorage(() => sharedPrefsStorage),
+      partialize: (state) => ({
+        tableDensity: state.tableDensity,
+        monoFontSize: state.monoFontSize,
+        refreshRate: state.refreshRate,
+        defaultTailLines: state.defaultTailLines,
+        defaultShell: state.defaultShell,
+        copyOnSelect: state.copyOnSelect,
+        rightClickAction: state.rightClickAction,
+        protectByDefault: state.protectByDefault,
+        cronHumanSchedule: state.cronHumanSchedule,
+        highUsagePct: state.highUsagePct,
+        underRequestedFactor: state.underRequestedFactor,
+        debugMode: state.debugMode,
+        columnWidths: state.columnWidths,
+        columnVisibility: state.columnVisibility,
+        sortModels: state.sortModels,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<UiPrefsState>),
+        navCollapsed: current.navCollapsed,
+      }),
+    },
   ),
 );
+
+let lastNavCollapsed = useUiPrefsStore.getState().navCollapsed;
+
+function persistWindowUiState(navCollapsed: boolean): void {
+  try {
+    prefsWindowStorage.setItem(prefsWindowKey, JSON.stringify({ navCollapsed }));
+  } catch {
+    /* a blocked/full session store must not break layout preferences */
+  }
+}
+
+persistWindowUiState(lastNavCollapsed);
+useUiPrefsStore.subscribe((state) => {
+  if (state.navCollapsed === lastNavCollapsed) return;
+  lastNavCollapsed = state.navCollapsed;
+  persistWindowUiState(lastNavCollapsed);
+});
 
 /**
  * Scale a polled query's base interval by the user's refresh-rate preset.

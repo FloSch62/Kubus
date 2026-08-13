@@ -1,4 +1,4 @@
-import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
+import type { AppInfo, AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
 
 declare global {
   /** Bridge exposed by the Electron preload (absent in regular browsers). */
@@ -6,6 +6,8 @@ declare global {
     kubusDesktop?: {
       /** Electron's process.platform ('linux', 'win32', 'darwin', …). */
       platform: string;
+      /** One-shot payload describing the content of a secondary app window. */
+      windowLaunch?: AppWindowLaunch;
       stateStorage: {
         getItem(name: string): string | null;
         setItem(name: string, value: string): void;
@@ -14,6 +16,10 @@ declare global {
       setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
       getAppInfo(): Promise<AppInfo | undefined>;
       checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult>;
+      /** Open a secondary native application window. */
+      openWindow(launch: AppWindowLaunch): void;
+      /** Detach only if the native cursor is outside every Kubus window. */
+      detachTab(launch: Extract<AppWindowLaunch, { kind: 'tab-transfer' }>): Promise<boolean>;
       /** Subscribe to the OS close-window chord (Cmd/Ctrl+W); returns unsubscribe. */
       onCloseTab(callback: () => void): () => void;
       /** Subscribe to the tab-cycling chords (Ctrl+Tab & friends); backwards=true cycles left. */

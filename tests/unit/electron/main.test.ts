@@ -38,6 +38,9 @@ const electron = vi.hoisted(() => {
     });
     readonly isMaximized = vi.fn(() => this.maximized);
     readonly isMinimized = vi.fn(() => this.minimized);
+    readonly isDestroyed = vi.fn(() => false);
+    readonly isVisible = vi.fn(() => true);
+    readonly getBounds = vi.fn(() => this.normalBounds);
     readonly restore = vi.fn(() => {
       this.minimized = false;
     });
@@ -106,6 +109,7 @@ const electron = vi.hoisted(() => {
     ipcHandlers,
     menu,
     nativeTheme: { shouldUseDarkColors: false },
+    screen: { getCursorScreenPoint: vi.fn(() => ({ x: 5000, y: 5000 })) },
     serverClose,
     shell,
     startServer,
@@ -120,6 +124,7 @@ vi.mock('electron', () => ({
   ipcMain: electron.ipcMain,
   Menu: electron.menu,
   nativeTheme: electron.nativeTheme,
+  screen: electron.screen,
   shell: electron.shell,
 }));
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
@@ -200,6 +205,13 @@ describe('Electron main process', () => {
     });
     expect(win.options.webPreferences).toEqual({
       preload: expect.stringMatching(/electron[\\/](?:src|dist)[\\/]preload\.js$/),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      navigateOnDragDrop: false,
     });
     if (process.platform === 'darwin') expect(win.setMenuBarVisibility).not.toHaveBeenCalled();
     else expect(win.setMenuBarVisibility).toHaveBeenCalledWith(false);
@@ -308,6 +320,47 @@ describe('Electron main process', () => {
       meta: false,
     });
     expect(keyUp.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('opens validated secondary windows and detaches only outside existing window bounds', async () => {
+    const win = await loadMain();
+    const openWindow = registered(electron.ipcListeners, 'kubus:open-window');
+    const launch = {
+      kind: 'page',
+      windowId: 'window-page',
+      title: 'Pods',
+      context: { selected: ['kind-a'], namespaces: ['production'], navCollapsed: true },
+      tab: { path: '/r/core/v1/pods' },
+    };
+    openWindow({ sender: win.webContents }, launch);
+    expect(electron.BrowserWindow.instances).toHaveLength(2);
+    expect(electron.BrowserWindow.instances[1]?.options.title).toBe('Pods — Kubus');
+    expect(electron.BrowserWindow.instances[1]?.loadURL).toHaveBeenCalledWith('http://127.0.0.1:41234/?token=secret-test-token');
+
+    openWindow({ sender: win.webContents }, { ...launch, tab: { path: '//evil.example' } });
+    expect(electron.BrowserWindow.instances).toHaveLength(2);
+    openWindow({ sender: win.webContents }, { ...launch, context: { selected: 'invalid', namespaces: [], navCollapsed: false } });
+    expect(electron.BrowserWindow.instances).toHaveLength(2);
+
+    const detach = registered(electron.ipcHandlers, 'kubus:detach-tab');
+    expect(detach({ sender: win.webContents }, {
+      kind: 'tab-transfer',
+      surface: 'dock',
+      windowId: 'window-transfer',
+      title: 'Shell',
+      transferId: 'opaque-token',
+    })).toBe(true);
+    expect(electron.BrowserWindow.instances).toHaveLength(3);
+
+    electron.screen.getCursorScreenPoint.mockReturnValue({ x: 40, y: 40 });
+    expect(detach({ sender: win.webContents }, {
+      kind: 'tab-transfer',
+      surface: 'dock',
+      windowId: 'window-transfer-2',
+      title: 'Shell',
+      transferId: 'opaque-token-2',
+    })).toBe(false);
+    expect(electron.BrowserWindow.instances).toHaveLength(3);
   });
 
   it('queues deep links until the renderer is ready, then pushes subsequent routes', async () => {

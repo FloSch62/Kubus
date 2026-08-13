@@ -58,3 +58,18 @@ export const kubusStateStorage: StateStorage = {
     browserStorage()?.removeItem(name);
   },
 };
+
+/** Avoid cross-window broadcasts when a local-only store action partializes to identical shared data. */
+export function skipUnchangedStorageWrites(base: StateStorage): StateStorage {
+  return {
+    getItem: (name) => base.getItem(name),
+    setItem: (name, value) => {
+      const current = base.getItem(name);
+      if (current instanceof Promise) {
+        return current.then((resolved) => resolved === value ? undefined : base.setItem(name, value));
+      }
+      return current === value ? undefined : base.setItem(name, value);
+    },
+    removeItem: (name) => base.removeItem(name),
+  };
+}

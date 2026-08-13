@@ -7,6 +7,86 @@ export interface AppInfo {
   helmEngine: boolean;
 }
 
+/** WebSocket close reason which intentionally ends a server-side terminal session. */
+export const EXEC_SESSION_CLOSE_REASON = 'kubus terminal closed';
+
+/** Per-window working context copied once when a secondary window is created. */
+export interface AppWindowContext {
+  selected: string[];
+  namespaces: string[];
+  navCollapsed: boolean;
+}
+
+/** Serializable tab descriptions accepted when a renderer opens a fresh window. */
+export type AppWindowDockTab =
+  | {
+      kind: 'terminal';
+      title: string;
+      ctx: string;
+      namespace: string;
+      pod: string;
+      container: string;
+      pinned?: boolean;
+      color?: string;
+    }
+  | {
+      kind: 'node-shell';
+      title: string;
+      ctx: string;
+      node: string;
+      pinned?: boolean;
+      color?: string;
+    }
+  | {
+      kind: 'logs';
+      title: string;
+      ctx: string;
+      namespace: string;
+      pods: string[];
+      sources?: Array<{ pod: string; containers: string[] }>;
+      target?: { kind: LogTargetKind; name: string };
+      container?: string;
+      follow?: boolean;
+      tailLines?: number;
+      sinceSeconds?: number;
+      previous?: boolean;
+      pinned?: boolean;
+      color?: string;
+    };
+
+/** One secondary Kubus window requested by a renderer. */
+export type AppWindowLaunch =
+  | {
+      kind: 'page';
+      windowId: string;
+      title: string;
+      context?: AppWindowContext;
+      tab: {
+        path: string;
+        pendingSavedView?: SavedViewGridState;
+        customTitle?: string;
+        pinned?: boolean;
+        color?: string;
+      };
+    }
+  | {
+      kind: 'dock';
+      windowId: string;
+      title: string;
+      context?: AppWindowContext;
+      tab: AppWindowDockTab;
+    }
+  | {
+      /** Opaque claim token; the tab itself travels over the same-origin window bus. */
+      kind: 'tab-transfer';
+      /** Chooses the destination shell before the opaque tab is claimed. */
+      surface: 'page' | 'dock';
+      windowId: string;
+      transferId: string;
+      title: string;
+      context?: AppWindowContext;
+    };
+
 export type AppLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 /** One diagnostic log record from the in-memory app log buffer. */

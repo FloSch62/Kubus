@@ -184,6 +184,13 @@ export function GlobalShortcuts() {
     };
 
     const cycleTab = (delta: number) => {
+      const dock = useDockStore.getState();
+      const focusedInDock = document.activeElement instanceof HTMLElement && !!document.activeElement.closest('.kubus-bottom-dock');
+      if (focusedInDock && dock.open && dock.tabs.length > 1) {
+        const idx = Math.max(0, dock.tabs.findIndex((tab) => tab.id === dock.activeId));
+        dock.setActive(dock.tabs[(idx + delta + dock.tabs.length) % dock.tabs.length]!.id);
+        return;
+      }
       const s = useTabsStore.getState();
       if (s.tabs.length < 2) return;
       const idx = Math.max(0, s.tabs.findIndex((t) => t.id === s.activeId));

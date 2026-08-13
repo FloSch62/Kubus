@@ -2,12 +2,11 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
+import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import { useLocation, useNavigate } from 'react-router';
 import { useTabsStore } from '../state/tabs.js';
 import { useClustersStore } from '../state/clusters.js';
@@ -15,6 +14,11 @@ import { applySavedViewGridState } from '../state/saved-view.js';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { tabMeta } from './tab-meta.js';
 import { TruncationTooltip } from '../components/truncation.js';
+import { TabActionsMenu, type TabMenuState } from '../components/TabActionsMenu.js';
+import { createTabTransferId, finishLocalTabTransfer, receiveTabTransfer, registerTabTransferSource } from '../tab-transfer.js';
+import { hasTabTransfer, readTabTransfer, shouldDetachTabDrag, writeTabTransfer } from '../tab-drag.js';
+import { detachTabWindow } from '../window-management.js';
+import { currentAppWindowContext } from '../window-context.js';
 
 // Electron always starts at '/'; on the first mount we reopen the tab the user
 // left active. Module-scoped so StrictMode's double effect doesn't re-restore.
@@ -30,9 +34,11 @@ export const TabsBar = memo(function TabsBar() {
   const current = location.pathname + location.search;
   const activeTab = tabs.find((tab) => tab.id === activeId);
 
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<TabMenuState | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const dragIndexRef = useRef<number | null>(null);
+  const dragTransferIdRef = useRef<string | null>(null);
+  const localDropRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
 
@@ -63,6 +69,19 @@ export const TabsBar = memo(function TabsBar() {
     activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeId, tabs.length]);
 
+  // Cross-window claims mutate the store outside this component's event
+  // handlers. Subscribe once so an adopted page lands its router location in
+  // the same frame as ordinary tab activation.
+  useEffect(
+    () =>
+      useTabsStore.subscribe((state, previous) => {
+        if (state.activeId === previous.activeId) return;
+        const active = state.tabs.find((tab) => tab.id === state.activeId);
+        if (active && active.path !== window.location.pathname + window.location.search) void navigate(active.path);
+      }),
+    [navigate],
+  );
+
   // Store → router: after any tab mutation, land on the (new) active tab.
   const act = (mutate: () => void) => {
     mutate();
@@ -73,7 +92,6 @@ export const TabsBar = memo(function TabsBar() {
 
   const metas = useMemo(() => new Map(tabs.map((t) => [t.id, tabMeta(t.path, apiResources?.resources)])), [tabs, apiResources]);
   const closeTab = (id: string) => act(() => useTabsStore.getState().closeTab(id));
-  const menuIndex = menu ? tabs.findIndex((t) => t.id === menu.id) : -1;
 
   return (
     <Box
@@ -108,22 +126,61 @@ export const TabsBar = memo(function TabsBar() {
               tabIndex={active ? 0 : -1}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'move';
+                const transferId = createTabTransferId();
+                registerTabTransferSource(transferId, 'page', tab.id);
+                writeTabTransfer(e.dataTransfer, transferId);
+                dragTransferIdRef.current = transferId;
+                localDropRef.current = false;
                 dragIndexRef.current = idx;
                 setDragId(tab.id);
               }}
               onDragOver={(e) => {
+                if (dragIndexRef.current === null && !hasTabTransfer(e.dataTransfer)) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
                 const from = dragIndexRef.current;
                 if (from !== null && from !== idx) {
-                  useTabsStore.getState().moveTab(from, idx);
-                  dragIndexRef.current = idx;
+                  const state = useTabsStore.getState();
+                  // Pinned and ordinary tabs are separate reorder groups. Do
+                  // not advance the live drag index when the store rejects a
+                  // boundary crossing, or the next hover would move a neighbor.
+                  if (!!state.tabs[from]?.pinned === !!state.tabs[idx]?.pinned) {
+                    state.moveTab(from, idx);
+                    dragIndexRef.current = idx;
+                  }
                 }
               }}
-              onDrop={(e) => e.preventDefault()}
-              onDragEnd={() => {
+              onDrop={(e) => {
+                e.preventDefault();
+                const transferId = readTabTransfer(e.dataTransfer);
+                if (!transferId) return;
+                if (dragIndexRef.current !== null) {
+                  localDropRef.current = true;
+                  finishLocalTabTransfer(transferId);
+                  return;
+                }
+                void receiveTabTransfer(transferId, tab.id, e.clientX < e.currentTarget.getBoundingClientRect().left + e.currentTarget.clientWidth / 2 ? 'before' : 'after');
+              }}
+              onDragEnd={(e) => {
+                const transferId = dragTransferIdRef.current;
+                const draggedTitle = tab.customTitle ?? meta.title;
+                if (transferId && !localDropRef.current && e.dataTransfer.dropEffect === 'none') {
+                  if (window.kubusDesktop || shouldDetachTabDrag(e.nativeEvent)) {
+                    void detachTabWindow({
+                      kind: 'tab-transfer',
+                      surface: 'page',
+                      transferId,
+                      title: draggedTitle,
+                      context: currentAppWindowContext(),
+                    }).then((detached) => {
+                      if (!detached) finishLocalTabTransfer(transferId);
+                    });
+                  } else {
+                    finishLocalTabTransfer(transferId);
+                  }
+                }
                 dragIndexRef.current = null;
+                dragTransferIdRef.current = null;
                 setDragId(null);
               }}
               onClick={() => act(() => useTabsStore.getState().setActive(tab.id))}
@@ -138,6 +195,18 @@ export const TabsBar = memo(function TabsBar() {
                   closeTab(tab.id);
                   // The focused element is gone; keep keyboard flow on the strip.
                   requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus());
+                  return;
+                }
+                if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                  e.preventDefault();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setMenu({
+                    surface: 'page',
+                    id: tab.id,
+                    title: tab.customTitle ?? meta.title,
+                    x: rect.left + 8,
+                    y: rect.bottom - 4,
+                  });
                   return;
                 }
                 // Roving focus per the ARIA tabs pattern: arrows move focus
@@ -159,7 +228,7 @@ export const TabsBar = memo(function TabsBar() {
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setMenu({ id: tab.id, x: e.clientX, y: e.clientY });
+                setMenu({ surface: 'page', id: tab.id, title: tab.customTitle ?? meta.title, x: e.clientX, y: e.clientY });
               }}
               sx={{
                 display: 'flex',
@@ -178,21 +247,26 @@ export const TabsBar = memo(function TabsBar() {
                 userSelect: 'none',
                 opacity: dragId === tab.id ? 0.5 : 1,
                 ...(active
-                  ? { bgcolor: 'background.default', boxShadow: (theme) => `inset 0 2px 0 0 ${theme.palette.primary.main}` }
-                  : { color: 'text.secondary', '&:hover': { bgcolor: 'action.hover' } }),
+                  ? { bgcolor: 'background.default', boxShadow: (theme) => `inset 0 2px 0 0 ${tab.color ?? theme.palette.primary.main}` }
+                  : {
+                      color: 'text.secondary',
+                      boxShadow: tab.color ? `inset 0 2px 0 0 ${tab.color}` : undefined,
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }),
                 '&:hover .tab-close, &:focus-within .tab-close': { opacity: 1 },
               }}
             >
               <Box sx={{ display: 'flex', color: 'text.secondary', '& svg': { fontSize: 15 } }}>{meta.icon}</Box>
-              <TruncationTooltip text={meta.title}>
+              {tab.pinned ? <PushPinOutlinedIcon aria-label="Pinned" sx={{ fontSize: 13, color: 'text.secondary', transform: 'rotate(45deg)' }} /> : null}
+              <TruncationTooltip text={tab.customTitle ?? meta.title}>
                 <Typography variant="body2" noWrap sx={{ flex: 1, fontSize: 12.5 }}>
-                  {meta.title}
+                  {tab.customTitle ?? meta.title}
                 </Typography>
               </TruncationTooltip>
               <IconButton
                 className="tab-close"
                 size="small"
-                aria-label={`Close ${meta.title} tab`}
+                aria-label={`Close ${tab.customTitle ?? meta.title} tab`}
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(tab.id);
@@ -216,51 +290,7 @@ export const TabsBar = memo(function TabsBar() {
         </IconButton>
       </Tooltip>
       <Box sx={{ flex: 1 }} onDoubleClick={() => act(() => useTabsStore.getState().openTab('/'))} />
-      <Menu
-        open={!!menu}
-        onClose={() => setMenu(null)}
-        anchorReference="anchorPosition"
-        anchorPosition={menu ? { top: menu.y, left: menu.x } : undefined}
-      >
-        <MenuItem
-          dense
-          onClick={() => {
-            if (menu) act(() => useTabsStore.getState().duplicateTab(menu.id));
-            setMenu(null);
-          }}
-        >
-          Duplicate
-        </MenuItem>
-        <MenuItem
-          dense
-          onClick={() => {
-            if (menu) closeTab(menu.id);
-            setMenu(null);
-          }}
-        >
-          Close
-        </MenuItem>
-        <MenuItem
-          dense
-          disabled={tabs.length < 2}
-          onClick={() => {
-            if (menu) act(() => useTabsStore.getState().closeOthers(menu.id));
-            setMenu(null);
-          }}
-        >
-          Close others
-        </MenuItem>
-        <MenuItem
-          dense
-          disabled={menuIndex < 0 || menuIndex >= tabs.length - 1}
-          onClick={() => {
-            if (menu) act(() => useTabsStore.getState().closeRight(menu.id));
-            setMenu(null);
-          }}
-        >
-          Close to the right
-        </MenuItem>
-      </Menu>
+      <TabActionsMenu menu={menu} onClose={() => setMenu(null)} afterPageMutation={() => act(() => undefined)} />
     </Box>
   );
 });

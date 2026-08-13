@@ -31,6 +31,7 @@ import { broadcastWatchMessage, registerWatchSocket } from './ws/watch-socket.js
 import { registerLogsSocket } from './ws/logs-socket.js';
 import { registerExecSocket } from './ws/exec-socket.js';
 import { registerNodeShellSocket } from './ws/node-shell-socket.js';
+import { ExecSessionRegistry } from './ws/transferable-exec.js';
 import { HelmOperationManager } from './helm/operations.js';
 import { appLogPinoSink } from './logging/log-buffer.js';
 
@@ -41,6 +42,7 @@ export interface AppContext {
   sshTunnels: SshTunnelManager;
   settings: SettingsStore;
   helmOperations: HelmOperationManager;
+  execSessions: ExecSessionRegistry;
   /** Raw --kubeconfig CLI flag (cleared when the user resets the override). */
   cliKubeconfig: string | undefined;
 }
@@ -80,7 +82,8 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   const clusters = new ClusterManager(app.log, effectiveOverride, sshTunnels);
   const portForwards = new PortForwardManager(clusters, app.log);
   const helmOperations = new HelmOperationManager(app.log, (operation) => broadcastWatchMessage({ op: 'helm-operation', operation }));
-  const ctx: AppContext = { config, clusters, portForwards, sshTunnels, settings, helmOperations, cliKubeconfig: config.kubeconfigOverride };
+  const execSessions = new ExecSessionRegistry();
+  const ctx: AppContext = { config, clusters, portForwards, sshTunnels, settings, helmOperations, execSessions, cliKubeconfig: config.kubeconfigOverride };
 
   await app.register(fastifyWebsocket, {
     options: {
@@ -149,6 +152,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   }
 
   app.addHook('onClose', async () => {
+    execSessions.dispose();
     portForwards.stopAll();
     clusters.dispose();
     sshTunnels.stopAll();

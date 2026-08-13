@@ -9,8 +9,36 @@ import { ApiError, initAuthToken } from './api/http.js';
 import { isMutationErrorHandledLocally } from './api/mutation-errors.js';
 import { showErrorToast } from './state/toast.js';
 import App from './App.js';
+import { appWindowSurface, consumeAppWindowLaunch } from './window-management.js';
+import { dockTabId, useDockStore, type DockTab } from './state/dock.js';
+import { pageTabId, useTabsStore } from './state/tabs.js';
+import { showToast } from './state/toast.js';
+import { installCrossWindowStateSync } from './cross-window-state.js';
+import { receiveTabTransfer } from './tab-transfer.js';
+import { applyAppWindowContext } from './window-context.js';
 
 initAuthToken();
+installCrossWindowStateSync();
+
+const surface = appWindowSurface();
+const launch = consumeAppWindowLaunch();
+const launchAppliedKey = 'kubus-window-launch-applied';
+if (launch && sessionStorage.getItem(launchAppliedKey) !== launch.windowId) {
+  sessionStorage.setItem(launchAppliedKey, launch.windowId);
+  if (launch.context) applyAppWindowContext(launch.context);
+  if (launch.kind === 'page') {
+    const tab = { id: pageTabId(), ...launch.tab };
+    useTabsStore.setState({ tabs: [tab], activeId: tab.id, closedPaths: [] });
+  } else if (launch.kind === 'dock') {
+    useDockStore.getState().addTab({ id: dockTabId(), ...launch.tab } as DockTab);
+  } else {
+    void (async () => {
+      if (!(await receiveTabTransfer(launch.transferId, undefined, 'after', true))) {
+        showToast('warning', 'The tab could not be moved from the other window.');
+      }
+    })();
+  }
+}
 
 const queryClient = new QueryClient({
   mutationCache: new MutationCache({
@@ -36,7 +64,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <App surface={surface} />
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

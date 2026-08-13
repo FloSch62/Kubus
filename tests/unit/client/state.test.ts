@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clampDetailWidth } from '../../../client/src/state/detail';
-import { clampDockHeight, useDockStore, type DockTab } from '../../../client/src/state/dock';
+import { clampDockHeight, useDockStore, type DockTab, type TerminalTab } from '../../../client/src/state/dock';
 import { forwardPrefKey } from '../../../client/src/state/portforward-prefs';
 import { errorDetails } from '../../../client/src/state/toast';
 import { namespaceVisible } from '../../../client/src/state/clusters';
@@ -106,6 +106,68 @@ describe('useDockStore terminal focus requests', () => {
     before.requestTerminalReconnect(terminal.id);
     useDockStore.getState().closeTab(terminal.id);
     expect(useDockStore.getState().terminalReconnectRequests).toEqual({});
+  });
+});
+
+describe('useDockStore tab quality-of-life actions', () => {
+  const terminal = (id: string, pinned = false): TerminalTab => ({
+    kind: 'terminal',
+    id,
+    title: id,
+    ctx: 'kind-a',
+    namespace: 'default',
+    pod: id,
+    container: 'app',
+    pinned: pinned || undefined,
+  });
+
+  beforeEach(() => {
+    useDockStore.setState({
+      tabs: [terminal('pinned', true), terminal('a'), terminal('b'), terminal('c')],
+      activeId: 'b',
+      open: true,
+      terminalReconnectRequests: {},
+    });
+  });
+
+  it('renames, flags, pins, and keeps the pinned partition stable', () => {
+    const store = useDockStore.getState();
+    store.renameTab('b', '  API shell  ');
+    store.setColor('b', '#42a5f5');
+    store.setPinned('b', true);
+    expect(useDockStore.getState().tabs.map((tab) => [tab.id, tab.title, tab.pinned, tab.color])).toEqual([
+      ['pinned', 'pinned', true, undefined],
+      ['b', 'API shell', true, '#42a5f5'],
+      ['a', 'a', undefined, undefined],
+      ['c', 'c', undefined, undefined],
+    ]);
+
+    useDockStore.getState().moveTab(1, 2);
+    expect(useDockStore.getState().tabs.map((tab) => tab.id)).toEqual(['pinned', 'b', 'a', 'c']);
+  });
+
+  it('duplicates as a fresh session and strips server handoff state', () => {
+    useDockStore.setState({
+      tabs: [{ ...terminal('live'), terminalId: 'terminal-1', transferId: 'transfer-1', snapshot: 'history', color: '#f00' }],
+      activeId: 'live',
+    });
+    useDockStore.getState().duplicateTab('live');
+    const copy = useDockStore.getState().tabs[1];
+    expect(copy).toMatchObject({ kind: 'terminal', title: 'live', color: '#f00' });
+    expect(copy?.id).not.toBe('live');
+    expect(copy).not.toHaveProperty('terminalId');
+    expect(copy).not.toHaveProperty('transferId');
+    expect(copy).not.toHaveProperty('snapshot');
+  });
+
+  it('close-other and close-right preserve pinned tabs', () => {
+    useDockStore.getState().closeOthers('b');
+    expect(useDockStore.getState().tabs.map((tab) => tab.id)).toEqual(['pinned', 'b']);
+
+    useDockStore.setState({ tabs: [terminal('pinned', true), terminal('a'), terminal('b'), terminal('c')], activeId: 'c' });
+    useDockStore.getState().closeRight('a');
+    expect(useDockStore.getState().tabs.map((tab) => tab.id)).toEqual(['pinned', 'a']);
+    expect(useDockStore.getState().activeId).toBe('a');
   });
 });
 
@@ -268,6 +330,32 @@ describe('useTabsStore', () => {
     expect(useTabsStore.getState().tabs.map((t) => t.path)).toEqual(['/a', '/x', '/b', '/c']);
   });
 
+  it('keeps new and reopened tabs behind the pinned group', () => {
+    const tabs = seed(['/pinned-a', '/pinned-b', '/ordinary'], 0);
+    useTabsStore.setState({
+      tabs: tabs.map((tab, index) => ({ ...tab, pinned: index < 2 || undefined })),
+      closedPaths: ['/closed'],
+    });
+
+    useTabsStore.getState().openTab('/new', { afterActive: true });
+    expect(useTabsStore.getState().tabs.map((tab) => tab.path)).toEqual([
+      '/pinned-a',
+      '/pinned-b',
+      '/new',
+      '/ordinary',
+    ]);
+
+    useTabsStore.getState().setActive('t0');
+    useTabsStore.getState().reopenTab();
+    expect(useTabsStore.getState().tabs.map((tab) => tab.path)).toEqual([
+      '/pinned-a',
+      '/pinned-b',
+      '/closed',
+      '/new',
+      '/ordinary',
+    ]);
+  });
+
   it('closing the active tab activates its right neighbor and records the path', () => {
     seed(['/a', '/b', '/c'], 1);
     useTabsStore.getState().closeTab('t1');
@@ -335,6 +423,31 @@ describe('useTabsStore', () => {
     const before = useTabsStore.getState();
     useTabsStore.getState().moveTab(0, 5);
     expect(useTabsStore.getState()).toBe(before);
+  });
+
+  it('renames, flags, pins, duplicates, and preserves pinned tabs during bulk close', () => {
+    seed(['/a', '/b', '/c']);
+    useTabsStore.getState().renameTab('t1', '  Workloads  ');
+    useTabsStore.getState().setColor('t1', '#42a5f5');
+    useTabsStore.getState().setPinned('t0', true);
+    useTabsStore.getState().duplicateTab('t1');
+    let state = useTabsStore.getState();
+    expect(state.tabs[0]).toMatchObject({ id: 't0', pinned: true });
+    expect(state.tabs.find((tab) => tab.id === 't1')).toMatchObject({ customTitle: 'Workloads', color: '#42a5f5' });
+    expect(state.tabs[2]).toMatchObject({ path: '/b', customTitle: 'Workloads', color: '#42a5f5' });
+    expect(state.tabs[2]).not.toHaveProperty('pinned');
+
+    useTabsStore.getState().closeOthers('t1');
+    state = useTabsStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(['t0', 't1']);
+  });
+
+  it('adopts an existing cross-window identity at the requested edge', () => {
+    seed(['/a', '/b']);
+    expect(useTabsStore.getState().adoptTab({ id: 'remote', path: '/helm' }, 't1', 'before')).toBe(true);
+    expect(useTabsStore.getState().tabs.map((tab) => tab.id)).toEqual(['t0', 'remote', 't1']);
+    expect(useTabsStore.getState().activeId).toBe('remote');
+    expect(useTabsStore.getState().adoptTab({ id: 'remote', path: '/again' })).toBe(false);
   });
 
   it('syncLocation mirrors the router path into the active tab', () => {

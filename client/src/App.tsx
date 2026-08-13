@@ -14,15 +14,30 @@ import { TitleBarAwareBackdrop } from './components/TitleBarAwareBackdrop.js';
 import { setDebugLogging } from './api/logs.js';
 import { useUiPrefsStore } from './state/prefs.js';
 import { useUiStore } from './state/ui.js';
+import { DockWindowShell } from './layout/DockWindowShell.js';
+import type { AppWindowSurface } from './window-management.js';
 
 const LogViewerDialog = lazy(() => import('./components/LogViewerDialog.js').then((module) => ({ default: module.LogViewerDialog })));
 
-export default function App() {
+function FullApplication() {
   // One app-wide subscription keeps context/discovery queries fresh.
   useContextsInvalidation();
+  const logViewerOpen = useUiStore((state) => state.logViewerOpen);
+  return (
+    <>
+      <ErrorBoundary label="Kubus">
+        <AppRouter />
+      </ErrorBoundary>
+      <BackendStatusBanner />
+      <UpdateNotification />
+      <Suspense fallback={null}>{logViewerOpen ? <LogViewerDialog /> : null}</Suspense>
+    </>
+  );
+}
+
+export default function App({ surface = 'app' }: { surface?: AppWindowSurface }) {
   const themeMode = useClustersStore((s) => s.themeMode);
   const debugMode = useUiPrefsStore((state) => state.debugMode);
-  const logViewerOpen = useUiStore((state) => state.logViewerOpen);
   const [osTheme, setOsTheme] = useState<'light' | 'dark'>(() =>
     //Check the operating system’s current color scheme and return true if it is dark, false otherwise
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
@@ -46,13 +61,14 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <ErrorBoundary label="Kubus">
-        <AppRouter />
-      </ErrorBoundary>
+      {surface === 'dock' ? (
+        <ErrorBoundary label="The terminal or log window">
+          <DockWindowShell />
+        </ErrorBoundary>
+      ) : (
+        <FullApplication />
+      )}
       <ToastHost />
-      <BackendStatusBanner />
-      <UpdateNotification />
-      <Suspense fallback={null}>{logViewerOpen ? <LogViewerDialog /> : null}</Suspense>
     </ThemeProvider>
   );
 }

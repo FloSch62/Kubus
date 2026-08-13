@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { HelmOperation, KubeObject, PortForwardInfo } from './api-types.js';
+export { EXEC_SESSION_CLOSE_REASON } from './api-types.js';
 
 /** Messages the client sends on /ws/watch. */
 export const watchClientMessageSchema = z.discriminatedUnion('op', [
@@ -51,7 +52,14 @@ export type LogServerMessage =
 /** Text frames on /ws/exec; binary frames carry raw terminal bytes. */
 export const execClientControlSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('resize'), cols: z.number().int().positive(), rows: z.number().int().positive() }),
+  /** Freeze output before a live terminal is handed to another renderer. */
+  z.object({ op: z.literal('prepare-transfer') }),
+  /** Resume output when a prepared handoff is abandoned. */
+  z.object({ op: z.literal('cancel-transfer') }),
 ]);
 export type ExecClientControl = z.infer<typeof execClientControlSchema>;
 
-export type ExecServerControl = { op: 'exit'; code?: number; message?: string };
+export type ExecServerControl =
+  | { op: 'session'; terminalId: string }
+  | { op: 'transfer-ready' }
+  | { op: 'exit'; code?: number; message?: string };
