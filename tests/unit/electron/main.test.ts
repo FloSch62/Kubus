@@ -83,6 +83,7 @@ const electron = vi.hoisted(() => {
   const state = { userDataPath: '' };
   const serverClose = vi.fn(async () => undefined);
   const startServer = vi.fn(async () => ({ url: 'http://127.0.0.1:41234', close: serverClose }));
+  const appendAppLog = vi.fn();
   const fixPath = vi.fn();
   const menu = {
     buildFromTemplate: vi.fn(() => ({ id: 'application-menu' })),
@@ -95,6 +96,8 @@ const electron = vi.hoisted(() => {
     appHandlers,
     BrowserWindow: MockBrowserWindow,
     fixPath,
+    appendAppLog,
+    dialog: { showErrorBox: vi.fn() },
     ipcMain: {
       on: vi.fn((name: string, handler: Handler) => ipcListeners.set(name, handler)),
       handle: vi.fn((name: string, handler: Handler) => ipcHandlers.set(name, handler)),
@@ -113,13 +116,14 @@ const electron = vi.hoisted(() => {
 vi.mock('electron', () => ({
   app: electron.app,
   BrowserWindow: electron.BrowserWindow,
+  dialog: electron.dialog,
   ipcMain: electron.ipcMain,
   Menu: electron.menu,
   nativeTheme: electron.nativeTheme,
   shell: electron.shell,
 }));
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
-vi.mock('@kubus/server', () => ({ startServer: electron.startServer }));
+vi.mock('@kubus/server', () => ({ appendAppLog: electron.appendAppLog, startServer: electron.startServer }));
 
 let userDataPath: string;
 let previousHelmEngine: string | undefined;
@@ -181,6 +185,8 @@ describe('Electron main process', () => {
       expect.objectContaining({ port: 0, openBrowser: false, prettyLogs: false }),
     );
     expect(win.loadURL).toHaveBeenCalledWith('http://127.0.0.1:41234');
+    expect(readFileSync(path.join(userDataPath, 'logs', 'main.log'), 'utf8')).toMatch(/Kubus 0\.6\.1 starting/);
+    expect(electron.appendAppLog).toHaveBeenCalledWith('info', expect.stringContaining('Kubus 0.6.1 starting'), undefined);
     expect(win.options).toMatchObject({
       minWidth: 800,
       minHeight: 500,
@@ -196,6 +202,9 @@ describe('Electron main process', () => {
 
     win.handlers.get('ready-to-show')?.();
     expect(win.show).toHaveBeenCalledOnce();
+
+    win.webContents.handlers.get('render-process-gone')?.({}, { reason: 'crashed', exitCode: 9 });
+    expect(electron.appendAppLog).toHaveBeenCalledWith('error', 'window renderer gone (crashed, exit code 9)', undefined);
 
     const result = win.webContents.windowOpenHandler?.({ url: 'https://example.com/docs' });
     expect(result).toEqual({ action: 'deny' });
@@ -421,6 +430,26 @@ describe('Electron main process', () => {
     expect(electron.app.quit).toHaveBeenCalledOnce();
     expect(electron.app.whenReady).not.toHaveBeenCalled();
     expect(electron.startServer).not.toHaveBeenCalled();
+    expect(electron.BrowserWindow.instances).toHaveLength(0);
+  });
+
+  it('records and reports an embedded-server startup failure', async () => {
+    electron.startServer.mockRejectedValueOnce(new Error('address unavailable'));
+
+    await import('../../../electron/src/main.js');
+    await vi.waitFor(() => expect(electron.app.quit).toHaveBeenCalledOnce());
+
+    const logPath = path.join(userDataPath, 'logs', 'main.log');
+    expect(readFileSync(logPath, 'utf8')).toContain('ERROR the embedded server failed to start');
+    expect(electron.appendAppLog).toHaveBeenCalledWith(
+      'error',
+      'the embedded server failed to start',
+      expect.objectContaining({ err: expect.stringContaining('address unavailable') }),
+    );
+    expect(electron.dialog.showErrorBox).toHaveBeenCalledWith(
+      'Kubus failed to start',
+      expect.stringContaining(logPath),
+    );
     expect(electron.BrowserWindow.instances).toHaveLength(0);
   });
 });

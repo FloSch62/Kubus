@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   app,
   BrowserWindow,
+  dialog,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   ipcMain,
@@ -14,6 +15,7 @@ import {
 } from 'electron';
 import fixPath from 'fix-path';
 import { startServer, type RunningServer } from '@kubus/server';
+import { initMainLog, installCrashCapture, mainLog, mainLogPath } from './main-log.js';
 
 // GUI apps on macOS/Linux don't inherit the shell PATH; kubeconfig exec
 // plugins (aws, gke-gcloud-auth-plugin, kubelogin, ...) need it.
@@ -23,6 +25,9 @@ fixPath();
 // ("@kubus/electron") and never matches the .desktop StartupWMClass,
 // leaving the window without taskbar/dock icon.
 app.setName('Kubus');
+initMainLog(app.getPath('userData'));
+installCrashCapture();
+mainLog('info', `Kubus ${app.getVersion()} starting on ${process.platform}/${process.arch} (Electron ${process.versions.electron})`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isMac = process.platform === 'darwin';
@@ -333,6 +338,9 @@ function createWindow(url: string): void {
   mainWindow.webContents.on('did-start-loading', () => {
     rendererRouteReady = false;
   });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    mainLog('error', `window renderer gone (${details.reason}, exit code ${details.exitCode})`);
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url: external }) => {
     void shell.openExternal(external);
     return { action: 'deny' };
@@ -500,10 +508,16 @@ if (!app.requestSingleInstanceLock()) {
           : path.resolve(__dirname, '../../client/dist'),
       });
     } catch (err) {
-      console.error('failed to start kubus server', err);
+      mainLog('error', 'the embedded server failed to start', err);
+      const logPath = mainLogPath();
+      dialog.showErrorBox(
+        'Kubus failed to start',
+        `${err instanceof Error ? err.message : String(err)}${logPath ? `\n\nDetails were written to:\n${logPath}` : ''}`,
+      );
       app.quit();
       return;
     }
+    mainLog('info', `server listening at ${server.url}`);
     buildMenu();
     createWindow(server.url);
   });

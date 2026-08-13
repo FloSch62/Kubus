@@ -3,6 +3,10 @@ import type { FastifyInstance } from 'fastify';
 import { resolveConfig, type ServerConfig } from './config.js';
 import { buildApp } from './app.js';
 
+// The Electron shell logs boot and crash milestones into the same in-process
+// buffer that backs the diagnostic log viewer.
+export { appendAppLog } from './logging/log-buffer.js';
+
 export interface RunningServer {
   app: FastifyInstance;
   port: number;

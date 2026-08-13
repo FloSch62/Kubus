@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import pino from 'pino';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import type { ServerConfig } from './config.js';
@@ -25,11 +26,13 @@ import { registerGraphRoutes } from './routes/graph.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerFileRoutes } from './routes/files.js';
+import { registerLogRoutes } from './routes/logs.js';
 import { broadcastWatchMessage, registerWatchSocket } from './ws/watch-socket.js';
 import { registerLogsSocket } from './ws/logs-socket.js';
 import { registerExecSocket } from './ws/exec-socket.js';
 import { registerNodeShellSocket } from './ws/node-shell-socket.js';
 import { HelmOperationManager } from './helm/operations.js';
+import { appLogPinoSink } from './logging/log-buffer.js';
 
 export interface AppContext {
   config: ServerConfig;
@@ -44,12 +47,28 @@ export interface AppContext {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** The level the server returns to when debug logging is switched off. */
+export function baseLogLevel(): string {
+  return process.env.LOG_LEVEL ?? 'info';
+}
+
+/** Mirror every accepted pino record to the console and in-memory log viewer. */
+function buildLogger(config: ServerConfig): FastifyBaseLogger {
+  const console = config.prettyLogs
+    ? (pino.transport({ target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } }) as pino.DestinationStream)
+    : process.stdout;
+  return pino(
+    { level: baseLogLevel() },
+    pino.multistream([
+      { level: 'trace', stream: console },
+      { level: 'trace', stream: appLogPinoSink() },
+    ]),
+  ) as FastifyBaseLogger;
+}
+
 export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const app = Fastify({
-    logger: {
-      level: process.env.LOG_LEVEL ?? 'info',
-      transport: config.prettyLogs ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } : undefined,
-    },
+    loggerInstance: buildLogger(config),
     // Resource lists can be large; YAML applies too.
     bodyLimit: 32 * 1024 * 1024,
   });
@@ -110,6 +129,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerAuditRoutes(app, ctx);
   registerSearchRoutes(app, ctx);
   registerFileRoutes(app, ctx);
+  registerLogRoutes(app);
   registerWatchSocket(app, ctx);
   registerLogsSocket(app, ctx);
   registerExecSocket(app, ctx);
