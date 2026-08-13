@@ -35,6 +35,8 @@ interface UiPrefsState {
   highUsagePct: number;
   /** Overview "under-requested" pod panel: usage ≥ this multiple of the request. */
   underRequestedFactor: number;
+  /** Verbose diagnostic logging plus access to the app log viewer and export. */
+  debugMode: boolean;
   /** User-resized column widths, keyed by table id then column field. */
   columnWidths: Record<string, Record<string, number>>;
   /** User-toggled column visibility models, keyed by table id then column field. */
@@ -76,6 +78,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       cronHumanSchedule: false,
       highUsagePct: 80,
       underRequestedFactor: 2,
+      debugMode: false,
       columnWidths: {},
       columnVisibility: {},
       sortModels: {},

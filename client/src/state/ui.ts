@@ -9,11 +9,13 @@ interface UiState {
   searchOpen: boolean;
   settingsOpen: boolean;
   shortcutsOpen: boolean;
+  logViewerOpen: boolean;
   /** When a `g` go-to sequence is pending: its Date.now() start; 0 = none. Drives the which-key panel. */
   goPendingSince: number;
   setSearchOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
+  setLogViewerOpen: (open: boolean) => void;
   startGoPending: () => void;
   clearGoPending: () => void;
 }
@@ -22,10 +24,12 @@ export const useUiStore = create<UiState>((set) => ({
   searchOpen: false,
   settingsOpen: false,
   shortcutsOpen: false,
+  logViewerOpen: false,
   goPendingSince: 0,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setLogViewerOpen: (logViewerOpen) => set({ logViewerOpen }),
   startGoPending: () => set({ goPendingSince: Date.now() }),
   clearGoPending: () => set((s) => (s.goPendingSince ? { goPendingSince: 0 } : s)),
 }));

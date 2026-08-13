@@ -29,6 +29,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CachedOutlinedIcon from '@mui/icons-material/CachedOutlined';
+import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
@@ -45,6 +46,10 @@ import { useClustersStore } from '../../state/clusters.js';
 import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
 import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type RightClickAction, type TableDensity } from '../../state/prefs.js';
 import { KubeconfigSection } from './KubeconfigSection.js';
+import { fetchAppLogs, formatLogEntry } from '../../api/logs.js';
+import { exportFilename, saveTextFile } from '../../save-file.js';
+import { showErrorToast } from '../../state/toast.js';
+import { useUiStore } from '../../state/ui.js';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -420,6 +425,59 @@ function LogsTerminalSection() {
   );
 }
 
+/** Diagnostic logging: verbose capture plus viewer and export controls. */
+function DebugSection() {
+  const debugMode = useUiPrefsStore((state) => state.debugMode);
+  const setPrefs = useUiPrefsStore((state) => state.set);
+  const setLogViewerOpen = useUiStore((state) => state.setLogViewerOpen);
+
+  const exportLogs = () => {
+    fetchAppLogs()
+      .then((logs) => {
+        saveTextFile(
+          exportFilename('debug log', 'log'),
+          [
+            `# Kubus diagnostic log — exported ${new Date().toISOString()}`,
+            `# ${logs.entries.length} entries, debug logging ${logs.debugEnabled ? 'on' : 'off'}`,
+            ...logs.entries.map(formatLogEntry),
+          ].join('\n'),
+        );
+      })
+      .catch(showErrorToast);
+  };
+
+  return (
+    <Stack spacing={3}>
+      <Section title="Debug mode">
+        <FormControlLabel
+          control={<Switch checked={debugMode} onChange={(event) => setPrefs({ debugMode: event.target.checked })} />}
+          label={
+            <Box>
+              <Typography variant="body2">Capture verbose diagnostic logs</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Records cluster discovery, API access, watches, port forwards and Helm operations in greater detail. Warnings and errors are always captured, even while this is off.
+              </Typography>
+            </Box>
+          }
+        />
+      </Section>
+      <Section title="Logs">
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" size="small" startIcon={<ArticleOutlinedIcon />} onClick={() => setLogViewerOpen(true)}>
+            View logs
+          </Button>
+          <Button variant="outlined" size="small" startIcon={<DownloadOutlinedIcon />} onClick={exportLogs}>
+            Export logs
+          </Button>
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          Covers app startup and operations since launch. Logs are held in memory on this machine only and never leave it unless you export them. If the desktop app fails to launch entirely, its shell also writes logs/main.log in the app data directory.
+        </Typography>
+      </Section>
+    </Stack>
+  );
+}
+
 function updateReasonLabel(reason?: string): string {
   switch (reason) {
     case 'timeout':
@@ -529,7 +587,7 @@ function AboutSection() {
   );
 }
 
-const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'About'];
+const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug', 'About'];
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState(0);
@@ -553,7 +611,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           {tab === 2 && <AppearanceSection />}
           {tab === 3 && <RefreshSection />}
           {tab === 4 && <LogsTerminalSection />}
-          {tab === 5 && <AboutSection />}
+          {tab === 5 && <DebugSection />}
+          {tab === 6 && <AboutSection />}
         </Box>
       </DialogContent>
       <DialogActions>
