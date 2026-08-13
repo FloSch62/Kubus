@@ -22,7 +22,17 @@ import { showToast } from '../state/toast.js';
 import { selectedTerminalText } from '../terminal-selection.js';
 import { terminalRightClickIntent, xtermRightClickSelectsWord } from '../terminal-right-click.js';
 
-export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: TerminalTab | NodeShellTab; active: boolean; focusRequest: number }) {
+export default function TerminalPaneImpl({
+  tab,
+  active,
+  focusRequest,
+  reconnectRequest,
+}: {
+  tab: TerminalTab | NodeShellTab;
+  active: boolean;
+  focusRequest: number;
+  reconnectRequest: number;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -81,7 +91,7 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
     const el = containerRef.current;
     if (!el) return;
 
-    const { monoFontSize, defaultShell } = useUiPrefsStore.getState();
+    const { monoFontSize } = useUiPrefsStore.getState();
     const term = new Terminal({
       fontSize: monoFontSize + 1,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
@@ -96,6 +106,33 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
     term.open(el);
     fit.fit();
 
+    const onSelection = term.onSelectionChange(() => {
+      const selection = selectedTerminalText(term, useUiPrefsStore.getState().copyOnSelect);
+      if (selection !== null) void copyToClipboard(selection);
+    });
+
+    // Inactive tabs and a collapsed dock have zero height. Ignore those
+    // resize notifications so the remote PTY keeps its last usable size.
+    const observer = new ResizeObserver(() => {
+      if (activeRef.current) fit.fit();
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+      onSelection.dispose();
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
+  }, [tab.id]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+
+    if (reconnectRequest > 0) term.write('\r\n\x1b[90m[reconnecting]\x1b[0m\r\n');
+    const { defaultShell } = useUiPrefsStore.getState();
     const ws = new WebSocket(
       tab.kind === 'node-shell'
         ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows })
@@ -137,29 +174,16 @@ export default function TerminalPaneImpl({ tab, active, focusRequest }: { tab: T
     const onResize = term.onResize(({ cols, rows }) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'resize', cols, rows }));
     });
-    const onSelection = term.onSelectionChange(() => {
-      const selection = selectedTerminalText(term, useUiPrefsStore.getState().copyOnSelect);
-      if (selection !== null) void copyToClipboard(selection);
-    });
-
-    // Inactive tabs and a collapsed dock have zero height. Ignore those
-    // resize notifications so the remote PTY keeps its last usable size.
-    const observer = new ResizeObserver(() => {
-      if (activeRef.current) fit.fit();
-    });
-    observer.observe(el);
-
     return () => {
-      observer.disconnect();
       onData.dispose();
       onResize.dispose();
-      onSelection.dispose();
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onclose = null;
       ws.close();
-      term.dispose();
-      termRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id]);
+  }, [reconnectRequest, tab.id]);
 
   // Refit when this tab becomes visible (display:none panes have zero size).
   useEffect(() => {

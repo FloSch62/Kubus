@@ -1,6 +1,10 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import Tooltip from '@mui/material/Tooltip';
@@ -8,6 +12,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SubjectIcon from '@mui/icons-material/Subject';
 import { clampDockHeight, useDockStore } from '../state/dock.js';
@@ -25,6 +30,9 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
   const maximized = useDockStore((s) => s.maximized);
   const setMaximized = useDockStore((s) => s.setMaximized);
   const terminalFocusRequest = useDockStore((s) => s.terminalFocusRequest);
+  const terminalReconnectRequests = useDockStore((s) => s.terminalReconnectRequests);
+  const requestTerminalReconnect = useDockStore((s) => s.requestTerminalReconnect);
+  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // Escape restores a maximized dock via the global dismiss chain in
   // GlobalShortcuts — guarded there so a focused terminal keeps its Escape.
@@ -108,6 +116,18 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
               onAuxClick={(e) => {
                 if (e.button === 1) closeTab(tab.id);
               }}
+              onContextMenu={(e) => {
+                if (tab.kind !== 'terminal' && tab.kind !== 'node-shell') return;
+                e.preventDefault();
+                setTabMenu({ id: tab.id, x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                if (tab.kind !== 'terminal' && tab.kind !== 'node-shell') return;
+                if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setTabMenu({ id: tab.id, x: rect.left + 8, y: rect.bottom - 4 });
+              }}
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}
@@ -148,6 +168,7 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
                 tab={tab}
                 active={open && tab.id === activeId}
                 focusRequest={terminalFocusRequest?.tabId === tab.id ? terminalFocusRequest.sequence : 0}
+                reconnectRequest={terminalReconnectRequests[tab.id] ?? 0}
               />
             ) : open ? (
               <LogViewer tab={tab} />
@@ -155,6 +176,24 @@ export const BottomDock = memo(function BottomDock({ containerRef }: { container
           </Box>
         ))}
       </Box>
+      <Menu
+        open={tabMenu !== null}
+        onClose={() => setTabMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={tabMenu ? { top: tabMenu.y, left: tabMenu.x } : undefined}
+      >
+        <MenuItem
+          onClick={() => {
+            if (tabMenu) requestTerminalReconnect(tabMenu.id);
+            setTabMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <RestartAltIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Reconnect</ListItemText>
+        </MenuItem>
+      </Menu>
     </Box>
   );
 });
