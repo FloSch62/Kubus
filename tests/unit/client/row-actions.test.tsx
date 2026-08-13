@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KubeObject } from '@kubus/shared';
+import type { KubeconfigSettings, KubeObject } from '@kubus/shared';
 import {
   DetailQuickActions,
   isLogTargetKind,
@@ -48,6 +48,13 @@ const queryMocks = vi.hoisted(() => {
     services: [] as KubeObject[],
     preflight: { allowed: true } as { allowed: boolean; reason?: string },
     localPort: vi.fn(async () => ({ available: true })),
+    kubeconfig: {
+      paths: ['/home/test/.kube/config'],
+      primaryPath: '/home/test/.kube/config',
+      override: null,
+      source: 'default',
+      kubeconfigEnv: null,
+    } as KubeconfigSettings,
   };
 });
 
@@ -75,6 +82,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
   checkLocalPort: queryMocks.localPort,
   useCreateResource: () => queryMocks.create,
   useDryRunResource: () => queryMocks.dryRun,
+  useKubeconfigSettings: () => ({ data: queryMocks.kubeconfig, isLoading: false }),
   useResourceSchema: () => ({ data: undefined }),
   useResourceList: (selection: { plural?: string } | undefined) => ({
     data: selection?.plural === 'horizontalpodautoscalers'
@@ -161,6 +169,13 @@ beforeEach(() => {
   queryMocks.hpas = [];
   queryMocks.services = [];
   queryMocks.preflight = { allowed: true };
+  queryMocks.kubeconfig = {
+    paths: ['/home/test/.kube/config'],
+    primaryPath: '/home/test/.kube/config',
+    override: null,
+    source: 'default',
+    kubeconfigEnv: null,
+  };
   queryMocks.localPort.mockClear();
   sideEffects.copy.mockClear();
   sideEffects.showToast.mockClear();
@@ -327,6 +342,28 @@ describe('pod actions', () => {
 
     view = clickMenuAction(pod, 'Copy link');
     await waitFor(() => expect(sideEffects.copy).toHaveBeenCalled());
+    view.unmount();
+
+    view = clickMenuAction(pod, 'Copy kubectl get command');
+    await waitFor(() =>
+      expect(sideEffects.copy).toHaveBeenCalledWith('kubectl get pods/pod-a --namespace team-a --context dev'),
+    );
+    expect(sideEffects.showToast).toHaveBeenCalledWith('success', 'kubectl get command copied');
+    view.unmount();
+
+    queryMocks.kubeconfig = {
+      paths: ['/work/kubeconfigs/team dev.yaml'],
+      primaryPath: '/work/kubeconfigs/team dev.yaml',
+      override: '/work/kubeconfigs/team dev.yaml',
+      source: 'settings-file',
+      kubeconfigEnv: null,
+    };
+    view = clickMenuAction(pod, 'Copy kubectl get command');
+    await waitFor(() =>
+      expect(sideEffects.copy).toHaveBeenCalledWith(
+        "kubectl get pods/pod-a --namespace team-a --context dev --kubeconfig '/work/kubeconfigs/team dev.yaml'",
+      ),
+    );
     view.unmount();
 
     view = clickMenuAction(pod, 'Delete…');
