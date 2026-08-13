@@ -187,6 +187,73 @@ test('opens terminal and log content in focused native utility windows', async (
   }
 });
 
+test('restores a full app for deep links without adopting utility-window bounds', async () => {
+  const launched = await launchElectron();
+  const windowStateFile = path.join(launched.userDataDir, 'window-state.json');
+
+  try {
+    const utilityPromise = launched.app.waitForEvent('window');
+    await launched.page.evaluate(() => {
+      window.kubusDesktop?.openWindow({
+        kind: 'dock',
+        windowId: 'electron-lifecycle-utility',
+        title: 'Logs: logger',
+        tab: {
+          kind: 'logs',
+          title: 'Logs: logger',
+          ctx: 'kind-a',
+          namespace: 'default',
+          pods: ['logger'],
+        },
+      });
+    });
+    const utility = await utilityPromise;
+    await expect(utility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+
+    const expectedAppBounds = await launched.app.evaluate(({ BrowserWindow }) => {
+      const windows = BrowserWindow.getAllWindows();
+      const appWindow = windows.find((window) => window.getTitle() === 'Kubus');
+      const utilityWindow = windows.find((window) => window !== appWindow);
+      if (!appWindow || !utilityWindow) throw new Error('expected application and utility windows');
+      appWindow.setBounds({ width: 1100, height: 720, x: 40, y: 50 });
+      utilityWindow.setBounds({ width: 820, height: 540, x: 220, y: 180 });
+      return appWindow.getNormalBounds();
+    });
+
+    await launched.page.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => launched.page.isClosed()).toBe(true);
+    await expect.poll(() => {
+      if (!existsSync(windowStateFile)) return undefined;
+      return JSON.parse(readFileSync(windowStateFile, 'utf8')) as Record<string, unknown>;
+    }).toMatchObject({ ...expectedAppBounds });
+
+    const replacementPromise = launched.app.waitForEvent('window');
+    await launched.app.evaluate(({ app }) => {
+      app.emit(
+        'second-instance',
+        {} as never,
+        ['kubus', 'kubus://events?source=utility-only'],
+        '',
+        {},
+      );
+    });
+    const replacementApp = await replacementPromise;
+
+    await expect(replacementApp).toHaveURL(/\/events\?source=utility-only$/);
+    await expect(replacementApp.locator('.kubus-dock-window-titlebar')).toHaveCount(0);
+    await expect(replacementApp.getByRole('tablist', { name: 'Open pages' })).toBeVisible();
+    await expect(replacementApp.getByRole('button', { name: 'New tab' })).toBeVisible();
+    await expect(utility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+
+    const savedAppBounds = readFileSync(windowStateFile, 'utf8');
+    await utility.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => utility.isClosed()).toBe(true);
+    expect(readFileSync(windowStateFile, 'utf8')).toBe(savedAppBounds);
+  } finally {
+    await launched.close();
+  }
+});
+
 test('moves a page tab through the native window handoff path', async () => {
   const launched = await launchElectron({ deepLink: 'kubus://r/core/v1/pods' });
 

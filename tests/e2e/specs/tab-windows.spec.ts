@@ -108,3 +108,29 @@ test('opens logs in a focused utility window without the Kubus application chrom
   await expect(sourceTab).toBeVisible();
   await popup.close();
 });
+
+test('closes a focused utility window when its initial tab handoff expires', async ({ page }) => {
+  test.setTimeout(25_000);
+  await gotoApp(page);
+
+  const popupPromise = page.waitForEvent('popup');
+  await page.evaluate(() => {
+    const launch = {
+      kind: 'tab-transfer',
+      surface: 'dock',
+      windowId: 'expired-transfer-window',
+      title: 'Missing terminal',
+      transferId: 'missing-transfer-token',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(launch));
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const encoded = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+    window.open(`${window.location.origin}/?token=dev#launch=${encoded}`, '_blank');
+  });
+  const popup = await popupPromise;
+
+  await expect(popup.locator('.kubus-dock-window-loading')).toBeVisible();
+  await expect.poll(() => popup.isClosed(), { timeout: 15_000 }).toBe(true);
+  expect(page.isClosed()).toBe(false);
+});

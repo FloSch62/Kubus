@@ -9,7 +9,7 @@ import { ApiError, initAuthToken } from './api/http.js';
 import { isMutationErrorHandledLocally } from './api/mutation-errors.js';
 import { showErrorToast } from './state/toast.js';
 import App from './App.js';
-import { appWindowSurface, consumeAppWindowLaunch } from './window-management.js';
+import { appWindowSurface, closeCurrentAppWindow, consumeAppWindowLaunch } from './window-management.js';
 import { dockTabId, useDockStore, type DockTab } from './state/dock.js';
 import { pageTabId, useTabsStore } from './state/tabs.js';
 import { showToast } from './state/toast.js';
@@ -34,7 +34,8 @@ if (launch && sessionStorage.getItem(launchAppliedKey) !== launch.windowId) {
   } else {
     void (async () => {
       if (!(await receiveTabTransfer(launch.transferId, undefined, 'after', true))) {
-        showToast('warning', 'The tab could not be moved from the other window.');
+        if (launch.surface === 'dock') closeCurrentAppWindow();
+        else showToast('warning', 'The tab could not be moved from the other window.');
       }
     })();
   }

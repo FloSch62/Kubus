@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppWindowLaunch } from '@kubus/shared';
 import {
+  closeCurrentAppWindow,
   decodeAppWindowLaunch,
   encodeAppWindowLaunch,
   isAppWindowLaunch,
 } from '../../../client/src/window-management.js';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete window.kubusDesktop;
+});
 
 describe('secondary Kubus window payloads', () => {
   it('round-trips unicode page and dock launches', () => {
@@ -59,5 +63,17 @@ describe('secondary Kubus window payloads', () => {
       tab: { path: '/' },
     })).toBe(false);
     expect(decodeAppWindowLaunch('not-json')).toBeUndefined();
+  });
+
+  it('closes only the current native window or browser popup', () => {
+    const closeWindow = vi.fn();
+    window.kubusDesktop = { closeWindow } as unknown as NonNullable<typeof window.kubusDesktop>;
+    closeCurrentAppWindow();
+    expect(closeWindow).toHaveBeenCalledOnce();
+
+    delete window.kubusDesktop;
+    const closePopup = vi.spyOn(window, 'close').mockImplementation(() => undefined);
+    closeCurrentAppWindow();
+    expect(closePopup).toHaveBeenCalledOnce();
   });
 });

@@ -43,6 +43,8 @@ const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 let primaryWindow: BrowserWindow | undefined;
 let appUrl: string | undefined;
 const managedWindows = new Set<BrowserWindow>();
+const applicationWindows = new Set<BrowserWindow>();
+const routeReadyWindows = new Set<BrowserWindow>();
 const windowLaunches = new Map<number, AppWindowLaunch>();
 let server: RunningServer | undefined;
 let closing: Promise<void> | undefined;
@@ -55,10 +57,6 @@ let updateCheck: Promise<UpdateCheckResult> | undefined;
 
 const PROTOCOL = 'kubus';
 let pendingRoute: string | undefined;
-// True once the renderer has called kubus:get-pending-route, i.e. its route
-// listener is attached. Pushing before that (did-finish-load fires before the
-// SPA mounts) would drop the link on cold start.
-let rendererRouteReady = false;
 
 /** kubus://r/apps/v1/deployments?sel=… → "/r/apps/v1/deployments?sel=…". */
 function routeFromDeepLink(raw: string): string | undefined {
@@ -70,8 +68,13 @@ function routeFromDeepLink(raw: string): string | undefined {
 }
 
 function openRoute(route: string): void {
-  const win = primaryWindow ?? managedWindows.values().next().value;
-  if (win && rendererRouteReady) {
+  let win = primaryWindow;
+  if (!win) {
+    // A focused terminal/log window has no application router. Keep the route
+    // pending and restore a full application window to receive it.
+    pendingRoute = route;
+    if (appUrl) win = createWindow(appUrl);
+  } else if (routeReadyWindows.has(win)) {
     win.webContents.send('kubus:open-route', route);
   } else {
     // Cold start or mid-boot: held until the renderer pulls it.
@@ -353,9 +356,14 @@ function parseWindowLaunch(value: unknown): AppWindowLaunch | undefined {
     : undefined;
 }
 
+function isApplicationLaunch(launch?: AppWindowLaunch): boolean {
+  return !launch || launch.kind === 'page' || (launch.kind === 'tab-transfer' && launch.surface === 'page');
+}
+
 function createWindow(url: string, launch?: AppWindowLaunch): BrowserWindow {
   const state = loadWindowState();
-  const isPrimary = !primaryWindow;
+  const applicationSurface = isApplicationLaunch(launch);
+  const isPrimary = applicationSurface && !primaryWindow;
   const win = new BrowserWindow({
     width: state.width,
     height: state.height,
@@ -384,6 +392,7 @@ function createWindow(url: string, launch?: AppWindowLaunch): BrowserWindow {
     },
   });
   managedWindows.add(win);
+  if (applicationSurface) applicationWindows.add(win);
   const webContentsId = win.webContents.id;
   if (launch) windowLaunches.set(webContentsId, launch);
   if (isPrimary) primaryWindow = win;
@@ -399,16 +408,17 @@ function createWindow(url: string, launch?: AppWindowLaunch): BrowserWindow {
   });
   win.on('closed', () => {
     managedWindows.delete(win);
+    applicationWindows.delete(win);
+    routeReadyWindows.delete(win);
     windowLaunches.delete(webContentsId);
     if (win === primaryWindow) {
-      primaryWindow = managedWindows.values().next().value;
-      // Existing renderers registered their deep-link listener during boot.
-      rendererRouteReady = !!primaryWindow;
+      // Only another full application renderer can own navigation/deep links.
+      primaryWindow = applicationWindows.values().next().value;
     }
   });
   // A reload restarts the SPA; hold routes until it re-registers.
   win.webContents.on('did-start-loading', () => {
-    if (win === primaryWindow) rendererRouteReady = false;
+    routeReadyWindows.delete(win);
   });
   win.webContents.on('render-process-gone', (_event, details) => {
     mainLog('error', `window renderer gone (${details.reason}, exit code ${details.exitCode})`);
@@ -530,8 +540,12 @@ ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
 // The renderer pulls the pending deep link once its route listener is
 // attached; from then on links are pushed over kubus:open-route.
 ipcMain.handle('kubus:get-pending-route', (event): string | null => {
+  const win = senderWindow(event);
+  if (!win || !applicationWindows.has(win)) return null;
+  // Every full app renderer installs the listener. Remember readiness now so
+  // an already-loaded page window can safely become the navigation owner.
+  routeReadyWindows.add(win);
   if (!isPrimaryWindowSender(event)) return null;
-  rendererRouteReady = true;
   const route = pendingRoute ?? null;
   pendingRoute = undefined;
   return route;
@@ -582,16 +596,19 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
+    // Windows/Linux deliver a deep link to the running instance as an argv
+    // entry of the second process.
+    const link = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    const route = link ? routeFromDeepLink(link) : undefined;
+    if (route) {
+      openRoute(route);
+      return;
+    }
     const win = primaryWindow ?? managedWindows.values().next().value;
     if (win) {
       if (win.isMinimized()) win.restore();
       win.focus();
     }
-    // Windows/Linux deliver a deep link to the running instance as an argv
-    // entry of the second process.
-    const link = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-    const route = link ? routeFromDeepLink(link) : undefined;
-    if (route) openRoute(route);
   });
 
   void app.whenReady().then(async () => {

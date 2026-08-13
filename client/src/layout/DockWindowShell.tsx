@@ -4,11 +4,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { BottomDock } from './BottomDock.js';
 import { useDockStore } from '../state/dock.js';
-
-function closeUtilityWindow(): void {
-  if (window.kubusDesktop) window.kubusDesktop.closeWindow();
-  else window.close();
-}
+import { closeCurrentAppWindow } from '../window-management.js';
 
 /** Focused secondary renderer: one compact tab strip and its terminal/log content. */
 export const DockWindowShell = memo(function DockWindowShell() {
@@ -23,7 +19,7 @@ export const DockWindowShell = memo(function DockWindowShell() {
       hadContent.current = true;
       return;
     }
-    if (hadContent.current) closeUtilityWindow();
+    if (hadContent.current) closeCurrentAppWindow();
   }, [tabCount]);
 
   useEffect(() => {

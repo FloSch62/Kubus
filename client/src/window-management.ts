@@ -180,6 +180,12 @@ export function openAppWindow(request: AppWindowRequest): boolean {
   return true;
 }
 
+/** Close only this renderer's native window or script-opened browser popup. */
+export function closeCurrentAppWindow(): void {
+  if (window.kubusDesktop) window.kubusDesktop.closeWindow();
+  else window.close();
+}
+
 /** Native cursor bounds avoid accidental detach while a tab is dropped inside any Kubus window. */
 export async function detachTabWindow(request: Omit<Extract<AppWindowLaunch, { kind: 'tab-transfer' }>, 'windowId'>): Promise<boolean> {
   const launch = { ...request, windowId: randomId() } as Extract<AppWindowLaunch, { kind: 'tab-transfer' }>;

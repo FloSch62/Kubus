@@ -11,6 +11,7 @@ const electron = vi.hoisted(() => {
   const ipcHandlers = new Map<string, Handler>();
 
   class MockWebContents {
+    readonly id = ++state.nextWebContentsId;
     readonly handlers = new Map<string, Handler>();
     readonly send = vi.fn();
     readonly on = vi.fn((name: string, handler: Handler) => {
@@ -83,7 +84,7 @@ const electron = vi.hoisted(() => {
       return app;
     }),
   };
-  const state = { userDataPath: '' };
+  const state = { userDataPath: '', nextWebContentsId: 0 };
   const serverClose = vi.fn(async () => undefined);
   const startServer = vi.fn(async () => ({ url: 'http://127.0.0.1:41234/?token=secret-test-token', close: serverClose }));
   const appendAppLog = vi.fn();
@@ -165,6 +166,7 @@ beforeEach(() => {
   electron.serverClose.mockResolvedValue(undefined);
   electron.startServer.mockResolvedValue({ url: 'http://127.0.0.1:41234/?token=secret-test-token', close: electron.serverClose });
   electron.nativeTheme.shouldUseDarkColors = false;
+  electron.state.nextWebContentsId = 0;
 
   userDataPath = mkdtempSync(path.join(tmpdir(), 'kubus-electron-unit-'));
   electron.state.userDataPath = userDataPath;
@@ -389,6 +391,51 @@ describe('Electron main process', () => {
     expect(win.restore).toHaveBeenCalledOnce();
     expect(win.focus).toHaveBeenCalled();
     expect(win.webContents.send).toHaveBeenCalledWith('kubus:open-route', '/events');
+  });
+
+  it('keeps deep links and saved bounds owned by full application windows', async () => {
+    const win = await loadMain();
+    const getPendingRoute = registered(electron.ipcHandlers, 'kubus:get-pending-route');
+    expect(getPendingRoute({ sender: win.webContents })).toBeNull();
+
+    const openWindow = registered(electron.ipcListeners, 'kubus:open-window');
+    openWindow({ sender: win.webContents }, {
+      kind: 'dock',
+      windowId: 'utility-only',
+      title: 'Logs',
+      tab: { kind: 'logs', title: 'Logs', ctx: 'kind-a', namespace: 'default', pods: ['logger'] },
+    });
+    const utility = electron.BrowserWindow.instances[1]!;
+    win.normalBounds = { width: 1400, height: 860, x: 30, y: 40 };
+    utility.normalBounds = { width: 820, height: 520, x: 400, y: 300 };
+
+    win.handlers.get('close')?.();
+    win.handlers.get('closed')?.();
+    expect(JSON.parse(readFileSync(path.join(userDataPath, 'window-state.json'), 'utf8'))).toEqual({
+      width: 1400,
+      height: 860,
+      x: 30,
+      y: 40,
+      maximized: false,
+    });
+    // A utility renderer never advertises itself as a route-capable app.
+    expect(getPendingRoute({ sender: utility.webContents })).toBeNull();
+
+    appHandler('open-url')({ preventDefault: vi.fn() }, 'kubus://events?source=utility-only');
+    expect(electron.BrowserWindow.instances).toHaveLength(3);
+    const replacementApp = electron.BrowserWindow.instances[2]!;
+    expect(utility.webContents.send).not.toHaveBeenCalledWith('kubus:open-route', expect.anything());
+    expect(replacementApp.focus).toHaveBeenCalledOnce();
+    expect(getPendingRoute({ sender: replacementApp.webContents })).toBe('/events?source=utility-only');
+
+    utility.handlers.get('close')?.();
+    utility.handlers.get('closed')?.();
+    expect(JSON.parse(readFileSync(path.join(userDataPath, 'window-state.json'), 'utf8'))).toMatchObject({
+      width: 1400,
+      height: 860,
+      x: 30,
+      y: 40,
+    });
   });
 
   it('validates update manifests and never services a foreign renderer', async () => {
