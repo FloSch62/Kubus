@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AppWindowLaunch } from '@kubus/shared';
 
 // Client state is mirrored here and persisted with fire-and-forget messages.
 // sendSync is deliberately avoided for the steady-state path: it parks the
@@ -14,6 +15,15 @@ const stateSnapshot: Record<string, string> = (() => {
   }
 })();
 
+const windowLaunch: AppWindowLaunch | undefined = (() => {
+  try {
+    const value: unknown = ipcRenderer.sendSync('kubus:window-launch');
+    return value && typeof value === 'object' ? (value as AppWindowLaunch) : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
 // The disk-side write failed in the main process: mirror the snapshot into
 // origin-scoped localStorage so a relaunch on the same origin can migrate it
 // back (kubusStateStorage.getItem reads browser storage when the desktop
@@ -26,9 +36,20 @@ ipcRenderer.on('kubus:state:write-failed', () => {
   }
 });
 
+// Other native windows share the main-process state cache. Mirror changes
+// into this preload snapshot, then ask the matching Zustand store to rehydrate.
+ipcRenderer.on('kubus:state:changed', (_event, name: unknown, value: unknown) => {
+  if (typeof name !== 'string') return;
+  if (typeof value === 'string') stateSnapshot[name] = value;
+  else if (value === null) delete stateSnapshot[name];
+  else return;
+  window.dispatchEvent(new CustomEvent('kubus:state-changed', { detail: { name } }));
+});
+
 // Desktop bridge for stable client state plus native window integrations.
 contextBridge.exposeInMainWorld('kubusDesktop', {
   platform: process.platform,
+  windowLaunch,
   stateStorage: {
     getItem(name: string): string | null {
       return stateSnapshot[name] ?? null;
@@ -50,6 +71,12 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
   },
   checkForUpdate(options?: { force?: boolean }) {
     return ipcRenderer.invoke('kubus:check-for-update', options);
+  },
+  openWindow(launch: AppWindowLaunch): void {
+    ipcRenderer.send('kubus:open-window', launch);
+  },
+  detachTab(launch: Extract<AppWindowLaunch, { kind: 'tab-transfer' }>): Promise<boolean> {
+    return ipcRenderer.invoke('kubus:detach-tab', launch) as Promise<boolean>;
   },
   // Fires when the user presses the OS close-window chord (Cmd/Ctrl+W). Returns
   // an unsubscribe. The renderer closes the focused dock tab or page tab; it

@@ -11,8 +11,9 @@ import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
-import type { ExecServerControl } from '@kubus/shared';
+import { EXEC_SESSION_CLOSE_REASON, type ExecServerControl } from '@kubus/shared';
 import { wsUrl } from '../api/http.js';
 import { copyToClipboard, readFromClipboard } from '../clipboard.js';
 import type { NodeShellTab, TerminalTab } from '../state/dock.js';
@@ -21,6 +22,10 @@ import { useUiPrefsStore } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
 import { selectedTerminalText } from '../terminal-selection.js';
 import { terminalRightClickIntent, xtermRightClickSelectsWord } from '../terminal-right-click.js';
+import { registerTerminal } from '../terminal-registry.js';
+import { cancelTabTransfer, completeTabTransfer } from '../tab-transfer.js';
+
+const TRANSFER_PREPARE_TIMEOUT_MS = 5_000;
 
 export default function TerminalPaneImpl({
   tab,
@@ -36,6 +41,13 @@ export default function TerminalPaneImpl({
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const serializeRef = useRef<SerializeAddon | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const transferPreparationRef = useRef<{
+    resolve: (prepared: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const initialSnapshotRef = useRef(tab.snapshot);
   const rightClickSelectsWordDefaultRef = useRef(false);
   const [contextMenu, setContextMenu] = useState<{ top: number; left: number; selection: string } | null>(null);
   const activeRef = useRef(active);
@@ -100,11 +112,45 @@ export default function TerminalPaneImpl({
     });
     rightClickSelectsWordDefaultRef.current = term.options.rightClickSelectsWord ?? false;
     const fit = new FitAddon();
+    const serialize = new SerializeAddon();
     fitRef.current = fit;
     termRef.current = term;
+    serializeRef.current = serialize;
     term.loadAddon(fit);
+    term.loadAddon(serialize);
     term.open(el);
     fit.fit();
+    if (initialSnapshotRef.current) term.write(initialSnapshotRef.current);
+
+    const settleTransfer = (prepared: boolean) => {
+      const pending = transferPreparationRef.current;
+      if (!pending) return;
+      transferPreparationRef.current = null;
+      clearTimeout(pending.timer);
+      pending.resolve(prepared);
+    };
+    const unregister = registerTerminal(tab.id, {
+      prepareTransfer: () => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN || transferPreparationRef.current) return Promise.resolve(false);
+        return new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            if (transferPreparationRef.current?.resolve !== resolve) return;
+            transferPreparationRef.current = null;
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'cancel-transfer' }));
+            resolve(false);
+          }, TRANSFER_PREPARE_TIMEOUT_MS);
+          transferPreparationRef.current = { resolve, timer };
+          ws.send(JSON.stringify({ op: 'prepare-transfer' }));
+        });
+      },
+      cancelTransfer: () => {
+        settleTransfer(false);
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'cancel-transfer' }));
+      },
+      snapshot: () => serialize.serialize(),
+    });
 
     const onSelection = term.onSelectionChange(() => {
       const selection = selectedTerminalText(term, useUiPrefsStore.getState().copyOnSelect);
@@ -120,10 +166,13 @@ export default function TerminalPaneImpl({
 
     return () => {
       observer.disconnect();
+      unregister();
+      settleTransfer(false);
       onSelection.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      serializeRef.current = null;
     };
   }, [tab.id]);
 
@@ -133,9 +182,18 @@ export default function TerminalPaneImpl({
 
     if (reconnectRequest > 0) term.write('\r\n\x1b[90m[reconnecting]\x1b[0m\r\n');
     const { defaultShell } = useUiPrefsStore.getState();
+    const currentTab = useDockStore.getState().tabs.find((candidate) => candidate.id === tab.id);
+    const terminalId =
+      reconnectRequest === 0 && (currentTab?.kind === 'terminal' || currentTab?.kind === 'node-shell')
+        ? currentTab.terminalId
+        : undefined;
+    // Reconnect is intentionally a fresh shell. Retaining the old id would race
+    // the old socket's explicit close and briefly attach to a session being torn
+    // down, producing a second close instead of a usable replacement.
+    if (reconnectRequest > 0) useDockStore.getState().setTerminalSession(tab.id, undefined);
     const ws = new WebSocket(
       tab.kind === 'node-shell'
-        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows })
+        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows, terminalId })
         : wsUrl('/ws/exec', {
             ctx: tab.ctx,
             namespace: tab.namespace,
@@ -144,8 +202,10 @@ export default function TerminalPaneImpl({
             shell: defaultShell !== 'auto' && defaultShell.trim() ? defaultShell.trim() : undefined,
             cols: term.cols,
             rows: term.rows,
+            terminalId,
           }),
     );
+    wsRef.current = ws;
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
@@ -157,7 +217,24 @@ export default function TerminalPaneImpl({
       } else if (typeof ev.data === 'string') {
         try {
           const ctl = JSON.parse(ev.data) as ExecServerControl;
-          if (ctl.op === 'exit') {
+          if (ctl.op === 'session') {
+            useDockStore.getState().setTerminalSession(tab.id, ctl.terminalId);
+            const current = useDockStore.getState().tabs.find((candidate) => candidate.id === tab.id);
+            if (current && (current.kind === 'terminal' || current.kind === 'node-shell') && current.transferId) {
+              completeTabTransfer(current.transferId);
+              useDockStore.getState().clearTransfer(tab.id);
+            }
+          } else if (ctl.op === 'transfer-ready') {
+            const pending = transferPreparationRef.current;
+            if (pending) term.write('', () => {
+              if (transferPreparationRef.current === pending) {
+                transferPreparationRef.current = null;
+                clearTimeout(pending.timer);
+                pending.resolve(true);
+              }
+            });
+          } else if (ctl.op === 'exit') {
+            useDockStore.getState().setTerminalSession(tab.id, undefined);
             term.write(`\r\n\x1b[33m[session ended${ctl.message ? `: ${ctl.message}` : ''}]\x1b[0m\r\n`);
           }
         } catch {
@@ -165,7 +242,14 @@ export default function TerminalPaneImpl({
         }
       }
     };
-    ws.onclose = () => term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
+    ws.onclose = () => {
+      const current = useDockStore.getState().tabs.find((candidate) => candidate.id === tab.id);
+      if (current && (current.kind === 'terminal' || current.kind === 'node-shell') && current.transferId) {
+        cancelTabTransfer(current.transferId);
+        useDockStore.getState().clearTransfer(tab.id);
+      }
+      term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
+    };
 
     const encoder = new TextEncoder();
     const onData = term.onData((data) => {
@@ -180,7 +264,10 @@ export default function TerminalPaneImpl({
       ws.onopen = null;
       ws.onmessage = null;
       ws.onclose = null;
-      ws.close();
+      if (wsRef.current === ws) wsRef.current = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, EXEC_SESSION_CLOSE_REASON);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reconnectRequest, tab.id]);

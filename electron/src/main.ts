@@ -10,11 +10,13 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  screen,
   shell,
   type MenuItemConstructorOptions,
 } from 'electron';
 import fixPath from 'fix-path';
 import { startServer, type RunningServer } from '@kubus/server';
+import type { AppWindowLaunch } from '@kubus/shared';
 import { initMainLog, installCrashCapture, mainLog, mainLogPath } from './main-log.js';
 
 // GUI apps on macOS/Linux don't inherit the shell PATH; kubeconfig exec
@@ -38,7 +40,12 @@ const TITLEBAR_HEIGHT = 52;
 const UPDATE_MANIFEST_URL = 'https://kubus-app.dev/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 
-let mainWindow: BrowserWindow | undefined;
+let primaryWindow: BrowserWindow | undefined;
+let appUrl: string | undefined;
+const managedWindows = new Set<BrowserWindow>();
+const applicationWindows = new Set<BrowserWindow>();
+const routeReadyWindows = new Set<BrowserWindow>();
+const windowLaunches = new Map<number, AppWindowLaunch>();
 let server: RunningServer | undefined;
 let closing: Promise<void> | undefined;
 let updateCheck: Promise<UpdateCheckResult> | undefined;
@@ -50,10 +57,6 @@ let updateCheck: Promise<UpdateCheckResult> | undefined;
 
 const PROTOCOL = 'kubus';
 let pendingRoute: string | undefined;
-// True once the renderer has called kubus:get-pending-route, i.e. its route
-// listener is attached. Pushing before that (did-finish-load fires before the
-// SPA mounts) would drop the link on cold start.
-let rendererRouteReady = false;
 
 /** kubus://r/apps/v1/deployments?sel=… → "/r/apps/v1/deployments?sel=…". */
 function routeFromDeepLink(raw: string): string | undefined {
@@ -65,8 +68,13 @@ function routeFromDeepLink(raw: string): string | undefined {
 }
 
 function openRoute(route: string): void {
-  const win = mainWindow;
-  if (win && rendererRouteReady) {
+  let win = primaryWindow;
+  if (!win) {
+    // A focused terminal/log window has no application router. Keep the route
+    // pending and restore a full application window to receive it.
+    pendingRoute = route;
+    if (appUrl) win = createWindow(appUrl);
+  } else if (routeReadyWindows.has(win)) {
     win.webContents.send('kubus:open-route', route);
   } else {
     // Cold start or mid-boot: held until the renderer pulls it.
@@ -132,8 +140,16 @@ interface AppInfo {
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 const clientStateFile = () => path.join(app.getPath('userData'), 'client-state.json');
 
-function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
-  return !!mainWindow && event.sender === mainWindow.webContents;
+function senderWindow(event: IpcMainEvent | IpcMainInvokeEvent): BrowserWindow | undefined {
+  return [...managedWindows].find((win) => win.webContents === event.sender);
+}
+
+function isManagedWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return senderWindow(event) !== undefined;
+}
+
+function isPrimaryWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  return !!primaryWindow && event.sender === primaryWindow.webContents;
 }
 
 function loadWindowState(): WindowState {
@@ -301,17 +317,63 @@ async function checkForUpdate(force = false): Promise<UpdateCheckResult> {
   }
 }
 
-function createWindow(url: string): void {
+function parseWindowLaunch(value: unknown): AppWindowLaunch | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const launch = value as Record<string, unknown>;
+  if (
+    typeof launch.windowId !== 'string' ||
+    !launch.windowId ||
+    launch.windowId.length > 200 ||
+    typeof launch.title !== 'string' ||
+    launch.title.length > 500
+  ) {
+    return undefined;
+  }
+  if (launch.context !== undefined) {
+    if (!launch.context || typeof launch.context !== 'object') return undefined;
+    const context = launch.context as Record<string, unknown>;
+    const validList = (items: unknown): items is string[] =>
+      Array.isArray(items) &&
+      items.length <= 1000 &&
+      items.every((item) => typeof item === 'string' && item.length <= 1000);
+    if (!validList(context.selected) || !validList(context.namespaces) || typeof context.navCollapsed !== 'boolean') return undefined;
+  }
+  if (launch.kind === 'tab-transfer') {
+    return (launch.surface === 'page' || launch.surface === 'dock') &&
+      typeof launch.transferId === 'string' && !!launch.transferId && launch.transferId.length <= 200
+      ? (value as AppWindowLaunch)
+      : undefined;
+  }
+  if ((launch.kind !== 'page' && launch.kind !== 'dock') || !launch.tab || typeof launch.tab !== 'object') return undefined;
+  const tab = launch.tab as Record<string, unknown>;
+  if (launch.kind === 'page') {
+    return typeof tab.path === 'string' && tab.path.startsWith('/') && !tab.path.startsWith('//') && tab.path.length <= 8192
+      ? (value as AppWindowLaunch)
+      : undefined;
+  }
+  return typeof tab.kind === 'string' && ['terminal', 'node-shell', 'logs'].includes(tab.kind) && typeof tab.title === 'string'
+    ? (value as AppWindowLaunch)
+    : undefined;
+}
+
+function isApplicationLaunch(launch?: AppWindowLaunch): boolean {
+  return !launch || launch.kind === 'page' || (launch.kind === 'tab-transfer' && launch.surface === 'page');
+}
+
+function createWindow(url: string, launch?: AppWindowLaunch): BrowserWindow {
   const state = loadWindowState();
-  mainWindow = new BrowserWindow({
+  const applicationSurface = isApplicationLaunch(launch);
+  const isPrimary = applicationSurface && !primaryWindow;
+  const win = new BrowserWindow({
     width: state.width,
     height: state.height,
-    x: state.x,
-    y: state.y,
+    x: state.x === undefined || isPrimary ? state.x : state.x + 28,
+    y: state.y === undefined || isPrimary ? state.y : state.y + 28,
     minWidth: 800,
     minHeight: 500,
-    title: 'Kubus',
+    title: launch ? `${launch.title} — Kubus` : 'Kubus',
     show: false,
+    backgroundColor: overlayColors().color,
     icon: windowIcon(),
     // Frameless look on every platform: the client's TopBar is the titlebar
     // (drag region + env(titlebar-area-*) paddings live in the client CSS).
@@ -320,28 +382,48 @@ function createWindow(url: string): void {
     titleBarOverlay: isMac ? true : { ...overlayColors(), height: TITLEBAR_HEIGHT },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      navigateOnDragDrop: false,
     },
   });
-  if (state.maximized) mainWindow.maximize();
+  managedWindows.add(win);
+  if (applicationSurface) applicationWindows.add(win);
+  const webContentsId = win.webContents.id;
+  if (launch) windowLaunches.set(webContentsId, launch);
+  if (isPrimary) primaryWindow = win;
+  if (state.maximized && isPrimary) win.maximize();
   // The menu stays installed so its accelerators (zoom, reload, devtools,
   // fullscreen) keep working, but the bar itself is macOS-only chrome.
-  if (!isMac) mainWindow.setMenuBarVisibility(false);
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
-  mainWindow.on('close', () => {
-    if (mainWindow) saveWindowState(mainWindow);
+  if (!isMac) win.setMenuBarVisibility(false);
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show();
   });
-  mainWindow.on('closed', () => {
-    mainWindow = undefined;
-    rendererRouteReady = false;
+  win.on('close', () => {
+    if (win === primaryWindow) saveWindowState(win);
+  });
+  win.on('closed', () => {
+    managedWindows.delete(win);
+    applicationWindows.delete(win);
+    routeReadyWindows.delete(win);
+    windowLaunches.delete(webContentsId);
+    if (win === primaryWindow) {
+      // Only another full application renderer can own navigation/deep links.
+      primaryWindow = applicationWindows.values().next().value;
+    }
   });
   // A reload restarts the SPA; hold routes until it re-registers.
-  mainWindow.webContents.on('did-start-loading', () => {
-    rendererRouteReady = false;
+  win.webContents.on('did-start-loading', () => {
+    routeReadyWindows.delete(win);
   });
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+  win.webContents.on('render-process-gone', (_event, details) => {
     mainLog('error', `window renderer gone (${details.reason}, exit code ${details.exitCode})`);
   });
-  mainWindow.webContents.setWindowOpenHandler(({ url: external }) => {
+  win.webContents.setWindowOpenHandler(({ url: external }) => {
     void shell.openExternal(external);
     return { action: 'deny' };
   });
@@ -349,37 +431,37 @@ function createWindow(url: string): void {
   // it can close the focused dock tab (logs/terminal) first, and only close the
   // whole window when nothing is docked. preventDefault() stops the native menu
   // accelerator from firing (and keeps the key out of the page).
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
     const key = input.key.toLowerCase();
     // Cmd/Ctrl+W closes the focused dock/page tab — never the window.
     if (key === 'w' && !input.alt && !input.shift && (isMac ? input.meta && !input.control : input.control && !input.meta)) {
       event.preventDefault();
-      mainWindow?.webContents.send('kubus:close-tab');
+      win.webContents.send('kubus:close-tab');
       return;
     }
     // Browser-style page-tab cycling; the payload is true to cycle backwards.
     if (input.control && !input.meta && !input.alt && (key === 'tab' || key === 'pageup' || key === 'pagedown')) {
       event.preventDefault();
-      mainWindow?.webContents.send('kubus:cycle-tab', key === 'tab' ? input.shift : key === 'pageup');
+      win.webContents.send('kubus:cycle-tab', key === 'tab' ? input.shift : key === 'pageup');
       return;
     }
     if (isMac && input.meta && input.shift && !input.control && !input.alt && (input.code === 'BracketLeft' || input.code === 'BracketRight')) {
       event.preventDefault();
-      mainWindow?.webContents.send('kubus:cycle-tab', input.code === 'BracketLeft');
+      win.webContents.send('kubus:cycle-tab', input.code === 'BracketLeft');
     }
   });
-  void mainWindow.loadURL(url);
+  void win.loadURL(url);
+  return win;
 }
 
 ipcMain.on('kubus:close-window', (event) => {
-  if (!isMainWindowSender(event)) return;
-  mainWindow?.close();
+  senderWindow(event)?.close();
 });
 
 ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
-  if (isMac || !isMainWindowSender(event)) return;
-  const win = mainWindow;
+  if (isMac) return;
+  const win = senderWindow(event);
   if (!win) return;
   const { color, symbolColor } = (options ?? {}) as { color?: unknown; symbolColor?: unknown };
   if (typeof color !== 'string' || typeof symbolColor !== 'string') return;
@@ -395,7 +477,7 @@ ipcMain.on('kubus:set-titlebar-overlay', (event, options: unknown) => {
 // reply parks the renderer main thread forever.
 ipcMain.on('kubus:state:get-all', (event) => {
   try {
-    event.returnValue = isMainWindowSender(event) ? { ...loadClientState() } : {};
+    event.returnValue = isManagedWindowSender(event) ? { ...loadClientState() } : {};
   } catch {
     event.returnValue = {};
   }
@@ -432,41 +514,51 @@ function flushClientState(): void {
     // Disk write failed (full disk, permissions …): keep the state pending
     // and retry with backoff, and tell the renderer so it can mirror the
     // snapshot into browser storage as a fallback.
-    mainWindow?.webContents.send('kubus:state:write-failed');
+    for (const win of managedWindows) win.webContents.send('kubus:state:write-failed');
     scheduleClientStateFlush(state, STATE_RETRY_MS);
   }
 }
 
 ipcMain.on('kubus:state:set-item', (event, name: unknown, value: unknown) => {
-  if (!isMainWindowSender(event) || typeof name !== 'string' || typeof value !== 'string') return;
+  if (!isManagedWindowSender(event) || typeof name !== 'string' || typeof value !== 'string') return;
   scheduleClientStateFlush({ ...loadClientState(), [name]: value });
+  for (const win of managedWindows) {
+    if (win.webContents !== event.sender) win.webContents.send('kubus:state:changed', name, value);
+  }
 });
 
 ipcMain.on('kubus:state:remove-item', (event, name: unknown) => {
-  if (!isMainWindowSender(event) || typeof name !== 'string') return;
+  if (!isManagedWindowSender(event) || typeof name !== 'string') return;
   const next = { ...loadClientState() };
   delete next[name];
   scheduleClientStateFlush(next);
+  for (const win of managedWindows) {
+    if (win.webContents !== event.sender) win.webContents.send('kubus:state:changed', name, null);
+  }
 });
 
 // The renderer pulls the pending deep link once its route listener is
 // attached; from then on links are pushed over kubus:open-route.
 ipcMain.handle('kubus:get-pending-route', (event): string | null => {
-  if (!isMainWindowSender(event)) return null;
-  rendererRouteReady = true;
+  const win = senderWindow(event);
+  if (!win || !applicationWindows.has(win)) return null;
+  // Every full app renderer installs the listener. Remember readiness now so
+  // an already-loaded page window can safely become the navigation owner.
+  routeReadyWindows.add(win);
+  if (!isPrimaryWindowSender(event)) return null;
   const route = pendingRoute ?? null;
   pendingRoute = undefined;
   return route;
 });
 
 ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
-  if (!isMainWindowSender(event)) return undefined;
+  if (!isManagedWindowSender(event)) return undefined;
   const enginePath = process.env.KUBUS_HELM_ENGINE;
   return { name: app.getName(), version: app.getVersion(), helmEngine: !!enginePath && existsSync(enginePath) };
 });
 
 ipcMain.handle('kubus:check-for-update', async (event, options?: { force?: unknown }): Promise<UpdateCheckResult> => {
-  if (!isMainWindowSender(event)) {
+  if (!isManagedWindowSender(event)) {
     return { available: false, currentVersion: app.getVersion(), reason: 'invalid-sender' };
   }
   if (options?.force === true) updateCheck = checkForUpdate(true);
@@ -474,19 +566,49 @@ ipcMain.handle('kubus:check-for-update', async (event, options?: { force?: unkno
   return updateCheck;
 });
 
+ipcMain.on('kubus:window-launch', (event) => {
+  event.returnValue = isManagedWindowSender(event) ? windowLaunches.get(event.sender.id) : undefined;
+});
+
+ipcMain.on('kubus:open-window', (event, value: unknown) => {
+  if (!isManagedWindowSender(event) || !appUrl) return;
+  const launch = parseWindowLaunch(value);
+  if (launch) createWindow(appUrl, launch);
+});
+
+ipcMain.handle('kubus:detach-tab', (event, value: unknown): boolean => {
+  if (!isManagedWindowSender(event) || !appUrl) return false;
+  const launch = parseWindowLaunch(value);
+  if (launch?.kind !== 'tab-transfer') return false;
+  const cursor = screen.getCursorScreenPoint();
+  const insideWindow = [...managedWindows]
+    .filter((win) => !win.isDestroyed() && win.isVisible() && !win.isMinimized())
+    .some((win) => {
+      const bounds = win.getBounds();
+      return cursor.x >= bounds.x && cursor.x < bounds.x + bounds.width && cursor.y >= bounds.y && cursor.y < bounds.y + bounds.height;
+    });
+  if (insideWindow) return false;
+  createWindow(appUrl, launch);
+  return true;
+});
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
     // Windows/Linux deliver a deep link to the running instance as an argv
     // entry of the second process.
     const link = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     const route = link ? routeFromDeepLink(link) : undefined;
-    if (route) openRoute(route);
+    if (route) {
+      openRoute(route);
+      return;
+    }
+    const win = primaryWindow ?? managedWindows.values().next().value;
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
   });
 
   void app.whenReady().then(async () => {
@@ -521,7 +643,8 @@ if (!app.requestSingleInstanceLock()) {
     // the persistent main-process log and the exportable diagnostic buffer.
     mainLog('info', `server listening at ${new URL(server.url).origin}`);
     buildMenu();
-    createWindow(server.url);
+    appUrl = server.url;
+    createWindow(appUrl);
   });
 
   // The server (and its port-forwards) is tied to the window, so quit

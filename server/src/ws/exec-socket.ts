@@ -17,18 +17,28 @@ export function registerExecSocket(app: FastifyInstance, ctx: AppContext): void 
   app.get('/ws/exec', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
     const q = req.query as Record<string, string | undefined>;
     try {
+      const cols = Number(q.cols ?? 80) || 80;
+      const rows = Number(q.rows ?? 24) || 24;
+      if (q.terminalId) {
+        if (!ctx.execSessions.attach(q.terminalId, socket, cols, rows)) {
+          socket.send(JSON.stringify({ op: 'exit', code: 1, message: 'The terminal session is no longer available.' }));
+          socket.close();
+        }
+        return;
+      }
       const handle = ctx.clusters.get(q.ctx ?? '');
       // Login shells (-l) so /etc/profile.d is sourced — debug images
       // (debugbox, netshoot) define their helper functions there. Unknown
       // custom executables stay untouched because they may not accept -l.
       const command = shellCommand(q.shell);
-      void runExecBridge(socket, handle, {
+      const transferable = ctx.execSessions.create(socket);
+      void runExecBridge(transferable as unknown as WebSocket, handle, {
         namespace: q.namespace ?? '',
         pod: q.pod ?? '',
         container: q.container ?? '',
         command,
-        cols: Number(q.cols ?? 80) || 80,
-        rows: Number(q.rows ?? 24) || 24,
+        cols,
+        rows,
       });
     } catch (err) {
       if (socket.readyState === socket.OPEN) {

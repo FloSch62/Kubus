@@ -46,14 +46,17 @@ test('boots the real desktop shell behind the restricted preload bridge', async 
       [
         'checkForUpdate',
         'closeWindow',
+        'detachTab',
         'getAppInfo',
         'getPendingRoute',
         'onCloseTab',
         'onCycleTab',
         'onOpenRoute',
+        'openWindow',
         'platform',
         'setTitleBarOverlay',
         'stateStorage',
+        'windowLaunch',
       ].sort(),
     );
     expect(surface.info).toMatchObject({ name: 'Kubus', version: expect.stringMatching(/^\d+\.\d+\.\d+$/) });
@@ -63,6 +66,233 @@ test('boots the real desktop shell behind the restricted preload bridge', async 
     expect(new URL(surface.url).hostname).toBe('127.0.0.1');
     expect(new URL(surface.url).searchParams.has('token')).toBe(false);
     expect(pageErrors).toEqual([]);
+  } finally {
+    await launched.close();
+  }
+});
+
+test('opens a routed native window and synchronizes shared renderer state both ways', async () => {
+  const launched = await launchElectron();
+
+  try {
+    const secondaryPromise = launched.app.waitForEvent('window');
+    await launched.page.evaluate(() => {
+      window.kubusDesktop?.openWindow({
+        kind: 'page',
+        windowId: 'electron-secondary',
+        title: 'Pods',
+        tab: { path: '/r/core/v1/pods', customTitle: 'Native pods', color: '#42a5f5' },
+      });
+    });
+    const secondary = await secondaryPromise;
+    await expect(secondary).toHaveURL(/\/r\/core\/v1\/pods$/);
+    await expect(secondary.getByRole('tab', { name: /Native pods/ })).toBeVisible();
+    expect(await secondary.evaluate(() => window.kubusDesktop?.windowLaunch?.windowId)).toBe('electron-secondary');
+    expect(await launched.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(2);
+
+    await launched.page.evaluate(() => window.kubusDesktop?.stateStorage.setItem('electron-window-sync', 'from-primary'));
+    await expect.poll(() => secondary.evaluate(() => window.kubusDesktop?.stateStorage.getItem('electron-window-sync')))
+      .toBe('from-primary');
+    await secondary.evaluate(() => window.kubusDesktop?.stateStorage.setItem('electron-window-sync', 'from-secondary'));
+    await expect.poll(() => launched.page.evaluate(() => window.kubusDesktop?.stateStorage.getItem('electron-window-sync')))
+      .toBe('from-secondary');
+
+    // Theme is durable app-wide configuration and should update live.
+    await launched.page.getByRole('button', { name: 'Toggle theme' }).click();
+    await secondary.getByRole('button', { name: 'Toggle theme' }).hover();
+    await expect(secondary.getByRole('tooltip')).toContainText('Switch to dark mode');
+
+    await secondary.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => secondary.isClosed()).toBe(true);
+    expect(launched.page.isClosed()).toBe(false);
+    expect(await launched.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+  } finally {
+    await launched.close();
+  }
+});
+
+test('opens terminal and log content in focused native utility windows', async () => {
+  const launched = await launchElectron();
+
+  try {
+    const secondaryPromise = launched.app.waitForEvent('window');
+    await launched.page.evaluate(() => {
+      window.kubusDesktop?.openWindow({
+        kind: 'dock',
+        windowId: 'electron-log-utility',
+        title: 'Logs: logger',
+        context: { selected: [], namespaces: ['default'], navCollapsed: false },
+        tab: {
+          kind: 'logs',
+          title: 'Logs: logger',
+          ctx: 'kind-a',
+          namespace: 'default',
+          pods: ['logger'],
+        },
+      });
+    });
+    const logUtility = await secondaryPromise;
+
+    await expect(logUtility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+    await expect(logUtility.getByRole('tab', { name: /Logs: logger/ })).toBeVisible();
+    await expect(logUtility.locator('.MuiDrawer-root')).toHaveCount(0);
+    await expect(logUtility.getByRole('button', { name: 'New tab' })).toHaveCount(0);
+    await expect(logUtility.locator('.kubus-bottom-dock')).toHaveCSS('height', /.+/);
+    expect(await logUtility.evaluate(() => window.kubusDesktop?.windowLaunch?.windowId)).toBe('electron-log-utility');
+
+    // The utility BrowserWindow owns its content: closing its last dock tab
+    // closes that window, without affecting the main application window.
+    await logUtility.getByRole('button', { name: 'Close Logs: logger' }).click();
+    await expect.poll(() => logUtility.isClosed()).toBe(true);
+    expect(launched.page.isClosed()).toBe(false);
+
+    const terminalPromise = launched.app.waitForEvent('window');
+    await launched.page.evaluate(() => {
+      window.kubusDesktop?.openWindow({
+        kind: 'dock',
+        windowId: 'electron-terminal-utility',
+        title: 'sh: logger',
+        context: { selected: [], namespaces: ['default'], navCollapsed: false },
+        tab: {
+          kind: 'terminal',
+          title: 'sh: logger',
+          ctx: 'kind-a',
+          namespace: 'default',
+          pod: 'logger',
+          container: 'logger',
+        },
+      });
+    });
+    const terminalUtility = await terminalPromise;
+
+    await expect(terminalUtility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+    await expect(terminalUtility.locator('.xterm')).toBeVisible();
+    await expect(terminalUtility.locator('.MuiDrawer-root')).toHaveCount(0);
+    await expect(terminalUtility.getByRole('button', { name: 'New tab' })).toHaveCount(0);
+
+    // Durable presentation preferences are critical shared state even though
+    // each window's tabs, navigation and active working context stay local.
+    const before = await terminalUtility.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    // os -> light leaves pixels unchanged on this light runner; light -> dark
+    // proves the shared preference reached the utility renderer.
+    await launched.page.getByRole('button', { name: 'Toggle theme' }).click();
+    await launched.page.getByRole('button', { name: 'Toggle theme' }).click();
+    await expect.poll(() => terminalUtility.evaluate(() => getComputedStyle(document.body).backgroundColor)).not.toBe(before);
+
+    await terminalUtility.getByRole('button', { name: 'Close sh: logger' }).click();
+    await expect.poll(() => terminalUtility.isClosed()).toBe(true);
+    expect(launched.page.isClosed()).toBe(false);
+  } finally {
+    await launched.close();
+  }
+});
+
+test('restores a full app for deep links without adopting utility-window bounds', async () => {
+  const launched = await launchElectron();
+  const windowStateFile = path.join(launched.userDataDir, 'window-state.json');
+
+  try {
+    const utilityPromise = launched.app.waitForEvent('window');
+    await launched.page.evaluate(() => {
+      window.kubusDesktop?.openWindow({
+        kind: 'dock',
+        windowId: 'electron-lifecycle-utility',
+        title: 'Logs: logger',
+        tab: {
+          kind: 'logs',
+          title: 'Logs: logger',
+          ctx: 'kind-a',
+          namespace: 'default',
+          pods: ['logger'],
+        },
+      });
+    });
+    const utility = await utilityPromise;
+    await expect(utility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+
+    const expectedAppBounds = await launched.app.evaluate(({ BrowserWindow }) => {
+      const windows = BrowserWindow.getAllWindows();
+      const appWindow = windows.find((window) => window.getTitle() === 'Kubus');
+      const utilityWindow = windows.find((window) => window !== appWindow);
+      if (!appWindow || !utilityWindow) throw new Error('expected application and utility windows');
+      appWindow.setBounds({ width: 1100, height: 720, x: 40, y: 50 });
+      utilityWindow.setBounds({ width: 820, height: 540, x: 220, y: 180 });
+      return appWindow.getNormalBounds();
+    });
+
+    await launched.page.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => launched.page.isClosed()).toBe(true);
+    await expect.poll(() => {
+      if (!existsSync(windowStateFile)) return undefined;
+      return JSON.parse(readFileSync(windowStateFile, 'utf8')) as Record<string, unknown>;
+    }).toMatchObject({ ...expectedAppBounds });
+
+    const replacementPromise = launched.app.waitForEvent('window');
+    await launched.app.evaluate(({ app }) => {
+      app.emit(
+        'second-instance',
+        {} as never,
+        ['kubus', 'kubus://events?source=utility-only'],
+        '',
+        {},
+      );
+    });
+    const replacementApp = await replacementPromise;
+
+    await expect(replacementApp).toHaveURL(/\/events\?source=utility-only$/);
+    await expect(replacementApp.locator('.kubus-dock-window-titlebar')).toHaveCount(0);
+    await expect(replacementApp.getByRole('tablist', { name: 'Open pages' })).toBeVisible();
+    await expect(replacementApp.getByRole('button', { name: 'New tab' })).toBeVisible();
+    await expect(utility.locator('.kubus-dock-window-titlebar')).toBeVisible();
+
+    const savedAppBounds = readFileSync(windowStateFile, 'utf8');
+    await utility.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => utility.isClosed()).toBe(true);
+    expect(readFileSync(windowStateFile, 'utf8')).toBe(savedAppBounds);
+  } finally {
+    await launched.close();
+  }
+});
+
+test('moves a page tab through the native window handoff path', async () => {
+  const launched = await launchElectron({ deepLink: 'kubus://r/core/v1/pods' });
+
+  try {
+    const podsTab = launched.page.getByRole('tab', { name: /Pods/ }).first();
+    await expect(podsTab).toBeVisible();
+    await launched.page.getByRole('button', { name: 'New tab' }).click();
+    await expect(launched.page.getByRole('tab', { name: /Overview/ })).toBeVisible();
+
+    // Window layout is copied for continuity, then becomes independent.
+    await launched.page.setViewportSize({ width: 1200, height: 800 });
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const primaryDrawer = launched.page.locator('.MuiDrawer-root').first();
+    await launched.page.keyboard.press(`${modifier}+b`);
+    await expect(primaryDrawer).toHaveCSS('width', '0px');
+
+    // Re-resolve by strip position after the nav-width transition; Chromium
+    // can keep the pre-transition accessibility node stale for a frame.
+    await launched.page.locator('[role="tab"]').first().click({ button: 'right' });
+    const secondaryPromise = launched.app.waitForEvent('window');
+    await launched.page.getByRole('menuitem', { name: 'Move to new window', exact: true }).click();
+    const secondary = await secondaryPromise;
+
+    await expect(secondary).toHaveURL(/\/r\/core\/v1\/pods$/);
+    await expect(secondary.getByRole('tab', { name: /Pods/ })).toBeVisible();
+    await expect(secondary.locator('.kubus-dock-window-titlebar')).toHaveCount(0);
+    await expect(launched.page.getByRole('tab', { name: /Pods/ })).toHaveCount(0);
+    await expect(launched.page.getByRole('tab', { name: /Overview/ })).toBeVisible();
+    expect(await launched.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(2);
+
+    await secondary.setViewportSize({ width: 1200, height: 800 });
+    const secondaryDrawer = secondary.locator('.MuiDrawer-root').first();
+    await expect(secondaryDrawer).toHaveCSS('width', '0px');
+    await secondary.keyboard.press(`${modifier}+b`);
+    await expect(secondaryDrawer).toHaveCSS('width', '228px');
+    await expect(primaryDrawer).toHaveCSS('width', '0px');
+
+    await secondary.evaluate(() => window.kubusDesktop?.closeWindow());
+    await expect.poll(() => secondary.isClosed()).toBe(true);
   } finally {
     await launched.close();
   }

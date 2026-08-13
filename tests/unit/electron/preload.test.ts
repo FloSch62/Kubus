@@ -39,6 +39,7 @@ vi.mock('electron', () => ({
 
 interface DesktopBridge {
   platform: string;
+  windowLaunch?: unknown;
   stateStorage: {
     getItem(name: string): string | null;
     setItem(name: string, value: string): void;
@@ -47,6 +48,8 @@ interface DesktopBridge {
   setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
   getAppInfo(): Promise<unknown>;
   checkForUpdate(options?: { force?: boolean }): Promise<unknown>;
+  openWindow(launch: unknown): void;
+  detachTab(launch: unknown): Promise<boolean>;
   onCloseTab(callback: () => void): () => void;
   onCycleTab(callback: (backwards: boolean) => void): () => void;
   onOpenRoute(callback: (route: string) => void): () => void;
@@ -60,7 +63,7 @@ async function loadBridge(snapshot: unknown = {}): Promise<DesktopBridge> {
       throw snapshot;
     });
   } else {
-    electron.ipcRenderer.sendSync.mockReturnValue(snapshot);
+    electron.ipcRenderer.sendSync.mockImplementation((channel: string) => channel === 'kubus:state:get-all' ? snapshot : undefined);
   }
   await import('../../../electron/src/preload.js');
   expect(electron.exposeInMainWorld).toHaveBeenCalledOnce();
@@ -108,6 +111,10 @@ describe('Electron preload bridge', () => {
 
     bridge.setTitleBarOverlay({ color: '#111111', symbolColor: '#eeeeee' });
     bridge.closeWindow();
+    const launch = { kind: 'tab-transfer', surface: 'dock', windowId: 'window-1', transferId: 'token', title: 'Shell' } as const;
+    bridge.openWindow(launch);
+    electron.ipcRenderer.invoke.mockResolvedValueOnce(true);
+    await expect(bridge.detachTab(launch)).resolves.toBe(true);
     await expect(bridge.getAppInfo()).resolves.toEqual({ name: 'Kubus' });
     await expect(bridge.checkForUpdate({ force: true })).resolves.toEqual({ available: false });
     await expect(bridge.getPendingRoute()).resolves.toBe('/pending');
@@ -117,6 +124,8 @@ describe('Electron preload bridge', () => {
       symbolColor: '#eeeeee',
     });
     expect(electron.ipcRenderer.send).toHaveBeenCalledWith('kubus:close-window');
+    expect(electron.ipcRenderer.send).toHaveBeenCalledWith('kubus:open-window', launch);
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:detach-tab', launch);
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-app-info');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:check-for-update', { force: true });
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-pending-route');

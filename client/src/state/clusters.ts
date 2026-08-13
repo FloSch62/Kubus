@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { StateStorage } from 'zustand/middleware';
 import { useUiPrefsStore } from './prefs.js';
-import { kubusStateStorage } from './persist-storage.js';
+import { kubusStateStorage, skipUnchangedStorageWrites } from './persist-storage.js';
+import { windowScopeId } from '../window-management.js';
 
 export interface ContextSettings {
   /**
@@ -48,11 +50,61 @@ interface ClustersState {
   removeContext: (name: string) => void;
 }
 
+interface WindowClusterContext {
+  selected: string[];
+  namespaces: string[];
+}
+
+const sessionStateStorage: StateStorage = {
+  getItem: (name) => sessionStorage.getItem(name),
+  setItem: (name, value) => sessionStorage.setItem(name, value),
+  removeItem: (name) => sessionStorage.removeItem(name),
+};
+
+const clusterWindowScope = windowScopeId();
+const clusterWindowStorage = clusterWindowScope === 'main' ? kubusStateStorage : sessionStateStorage;
+const clusterWindowKey = `kubus-window-clusters:${clusterWindowScope}`;
+const sharedClusterStorage = skipUnchangedStorageWrites(kubusStateStorage);
+
+function syncStorageValue(storage: StateStorage, name: string): string | null {
+  const value = storage.getItem(name);
+  return typeof value === 'string' || value === null ? value : null;
+}
+
+function parseWindowClusterContext(raw: string | null): WindowClusterContext | undefined {
+  try {
+    const value = JSON.parse(raw ?? 'null') as Partial<WindowClusterContext> | null;
+    if (!value || !Array.isArray(value.selected) || !Array.isArray(value.namespaces)) return undefined;
+    if (!value.selected.every((item) => typeof item === 'string') || !value.namespaces.every((item) => typeof item === 'string')) return undefined;
+    return { selected: value.selected, namespaces: value.namespaces };
+  } catch {
+    return undefined;
+  }
+}
+
+function legacyMainClusterContext(): WindowClusterContext | undefined {
+  if (clusterWindowScope !== 'main') return undefined;
+  try {
+    const envelope = JSON.parse(syncStorageValue(kubusStateStorage, 'kubus-clusters') ?? 'null') as {
+      state?: Partial<WindowClusterContext>;
+    } | null;
+    if (!envelope?.state) return undefined;
+    return parseWindowClusterContext(JSON.stringify(envelope.state));
+  } catch {
+    return undefined;
+  }
+}
+
+const initialWindowClusterContext =
+  parseWindowClusterContext(syncStorageValue(clusterWindowStorage, clusterWindowKey)) ??
+  legacyMainClusterContext() ??
+  { selected: [], namespaces: [] };
+
 export const useClustersStore = create<ClustersState>()(
   persist(
     (set) => ({
-      selected: [],
-      namespaces: [],
+      selected: initialWindowClusterContext.selected,
+      namespaces: initialWindowClusterContext.namespaces,
       themeMode: 'os',
       contextSettings: {},
       contextOrder: [],
@@ -83,9 +135,46 @@ export const useClustersStore = create<ClustersState>()(
           };
         }),
     }),
-    { name: 'kubus-clusters', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
+    {
+      name: 'kubus-clusters',
+      version: 0,
+      storage: createJSONStorage(() => sharedClusterStorage),
+      // A window's active cluster/namespace context is deliberately absent:
+      // rehydrating app-wide cluster metadata must not navigate other windows.
+      partialize: ({ themeMode, contextSettings, contextOrder, pickerLayout }) => ({
+        themeMode,
+        contextSettings,
+        contextOrder,
+        pickerLayout,
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<ClustersState>),
+        selected: current.selected,
+        namespaces: current.namespaces,
+      }),
+    },
   ),
 );
+
+let lastSelected = useClustersStore.getState().selected;
+let lastNamespaces = useClustersStore.getState().namespaces;
+
+function persistWindowClusterContext(selected: string[], namespaces: string[]): void {
+  try {
+    clusterWindowStorage.setItem(clusterWindowKey, JSON.stringify({ selected, namespaces } satisfies WindowClusterContext));
+  } catch {
+    /* a blocked/full session store must not break cluster switching */
+  }
+}
+
+persistWindowClusterContext(lastSelected, lastNamespaces);
+useClustersStore.subscribe((state) => {
+  if (state.selected === lastSelected && state.namespaces === lastNamespaces) return;
+  lastSelected = state.selected;
+  lastNamespaces = state.namespaces;
+  persistWindowClusterContext(lastSelected, lastNamespaces);
+});
 
 export function useIsProtected(ctx: string): boolean {
   const explicit = useClustersStore((s) => s.contextSettings[ctx]?.protected);

@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../../server/src/app.js';
 import { registerExecSocket } from '../../../server/src/ws/exec-socket.js';
+import { ExecSessionRegistry } from '../../../server/src/ws/transferable-exec.js';
 
 type Handler = (socket: unknown, request: unknown) => unknown;
 
@@ -64,7 +65,7 @@ it.each([
       };
     },
   };
-  const ctx = { clusters: { get: () => handle } } as unknown as AppContext;
+  const ctx = { clusters: { get: () => handle }, execSessions: new ExecSessionRegistry() } as unknown as AppContext;
   registerExecSocket(app, ctx);
 
   const socket = new FakeSocket();
