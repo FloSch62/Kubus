@@ -59,6 +59,7 @@ import {
   useDeleteResource,
   useDrain,
   useRerunJob,
+  useKubeconfigSettings,
   useResourceList,
   useRolloutPause,
   useRolloutRestart,
@@ -80,6 +81,7 @@ import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
+import { IS_WINDOWS } from '../platform.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -396,6 +398,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   const rerun = useRerunJob();
   const rolloutPause = useRolloutPause();
   const suspendCj = useSuspendCronJob();
+  const kubeconfig = useKubeconfigSettings(open);
   const addTab = useDockStore((s) => s.addTab);
 
   const { kind, obj, ctx } = target;
@@ -719,10 +722,17 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
           <ListItemText>Copy link</ListItemText>
         </MenuItem>
         <MenuItem
+          disabled={kubeconfig.isLoading}
           onClick={() => {
-            void copyToClipboard(kubectlGetCommand({ ctx, group: target.group, plural: target.plural, name, namespace })).then((copied) =>
-              copied ? ok('kubectl get command copied') : showToast('error', 'Copy to clipboard failed'),
-            );
+            void copyToClipboard(
+              kubectlGetCommand(
+                { ctx, group: target.group, plural: target.plural, name, namespace },
+                {
+                  kubeconfigPaths: kubeconfig.data?.source === 'default' ? undefined : kubeconfig.data?.paths,
+                  shell: IS_WINDOWS ? 'windows' : 'posix',
+                },
+              ),
+            ).then((copied) => (copied ? ok('kubectl get command copied') : showToast('error', 'Copy to clipboard failed')));
             close();
           }}
         >
