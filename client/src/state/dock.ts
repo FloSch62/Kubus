@@ -45,6 +45,7 @@ interface DockState {
   height: number;
   maximized: boolean;
   terminalFocusRequest?: { tabId: string; sequence: number };
+  terminalReconnectRequests: Record<string, number>;
   addTab: (tab: DockTab) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -52,6 +53,7 @@ interface DockState {
   setHeight: (height: number) => void;
   setMaximized: (maximized: boolean) => void;
   requestTerminalFocus: (id: string) => void;
+  requestTerminalReconnect: (id: string) => void;
 }
 
 let counter = 0;
@@ -70,6 +72,7 @@ export const useDockStore = create<DockState>((set) => ({
   height: 320,
   maximized: false,
   terminalFocusRequest: undefined,
+  terminalReconnectRequests: {},
   addTab: (tab) => {
     // The detail drawer is modal and would cover the dock — close it so the
     // freshly opened terminal/log tab is actually visible.
@@ -79,12 +82,15 @@ export const useDockStore = create<DockState>((set) => ({
   closeTab: (id) =>
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
+      const terminalReconnectRequests = { ...s.terminalReconnectRequests };
+      delete terminalReconnectRequests[id];
       return {
         tabs,
         activeId: s.activeId === id ? tabs[tabs.length - 1]?.id : s.activeId,
         open: tabs.length > 0 ? s.open : false,
         maximized: tabs.length > 0 ? s.maximized : false,
         terminalFocusRequest: s.terminalFocusRequest?.tabId === id ? undefined : s.terminalFocusRequest,
+        terminalReconnectRequests,
       };
     }),
   setActive: (id) => set({ activeId: id, open: true }),
@@ -101,6 +107,17 @@ export const useDockStore = create<DockState>((set) => ({
         terminalFocusRequest: {
           tabId: id,
           sequence: (s.terminalFocusRequest?.sequence ?? 0) + 1,
+        },
+      };
+    }),
+  requestTerminalReconnect: (id) =>
+    set((s) => {
+      const tab = s.tabs.find((candidate) => candidate.id === id);
+      if (tab?.kind !== 'terminal' && tab?.kind !== 'node-shell') return s;
+      return {
+        terminalReconnectRequests: {
+          ...s.terminalReconnectRequests,
+          [id]: (s.terminalReconnectRequests[id] ?? 0) + 1,
         },
       };
     }),

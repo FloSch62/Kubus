@@ -64,6 +64,7 @@ describe('useDockStore terminal focus requests', () => {
       open: false,
       maximized: false,
       terminalFocusRequest: undefined,
+      terminalReconnectRequests: {},
     });
   });
 
@@ -79,11 +80,32 @@ describe('useDockStore terminal focus requests', () => {
     expect(useDockStore.getState().terminalFocusRequest).toEqual({ tabId: terminal.id, sequence: 2 });
   });
 
-  it('ignores log tabs and unknown ids', () => {
+  it('ignores log tabs and unknown ids for focus requests', () => {
     const before = useDockStore.getState();
     before.requestTerminalFocus(logs.id);
     before.requestTerminalFocus('missing');
     expect(useDockStore.getState()).toBe(before);
+  });
+
+  it('issues reconnect requests without activating or opening the terminal', () => {
+    useDockStore.getState().requestTerminalReconnect(terminal.id);
+    useDockStore.getState().requestTerminalReconnect(terminal.id);
+
+    const state = useDockStore.getState();
+    expect(state.terminalReconnectRequests).toEqual({ [terminal.id]: 2 });
+    expect(state.activeId).toBe(logs.id);
+    expect(state.open).toBe(false);
+  });
+
+  it('ignores non-terminal reconnect requests and clears requests when a tab closes', () => {
+    const before = useDockStore.getState();
+    before.requestTerminalReconnect(logs.id);
+    before.requestTerminalReconnect('missing');
+    expect(useDockStore.getState()).toBe(before);
+
+    before.requestTerminalReconnect(terminal.id);
+    useDockStore.getState().closeTab(terminal.id);
+    expect(useDockStore.getState().terminalReconnectRequests).toEqual({});
   });
 });
 
