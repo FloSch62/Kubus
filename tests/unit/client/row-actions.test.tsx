@@ -329,6 +329,13 @@ describe('pod actions', () => {
     await waitFor(() => expect(sideEffects.copy).toHaveBeenCalled());
     view.unmount();
 
+    view = clickMenuAction(pod, 'Copy kubectl get command');
+    await waitFor(() =>
+      expect(sideEffects.copy).toHaveBeenCalledWith('kubectl get pods/pod-a --namespace team-a --context dev'),
+    );
+    expect(sideEffects.showToast).toHaveBeenCalledWith('success', 'kubectl get command copied');
+    view.unmount();
+
     view = clickMenuAction(pod, 'Delete…');
     const confirm = screen.getByPlaceholderText('pod-a');
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();

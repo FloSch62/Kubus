@@ -50,6 +50,7 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LinkIcon from '@mui/icons-material/Link';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -78,6 +79,7 @@ import { execTargetContainer, podContainerNames } from '../kube-display.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
+import { kubectlGetCommand } from '../kubectl-command.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -715,6 +717,19 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <LinkIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Copy link</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            void copyToClipboard(kubectlGetCommand({ ctx, group: target.group, plural: target.plural, name, namespace })).then((copied) =>
+              copied ? ok('kubectl get command copied') : showToast('error', 'Copy to clipboard failed'),
+            );
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <ContentCopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Copy kubectl get command</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem
