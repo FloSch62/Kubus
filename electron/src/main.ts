@@ -517,7 +517,9 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
-    mainLog('info', `server listening at ${server.url}`);
+    // server.url carries the renderer's bearer token. Keep credentials out of
+    // the persistent main-process log and the exportable diagnostic buffer.
+    mainLog('info', `server listening at ${new URL(server.url).origin}`);
     buildMenu();
     createWindow(server.url);
   });

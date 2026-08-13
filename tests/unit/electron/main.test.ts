@@ -82,7 +82,7 @@ const electron = vi.hoisted(() => {
   };
   const state = { userDataPath: '' };
   const serverClose = vi.fn(async () => undefined);
-  const startServer = vi.fn(async () => ({ url: 'http://127.0.0.1:41234', close: serverClose }));
+  const startServer = vi.fn(async () => ({ url: 'http://127.0.0.1:41234/?token=secret-test-token', close: serverClose }));
   const appendAppLog = vi.fn();
   const fixPath = vi.fn();
   const menu = {
@@ -158,7 +158,7 @@ beforeEach(() => {
   electron.app.requestSingleInstanceLock.mockReturnValue(true);
   electron.app.whenReady.mockResolvedValue(undefined);
   electron.serverClose.mockResolvedValue(undefined);
-  electron.startServer.mockResolvedValue({ url: 'http://127.0.0.1:41234', close: electron.serverClose });
+  electron.startServer.mockResolvedValue({ url: 'http://127.0.0.1:41234/?token=secret-test-token', close: electron.serverClose });
   electron.nativeTheme.shouldUseDarkColors = false;
 
   userDataPath = mkdtempSync(path.join(tmpdir(), 'kubus-electron-unit-'));
@@ -184,9 +184,13 @@ describe('Electron main process', () => {
     expect(electron.startServer).toHaveBeenCalledWith(
       expect.objectContaining({ port: 0, openBrowser: false, prettyLogs: false }),
     );
-    expect(win.loadURL).toHaveBeenCalledWith('http://127.0.0.1:41234');
-    expect(readFileSync(path.join(userDataPath, 'logs', 'main.log'), 'utf8')).toMatch(/Kubus 0\.6\.1 starting/);
+    expect(win.loadURL).toHaveBeenCalledWith('http://127.0.0.1:41234/?token=secret-test-token');
+    const mainLogText = readFileSync(path.join(userDataPath, 'logs', 'main.log'), 'utf8');
+    expect(mainLogText).toMatch(/Kubus 0\.6\.1 starting/);
+    expect(mainLogText).toContain('server listening at http://127.0.0.1:41234');
+    expect(mainLogText).not.toContain('secret-test-token');
     expect(electron.appendAppLog).toHaveBeenCalledWith('info', expect.stringContaining('Kubus 0.6.1 starting'), undefined);
+    expect(electron.appendAppLog).toHaveBeenCalledWith('info', 'server listening at http://127.0.0.1:41234', undefined);
     expect(win.options).toMatchObject({
       minWidth: 800,
       minHeight: 500,
