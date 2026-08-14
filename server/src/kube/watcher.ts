@@ -189,6 +189,10 @@ export class ResourceWatcher {
         this.setState('live');
         backoff = MIN_BACKOFF_MS;
         await this.watchOnce();
+        // A normal close is usually the API server's timeout. Re-list before
+        // opening the next watch so a missed event cannot leave the cache
+        // stale forever while every connection still appears healthy.
+        await this.relistWithRetry();
       } catch (err) {
         if (!this.running) break;
         if (isUnavailable(err)) {
@@ -208,6 +212,23 @@ export class ResourceWatcher {
         } else {
           this.setState('reconnecting', err instanceof Error ? err.message : String(err));
         }
+        await delay(backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+      }
+    }
+  }
+
+  /** Authoritative resync after a normal watch close, resilient to brief list failures. */
+  private async relistWithRetry(): Promise<void> {
+    let backoff = MIN_BACKOFF_MS;
+    while (this.running) {
+      try {
+        await this.relistAndDiff();
+        return;
+      } catch (err) {
+        if (!this.running) throw err;
+        if (!isRetryableListError(err)) throw err;
+        this.setState('reconnecting', err instanceof Error ? err.message : String(err));
         await delay(backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
       }
