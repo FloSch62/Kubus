@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -12,7 +12,7 @@ import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { PortForwardInfo } from '@kubus/shared';
 import { usePortForwards, useStopAllPortForwards, useStopPortForward } from '../api/queries.js';
-import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
+import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EmptyState } from '../components/EmptyState.js';
@@ -25,6 +25,7 @@ export function PortForwardsPage() {
   const { mutate: stop } = useStopPortForward();
   const stopAll = useStopAllPortForwards();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const gridRootRef = useRef<HTMLDivElement>(null);
 
   const columns: GridColDef<PortForwardInfo>[] = useMemo(() => {
     const defs: GridColDef<PortForwardInfo>[] = [
@@ -75,7 +76,7 @@ export function PortForwardsPage() {
   const grid = useGridPrefs('port-forwards', columns);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>
+    <Box ref={gridRootRef} sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>
       <PageHeader title="Port Forwards" icon={<CableOutlinedIcon />}>
         <Chip label={`${data?.length ?? 0} active`} variant="outlined" />
         <Box sx={{ flex: 1 }} />
@@ -138,6 +139,7 @@ export function PortForwardsPage() {
           sx={forwardsGridSx}
         />
       )}
+      <CellCopyOverlay rootRef={gridRootRef} />
     </Box>
   );
 }

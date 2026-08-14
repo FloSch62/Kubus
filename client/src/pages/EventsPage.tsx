@@ -17,7 +17,7 @@ import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart
 import { namespaceVisible, useClustersStore } from '../state/clusters.js';
 import { useDetailStore } from '../state/detail.js';
 import { AgeCell } from '../components/AgeCell.js';
-import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
+import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { useQuickSearchShortcut } from '../components/quick-search.js';
 import { SmartFilterInput } from '../components/SmartFilterInput.js';
@@ -110,6 +110,7 @@ export function EventsPage() {
   const [text, setText] = useState('');
   const deferredText = useDeferredValue(text);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const gridRootRef = useRef<HTMLDivElement>(null);
   useQuickSearchShortcut(searchInputRef);
 
   const kinds = useMemo(() => {
@@ -239,7 +240,7 @@ export function EventsPage() {
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <Box ref={gridRootRef} sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
         <PageHeader title="Events" icon={<NotificationsNoneOutlinedIcon />}>
           <Chip label={countLabel(rows.length, 'event')} variant="outlined" />
@@ -275,6 +276,7 @@ export function EventsPage() {
         initialState={eventsGridInitialState}
         sx={eventsGridSx}
       />
+      <CellCopyOverlay rootRef={gridRootRef} />
     </Box>
   );
 }

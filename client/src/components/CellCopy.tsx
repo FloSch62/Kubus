@@ -74,7 +74,7 @@ const cellCopyIcons = (
   </>
 );
 
-const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) {
+const CellCopyButton = memo(function CellCopyButton({ cell }: { cell: HTMLElement }) {
   return (
     <button
       type="button"
@@ -85,6 +85,10 @@ const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) 
       onClick={(event) => {
         event.stopPropagation();
         const button = event.currentTarget;
+        // Watches can update a cell while the pointer remains stationary.
+        // Read at click time so the copied value always matches the cell.
+        const text = cell.querySelector<HTMLElement>('[data-copy-text]')?.dataset.copyText ?? '';
+        if (!text) return;
         void copyToClipboard(text).then((ok) => {
           if (!ok) return;
           button.classList.add('kubus-cell-copied');
@@ -103,24 +107,18 @@ const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) 
   );
 });
 
-interface ActiveCopyCell {
-  cell: HTMLElement;
-  text: string;
-}
-
 /**
  * One hover copy button shared by the whole grid. Virtualized scrolling used
  * to mount a button (and two SVGs) in every non-empty visible cell; moving a
  * single portal between cells keeps that DOM out of the row recycle path.
  */
 export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | null> }) {
-  const [active, setActive] = useState<ActiveCopyCell | null>(null);
+  const [activeCell, setActiveCell] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const scroller = root.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
-    const hide = () => setActive(null);
+    const hide = () => setActiveCell(null);
     const showForPointer = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
       const cell = target?.closest<HTMLElement>('.MuiDataGrid-cell');
@@ -130,7 +128,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
         hide();
         return;
       }
-      setActive((current) => (current?.cell === cell && current.text === text ? current : { cell, text }));
+      setActiveCell((current) => (current === cell ? current : cell));
     };
 
     root.addEventListener('pointerover', showForPointer);
@@ -138,15 +136,17 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
     // A stationary pointer does not reliably emit enter/leave events while
     // virtualization replaces the row beneath it. Hide immediately; the next
     // pointer movement reveals the button for the new cell.
-    scroller?.addEventListener('scroll', hide, { passive: true });
+    // Capture scroll from a virtual scroller even if it mounts after this
+    // effect (for example when an empty grid receives its first row).
+    root.addEventListener('scroll', hide, { capture: true, passive: true });
     return () => {
       root.removeEventListener('pointerover', showForPointer);
       root.removeEventListener('pointerleave', hide);
-      scroller?.removeEventListener('scroll', hide);
+      root.removeEventListener('scroll', hide, true);
     };
   }, [rootRef]);
 
-  return active && active.cell.isConnected ? createPortal(<CellCopyButton text={active.text} />, active.cell) : null;
+  return activeCell?.isConnected ? createPortal(<CellCopyButton cell={activeCell} />, activeCell) : null;
 }
 
 function updateTruncationTitle(event: ReactMouseEvent<HTMLSpanElement>) {

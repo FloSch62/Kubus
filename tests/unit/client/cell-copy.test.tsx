@@ -40,4 +40,15 @@ describe('CellCopyOverlay', () => {
     fireEvent.scroll(container.querySelector('.MuiDataGrid-virtualScroller')!);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Copy value' })).not.toBeInTheDocument());
   });
+
+  it('copies the current value when a hovered cell updates', async () => {
+    render(<GridHarness />);
+
+    fireEvent.pointerOver(screen.getByText('First'));
+    const value = screen.getByText('First');
+    value.dataset.copyText = 'updated-raw';
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy value' }));
+
+    expect(clipboard.copy).toHaveBeenLastCalledWith('updated-raw');
+  });
 });
