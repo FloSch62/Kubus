@@ -259,11 +259,62 @@ describe('ResourceWatcher', () => {
     expect(batches).toEqual([]);
     expect(watcher.items()).toHaveLength(1);
 
-    // A benign stream end reconnects from the bookmarked rv without backoff.
+    // A benign stream end performs an authoritative relist before reconnecting.
+    raw.queueList({ metadata: { resourceVersion: '50' }, items: [obj('uid-a', '1', 'a')] });
     raw.streamAt(0).end();
     await until(() => raw.streams.length === 2, 'reconnect');
-    expect(raw.streamCalls[1]).toContain('resourceVersion=42');
+    expect(raw.jsonCalls).toHaveLength(2);
+    expect(raw.streamCalls[1]).toContain('resourceVersion=50');
     expect(delayMock).not.toHaveBeenCalled();
+  });
+
+  it('removes an externally deleted object when a timed-out watch closes without its event', async () => {
+    const raw = new FakeRaw();
+    raw.queueList({
+      metadata: { resourceVersion: '10' },
+      items: [obj('uid-a', '1', 'a'), obj('uid-b', '2', 'b')],
+    });
+    const watcher = makeWatcher(raw);
+    const { batches, sub } = collector();
+    watcher.subscribe(sub);
+    await watcher.ready();
+    await until(() => raw.streams.length === 1, 'watch stream');
+
+    // Simulate an upstream timeout after Kubernetes deleted a, but without the
+    // DELETED event reaching Kubus. The authoritative LIST only contains b.
+    raw.queueList({ metadata: { resourceVersion: '20' }, items: [obj('uid-b', '2', 'b')] });
+    raw.streamAt(0).end();
+
+    await until(() => batches.length === 1, 'synthetic deletion after timeout');
+    expect(batches[0]?.map((delta) => ({ type: delta.type, uid: delta.object.metadata.uid }))).toEqual([
+      { type: 'DELETED', uid: 'uid-a' },
+    ]);
+    expect(watcher.items().map((item) => item.metadata.uid)).toEqual(['uid-b']);
+    await until(() => raw.streams.length === 2, 'watch reconnect');
+    expect(raw.streamCalls[1]).toContain('resourceVersion=20');
+  });
+
+  it('retries timeout resyncs through transport and API-server flakiness', async () => {
+    const raw = new FakeRaw();
+    raw.queueList({ metadata: { resourceVersion: '10' }, items: [obj('uid-a', '1', 'a')] });
+    const watcher = makeWatcher(raw);
+    const { batches, statuses, sub } = collector();
+    watcher.subscribe(sub);
+    await watcher.ready();
+    await until(() => raw.streams.length === 1, 'watch stream');
+
+    raw.queueListError(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }));
+    raw.queueListError(Object.assign(new Error('API server overloaded'), { code: 503 }));
+    raw.queueList({ metadata: { resourceVersion: '30' }, items: [] });
+    raw.streamAt(0).end();
+
+    await until(() => raw.streams.length === 2, 'watch reconnect after flaky relist');
+    expect(delayMock.mock.calls.map((call) => call[0])).toEqual([1000, 2000]);
+    expect(statuses.map((status) => status.state)).toEqual(['live', 'reconnecting', 'live']);
+    expect(batches[0]?.map((delta) => ({ type: delta.type, uid: delta.object.metadata.uid }))).toEqual([
+      { type: 'DELETED', uid: 'uid-a' },
+    ]);
+    expect(raw.streamCalls[1]).toContain('resourceVersion=30');
   });
 
   it('recovers from a 410 ERROR event by relisting and synthesizing diff deltas', async () => {
