@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
 import { ResourceTable } from '../../../client/src/components/ResourceTable';
 
 vi.mock('../../../client/src/components/SmartFilterInput.js', () => ({ SmartFilterInput: () => null }));
 vi.mock('../../../client/src/components/CellCopy.js', () => ({
+  CellCopyOverlay: () => null,
   copyCellGridSx: {},
   handleCopyCellKeyDown: vi.fn(),
   withCellCopy: (column: unknown) => column,
@@ -36,5 +37,22 @@ describe('ResourceTable selection', () => {
 
     rerender(<ResourceTable rows={[first, second]} columns={columns} checkboxSelection selectedRows={[]} onSelectionChange={vi.fn()} />);
     return waitFor(() => expect(screen.getAllByRole('checkbox').every((checkbox) => !(checkbox as HTMLInputElement).checked)).toBe(true));
+  });
+
+  it('holds watch updates out of the grid until scrolling settles', async () => {
+    const first = row('first');
+    const second = row('second');
+    const columns = [{ field: 'name', valueGetter: (_value: unknown, current: ClusterRow) => current.obj.metadata.name }];
+    const { container, rerender } = render(<ResourceTable rows={[first]} columns={columns} />);
+    const scroller = container.querySelector('.MuiDataGrid-virtualScroller');
+    expect(scroller).not.toBeNull();
+
+    fireEvent.scroll(scroller!);
+    rerender(<ResourceTable rows={[second]} columns={columns} />);
+    expect(screen.getByText('first')).toBeInTheDocument();
+    expect(screen.queryByText('second')).not.toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByText('second')).toBeInTheDocument());
+    expect(screen.queryByText('first')).not.toBeInTheDocument();
   });
 });
