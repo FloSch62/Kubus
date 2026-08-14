@@ -12,7 +12,7 @@ import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
 import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
 import { SmartFilterInput } from './SmartFilterInput.js';
-import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
+import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
 import type { MetricsLookup } from './columns.js';
 import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
@@ -59,6 +59,10 @@ const DEFAULT_SORT: GridSortModel = [{ field: 'name', sort: 'asc' }];
 
 const EMPTY_LABEL_OPTIONS: { terms: string[]; keys: Set<string> } = { terms: [], keys: new Set() };
 
+const getResourceRowId = (row: ClusterRow) => row.obj.metadata.uid;
+
+const SCROLL_SETTLE_MS = 120;
+
 /** All `key` and `key=value` selector terms present in the rows. */
 function labelSelectorOptions(rows: ClusterRow[]): { terms: string[]; keys: Set<string> } {
   const keys = new Set<string>();
@@ -94,6 +98,7 @@ export function ResourceTable({
   tableId,
   activeRowId,
 }: Props) {
+  const tableRef = useRef<HTMLDivElement>(null);
   const [localFilter, setLocalFilter] = useState('');
   // The committed value lives in the URL (or localFilter); the input itself is
   // local state so typing never waits on a router round-trip, and the commit
@@ -198,7 +203,42 @@ export function ResourceTable({
     return rows.filter((r) => matchesPlainText(r, words ?? [], resourceKind));
   }, [rows, parsedFilter, kind, metricsForFilter]);
 
+  // Kubernetes watches can replace the rows prop every 100 ms. Let those
+  // updates accumulate while the virtual scroller is moving so the grid does
+  // not re-sort and recycle its visible rows in the middle of a scroll frame.
+  // The newest snapshot is committed shortly after scrolling settles.
+  const scrollingRef = useRef(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [, commitPendingRows] = useState(0);
+  const gridRowsRef = useRef(filtered);
+  if (!scrollingRef.current) gridRowsRef.current = filtered;
+  const gridRows = gridRowsRef.current;
+  useEffect(() => {
+    const scroller = tableRef.current?.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
+    if (!scroller) return;
+    const handleScroll = () => {
+      scrollingRef.current = true;
+      clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = setTimeout(() => {
+        scrollingRef.current = false;
+        commitPendingRows((epoch) => epoch + 1);
+      }, SCROLL_SETTLE_MS);
+    };
+    scroller.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', handleScroll);
+      clearTimeout(scrollTimerRef.current);
+      scrollingRef.current = false;
+    };
+  }, []);
+
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
+  const rowsByIdRef = useRef(rowsById);
+  rowsByIdRef.current = rowsById;
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+  const callbacksRef = useRef({ onRowClick, onRowActivate, onRowContextMenu, onSelectionChange });
+  callbacksRef.current = { onRowClick, onRowActivate, onRowContextMenu, onSelectionChange };
   const rowSelectionModel = useMemo<GridRowSelectionModel | undefined>(
     () => selectedRows && { type: 'include', ids: new Set(selectedRows.map((row) => row.obj.metadata.uid)) },
     [selectedRows],
@@ -265,9 +305,80 @@ export function ResourceTable({
     ),
     [filteredOut, labelFiltered, kind],
   );
+  const slots = useMemo(() => ({ noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
+  const getRowClassName = useCallback(
+    (params: GridRowParams<ClusterRow>) => {
+      const classes: string[] = [];
+      if (params.id === activeRowId) classes.push('kubus-active-resource-row');
+      // Finished pods stay listed (and filterable) but recede visually so
+      // the running set stands out; hover restores full contrast.
+      if (kind === 'Pod') {
+        const status = podSummary(params.row.obj).status;
+        if (status === 'Succeeded' || status === 'Completed') classes.push('kubus-muted-row');
+      }
+      return classes.join(' ');
+    },
+    [activeRowId, kind],
+  );
+  const handleRowSelectionChange = useCallback<NonNullable<React.ComponentProps<typeof DataGrid<ClusterRow>>['onRowSelectionModelChange']>>(
+    (model) => {
+      const onChange = callbacksRef.current.onSelectionChange;
+      if (!onChange) return;
+      const currentRows = filteredRef.current;
+      // The header "select all" checkbox reports an exclude-type model whose
+      // ids are the deselected rows.
+      const ids = model.ids instanceof Set ? model.ids : new Set();
+      const selected =
+        model.type === 'exclude'
+          ? currentRows.filter((row) => !ids.has(row.obj.metadata.uid))
+          : currentRows.filter((row) => ids.has(row.obj.metadata.uid));
+      onChange(selected);
+    },
+    [],
+  );
+  const handleRowClick = useCallback((params: GridRowParams<ClusterRow>) => callbacksRef.current.onRowClick?.(params.row), []);
+  const rowSlotProps = useMemo(
+    () => ({
+      row: {
+        onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = event.currentTarget.getAttribute('data-id');
+          const row = id ? rowsByIdRef.current.get(id) : undefined;
+          if (row) callbacksRef.current.onRowContextMenu?.(row, event);
+        },
+      },
+    }),
+    [],
+  );
+  const handleColumnWidthChange = useCallback(
+    (params: { colDef: GridColDef<ClusterRow>; width: number }) => {
+      if (tableId) setColumnWidth(tableId, params.colDef.field, params.width);
+    },
+    [tableId, setColumnWidth],
+  );
+  const handleCellKeyDown = useCallback<NonNullable<React.ComponentProps<typeof DataGrid<ClusterRow>>['onCellKeyDown']>>(
+    (params, event, details) => {
+      handleCopyCellKeyDown(params, event, details);
+      const row = rowsByIdRef.current.get(String(params.id));
+      if (!row) return;
+      const callbacks = callbacksRef.current;
+      // Keyboard equivalents of clicking and right-clicking a row.
+      if (event.key === 'Enter' && (callbacks.onRowActivate || callbacks.onRowClick)) {
+        event.preventDefault();
+        (callbacks.onRowActivate ?? callbacks.onRowClick)!(row);
+      } else if (callbacks.onRowContextMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+        event.preventDefault();
+        const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
+        const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
+        callbacks.onRowContextMenu(row, { clientX: rect.left + 8, clientY: rect.bottom - 4 });
+      }
+    },
+    [],
+  );
 
   return (
-    <Box className="kubus-table" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <Box ref={tableRef} className="kubus-table" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
         <SmartFilterInput
           value={inputValue}
@@ -321,21 +432,11 @@ export function ResourceTable({
         {toolbar}
       </Stack>
       <DataGrid
-        rows={filtered}
+        rows={gridRows}
         columns={gridColumns}
         loading={loading}
-        getRowId={(r) => r.obj.metadata.uid}
-        getRowClassName={(params) => {
-          const classes: string[] = [];
-          if (params.id === activeRowId) classes.push('kubus-active-resource-row');
-          // Finished pods stay listed (and filterable) but recede visually so
-          // the running set stands out; hover restores full contrast.
-          if (kind === 'Pod') {
-            const status = podSummary(params.row.obj).status;
-            if (status === 'Succeeded' || status === 'Completed') classes.push('kubus-muted-row');
-          }
-          return classes.join(' ');
-        }}
+        getRowId={getResourceRowId}
+        getRowClassName={getRowClassName}
         density={tableDensity === 'comfortable' ? 'standard' : 'compact'}
         // On overlay-scrollbar platforms the grid measures the native
         // scrollbar as 0px and floats its own on top of the last column;
@@ -344,60 +445,20 @@ export function ResourceTable({
         scrollbarSize={layout.scrollbarSize}
         checkboxSelection={checkboxSelection}
         rowSelectionModel={rowSelectionModel}
-        slots={{ noRowsOverlay: NoRowsOverlay }}
-        onRowSelectionModelChange={
-          onSelectionChange
-            ? (model) => {
-                // The header "select all" checkbox reports an exclude-type
-                // model whose ids are the deselected rows.
-                const ids = model.ids instanceof Set ? model.ids : new Set();
-                const selected =
-                  model.type === 'exclude'
-                    ? filtered.filter((r) => !ids.has(r.obj.metadata.uid))
-                    : filtered.filter((r) => ids.has(r.obj.metadata.uid));
-                onSelectionChange(selected);
-              }
-            : undefined
-        }
+        slots={slots}
+        onRowSelectionModelChange={onSelectionChange ? handleRowSelectionChange : undefined}
         disableRowSelectionOnClick={!!checkboxSelection}
-        onRowClick={onRowClick ? (params: GridRowParams<ClusterRow>) => onRowClick(params.row) : undefined}
-        slotProps={
-          onRowContextMenu
-            ? {
-                row: {
-                  onContextMenu: (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const id = event.currentTarget.getAttribute('data-id');
-                    const row = id ? rowsById.get(id) : undefined;
-                    if (row) onRowContextMenu(row, event);
-                  },
-                },
-              }
-            : undefined
-        }
+        onRowClick={onRowClick ? handleRowClick : undefined}
+        slotProps={onRowContextMenu ? rowSlotProps : undefined}
         columnVisibilityModel={visibility}
         onColumnVisibilityModelChange={handleVisibilityChange}
-        onColumnWidthChange={tableId ? (params) => setColumnWidth(tableId, params.colDef.field, params.width) : undefined}
-        onCellKeyDown={(params, event, details) => {
-          handleCopyCellKeyDown(params, event, details);
-          const row = rowsById.get(String(params.id));
-          if (!row) return;
-          // Keyboard equivalents of clicking and right-clicking a row.
-          if (event.key === 'Enter' && (onRowActivate || onRowClick)) {
-            event.preventDefault();
-            (onRowActivate ?? onRowClick)!(row);
-          } else if (onRowContextMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
-            event.preventDefault();
-            const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
-            const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
-            onRowContextMenu(row, { clientX: rect.left + 8, clientY: rect.bottom - 4 });
-          }
-        }}
+        onColumnWidthChange={tableId ? handleColumnWidthChange : undefined}
+        onCellKeyDown={handleCellKeyDown}
         sortModel={sortModel}
         onSortModelChange={handleSortChange}
         sx={gridSx}
       />
+      <CellCopyOverlay rootRef={tableRef} />
     </Box>
   );
 }

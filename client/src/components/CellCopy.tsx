@@ -1,10 +1,10 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import IconButton from '@mui/material/IconButton';
 import CheckIcon from '@mui/icons-material/Check';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import type { GridColDef, GridEventListener, GridValidRowModel } from '@mui/x-data-grid';
 import { copyToClipboard } from '../clipboard.js';
-import { TruncationTooltip } from './truncation.js';
 
 /** The text a cell copies: the raw (unformatted) value the grid computed. */
 export function cellCopyText(value: unknown): string {
@@ -74,7 +74,7 @@ const cellCopyIcons = (
   </>
 );
 
-const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) {
+const CellCopyButton = memo(function CellCopyButton({ cell }: { cell: HTMLElement }) {
   return (
     <button
       type="button"
@@ -85,6 +85,10 @@ const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) 
       onClick={(event) => {
         event.stopPropagation();
         const button = event.currentTarget;
+        // Watches can update a cell while the pointer remains stationary.
+        // Read at click time so the copied value always matches the cell.
+        const text = cell.querySelector<HTMLElement>('[data-copy-text]')?.dataset.copyText ?? '';
+        if (!text) return;
         void copyToClipboard(text).then((ok) => {
           if (!ok) return;
           button.classList.add('kubus-cell-copied');
@@ -104,6 +108,54 @@ const CellCopyButton = memo(function CellCopyButton({ text }: { text: string }) 
 });
 
 /**
+ * One hover copy button shared by the whole grid. Virtualized scrolling used
+ * to mount a button (and two SVGs) in every non-empty visible cell; moving a
+ * single portal between cells keeps that DOM out of the row recycle path.
+ */
+export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | null> }) {
+  const [activeCell, setActiveCell] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const hide = () => setActiveCell(null);
+    const showForPointer = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const cell = target?.closest<HTMLElement>('.MuiDataGrid-cell');
+      const value = cell?.querySelector<HTMLElement>('[data-copy-text]');
+      const text = value?.dataset.copyText ?? '';
+      if (!cell || !text) {
+        hide();
+        return;
+      }
+      setActiveCell((current) => (current === cell ? current : cell));
+    };
+
+    root.addEventListener('pointerover', showForPointer);
+    root.addEventListener('pointerleave', hide);
+    // A stationary pointer does not reliably emit enter/leave events while
+    // virtualization replaces the row beneath it. Hide immediately; the next
+    // pointer movement reveals the button for the new cell.
+    // Capture scroll from a virtual scroller even if it mounts after this
+    // effect (for example when an empty grid receives its first row).
+    root.addEventListener('scroll', hide, { capture: true, passive: true });
+    return () => {
+      root.removeEventListener('pointerover', showForPointer);
+      root.removeEventListener('pointerleave', hide);
+      root.removeEventListener('scroll', hide, true);
+    };
+  }, [rootRef]);
+
+  return activeCell?.isConnected ? createPortal(<CellCopyButton cell={activeCell} />, activeCell) : null;
+}
+
+function updateTruncationTitle(event: ReactMouseEvent<HTMLSpanElement>) {
+  const element = event.currentTarget;
+  if (element.scrollWidth > element.clientWidth) element.title = element.textContent ?? '';
+  else element.removeAttribute('title');
+}
+
+/**
  * Wrap a column so every non-empty cell gets a hover copy button overlaid at
  * its right edge. Columns without a custom renderCell keep their default
  * text rendering (ellipsis + alignment handled by `.kubus-cell-text`, see
@@ -118,19 +170,19 @@ export function withCellCopy<R extends GridValidRowModel>(column: GridColDef<R>)
     renderCell: (params) => {
       const text = cellCopyText(params.value);
       const display = String(params.formattedValue ?? params.value ?? '');
-      return (
-        <>
-          {original ? (
-            original(params)
-          ) : (
-            <TruncationTooltip text={display}>
-              <span className="kubus-cell-text" style={{ textAlign: align }}>
-                {display}
-              </span>
-            </TruncationTooltip>
-          )}
-          {text ? <CellCopyButton text={text} /> : null}
-        </>
+      return original ? (
+        <div className="kubus-cell-copy-value" data-copy-text={text || undefined}>
+          {original(params)}
+        </div>
+      ) : (
+        <span
+          className="kubus-cell-text"
+          data-copy-text={text || undefined}
+          style={{ textAlign: align }}
+          onMouseEnter={updateTruncationTitle}
+        >
+          {display}
+        </span>
       );
     },
   };
@@ -157,6 +209,7 @@ export const handleCopyCellKeyDown: GridEventListener<'cellKeyDown'> = (params, 
 /** Grid `sx` styles required by withCellCopy / handleCopyCellKeyDown. */
 export const copyCellGridSx = {
   '& .MuiDataGrid-cell': { position: 'relative' },
+  '& .kubus-cell-copy-value': { display: 'contents' },
   '& .kubus-cell-copy': {
     position: 'absolute',
     top: '50%',
@@ -170,9 +223,6 @@ export const copyCellGridSx = {
     border: 0,
     borderRadius: 1,
     cursor: 'pointer',
-    opacity: 0,
-    pointerEvents: 'none',
-    transition: 'opacity 120ms',
     bgcolor: 'background.paper',
     boxShadow: 1,
     color: 'action.active',
@@ -181,7 +231,6 @@ export const copyCellGridSx = {
     '&.kubus-cell-copied .kubus-cell-copy-icon': { display: 'none' },
     '&.kubus-cell-copied .kubus-cell-copy-check': { display: 'block' },
   },
-  '& .MuiDataGrid-cell:hover .kubus-cell-copy': { opacity: 1, pointerEvents: 'auto' },
   '& .kubus-cell-text': {
     flex: 1,
     minWidth: 0,

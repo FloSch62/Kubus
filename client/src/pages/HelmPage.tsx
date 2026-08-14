@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -16,7 +16,7 @@ import { DataGrid } from '@mui/x-data-grid';
 import type { HelmReleaseSummary } from '@kubus/shared';
 import { useAppInfo, useHelmOperations, useHelmReleases, useHelmUpdates } from '../api/queries.js';
 import { namespaceVisible, useClustersStore } from '../state/clusters.js';
-import { copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
+import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { AgeCell } from '../components/AgeCell.js';
@@ -41,6 +41,7 @@ export function HelmPage() {
   const { data, isLoading } = useHelmReleases(selected);
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
+  const gridRootRef = useRef<HTMLDivElement>(null);
   const helmEngine = useAppInfo().data?.helmEngine ?? false;
   const operations = useHelmOperations();
 
@@ -161,7 +162,7 @@ export function HelmPage() {
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5, pt: 1.5 }}>
+    <Box ref={gridRootRef} sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5, pt: 1.5 }}>
       <PageHeader title="Helm Releases" icon={<SailingOutlinedIcon />}>
         <Chip label={countLabel(rows.length, 'release')} variant="outlined" />
         {availableUpdates > 0 ? <Chip label={`${availableUpdates} update${availableUpdates === 1 ? '' : 's'} available`} color="primary" /> : null}
@@ -209,6 +210,7 @@ export function HelmPage() {
         sx={releasesGridSx}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
       />
+      <CellCopyOverlay rootRef={gridRootRef} />
       {installOpen && (
         <Suspense fallback={null}>
           <HelmInstallDialog contexts={selected} onClose={() => setInstallOpen(false)} />
