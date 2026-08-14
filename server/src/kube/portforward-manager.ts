@@ -1,6 +1,6 @@
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { nanoid } from 'nanoid';
 import type { FastifyBaseLogger } from 'fastify';
 import type { KubeObject, LogTargetKind, PortForwardInfo, PortForwardPreflightResponse, PortForwardRequest } from '@kubus/shared';
@@ -107,6 +107,28 @@ export class PortForwardManager extends EventEmitter {
   }
 
   private async handleConnection(ctx: string, req: PortForwardRequest, info: PortForwardInfo, socket: net.Socket): Promise<void> {
+    let upstream: { close: () => void } | undefined;
+    let localClosed = false;
+    let output: Writable | undefined;
+    const closeUpstream = () => {
+      if (localClosed) return;
+      localClosed = true;
+      output?.destroy();
+      try {
+        upstream?.close();
+      } catch {
+        /* already closed */
+      }
+    };
+
+    // A peer FIN ends both halves of a net.Socket by default. Kubernetes can
+    // still deliver a WebSocket frame before the subsequent close event; a
+    // direct socket.write in that window emits an unhandled EPIPE. Start the
+    // teardown on end/error as well as close, before awaiting the upstream WS.
+    socket.once('end', closeUpstream);
+    socket.once('error', closeUpstream);
+    socket.once('close', closeUpstream);
+
     try {
       const handle = this.clusters.get(ctx);
       // Re-resolve per connection so service forwards survive pod churn.
@@ -125,25 +147,47 @@ export class PortForwardManager extends EventEmitter {
         socket.destroy();
         this.emitUpdate();
       });
-      const ws = await handle.makePortForward().portForward(req.namespace, target.pod, [target.port], socket, errStream, socket);
+      // Keep the dependency from writing directly to the net.Socket. The
+      // guarded destination quietly drops frames once local teardown starts
+      // and absorbs the asynchronous write error if FIN races a final frame.
+      output = new Writable({
+        write: (chunk, _encoding, done) => {
+          if (localClosed || socket.destroyed || socket.writableEnded || !socket.writable) {
+            done();
+            return;
+          }
+          socket.write(chunk, (err) => {
+            if (err) closeUpstream();
+            done();
+          });
+        },
+      });
+      const connection = await handle.makePortForward().portForward(req.namespace, target.pod, [target.port], output, errStream, socket);
+      upstream = connection && typeof connection === 'object' && 'close' in connection
+        ? (connection as { close: () => void })
+        : undefined;
+      // The local peer may have gone away while the Kubernetes WebSocket was
+      // connecting. In that case close it now; its close event was already
+      // observed and will not fire a second time for a late listener.
+      if (localClosed) {
+        try {
+          upstream?.close();
+        } catch {
+          /* already closed */
+        }
+        return;
+      }
       info.state = 'active';
       info.error = undefined;
       this.emitUpdate();
-      socket.on('close', () => {
-        if (ws && typeof ws === 'object' && 'close' in ws) {
-          try {
-            (ws as { close: () => void }).close();
-          } catch {
-            /* already closed */
-          }
-        }
-        if (errText.trim()) {
-          info.state = 'error';
-          info.error = errText.trim();
-          this.emitUpdate();
-        }
+      socket.once('close', () => {
+        if (!errText.trim()) return;
+        info.state = 'error';
+        info.error = errText.trim();
+        this.emitUpdate();
       });
     } catch (err) {
+      if (localClosed) return;
       info.state = 'error';
       info.error = err instanceof Error ? err.message : String(err);
       this.log.warn({ id: info.id, err: info.error }, 'port-forward connection failed');

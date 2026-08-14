@@ -17,7 +17,6 @@ import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
-import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
 import { dump as dumpYaml } from 'js-yaml';
 import type { HelmChartSourceRef, HelmDryRunResult, HelmReleaseDetail } from '@kubus/shared';
@@ -32,6 +31,7 @@ import { compareHelmVersions } from './helm-version.js';
 import { ChartMarkdown } from './ChartMarkdown.js';
 import { ChartSourceLink, preferredChartSource } from './ChartSourceLink.js';
 import { HelmOperationErrorAlert } from './HelmOperationErrorAlert.js';
+import { MonacoEditor } from './MonacoEditor.js';
 
 interface Props {
   ctx: string;
@@ -376,7 +376,7 @@ export default function HelmUpgradeDialog({ ctx, ns, name, release, isProtected,
         ) : null}
         <Box sx={{ flex: 1, minHeight: 0, border: 1, borderColor: 'divider' }}>
           {editTab === 'values' ? (
-            <Editor
+            <MonacoEditor
               language="yaml"
               value={valuesText}
               onChange={(v) => setValuesText(v ?? '')}

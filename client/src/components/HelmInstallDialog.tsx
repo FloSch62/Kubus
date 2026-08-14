@@ -30,7 +30,6 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
-import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
 import { dump as dumpYaml } from 'js-yaml';
 import type { HelmChartSourceRef, HelmChartSummary, HelmDryRunResult, HelmHubChart } from '@kubus/shared';
@@ -57,6 +56,7 @@ import { showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { ChartMarkdown } from './ChartMarkdown.js';
 import { ChartSourceLink, preferredChartSource } from './ChartSourceLink.js';
+import { MonacoEditor } from './MonacoEditor.js';
 
 interface Props {
   /** Candidate target clusters (the ones selected in the sidebar). */
@@ -503,7 +503,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
                 <CircularProgress size={24} />
               </Box>
             ) : (
-              <Editor
+              <MonacoEditor
                 language="yaml"
                 value={valuesText ?? ''}
                 onChange={(v) => setValuesText(v ?? '')}
@@ -568,7 +568,7 @@ function ConfigureStep({ contexts, pick, onBack, onClose }: { contexts: string[]
               </Alert>
             )}
             <Box sx={{ flex: 1, minHeight: 0, border: 1, borderColor: 'divider' }}>
-              <Editor
+              <MonacoEditor
                 language="yaml"
                 value={previewTab === 'manifest' ? preview.manifest : dumpYaml(preview.computedValues, { noRefs: true })}
                 theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}

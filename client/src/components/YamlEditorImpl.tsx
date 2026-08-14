@@ -5,13 +5,13 @@ import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import Editor from '@monaco-editor/react';
 import { useTheme } from '@mui/material/styles';
 import type { ResourceDryRunResponse } from '@kubus/shared';
 import { copyToClipboard } from '../clipboard.js';
 import { newYamlModelPath } from '../monaco-setup.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useYamlSchema, type YamlEditorProps } from './YamlEditor.js';
+import { MonacoEditor } from './MonacoEditor.js';
 
 export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', applyUnchanged, onChange, toolbar, schema }: YamlEditorProps) {
   const theme = useTheme();
@@ -207,7 +207,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
             </Typography>
           </Box>
         )}
-        <Editor
+        <MonacoEditor
           language="yaml"
           path={modelPath}
           value={text}
