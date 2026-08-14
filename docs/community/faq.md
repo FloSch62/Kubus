@@ -45,7 +45,7 @@ name. It's a UI guard, not RBAC — see [Production guard](../guide/production-g
 ### Why does macOS say the app is damaged / unverified?
 
 The builds aren't notarised yet. Right-click → **Open**, or run
-`xattr -dr com.apple.quarantine /Applications/Kubus.app`. Details on the
+`xattr -d com.apple.quarantine /Applications/Kubus.app`. Details on the
 [Desktop app](../install/desktop.md) page.
 
 ### Can I run it on a remote/headless box?

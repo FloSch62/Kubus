@@ -37,7 +37,7 @@ Grab the installer for your platform from the **[releases page](https://github.c
         - clear the quarantine flag from a terminal:
 
         ```bash
-        xattr -dr com.apple.quarantine /Applications/Kubus.app
+        xattr -d com.apple.quarantine /Applications/Kubus.app
         ```
 
     After the first launch you can open it normally from Spotlight or the Dock.
