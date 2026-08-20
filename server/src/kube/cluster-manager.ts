@@ -55,8 +55,6 @@ export class ClusterHandle {
   onDiscoveryChanged?: () => void;
 
   private clients = new Map<string, unknown>();
-  private searchIndexWarmup?: NodeJS.Timeout;
-
   constructor(
     baseConfig: KubeConfig,
     public readonly contextName: string,
@@ -146,12 +144,9 @@ export class ClusterHandle {
     this.watchers.acquire('', 'v1', 'events');
     this.watchers.acquire('', 'v1', 'nodes');
     this.watchers.acquire('', 'v1', 'namespaces');
-    this.searchIndexWarmup = setTimeout(() => this.searchIndex.warm(), 1_000);
-    this.searchIndexWarmup.unref();
   }
 
   dispose(): void {
-    if (this.searchIndexWarmup) clearTimeout(this.searchIndexWarmup);
     this.metricsPoller.stop();
     this.networkPoller.stop();
     this.crdTracker.stop();

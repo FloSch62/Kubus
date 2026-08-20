@@ -44,8 +44,6 @@ beforeEach(() => {
       crds: 0,
       crdsEstablished: 0,
       crdsUnavailable: false,
-      customResources: 0,
-      customResourcesIndexed: true,
     },
     failingPods: [],
     unavailableWorkloads: [],

@@ -58,9 +58,6 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
     const events = eventsWatcher.watcher.items();
     const persistentVolumes = persistentVolumesResult.items;
     const crds = crdsResult.items;
-    const customResourceEntries = await handle.searchIndex.entries();
-    const customResourcesIndexed = !handle.searchIndex.isReconciling();
-
     const overview: ClusterOverview = {
       counts: {
         nodes: nodesWatcher.watcher.items().length,
@@ -74,8 +71,6 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
         crds: crds.length,
         crdsEstablished: crds.filter(isEstablishedCrd).length,
         crdsUnavailable: crdsResult.unavailable,
-        customResources: customResourceEntries.reduce((n, entry) => (entry.kind.custom ? n + 1 : n), 0),
-        customResourcesIndexed,
       },
       failingPods: [],
       unavailableWorkloads: [],

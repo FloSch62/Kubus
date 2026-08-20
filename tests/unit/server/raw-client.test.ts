@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { isRetryableTransportError, resourcePath } from '../../../server/src/kube/raw-client.js';
+import type { KubeConfig } from '@kubernetes/client-node';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { KUBE_REQUEST_DEADLINE_MS, RawClient, isRetryableTransportError, resourcePath } from '../../../server/src/kube/raw-client.js';
+
+interface RawClientInternals {
+  withDeadline<T>(
+    path: string,
+    init: { method?: string; signal?: AbortSignal } | undefined,
+    run: (init: { method?: string; signal?: AbortSignal }) => Promise<T>,
+  ): Promise<T>;
+  safeGet<T>(init: { method?: string; signal?: AbortSignal } | undefined, run: () => Promise<T>): Promise<T>;
+}
+
+afterEach(() => vi.useRealTimers());
 
 describe('resourcePath', () => {
   it('uses /api for the core group and /apis otherwise', () => {
@@ -64,5 +76,40 @@ describe('isRetryableTransportError', () => {
     expect(isRetryableTransportError(wrap(wrap(wrap(reset))))).toBe(true);
     // Depth cap: the fifth object in the chain is never inspected.
     expect(isRetryableTransportError(wrap(wrap(wrap(wrap(reset)))))).toBe(false);
+  });
+});
+
+describe('RawClient request deadline', () => {
+  it('bounds the whole operation and does not retry after the deadline aborts', async () => {
+    vi.useFakeTimers();
+    const raw = new RawClient({} as KubeConfig) as unknown as RawClientInternals;
+    let attempts = 0;
+    const request = raw.withDeadline('/api/v1/pods', undefined, (init) =>
+      raw.safeGet(init, async () => {
+        attempts += 1;
+        await new Promise<never>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { code: 'ETIMEDOUT' })), { once: true });
+        });
+      }),
+    );
+
+    const rejection = expect(request).rejects.toThrow('Kubernetes API request timed out after 15s: /api/v1/pods');
+    await vi.advanceTimersByTimeAsync(KUBE_REQUEST_DEADLINE_MS);
+    await rejection;
+    expect(attempts).toBe(1);
+  });
+
+  it('preserves a caller abort instead of reporting a deadline', async () => {
+    vi.useFakeTimers();
+    const raw = new RawClient({} as KubeConfig) as unknown as RawClientInternals;
+    const caller = new AbortController();
+    const request = raw.withDeadline('/version', { signal: caller.signal }, async (init) => {
+      await new Promise<never>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('caller stopped')), { once: true });
+      });
+    });
+
+    caller.abort();
+    await expect(request).rejects.toThrow('caller stopped');
   });
 });

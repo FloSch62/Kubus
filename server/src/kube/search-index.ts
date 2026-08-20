@@ -11,7 +11,6 @@ const START_CONCURRENCY = 16;
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const WATCH_FORBIDDEN_RELIST_MS = 60_000;
-const CRD_RECONCILE_DEBOUNCE_MS = 1_000;
 const DISCOVERY_SAFETY_RECONCILE_MS = 5 * 60_000;
 const METADATA_LIST_ACCEPT = 'application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1,application/json';
 const METADATA_WATCH_ACCEPT = 'application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1,application/json';
@@ -88,7 +87,11 @@ function labelsText(labels: Record<string, string> | undefined): string | undefi
 
 function shouldIndexKind(kind: ResourceKindInfo): boolean {
   if (!kind.verbs.includes('list') || !kind.verbs.includes('watch')) return false;
-  return !!kind.custom || BUILTIN_RESOURCE_SEARCH_KINDS.has(gvrKey(kind));
+  // Custom-resource cardinality is unbounded. Watching every served CRD made
+  // each Kubus session consume hundreds of persistent API-server connections.
+  // Custom kinds remain searchable through discovery; only instance-name
+  // search is restricted to this fixed built-in set.
+  return BUILTIN_RESOURCE_SEARCH_KINDS.has(gvrKey(kind));
 }
 
 function apiStatusCode(err: unknown): number | undefined {
@@ -135,12 +138,10 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
 }
 
 /**
- * Live, names-only search index.
- *
- * The index does one metadata-only LIST per searchable GVR, then keeps that
- * GVR current with a metadata watch. Search reads the in-memory entries and
- * never triggers full scans. If a watch expires with 410, only that GVR is
- * relisted. CRD changes invalidate discovery and reconcile the watched GVR set.
+ * Bounded live, names-only search index for a fixed set of built-in kinds.
+ * It starts lazily when global search is first used, does one metadata-only
+ * LIST per GVR, then keeps that GVR current with a metadata watch. Custom kinds
+ * remain discoverable by kind but their instances are deliberately not watched.
  */
 export class ResourceSearchIndex {
   private entriesById = new Map<string, IndexedResourceSearchEntry>();
@@ -151,9 +152,7 @@ export class ResourceSearchIndex {
   private started = false;
   private disposed = false;
   private reconcileInFlight?: Promise<void>;
-  private reconcileTimer?: NodeJS.Timeout;
   private safetyReconcileTimer?: NodeJS.Timeout;
-  private crdAbort?: AbortController;
   private readonly lifecycleAbort = new AbortController();
 
   constructor(
@@ -166,17 +165,17 @@ export class ResourceSearchIndex {
     if (this.started || this.disposed) return;
     this.started = true;
     void this.reconcileKinds();
-    this.startCrdWatch();
-    this.safetyReconcileTimer = setInterval(() => this.scheduleReconcile(true), DISCOVERY_SAFETY_RECONCILE_MS);
+    this.safetyReconcileTimer = setInterval(() => {
+      this.discovery.invalidate();
+      void this.reconcileKinds();
+    }, DISCOVERY_SAFETY_RECONCILE_MS);
     this.safetyReconcileTimer.unref();
   }
 
   dispose(): void {
     this.disposed = true;
     this.lifecycleAbort.abort();
-    if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     if (this.safetyReconcileTimer) clearInterval(this.safetyReconcileTimer);
-    this.crdAbort?.abort();
     for (const state of this.kinds.values()) this.stopKind(state);
     this.kinds.clear();
     this.entriesById.clear();
@@ -187,6 +186,10 @@ export class ResourceSearchIndex {
   /** Shared snapshot — callers must not mutate the returned array. */
   async entries(): Promise<IndexedResourceSearchEntry[]> {
     this.warm();
+    // With lazy startup, the first search request owns the initial warmup.
+    // Wait for the bounded built-in lists so that request returns real results
+    // instead of an empty transient snapshot.
+    await this.reconcileInFlight;
     this.entriesSnapshot ??= [...this.entriesById.values()];
     return this.entriesSnapshot;
   }
@@ -194,17 +197,6 @@ export class ResourceSearchIndex {
   isReconciling(): boolean {
     this.warm();
     return !!this.reconcileInFlight;
-  }
-
-  private scheduleReconcile(invalidateDiscovery: boolean): void {
-    if (this.disposed) return;
-    if (invalidateDiscovery) this.discovery.invalidate();
-    if (this.reconcileTimer) return;
-    this.reconcileTimer = setTimeout(() => {
-      this.reconcileTimer = undefined;
-      void this.reconcileKinds();
-    }, CRD_RECONCILE_DEBOUNCE_MS);
-    this.reconcileTimer.unref();
   }
 
   private async reconcileKinds(): Promise<void> {
@@ -513,65 +505,4 @@ export class ResourceSearchIndex {
     else this.upsertEntry(state, metadata);
   }
 
-  private startCrdWatch(): void {
-    void this.crdWatchLoop();
-  }
-
-  private async listCrdResourceVersion(): Promise<string> {
-    const query = new URLSearchParams({ limit: '1' });
-    const list = await this.metadataJson<MetadataList>(resourcePath('apiextensions.k8s.io', 'v1', 'customresourcedefinitions', { query }));
-    return list.metadata?.resourceVersion ?? '';
-  }
-
-  private async crdWatchLoop(): Promise<void> {
-    let rv = '';
-    let backoff = MIN_BACKOFF_MS;
-    while (!this.disposed) {
-      try {
-        if (!rv) rv = await this.listCrdResourceVersion();
-        this.crdAbort = new AbortController();
-        const query = new URLSearchParams({
-          watch: '1',
-          resourceVersion: rv,
-          allowWatchBookmarks: 'true',
-          timeoutSeconds: '300',
-        });
-        const path = resourcePath('apiextensions.k8s.io', 'v1', 'customresourcedefinitions', { query });
-        const res = await this.metadataStream(path, this.crdAbort.signal);
-        const body = res.body;
-        if (!body) throw new Error('CRD watch response had no body');
-        backoff = MIN_BACKOFF_MS;
-
-        let buffer = '';
-        for await (const chunk of body) {
-          buffer += chunk.toString('utf8');
-          let nl: number;
-          while ((nl = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, nl).trim();
-            buffer = buffer.slice(nl + 1);
-            if (!line) continue;
-            const event = JSON.parse(line) as WatchLine;
-            if (event.type === 'ERROR') {
-              if (event.object?.code === 410) throw apiException(410, event.object?.message ?? '410 Gone', event.object);
-              throw new Error(`CRD watch error: ${event.object?.message ?? 'unknown'}`);
-            }
-            const nextRv = event.object?.metadata?.resourceVersion;
-            if (nextRv) rv = nextRv;
-            if (event.type !== 'BOOKMARK') this.scheduleReconcile(true);
-          }
-        }
-      } catch (err) {
-        if (this.disposed) return;
-        if (isGone(err)) {
-          rv = '';
-          this.scheduleReconcile(true);
-          continue;
-        }
-        if (isUnavailable(err)) return;
-        this.log.debug({ err: String(err) }, 'search index CRD watch failed');
-        if (!(await this.waitForRetry(backoff))) return;
-        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-      }
-    }
-  }
 }

@@ -33,11 +33,8 @@ interface SearchIndexInternals {
   started: boolean;
   disposed: boolean;
   reconcileInFlight?: Promise<void>;
-  reconcileTimer?: NodeJS.Timeout;
   safetyReconcileTimer?: NodeJS.Timeout;
-  crdAbort?: AbortController;
   warm(): void;
-  scheduleReconcile(invalidateDiscovery: boolean): void;
   reconcileKinds(): Promise<void>;
   reconcileKindsNow(): Promise<void>;
   startKind(kind: ResourceKindInfo): Promise<void>;
@@ -56,9 +53,6 @@ interface SearchIndexInternals {
   waitForRetry(ms: number): Promise<boolean>;
   watchKindOnce(state: KindState): Promise<void>;
   processKindWatchLine(state: KindState, event: { type: string; object?: { metadata?: Metadata; code?: number; message?: string } }): void;
-  startCrdWatch(): void;
-  listCrdResourceVersion(): Promise<string>;
-  crdWatchLoop(): Promise<void>;
 }
 
 function kind(overrides: Partial<ResourceKindInfo> = {}): ResourceKindInfo {
@@ -254,13 +248,15 @@ describe('ResourceSearchIndex reconciliation and lifecycle', () => {
     vi.restoreAllMocks();
   });
 
-  it('selects watchable built-ins/custom kinds, deduplicates versions, and removes obsolete kinds', async () => {
+  it('bounds indexing to watchable built-ins, deduplicates versions, and removes obsolete kinds', async () => {
     const podV1 = kind();
     const podOld = kind({ version: 'v1beta1' });
-    const custom = kind({ group: 'example.com', kind: 'Widget', plural: 'widgets', custom: true });
+    const customResources = Array.from({ length: 200 }, (_, i) =>
+      kind({ group: `example-${i}.com`, kind: `Widget${i}`, plural: `widgets${i}`, custom: true }),
+    );
     const ignoredCustom = kind({ group: 'example.com', kind: 'Ignored', plural: 'ignoreds', custom: true, verbs: ['list'] });
     const ignoredBuiltIn = kind({ group: '', kind: 'Event', plural: 'events' });
-    const { internals } = createHarness({ resources: [podV1, podOld, custom, ignoredCustom, ignoredBuiltIn] });
+    const { internals } = createHarness({ resources: [podV1, podOld, ...customResources, ignoredCustom, ignoredBuiltIn] });
 
     const obsolete = state(kind({ group: 'apps', kind: 'Deployment', plural: 'deployments' }));
     internals.upsertEntry(obsolete, { name: 'old', uid: 'old' });
@@ -271,33 +267,23 @@ describe('ResourceSearchIndex reconciliation and lifecycle', () => {
     });
 
     await internals.reconcileKindsNow();
-    expect(starts).toEqual([podV1, custom]);
+    expect(starts).toEqual([podV1]);
     expect(obsolete.running).toBe(false);
     expect(internals.entriesById.size).toBe(0);
 
     internals.disposed = true;
     await internals.reconcileKindsNow();
-    expect(starts).toHaveLength(2);
+    expect(starts).toHaveLength(1);
   });
 
-  it('coalesces scheduled and in-flight reconciliation and handles discovery failure', async () => {
+  it('handles discovery failure without disturbing the existing index', async () => {
     const { internals, discovery, log } = createHarness();
-    const reconcile = vi.fn(async () => {});
-    internals.reconcileKinds = reconcile;
-
-    internals.scheduleReconcile(true);
-    internals.scheduleReconcile(false);
-    expect(discovery.invalidate).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(reconcile).toHaveBeenCalledTimes(1);
-
+    const existing = state();
+    internals.kinds.set(existing.key, existing);
     discovery.getResources.mockRejectedValueOnce(new Error('discovery down'));
     await internals.reconcileKindsNow();
     expect(log.debug).toHaveBeenCalledWith(expect.objectContaining({ err: 'Error: discovery down' }), 'search index discovery failed');
-
-    internals.disposed = true;
-    internals.scheduleReconcile(true);
-    expect(discovery.invalidate).toHaveBeenCalledTimes(1);
+    expect(internals.kinds.get(existing.key)).toBe(existing);
   });
 
   it('starts kinds successfully and classifies unavailable and transient list failures', async () => {
@@ -406,79 +392,27 @@ describe('ResourceSearchIndex reconciliation and lifecycle', () => {
   it('warms once, exposes reconciliation state, and disposes timers, watches, and data', async () => {
     const { index, internals } = createHarness();
     const reconcile = vi.fn(async () => {});
-    const crd = vi.fn();
     internals.reconcileKinds = reconcile;
-    internals.startCrdWatch = crd;
 
     index.warm();
     index.warm();
     expect(reconcile).toHaveBeenCalledTimes(1);
-    expect(crd).toHaveBeenCalledTimes(1);
     expect(index.isReconciling()).toBe(false);
 
     const pending = Promise.resolve();
     internals.reconcileInFlight = pending;
     expect(index.isReconciling()).toBe(true);
-    internals.reconcileTimer = setTimeout(() => {}, 1000);
     internals.safetyReconcileTimer = setInterval(() => {}, 1000);
-    internals.crdAbort = new AbortController();
-    const abortSpy = vi.spyOn(internals.crdAbort, 'abort');
     const podState = state();
     podState.abort = new AbortController();
     internals.kinds.set(podState.key, podState);
     internals.upsertEntry(podState, { name: 'a', uid: 'a' });
 
     index.dispose();
-    expect(abortSpy).toHaveBeenCalled();
     expect(podState.running).toBe(false);
     expect(internals.kinds.size).toBe(0);
     expect(internals.entriesById.size).toBe(0);
     index.warm();
     expect(reconcile).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('ResourceSearchIndex CRD watch', () => {
-  it('reads the CRD resource version and schedules discovery reconciliation for changes', async () => {
-    const events = [
-      JSON.stringify({ type: 'BOOKMARK', object: { metadata: { resourceVersion: '2' } } }),
-      JSON.stringify({ type: 'MODIFIED', object: { metadata: { resourceVersion: '3' } } }),
-      '',
-    ].join('\n');
-    const { internals, raw } = createHarness({
-      json: async () => ({ metadata: { resourceVersion: '1' } }),
-      request: async () => streamResponse(events),
-    });
-    expect(await internals.listCrdResourceVersion()).toBe('1');
-    expect(raw.json.mock.calls[0]![0]).toContain('customresourcedefinitions?limit=1');
-
-    internals.scheduleReconcile = vi.fn(() => {
-      internals.disposed = true;
-    });
-    await internals.crdWatchLoop();
-    expect(internals.scheduleReconcile).toHaveBeenCalledWith(true);
-  });
-
-  it('handles missing bodies, expired watches, forbidden access, and retry exhaustion', async () => {
-    const missing = createHarness({ request: async () => ({ ok: true, body: null }) as unknown as Response });
-    missing.internals.waitForRetry = vi.fn(async () => false);
-    await missing.internals.crdWatchLoop();
-    expect(missing.log.debug).toHaveBeenCalledWith(expect.anything(), 'search index CRD watch failed');
-
-    const gone = createHarness({ request: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 410 } })}\n`) });
-    gone.internals.scheduleReconcile = vi.fn(() => {
-      gone.internals.disposed = true;
-    });
-    await gone.internals.crdWatchLoop();
-    expect(gone.internals.scheduleReconcile).toHaveBeenCalledWith(true);
-
-    const forbidden = createHarness({ request: async () => streamResponse('denied', 403) });
-    await forbidden.internals.crdWatchLoop();
-    expect(forbidden.log.debug).not.toHaveBeenCalled();
-
-    const failed = createHarness({ request: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 500 } })}\n`) });
-    failed.internals.waitForRetry = vi.fn(async () => false);
-    await failed.internals.crdWatchLoop();
-    expect(failed.log.debug).toHaveBeenCalledWith(expect.anything(), 'search index CRD watch failed');
   });
 });
