@@ -4,9 +4,18 @@ import fetch, { type RequestInit, type Response } from 'node-fetch';
 import { ApiException, type KubeConfig } from '@kubernetes/client-node';
 
 type FetchAgent = Agent & { options: Record<string, unknown> };
+type RawRequestInit = { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal };
 
 const TRAILING_SLASH_RE = /\/$/;
 const RETRYABLE_GET_ERROR_CODES = new Set(['ECONNABORTED', 'ECONNRESET', 'ENETRESET', 'EPIPE', 'ETIMEDOUT']);
+export const KUBE_REQUEST_DEADLINE_MS = 15_000;
+
+class RequestDeadlineError extends Error {
+  constructor(path: string) {
+    super(`Kubernetes API request timed out after ${KUBE_REQUEST_DEADLINE_MS / 1000}s: ${path}`);
+    this.name = 'RequestDeadlineError';
+  }
+}
 
 /**
  * Authenticated HTTP access to arbitrary API server paths for the things the
@@ -66,7 +75,7 @@ export class RawClient {
     return agent;
   }
 
-  private async requestOnce(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
+  private async requestOnce(path: string, init?: RawRequestInit): Promise<Response> {
     const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
     requestInit.agent = this.pooledAgent(requestInit.agent) as RequestInit['agent'];
     requestInit.method = init?.method ?? 'GET';
@@ -103,17 +112,50 @@ export class RawClient {
     }
   }
 
-  async request(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<Response> {
-    return this.safeGet(init, () => this.requestOnce(path, init));
+  /**
+   * Give the supplied operation one deadline, including authentication and a
+   * possible safe-GET retry. JSON operations include the response-body read;
+   * streaming operations include watch establishment. This prevents a
+   * saturated API server from parking requests through successive OS-level
+   * TCP timeouts. A caller-provided abort signal remains authoritative.
+   */
+  private async withDeadline<T>(path: string, init: RawRequestInit | undefined, run: (timedInit: RawRequestInit) => Promise<T>): Promise<T> {
+    const deadlineController = new AbortController();
+    const signal = init?.signal ? AbortSignal.any([init.signal, deadlineController.signal]) : deadlineController.signal;
+    const timedInit: RawRequestInit = { ...init, signal };
+    const deadlineError = new RequestDeadlineError(path);
+    let timedOut = false;
+    let timer: NodeJS.Timeout;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        deadlineController.abort(deadlineError);
+        reject(deadlineError);
+      }, KUBE_REQUEST_DEADLINE_MS);
+      timer.unref();
+    });
+
+    try {
+      return await Promise.race([run(timedInit), deadline]);
+    } catch (err) {
+      if (timedOut) throw deadlineError;
+      throw err;
+    } finally {
+      clearTimeout(timer!);
+    }
+  }
+
+  async request(path: string, init?: RawRequestInit): Promise<Response> {
+    return this.withDeadline(path, init, (timedInit) => this.safeGet(timedInit, () => this.requestOnce(path, timedInit)));
   }
 
   /** GET/mutate a JSON API path; throws ApiException on non-2xx. */
-  async json<T = unknown>(path: string, init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<T> {
-    return this.safeGet(init, async () => {
+  async json<T = unknown>(path: string, init?: RawRequestInit): Promise<T> {
+    return this.withDeadline(path, init, (timedInit) => this.safeGet(timedInit, async () => {
       // Keep the response-body read inside the retry boundary: an API server
       // can reset a pooled connection after sending headers but before the
       // complete JSON list has arrived.
-      const res = await this.requestOnce(path, init);
+      const res = await this.requestOnce(path, timedInit);
       const text = await res.text();
       if (!res.ok) {
         let body: unknown = text;
@@ -129,7 +171,7 @@ export class RawClient {
         throw new ApiException(res.status, message, body, {});
       }
       return (text ? JSON.parse(text) : undefined) as T;
-    });
+    }));
   }
 
   /**

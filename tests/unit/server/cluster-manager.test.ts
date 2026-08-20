@@ -242,7 +242,7 @@ describe('ClusterHandle', () => {
       ['', 'v1', 'namespaces'],
     ]);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(warm).toHaveBeenCalledTimes(1);
+    expect(warm).not.toHaveBeenCalled();
 
     handle.dispose();
     expect(metricsStop).toHaveBeenCalled();
