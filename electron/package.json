@@ -23,7 +23,7 @@
     "@kubus/server": "workspace:*",
     "@kubus/shared": "workspace:*",
     "@types/node": "^24.13.3",
-    "electron": "^43.4.0",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "fix-path": "^5.0.0",
