@@ -3,7 +3,7 @@ import { ApiException, type KubernetesObject } from '@kubernetes/client-node';
 import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunResponse, type ResourceKindInfo, type ValidationFinding } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { getPrinterColumns } from '../kube/printer-columns.js';
-import { resourcePath } from '../kube/raw-client.js';
+import { KUBE_LARGE_RESPONSE_DEADLINE_MS, resourcePath } from '../kube/raw-client.js';
 import { maybeRedact } from '../kube/redact.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { dumpYaml, loadYaml } from '../util/yaml.js';
@@ -88,7 +88,9 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
       query.set('limit', req.query.limit ?? '2000');
       if (req.query.continue) query.set('continue', req.query.continue);
       const path = resourcePath(group, version, plural, { namespace: req.query.namespace || undefined, query });
-      const list = await handle.raw.json<{ metadata?: { resourceVersion?: string; continue?: string }; items?: KubeObject[] }>(path);
+      const list = await handle.raw.json<{ metadata?: { resourceVersion?: string; continue?: string }; items?: KubeObject[] }>(path, {
+        deadlineMs: KUBE_LARGE_RESPONSE_DEADLINE_MS,
+      });
       const items = (list.items ?? []).map((item) => {
         if (item.metadata && 'managedFields' in item.metadata) {
           delete (item.metadata as Record<string, unknown>).managedFields;

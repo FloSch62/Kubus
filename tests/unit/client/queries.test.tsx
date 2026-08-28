@@ -216,6 +216,12 @@ describe('query hook contracts', () => {
       for (const query of captured.queries) await expect(Promise.resolve(query.queryFn?.({}))).resolves.not.toThrow();
     }
 
+    const searchConfig = harness.queryConfigs.map(config).find((item) => item.queryKey?.[0] === 'global-search');
+    const searchAbort = new AbortController();
+    await searchConfig?.queryFn?.({ signal: searchAbort.signal });
+    const searchCalls = harness.apiFetch.mock.calls.filter(([url]) => String(url).includes('/search?'));
+    expect(searchCalls.slice(-2).every((call) => (call[1] as RequestInit | undefined)?.signal === searchAbort.signal)).toBe(true);
+
     const calledUrls = harness.apiFetch.mock.calls.map((call) => String(call[0]));
     expect(calledUrls).toContain('/api/contexts/dev%2Fx/cluster-ca'.replace('cluster-ca', 'ca'));
     expect(calledUrls).toContain(

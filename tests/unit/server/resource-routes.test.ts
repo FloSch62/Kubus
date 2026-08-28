@@ -105,6 +105,7 @@ describe('resource routes', () => {
     expect(rawJson.mock.calls[0]![0]).toContain('fieldSelector=status.phase%3DRunning');
     expect(rawJson.mock.calls[0]![0]).toContain('limit=20');
     expect(rawJson.mock.calls[0]![0]).toContain('continue=old');
+    expect(rawJson.mock.calls[0]![1]).toEqual(expect.objectContaining({ deadlineMs: 60_000 }));
   });
 
   it('uses list defaults and returns empty metadata safely', async () => {

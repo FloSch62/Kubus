@@ -4,6 +4,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { ResourceKindInfo } from '@kubus/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DiscoveryCache } from '../../../server/src/kube/discovery';
+import { H2UnavailableError } from '../../../server/src/kube/h2-transport';
 import type { RawClient } from '../../../server/src/kube/raw-client';
 import { ResourceSearchIndex, type IndexedResourceSearchEntry } from '../../../server/src/kube/search-index';
 
@@ -32,8 +33,13 @@ interface SearchIndexInternals {
   kinds: Map<string, KindState>;
   started: boolean;
   disposed: boolean;
+  multiplexed: boolean;
   reconcileInFlight?: Promise<void>;
+  reconcileQueued: boolean;
   safetyReconcileTimer?: NodeJS.Timeout;
+  customCache?: { signature: string; refreshedAt: number; entries: IndexedResourceSearchEntry[] };
+  customRefresh?: { signature: string; promise: Promise<IndexedResourceSearchEntry[]> };
+  customGeneration: number;
   warm(): void;
   reconcileKinds(): Promise<void>;
   reconcileKindsNow(): Promise<void>;
@@ -41,8 +47,11 @@ interface SearchIndexInternals {
   stopKind(state: KindState): void;
   path(kind: ResourceKindInfo, query: URLSearchParams): string;
   metadataJson<T>(path: string): Promise<T>;
-  metadataStream(path: string, signal: AbortSignal): Promise<Response>;
+  metadataStream(path: string, signal: AbortSignal, h2Required: boolean): Promise<Response>;
+  listResourceMetadata(resource: ResourceKindInfo, opts?: { quorum?: boolean }): Promise<{ rv: string; items: Array<{ metadata?: Metadata }> }>;
   listKindMetadata(state: KindState, opts?: { quorum?: boolean }): Promise<{ rv: string; items: Array<{ metadata?: Metadata }> }>;
+  refreshCustomEntries(resources: ResourceKindInfo[], signature: string): Promise<IndexedResourceSearchEntry[]>;
+  scanCustomEntries(resources: ResourceKindInfo[]): Promise<IndexedResourceSearchEntry[]>;
   replaceKindEntries(state: KindState, items: Array<{ metadata?: Metadata }>): void;
   removeKindEntries(state: KindState): void;
   upsertEntry(state: KindState, metadata: Metadata | undefined): void;
@@ -92,15 +101,19 @@ function streamResponse(lines: string, status = 200): Response {
 function createHarness(options: {
   resources?: ResourceKindInfo[];
   json?: (path: string, init?: unknown) => Promise<unknown>;
-  request?: (path: string, init?: unknown) => Promise<Response>;
+  stream?: (path: string, init?: unknown) => Promise<Response>;
+  multiplexed?: boolean | (() => Promise<boolean>);
 } = {}) {
   const discovery = {
     getResources: vi.fn(async () => options.resources ?? []),
     invalidate: vi.fn(),
   } as unknown as DiscoveryCache;
+  const multiplexed = options.multiplexed ?? false;
   const raw = {
     json: vi.fn(options.json ?? (async () => ({ metadata: { resourceVersion: '1' }, items: [] }))),
-    request: vi.fn(options.request ?? (async () => streamResponse(''))),
+    request: vi.fn(async () => streamResponse('')),
+    stream: vi.fn(options.stream ?? (async () => streamResponse(''))),
+    supportsMultiplexedWatch: vi.fn(typeof multiplexed === 'function' ? multiplexed : async () => multiplexed),
   } as unknown as RawClient;
   const log = { debug: vi.fn() } as unknown as FastifyBaseLogger;
   const index = new ResourceSearchIndex(discovery, raw, log);
@@ -108,7 +121,7 @@ function createHarness(options: {
     index,
     internals: index as unknown as SearchIndexInternals,
     discovery: discovery as unknown as { getResources: ReturnType<typeof vi.fn>; invalidate: ReturnType<typeof vi.fn> },
-    raw: raw as unknown as { json: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn> },
+    raw: raw as unknown as { json: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; stream: ReturnType<typeof vi.fn>; supportsMultiplexedWatch: ReturnType<typeof vi.fn> },
     log: log as unknown as { debug: ReturnType<typeof vi.fn> },
   };
 }
@@ -185,21 +198,25 @@ describe('ResourceSearchIndex Kubernetes I/O', () => {
     expect(raw.json.mock.calls[0]![0]).not.toContain('resourceVersion=0');
   });
 
-  it('turns failed watch responses into structured errors and preserves raw bodies', async () => {
-    const jsonHarness = createHarness({ request: async () => streamResponse('{"message":"denied"}', 403) });
-    await expect(jsonHarness.internals.metadataStream('/watch', new AbortController().signal)).rejects.toMatchObject({
+  it('opens metadata watches through the multiplexing-aware stream API and propagates failures', async () => {
+    const { internals, raw } = createHarness();
+    const signal = new AbortController().signal;
+    await expect(internals.metadataStream('/watch', signal, true)).resolves.toMatchObject({ ok: true });
+    expect(raw.stream).toHaveBeenCalledWith('/watch', {
+      headers: { accept: expect.stringContaining('PartialObjectMetadata') },
+      signal,
+      h2Required: true,
+    });
+
+    const denied = createHarness({
+      stream: async () => {
+        throw Object.assign(new Error('denied'), { code: 403 });
+      },
+    });
+    await expect(denied.internals.metadataStream('/watch', signal, false)).rejects.toMatchObject({
       code: 403,
       message: expect.stringContaining('denied'),
     });
-
-    const textHarness = createHarness({ request: async () => streamResponse('plain failure', 500) });
-    await expect(textHarness.internals.metadataStream('/watch', new AbortController().signal)).rejects.toMatchObject({
-      code: 500,
-      message: expect.stringContaining('watch failed: 500 Error'),
-    });
-
-    const okHarness = createHarness({ request: async () => streamResponse('') });
-    await expect(okHarness.internals.metadataStream('/watch', new AbortController().signal)).resolves.toMatchObject({ ok: true });
   });
 
   it('consumes newline-delimited watch snapshots, bookmarks, updates, and deletes', async () => {
@@ -211,7 +228,7 @@ describe('ResourceSearchIndex Kubernetes I/O', () => {
       JSON.stringify({ type: 'DELETED', object: { metadata: { name: 'a', uid: 'a', resourceVersion: '5' } } }),
       '',
     ].join('\n');
-    const { internals } = createHarness({ request: async () => streamResponse(lines) });
+    const { internals } = createHarness({ stream: async () => streamResponse(lines) });
     const podState = state();
     podState.rv = '1';
     await internals.watchKindOnce(podState);
@@ -221,12 +238,12 @@ describe('ResourceSearchIndex Kubernetes I/O', () => {
 
   it('rejects missing bodies and watch ERROR events', async () => {
     const missing = createHarness({
-      request: async () => ({ ok: true, body: null }) as unknown as Response,
+      stream: async () => ({ ok: true, body: null }) as unknown as Response,
     });
     await expect(missing.internals.watchKindOnce(state())).rejects.toThrow('watch response had no body');
 
     const gone = createHarness({
-      request: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 410, message: 'expired' } })}\n`),
+      stream: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 410, message: 'expired' } })}\n`),
     });
     await expect(gone.internals.watchKindOnce(state())).rejects.toMatchObject({
       code: 410,
@@ -234,9 +251,91 @@ describe('ResourceSearchIndex Kubernetes I/O', () => {
     });
 
     const failed = createHarness({
-      request: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 500 } })}\n`),
+      stream: async () => streamResponse(`${JSON.stringify({ type: 'ERROR', object: { code: 500 } })}\n`),
     });
     await expect(failed.internals.watchKindOnce(state())).rejects.toThrow('watch error: unknown');
+  });
+});
+
+describe('ResourceSearchIndex custom-resource search', () => {
+  it('scans every listable CRD with bounded metadata-only concurrency and caches the snapshot', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const customResources = Array.from({ length: 200 }, (_, i) =>
+      kind({ group: `eda-${i}.example.com`, version: 'v1', kind: `EdaResource${i}`, plural: `resources${i}`, custom: true }),
+    );
+    const resources = customResources.flatMap((resource) => [resource, { ...resource, version: 'v1alpha1' }]);
+    resources.push(kind({ group: 'ignored.example.com', kind: 'Ignored', plural: 'ignoreds', custom: true, verbs: ['get'] }));
+    resources.push(kind());
+
+    const { index, raw } = createHarness({
+      json: async (path) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await Promise.resolve();
+        active -= 1;
+        const plural = path.split('?')[0]!.split('/').at(-1)!;
+        return {
+          metadata: { resourceVersion: '1' },
+          items: [{ metadata: { name: `${plural}-instance`, namespace: 'eda', uid: `uid-${plural}`, labels: { app: 'eda' } } }],
+        };
+      },
+    });
+
+    const first = await index.customEntries(resources);
+    expect(first).toHaveLength(200);
+    expect(first).toContainEqual(
+      expect.objectContaining({ name: 'resources0-instance', namespace: 'eda', uid: 'uid-resources0', labelsText: 'app=eda' }),
+    );
+    expect(maxActive).toBe(8);
+    expect(raw.json).toHaveBeenCalledTimes(200);
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(raw.json.mock.calls[0]![0]).toContain('resourceVersion=0');
+    expect(raw.json.mock.calls[0]![1]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ accept: expect.stringContaining('PartialObjectMetadataList') }) }));
+
+    expect(await index.customEntries(resources)).toBe(first);
+    expect(raw.json).toHaveBeenCalledTimes(200);
+
+    index.invalidateCustomEntries();
+    const refreshed = await index.customEntries(resources);
+    expect(refreshed).not.toBe(first);
+    expect(raw.json).toHaveBeenCalledTimes(400);
+  });
+
+  it('degrades a forbidden CRD independently and does not cache an invalidated in-flight generation', async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let scanStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      scanStarted = resolve;
+    });
+    let calls = 0;
+    const resource = kind({ group: 'eda.example.com', kind: 'Fabric', plural: 'fabrics', custom: true });
+    const { index, log } = createHarness({
+      json: async () => {
+        calls += 1;
+        if (calls === 1) {
+          scanStarted();
+          await firstGate;
+        }
+        if (calls === 2) throw { code: 403 };
+        return { items: [{ metadata: { name: 'fabric-a' } }] };
+      },
+    });
+
+    const outdated = index.customEntries([resource]);
+    await started;
+    index.invalidateCustomEntries();
+    releaseFirst();
+    await outdated;
+    expect((index as unknown as SearchIndexInternals).customCache).toBeUndefined();
+
+    expect(await index.customEntries([resource])).toEqual([]);
+    expect(log.debug).toHaveBeenCalledWith(expect.objectContaining({ gvr: 'eda.example.com/v1/fabrics' }), 'custom resource search list failed');
+    index.invalidateCustomEntries();
+    await expect(index.customEntries([resource])).resolves.toEqual([expect.objectContaining({ name: 'fabric-a' })]);
   });
 });
 
@@ -274,6 +373,83 @@ describe('ResourceSearchIndex reconciliation and lifecycle', () => {
     internals.disposed = true;
     await internals.reconcileKindsNow();
     expect(starts).toHaveLength(1);
+  });
+
+  it('watches every listable+watchable custom kind live when watches multiplex over HTTP/2', async () => {
+    const podV1 = kind();
+    const customResources = Array.from({ length: 200 }, (_, i) =>
+      kind({ group: `eda-${i}.example.com`, kind: `EdaResource${i}`, plural: `resources${i}`, custom: true }),
+    );
+    const duplicateVersions = customResources.map((resource) => ({ ...resource, version: 'v1alpha1' }));
+    const listOnlyCustom = kind({ group: 'example.com', kind: 'ListOnly', plural: 'listonlys', custom: true, verbs: ['list'] });
+    const noisyBuiltIn = kind({ group: 'coordination.k8s.io', kind: 'Lease', plural: 'leases' });
+    const { index, internals, raw } = createHarness({
+      resources: [podV1, ...customResources, ...duplicateVersions, listOnlyCustom, noisyBuiltIn],
+      multiplexed: true,
+    });
+
+    const starts: ResourceKindInfo[] = [];
+    internals.startKind = vi.fn(async (resource) => {
+      starts.push(resource);
+    });
+
+    await internals.reconcileKindsNow();
+    expect(internals.multiplexed).toBe(true);
+    expect(starts).toHaveLength(201);
+    expect(starts[0]).toBe(podV1);
+    expect(starts.filter((s) => s.custom)).toHaveLength(200);
+    expect(starts.every((s) => s.version === 'v1')).toBe(true);
+
+    // Custom instances are already live in entries(); search must not scan.
+    await expect(index.customEntries([podV1, ...customResources])).resolves.toEqual([]);
+    expect(raw.json).not.toHaveBeenCalled();
+  });
+
+  it('drops a custom watch and reconciles instead of falling back to per-watch sockets when HTTP/2 is lost', async () => {
+    const { internals } = createHarness();
+    const customState = state(kind({ group: 'eda.example.com', kind: 'Fabric', plural: 'fabrics', custom: true }));
+    customState.rv = '1';
+    internals.kinds.set(customState.key, customState);
+    internals.upsertEntry(customState, { name: 'fabric-a', uid: 'a' });
+    internals.watchKindOnce = vi.fn(async () => {
+      throw new H2UnavailableError('transport gone');
+    });
+    const reconcile = vi.fn(async () => {});
+    internals.reconcileKinds = reconcile;
+
+    await internals.kindLoop(customState);
+    expect(customState.running).toBe(false);
+    expect(internals.kinds.size).toBe(0);
+    expect(internals.entriesById.size).toBe(0);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles on CRD changes and queues one follow-up when a reconcile is already running', async () => {
+    const { index, internals } = createHarness();
+
+    // Not started yet: only the scan cache is dropped, nothing warms.
+    const early = vi.fn(async () => {});
+    internals.reconcileKinds = early;
+    index.onCrdChange();
+    expect(early).not.toHaveBeenCalled();
+
+    const { index: live, internals: liveInternals } = createHarness();
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const runs = vi.fn(async () => gate);
+    liveInternals.reconcileKindsNow = runs;
+    liveInternals.started = true;
+
+    const first = liveInternals.reconcileKinds();
+    live.onCrdChange();
+    live.onCrdChange();
+    expect(runs).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    await first;
+    await Promise.resolve();
+    expect(runs).toHaveBeenCalledTimes(2);
   });
 
   it('handles discovery failure without disturbing the existing index', async () => {

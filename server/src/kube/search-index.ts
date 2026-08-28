@@ -1,13 +1,15 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { FastifyBaseLogger } from 'fastify';
-import type { Response } from 'node-fetch';
 import { ApiException } from '@kubernetes/client-node';
 import { BUILTIN_NAV_GROUPS, type ResourceKindInfo, type WatchEventType } from '@kubus/shared';
 import type { DiscoveryCache } from './discovery.js';
-import { resourcePath, type RawClient } from './raw-client.js';
+import { H2UnavailableError } from './h2-transport.js';
+import { resourcePath, type RawClient, type StreamResponse } from './raw-client.js';
 
 const LIST_PAGE_SIZE = 1_000;
 const START_CONCURRENCY = 16;
+const CUSTOM_LIST_CONCURRENCY = 8;
+const CUSTOM_CACHE_TTL_MS = 60_000;
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const WATCH_FORBIDDEN_RELIST_MS = 60_000;
@@ -63,6 +65,17 @@ interface IndexedKindState {
   unavailable: boolean;
 }
 
+interface CustomEntriesCache {
+  signature: string;
+  refreshedAt: number;
+  entries: IndexedResourceSearchEntry[];
+}
+
+interface CustomRefresh {
+  signature: string;
+  promise: Promise<IndexedResourceSearchEntry[]>;
+}
+
 function gvrKey(kind: Pick<ResourceKindInfo, 'group' | 'version' | 'plural'>): string {
   return `${kind.group}/${kind.version}/${kind.plural}`;
 }
@@ -85,13 +98,32 @@ function labelsText(labels: Record<string, string> | undefined): string | undefi
   return text || undefined;
 }
 
-function shouldIndexKind(kind: ResourceKindInfo): boolean {
+function shouldIndexKind(kind: ResourceKindInfo, multiplexed: boolean): boolean {
   if (!kind.verbs.includes('list') || !kind.verbs.includes('watch')) return false;
-  // Custom-resource cardinality is unbounded. Watching every served CRD made
-  // each Kubus session consume hundreds of persistent API-server connections.
-  // Custom kinds remain searchable through discovery; only instance-name
-  // search is restricted to this fixed built-in set.
-  return BUILTIN_RESOURCE_SEARCH_KINDS.has(gvrKey(kind));
+  if (BUILTIN_RESOURCE_SEARCH_KINDS.has(gvrKey(kind))) return true;
+  // Custom-resource cardinality is unbounded. Live per-CRD watches are only
+  // affordable when they multiplex over shared HTTP/2 connections — one watch
+  // per CRD over HTTP/1.1 made each Kubus session consume hundreds of sockets
+  // and exhausted API servers. Without HTTP/2, custom instances fall back to
+  // the bounded scans below. High-churn built-ins outside the curated set
+  // (leases, events, endpointslices) stay out either way: they are noise in
+  // name search, not missing coverage.
+  return multiplexed && kind.custom === true;
+}
+
+function customSearchKinds(resources: ResourceKindInfo[]): ResourceKindInfo[] {
+  const kinds: ResourceKindInfo[] = [];
+  const seen = new Set<string>();
+  for (const kind of resources) {
+    if (!kind.custom || !kind.verbs.includes('list')) continue;
+    // Served versions expose the same objects. Discovery is preferred-first,
+    // so scan one version per group/plural and avoid duplicate search hits.
+    const resource = `${kind.group}/${kind.plural}`;
+    if (seen.has(resource)) continue;
+    seen.add(resource);
+    kinds.push(kind);
+  }
+  return kinds;
 }
 
 function apiStatusCode(err: unknown): number | undefined {
@@ -138,10 +170,16 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
 }
 
 /**
- * Bounded live, names-only search index for a fixed set of built-in kinds.
- * It starts lazily when global search is first used, does one metadata-only
- * LIST per GVR, then keeps that GVR current with a metadata watch. Custom kinds
- * remain discoverable by kind but their instances are deliberately not watched.
+ * Names-only global search index, started lazily by the first search.
+ *
+ * When the API server multiplexes watches over HTTP/2 (the normal case),
+ * every custom resource kind is indexed live alongside the curated built-ins —
+ * hundreds of metadata watches share one or two TCP connections, so instance
+ * search stays current through CR churn and CRD installs.
+ *
+ * When only HTTP/1.1 is available, custom kinds fall back to bounded
+ * metadata-only scans with a short shared cache: no per-CRD persistent
+ * sockets, and no repeated fan-out while a user types.
  */
 export class ResourceSearchIndex {
   private entriesById = new Map<string, IndexedResourceSearchEntry>();
@@ -151,8 +189,13 @@ export class ResourceSearchIndex {
   private kinds = new Map<string, IndexedKindState>();
   private started = false;
   private disposed = false;
+  private multiplexed = false;
   private reconcileInFlight?: Promise<void>;
+  private reconcileQueued = false;
   private safetyReconcileTimer?: NodeJS.Timeout;
+  private customCache?: CustomEntriesCache;
+  private customRefresh?: CustomRefresh;
+  private customGeneration = 0;
   private readonly lifecycleAbort = new AbortController();
 
   constructor(
@@ -181,6 +224,9 @@ export class ResourceSearchIndex {
     this.entriesById.clear();
     this.entriesSnapshot = undefined;
     this.idByNameKey.clear();
+    this.customCache = undefined;
+    this.customRefresh = undefined;
+    this.customGeneration += 1;
   }
 
   /** Shared snapshot — callers must not mutate the returned array. */
@@ -194,15 +240,65 @@ export class ResourceSearchIndex {
     return this.entriesSnapshot;
   }
 
+  /**
+   * Custom-resource instances for search. With multiplexed watches this is
+   * empty — custom kinds are already live in entries(). On HTTP/1.1-only
+   * clusters it scans without watches: the first global search performs one
+   * bounded metadata sweep; subsequent searches use the shared snapshot, and
+   * stale snapshots return immediately while refreshing.
+   */
+  async customEntries(resources: ResourceKindInfo[]): Promise<IndexedResourceSearchEntry[]> {
+    if (this.disposed) return [];
+    this.warm();
+    // Wait for the reconcile that decides the transport mode (and, when
+    // multiplexed, already lists every custom kind) before choosing to scan.
+    await this.reconcileInFlight;
+    if (this.multiplexed || this.disposed) return [];
+    const kinds = customSearchKinds(resources);
+    const signature = kinds.map(gvrKey).join('\n');
+    const cached = this.customCache;
+    if (cached?.signature === signature) {
+      if (Date.now() - cached.refreshedAt >= CUSTOM_CACHE_TTL_MS) void this.refreshCustomEntries(kinds, signature);
+      return cached.entries;
+    }
+    return this.refreshCustomEntries(kinds, signature);
+  }
+
+  /** CRD discovery changed; force the next search to rebuild its custom snapshot. */
+  invalidateCustomEntries(): void {
+    this.customCache = undefined;
+    this.customRefresh = undefined;
+    this.customGeneration += 1;
+  }
+
+  /**
+   * The cluster's CRD set changed (CrdTracker). Drop the scan cache, and — if
+   * the index is live — reconcile now so freshly installed kinds get watches
+   * within seconds instead of at the next safety interval.
+   */
+  onCrdChange(): void {
+    this.invalidateCustomEntries();
+    if (this.started && !this.disposed) void this.reconcileKinds();
+  }
+
   isReconciling(): boolean {
     this.warm();
     return !!this.reconcileInFlight;
   }
 
   private async reconcileKinds(): Promise<void> {
-    if (this.reconcileInFlight) return this.reconcileInFlight;
+    if (this.reconcileInFlight) {
+      // A CRD change mid-reconcile must not be lost until the safety interval:
+      // remember it and run again once the current pass finishes.
+      this.reconcileQueued = true;
+      return this.reconcileInFlight;
+    }
     this.reconcileInFlight = this.reconcileKindsNow().finally(() => {
       this.reconcileInFlight = undefined;
+      if (this.reconcileQueued && !this.disposed) {
+        this.reconcileQueued = false;
+        void this.reconcileKinds();
+      }
     });
     return this.reconcileInFlight;
   }
@@ -217,13 +313,22 @@ export class ResourceSearchIndex {
       return;
     }
 
+    try {
+      this.multiplexed = await this.raw.supportsMultiplexedWatch();
+    } catch (err) {
+      // Transport probe failed (cluster unreachable, dial error): assume the
+      // conservative mode for this round; the next reconcile re-probes.
+      this.multiplexed = false;
+      this.log.debug({ err: String(err) }, 'multiplexed watch probe failed');
+    }
+
     // Every served version of a resource exposes the same objects, so index
     // one version per group/plural. Discovery lists versions preferred-first
     // (aggregated discovery orders by version priority), so keep the first.
     const desired = new Map<string, ResourceKindInfo>();
     const seenResource = new Set<string>();
     for (const kind of resources) {
-      if (!shouldIndexKind(kind)) continue;
+      if (!shouldIndexKind(kind, this.multiplexed)) continue;
       const resource = `${kind.group}/${kind.plural}`;
       if (seenResource.has(resource)) continue;
       seenResource.add(resource);
@@ -288,26 +393,14 @@ export class ResourceSearchIndex {
     return this.raw.json<T>(path, { headers: { accept: METADATA_LIST_ACCEPT }, signal: this.lifecycleAbort.signal });
   }
 
-  private async metadataStream(path: string, signal: AbortSignal): Promise<Response> {
-    const res = await this.raw.request(path, { headers: { accept: METADATA_WATCH_ACCEPT }, signal });
-    if (!res.ok) {
-      const text = await res.text();
-      let body: unknown = text;
-      try {
-        body = JSON.parse(text);
-      } catch {
-        /* keep raw text */
-      }
-      const message =
-        body && typeof body === 'object' && 'message' in body
-          ? String((body as { message: unknown }).message)
-          : `watch failed: ${res.status} ${res.statusText}`;
-      throw apiException(res.status, message, body);
-    }
-    return res;
+  private async metadataStream(path: string, signal: AbortSignal, h2Required: boolean): Promise<StreamResponse> {
+    // Custom-kind watches exist only because they multiplex: if the HTTP/2
+    // transport disappears mid-flight they must fail (and drop to scans)
+    // rather than silently fan out into hundreds of HTTP/1.1 sockets.
+    return this.raw.stream(path, { headers: { accept: METADATA_WATCH_ACCEPT }, signal, h2Required });
   }
 
-  private async listKindMetadata(state: IndexedKindState, opts?: { quorum?: boolean }): Promise<{ rv: string; items: MetadataObject[] }> {
+  private async listResourceMetadata(kind: ResourceKindInfo, opts?: { quorum?: boolean }): Promise<{ rv: string; items: MetadataObject[] }> {
     const items: MetadataObject[] = [];
     const query = new URLSearchParams({ limit: String(LIST_PAGE_SIZE) });
     // resourceVersion=0 lets the apiserver answer from its watch cache instead
@@ -325,13 +418,60 @@ export class ResourceSearchIndex {
         // explicit resourceVersion is rejected by the apiserver.
         query.delete('resourceVersion');
       }
-      const list = await this.metadataJson<MetadataList>(this.path(state.kind, query));
+      const list = await this.metadataJson<MetadataList>(this.path(kind, query));
       rv = list.metadata?.resourceVersion ?? rv;
       cursor = list.metadata?.continue || undefined;
       items.push(...(list.items ?? []));
     } while (cursor);
 
     return { rv, items };
+  }
+
+  private async listKindMetadata(state: IndexedKindState, opts?: { quorum?: boolean }): Promise<{ rv: string; items: MetadataObject[] }> {
+    return this.listResourceMetadata(state.kind, opts);
+  }
+
+  private async refreshCustomEntries(kinds: ResourceKindInfo[], signature: string): Promise<IndexedResourceSearchEntry[]> {
+    if (this.customRefresh?.signature === signature) return this.customRefresh.promise;
+
+    const generation = this.customGeneration;
+    const promise = this.scanCustomEntries(kinds).then((entries) => {
+      if (!this.disposed && generation === this.customGeneration) {
+        this.customCache = { signature, refreshedAt: Date.now(), entries };
+      }
+      return entries;
+    });
+    this.customRefresh = { signature, promise };
+    const clearRefresh = () => {
+      if (this.customRefresh?.promise === promise) this.customRefresh = undefined;
+    };
+    void promise.then(clearRefresh, clearRefresh);
+    return promise;
+  }
+
+  private async scanCustomEntries(kinds: ResourceKindInfo[]): Promise<IndexedResourceSearchEntry[]> {
+    const entries: IndexedResourceSearchEntry[] = [];
+    await mapWithConcurrency(kinds, CUSTOM_LIST_CONCURRENCY, async (kind) => {
+      try {
+        const { items } = await this.listResourceMetadata(kind);
+        for (const item of items) {
+          const metadata = item.metadata;
+          if (!metadata?.name) continue;
+          entries.push({
+            kind,
+            name: metadata.name,
+            namespace: metadata.namespace,
+            uid: metadata.uid,
+            labelsText: labelsText(metadata.labels),
+          });
+        }
+      } catch (err) {
+        if (!this.disposed && !isAbortError(err)) {
+          this.log.debug({ gvr: gvrKey(kind), err: String(err) }, 'custom resource search list failed');
+        }
+      }
+    });
+    return entries;
   }
 
   private replaceKindEntries(state: IndexedKindState, items: MetadataObject[]): void {
@@ -411,6 +551,17 @@ export class ResourceSearchIndex {
         }
       } catch (err) {
         if (!state.running || this.disposed) return;
+        if (err instanceof H2UnavailableError) {
+          // The multiplexed transport is gone (proxy or LB change). Drop this
+          // custom watch and reconcile: the re-probe demotes every custom kind
+          // to the scan path instead of retrying into per-watch sockets.
+          this.log.debug({ gvr: state.key }, 'search index lost multiplexed transport, falling back to scans');
+          this.stopKind(state);
+          this.removeKindEntries(state);
+          this.kinds.delete(state.key);
+          void this.reconcileKinds();
+          return;
+        }
         if (isUnavailable(err)) {
           state.unavailable = true;
           this.removeKindEntries(state);
@@ -473,7 +624,7 @@ export class ResourceSearchIndex {
       allowWatchBookmarks: 'true',
       timeoutSeconds: '300',
     });
-    const res = await this.metadataStream(this.path(state.kind, query), state.abort.signal);
+    const res = await this.metadataStream(this.path(state.kind, query), state.abort.signal, state.kind.custom === true);
     const body = res.body;
     if (!body) throw new Error('watch response had no body');
 

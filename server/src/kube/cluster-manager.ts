@@ -78,6 +78,7 @@ export class ClusterHandle {
     this.searchIndex = new ResourceSearchIndex(this.discovery, this.raw, log);
     this.crdTracker = new CrdTracker(this.raw, log, () => {
       this.discovery.invalidate();
+      this.searchIndex.onCrdChange();
       this.onDiscoveryChanged?.();
     });
   }
@@ -152,6 +153,7 @@ export class ClusterHandle {
     this.crdTracker.stop();
     this.watchers.stopAll();
     this.searchIndex.dispose();
+    this.raw.dispose();
   }
 }
 

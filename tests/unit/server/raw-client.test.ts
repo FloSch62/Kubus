@@ -5,8 +5,8 @@ import { KUBE_REQUEST_DEADLINE_MS, RawClient, isRetryableTransportError, resourc
 interface RawClientInternals {
   withDeadline<T>(
     path: string,
-    init: { method?: string; signal?: AbortSignal } | undefined,
-    run: (init: { method?: string; signal?: AbortSignal }) => Promise<T>,
+    init: { method?: string; signal?: AbortSignal; deadlineMs?: number | false } | undefined,
+    run: (init: { method?: string; signal?: AbortSignal; deadlineMs?: number | false }) => Promise<T>,
   ): Promise<T>;
   safeGet<T>(init: { method?: string; signal?: AbortSignal } | undefined, run: () => Promise<T>): Promise<T>;
 }
@@ -103,13 +103,137 @@ describe('RawClient request deadline', () => {
     vi.useFakeTimers();
     const raw = new RawClient({} as KubeConfig) as unknown as RawClientInternals;
     const caller = new AbortController();
-    const request = raw.withDeadline('/version', { signal: caller.signal }, async (init) => {
-      await new Promise<never>((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(new Error('caller stopped')), { once: true });
-      });
+    const request = raw.withDeadline('/version', { signal: caller.signal }, async () => new Promise<never>(() => {}));
+
+    caller.abort(new Error('caller stopped'));
+    await expect(request).rejects.toThrow('caller stopped');
+  });
+
+  it('supports longer per-request deadlines for large resource and schema responses', async () => {
+    vi.useFakeTimers();
+    const raw = new RawClient({} as KubeConfig) as unknown as RawClientInternals;
+    const request = raw.withDeadline('/apis/eda.example.com/v1/fabrics', { deadlineMs: 60_000 }, async (init) =>
+      new Promise<never>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      }),
+    );
+
+    let settled = false;
+    void request.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(KUBE_REQUEST_DEADLINE_MS);
+    expect(settled).toBe(false);
+
+    const rejection = expect(request).rejects.toThrow('timed out after 60s');
+    await vi.advanceTimersByTimeAsync(60_000 - KUBE_REQUEST_DEADLINE_MS);
+    await rejection;
+  });
+});
+
+describe('RawClient watch streaming', () => {
+  function makeKc(server = 'https://api.example.com:6443', proxyUrl?: string): KubeConfig {
+    const headers = new Map([['authorization', 'Bearer token-1']]);
+    return {
+      getCurrentCluster: () => ({ server, proxyUrl }),
+      applyToFetchOptions: async () => ({ agent: { options: { ca: 'CA-PEM', servername: 'api.internal' } }, headers }),
+    } as unknown as KubeConfig;
+  }
+
+  function streamResponse(status: number, body = '') {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: 'X',
+      body: null,
+      text: async () => body,
+    };
+  }
+
+  function makeTransport(overrides: Partial<Record<'probe' | 'request' | 'close', ReturnType<typeof vi.fn>>> = {}) {
+    return {
+      probe: vi.fn(async () => true),
+      request: vi.fn(async () => streamResponse(200)),
+      close: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('opens watches through the HTTP/2 transport with auth headers and TLS material', async () => {
+    const transport = makeTransport();
+    const raw = new RawClient(makeKc('https://api.example.com:6443', 'socks5h://127.0.0.1:8888'), transport as never);
+    const signal = new AbortController().signal;
+
+    const res = await raw.stream('/api/v1/pods?watch=1', { signal, headers: { accept: 'metadata' } });
+    expect(res.ok).toBe(true);
+    expect(transport.request).toHaveBeenCalledTimes(1);
+    const [key, target, path, headers, passedSignal] = transport.request.mock.calls[0]!;
+    expect(typeof key).toBe('string');
+    expect(target).toMatchObject({
+      serverUrl: 'https://api.example.com:6443',
+      proxyUrl: 'socks5h://127.0.0.1:8888',
+      tls: { ca: 'CA-PEM', servername: 'api.internal' },
+    });
+    expect(path).toBe('/api/v1/pods?watch=1');
+    expect(headers).toMatchObject({ authorization: 'Bearer token-1', accept: 'metadata' });
+    expect(passedSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('falls back to an HTTP/1.1 request when the transport is unavailable, unless h2 is required', async () => {
+    const { H2UnavailableError } = await import('../../../server/src/kube/h2-transport.js');
+    const transport = makeTransport({
+      request: vi.fn(async () => {
+        throw new H2UnavailableError('http/1.1 only');
+      }),
+    });
+    const raw = new RawClient(makeKc(), transport as never);
+    const requestOnce = vi.fn(async () => streamResponse(200));
+    (raw as unknown as { requestOnce: typeof requestOnce }).requestOnce = requestOnce;
+
+    await expect(raw.stream('/watch')).resolves.toMatchObject({ ok: true });
+    expect(requestOnce).toHaveBeenCalledTimes(1);
+
+    await expect(raw.stream('/watch', { h2Required: true })).rejects.toBeInstanceOf(H2UnavailableError);
+    expect(requestOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns failed watch responses into structured errors preferring the body message', async () => {
+    const denied = makeTransport({ request: vi.fn(async () => streamResponse(403, '{"message":"watch is forbidden"}')) });
+    await expect(new RawClient(makeKc(), denied as never).stream('/watch')).rejects.toMatchObject({
+      code: 403,
+      message: expect.stringContaining('watch is forbidden'),
     });
 
-    caller.abort();
-    await expect(request).rejects.toThrow('caller stopped');
+    const plain = makeTransport({ request: vi.fn(async () => streamResponse(500, 'boom')) });
+    await expect(new RawClient(makeKc(), plain as never).stream('/watch')).rejects.toMatchObject({
+      code: 500,
+      message: expect.stringContaining('watch failed: 500'),
+    });
+  });
+
+  it('reports multiplexing support via the transport probe and never for plain-http servers', async () => {
+    const transport = makeTransport();
+    await expect(new RawClient(makeKc(), transport as never).supportsMultiplexedWatch()).resolves.toBe(true);
+    expect(transport.probe).toHaveBeenCalledTimes(1);
+
+    const httpTransport = makeTransport();
+    await expect(new RawClient(makeKc('http://127.0.0.1:8001'), httpTransport as never).supportsMultiplexedWatch()).resolves.toBe(false);
+    expect(httpTransport.probe).not.toHaveBeenCalled();
+
+    await expect(new RawClient(makeKc('http://127.0.0.1:8001'), httpTransport as never).stream('/watch', { h2Required: true })).rejects.toMatchObject({
+      name: 'H2UnavailableError',
+    });
+  });
+
+  it('dispose closes the pooled HTTP/2 sessions', () => {
+    const transport = makeTransport();
+    const raw = new RawClient(makeKc(), transport as never);
+    raw.dispose();
+    expect(transport.close).toHaveBeenCalledTimes(1);
   });
 });
