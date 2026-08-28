@@ -1,6 +1,6 @@
 // Bundle Monaco locally (no CDN) and wire its workers for Vite.
 import * as monaco from 'monaco-editor';
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import YamlWorker from 'monaco-yaml/yaml.worker?worker';
 import { loader } from '@monaco-editor/react';
 import { configureMonacoYaml, type SchemasSettings } from 'monaco-yaml';

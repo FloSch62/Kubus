@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { LOG_SOCKET_COMPLETE_CODE } from '@kubus/shared';
 import { expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -111,37 +112,35 @@ class FakeSocket extends EventEmitter {
   }
 }
 
-interface LogSink extends EventEmitter {
-  end(chunk: Buffer): void;
+function streamResponse(body: Readable) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    body,
+    async text() {
+      return '';
+    },
+  };
 }
 
 it('log sockets stream selected containers and resume each source from its timestamp', async () => {
   const { app, routes } = routeCollector();
   const calls: Record<string, unknown>[] = [];
-  const controllers: AbortController[] = [];
+  const signals: AbortSignal[] = [];
   const handle = {
     core: {
       async readNamespacedPod() {
         return { spec: { containers: [{ name: 'app' }, { name: 'sidecar' }] } };
       },
     },
-    makeLog() {
-      return {
-        async log(
-          namespace: string,
-          pod: string,
-          container: string,
-          sink: LogSink,
-          options: unknown,
-        ) {
-          calls.push({ namespace, pod, container, options });
-          // No trailing newline exercises the stream finalizer's timestamp parser.
-          sink.end(Buffer.from('2026-01-02T03:04:06.000000000Z resumed line'));
-          const controller = new AbortController();
-          controllers.push(controller);
-          return controller;
-        },
-      };
+    raw: {
+      async stream(path: string, options: { signal: AbortSignal; deadlineMs: false }) {
+        calls.push({ path, options });
+        signals.push(options.signal);
+        // No trailing newline exercises the stream finalizer's timestamp parser.
+        return streamResponse(Readable.from([Buffer.from('2026-01-02T03:04:06.000000000Z resumed line')]));
+      },
     },
   };
   registerLogsSocket(app, appContext(handle));
@@ -169,16 +168,11 @@ it('log sockets stream selected containers and resume each source from its times
 
   expect(calls).toHaveLength(1);
   expect(calls[0]).toEqual({
-    namespace: 'ops',
-    pod: 'api-0',
-    container: 'app',
+    path:
+      '/api/v1/namespaces/ops/pods/api-0/log?container=app&follow=true&previous=false&timestamps=true&sinceTime=2026-01-02T03%3A04%3A05.000000000Z',
     options: {
-      follow: true,
-      tailLines: undefined,
-      sinceSeconds: undefined,
-      sinceTime: '2026-01-02T03:04:05.000000000Z',
-      previous: false,
-      timestamps: true,
+      signal: signals[0],
+      deadlineMs: false,
     },
   });
   expect(socket.sent.find((message) => message.op === 'line')).toEqual({
@@ -190,12 +184,12 @@ it('log sockets stream selected containers and resume each source from its times
   });
 
   expect(socket.closeCalls).toEqual([{ code: 1011, reason: 'upstream log stream ended' }]);
-  expect(controllers[0]?.signal.aborted).toBe(true);
+  expect(signals[0]?.aborted).toBe(true);
 });
 
 it('completed containers close a follow session without requesting a retry', async () => {
   const { app, routes } = routeCollector();
-  const controllers: AbortController[] = [];
+  const signals: AbortSignal[] = [];
   const handle = {
     core: {
       async readNamespacedPod() {
@@ -207,15 +201,11 @@ it('completed containers close a follow session without requesting a retry', asy
         };
       },
     },
-    makeLog() {
-      return {
-        async log(_namespace: string, _pod: string, _container: string, sink: LogSink) {
-          sink.end(Buffer.from('2026-01-02T03:04:06.000000000Z complete'));
-          const controller = new AbortController();
-          controllers.push(controller);
-          return controller;
-        },
-      };
+    raw: {
+      async stream(_path: string, options: { signal: AbortSignal }) {
+        signals.push(options.signal);
+        return streamResponse(Readable.from([Buffer.from('2026-01-02T03:04:06.000000000Z complete')]));
+      },
     },
   };
   registerLogsSocket(app, appContext(handle));
@@ -235,11 +225,12 @@ it('completed containers close a follow session without requesting a retry', asy
   expect(socket.closeCalls).toEqual([
     { code: LOG_SOCKET_COMPLETE_CODE, reason: 'log session complete' },
   ]);
-  expect(controllers[0]?.signal.aborted).toBe(true);
+  expect(signals[0]?.aborted).toBe(true);
 });
 
 it('an interrupted live upstream stream closes the socket for retry', async () => {
   const { app, routes } = routeCollector();
+  const upstream = new Readable({ read() {} });
   const handle = {
     core: {
       async readNamespacedPod() {
@@ -253,13 +244,10 @@ it('an interrupted live upstream stream closes the socket for retry', async () =
         };
       },
     },
-    makeLog() {
-      return {
-        async log(_namespace: string, _pod: string, _container: string, sink: LogSink) {
-          queueMicrotask(() => sink.emit('unpipe'));
-          return new AbortController();
-        },
-      };
+    raw: {
+      async stream() {
+        return streamResponse(upstream);
+      },
     },
   };
   registerLogsSocket(app, appContext(handle));
@@ -274,10 +262,54 @@ it('an interrupted live upstream stream closes the socket for retry', async () =
       follow: 'true',
     },
   });
+  await waitFor(() => socket.sent.some((message) => message.op === 'pod-status' && message.state === 'streaming'));
+  upstream.destroy(new Error('upstream reset'));
   await waitFor(() => socket.closeCalls.length === 1);
 
   expect(socket.closeCalls).toEqual([{ code: 1011, reason: 'upstream log stream failed' }]);
   expect(socket.sent.some((message) => message.op === 'pod-status' && message.state === 'error')).toBe(
     true,
   );
+});
+
+it('handles the upstream AbortError when a log socket disconnects', async () => {
+  const { app, routes } = routeCollector();
+  const upstream = new Readable({ read() {} });
+  let signal: AbortSignal | undefined;
+  const handle = {
+    core: {
+      async readNamespacedPod() {
+        return { spec: { containers: [{ name: 'app' }] } };
+      },
+    },
+    raw: {
+      async stream(_path: string, options: { signal: AbortSignal }) {
+        signal = options.signal;
+        signal.addEventListener(
+          'abort',
+          () => upstream.destroy(new DOMException('This operation was aborted', 'AbortError')),
+          { once: true },
+        );
+        return streamResponse(upstream);
+      },
+    },
+  };
+  registerLogsSocket(app, appContext(handle));
+
+  const socket = new FakeSocket();
+  routes.get('/ws/logs')?.(socket, {
+    query: {
+      ctx: 'dev',
+      namespace: 'ops',
+      pods: 'api-0',
+      containers: 'app',
+      follow: 'true',
+    },
+  });
+  await waitFor(() => socket.sent.some((message) => message.op === 'pod-status' && message.state === 'streaming'));
+
+  socket.close(1000, 'client disconnected');
+  await waitFor(() => signal?.aborted === true && upstream.destroyed);
+
+  expect(socket.sent.some((message) => message.op === 'pod-status' && message.state === 'error')).toBe(false);
 });

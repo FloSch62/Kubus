@@ -62,7 +62,7 @@ export function registerLogsSocket(app: FastifyInstance, ctx: AppContext): void 
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
     };
 
-    const aborts: AbortController[] = [];
+    const aborts = new Set<AbortController>();
     const sinks = new Set<Writable>();
     let closed = false;
     let closing = false;
@@ -130,17 +130,46 @@ export function registerLogsSocket(app: FastifyInstance, ctx: AppContext): void 
       try {
         const handle = ctx.clusters.get(ctxName);
         const sinceTime = resumeAt[`${pod}/${containerName}`];
-        send({ op: 'pod-status', pod, container: containerName, state: 'streaming' });
-        const abort = await handle.makeLog().log(namespace, pod, containerName, sink, {
-          follow,
-          tailLines: !sinceTime && tailLines !== undefined && Number.isFinite(tailLines) ? tailLines : undefined,
-          sinceSeconds: !sinceTime && sinceSeconds !== undefined && Number.isFinite(sinceSeconds) ? sinceSeconds : undefined,
-          sinceTime,
-          previous,
-          timestamps: true,
+        const query = new URLSearchParams({
+          container: containerName,
+          follow: String(follow),
+          previous: String(previous),
+          timestamps: 'true',
         });
+        if (!sinceTime && tailLines !== undefined && Number.isFinite(tailLines)) {
+          query.set('tailLines', String(tailLines));
+        }
+        if (!sinceTime && sinceSeconds !== undefined && Number.isFinite(sinceSeconds)) {
+          query.set('sinceSeconds', String(sinceSeconds));
+        }
+        if (sinceTime) query.set('sinceTime', sinceTime);
+
+        const abort = new AbortController();
+        aborts.add(abort);
+        send({ op: 'pod-status', pod, container: containerName, state: 'streaming' });
+        const response = await handle.raw.stream(
+          `/api/v1/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/log?${query.toString()}`,
+          { signal: abort.signal, deadlineMs: false },
+        );
+        const upstream = response.body;
+        if (!upstream) throw new Error('Kubernetes log response had no body');
+        upstream.on('error', (err: unknown) => {
+          if (abort.signal.aborted || closed) {
+            sink.destroy();
+            return;
+          }
+          send({
+            op: 'pod-status',
+            pod,
+            container: containerName,
+            state: 'error',
+            message: err instanceof Error ? err.message : String(err),
+          });
+          complete('error');
+          sink.destroy();
+        });
+        upstream.pipe(sink);
         if (closed) abort.abort();
-        else aborts.push(abort);
         return await completion;
       } catch (err) {
         send({ op: 'pod-status', pod, container: containerName, state: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -197,6 +226,7 @@ export function registerLogsSocket(app: FastifyInstance, ctx: AppContext): void 
     socket.on('close', () => {
       closed = true;
       for (const abort of aborts) abort.abort();
+      aborts.clear();
       for (const sink of sinks) sink.destroy();
       sinks.clear();
     });

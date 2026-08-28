@@ -1,6 +1,6 @@
 {
   "name": "@kubus/server",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -15,13 +15,13 @@
   "dependencies": {
     "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.3.0",
-    "@kubernetes/client-node": "^1.4.0",
+    "@kubernetes/client-node": "^2.0.0",
     "@kubus/shared": "workspace:*",
-    "fastify": "^5.11.3",
-    "js-yaml": "^5.2.3",
+    "fastify": "^5.12.1",
+    "js-yaml": "^5.4.1",
     "nanoid": "^6.0.1",
     "node-fetch": "^3.3.2",
-    "open": "^11.0.0",
+    "open": "^11.0.1",
     "pino": "^10.3.1",
     "socks": "^2.8.9",
     "ws": "^8.21.3",

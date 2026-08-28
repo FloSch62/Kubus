@@ -23,10 +23,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 11.11.0
+          version: 11.24.0
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: pnpm
       - uses: actions/setup-go@v7
         with:
@@ -81,17 +81,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 11.11.0
+          version: 11.24.0
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
       # Launches the actual Electron main/preload/renderer stack with isolated
-      # user data and an empty kubeconfig. Ozone headless needs no X server.
+      # user data and an empty kubeconfig. Electron 44's Chromium can crash in
+      # native headless mode on hosted runners, so exercise its X11 path.
       - name: Electron end-to-end tests
-        run: pnpm test:electron
+        run: xvfb-run --auto-servernum pnpm test:electron
       # Cluster name kubus-a matches the local dev clusters, so the suite
       # runs unchanged in both places (context kind-kubus-a).
       - name: Create kind cluster

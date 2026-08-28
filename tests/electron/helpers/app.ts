@@ -49,7 +49,12 @@ export async function launchElectron(options: LaunchOptions = {}): Promise<Launc
   );
 
   const platformArgs =
-    process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless', '--disable-gpu'] : [];
+    process.platform === 'linux'
+      ? [
+          '--no-sandbox',
+          ...(process.env.DISPLAY ? ['--ozone-platform=x11'] : ['--headless', '--disable-gpu']),
+        ]
+      : [];
   let app: ElectronApplication | undefined;
   try {
     app = await electron.launch({

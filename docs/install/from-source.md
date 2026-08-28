@@ -10,8 +10,8 @@ Clone the repo and start it with `pnpm`. This is also the path to take if you wa
 
 ## Requirements
 
-- **Node.js ≥ 22**
-- **[pnpm](https://pnpm.io/installation)**
+- **Node.js ≥ 24.20**
+- **[pnpm](https://pnpm.io/installation) 11**
 
 ## Build & start
 
