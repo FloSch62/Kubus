@@ -9,8 +9,8 @@ source, the [install guide](../install/from-source.md) is shorter.
 
 ## Requirements
 
-- **Node.js ≥ 22**
-- **[pnpm](https://pnpm.io/installation)**
+- **Node.js ≥ 24.20**
+- **[pnpm](https://pnpm.io/installation) 11**
 
 ## Project layout
 
@@ -18,7 +18,7 @@ Kubus is a pnpm workspace:
 
 | Package | What it is |
 | --- | --- |
-| `client/` | The React 19 + MUI 7 single-page app (Vite). |
+| `client/` | The React 19 + MUI 9 single-page app (Vite). |
 | `server/` | The Fastify 5 server — Kubernetes client, watches, exec, port-forward, Helm, metrics. |
 | `shared/` | Types and metadata shared between client and server. |
 | `electron/` | The Electron desktop shell. |

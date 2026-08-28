@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // monaco-worker-manager still uses Monaco's pre-0.56 deep import. Monaco
+      // 0.56 exposes the same worker through its new package export path.
+      'monaco-editor/esm/vs/editor/editor.worker.js': 'monaco-editor/editor/editor.worker.js',
+    },
+  },
   server: {
     port: 5173,
     proxy: {

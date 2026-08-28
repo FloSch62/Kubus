@@ -16,7 +16,16 @@
     "react/rules-of-hooks": "error",
     "react/no-unstable-nested-components": "error",
     "react/jsx-no-constructed-context-values": "error",
-    "react/no-object-type-as-default-prop": "error"
+    "react/no-object-type-as-default-prop": "error",
+    // Oxlint 1.80 moved React Compiler diagnostics into the correctness
+    // category. Adopting the compiler requires a dedicated UI refactor; keep
+    // the existing release lint contract until that work is scheduled.
+    "react/immutability": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/purity": "off",
+    "react/refs": "off",
+    "react/set-state-in-effect": "off",
+    "react/use-memo": "off"
   },
   "overrides": [
     {

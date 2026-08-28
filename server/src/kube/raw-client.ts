@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Agent } from 'node:http';
+import type { RequestOptions as HttpsRequestOptions } from 'node:https';
 import fetch, { type RequestInit, type Response } from 'node-fetch';
 import { ApiException, type KubeConfig } from '@kubernetes/client-node';
 import { H2UnavailableError, H2WatchTransport, type H2TlsOptions } from './h2-transport.js';
@@ -65,7 +66,7 @@ function abortReason(signal: AbortSignal): unknown {
  * Authenticated HTTP access to arbitrary API server paths for the things the
  * typed clients can't do generically: discovery, dynamic resource list/get,
  * subresources, and watch streams. Auth (incl. exec-plugin token refresh) is
- * re-applied per request via KubeConfig.applyToFetchOptions.
+ * re-applied per request via KubeConfig.applyToHTTPSOptions.
  */
 export class RawClient {
   /** Keep-alive agent shared across requests while the TLS/proxy identity is stable. */
@@ -113,10 +114,10 @@ export class RawClient {
   }
 
   /**
-   * applyToFetchOptions builds a brand-new Agent per call, so every request
-   * would pay a full TCP+TLS handshake. Swap it for a cached keep-alive agent,
-   * keyed by everything that affects the connection (server, proxy, TLS
-   * material) so exec-plugin cert rotation still gets a fresh pool.
+   * Keep the client-node Agent alive across requests so they do not each pay a
+   * full TCP+TLS handshake. The cache key includes everything that affects the
+   * connection (server, proxy, TLS material), so exec-plugin cert rotation still
+   * gets a fresh pool.
    */
   private pooledAgent(fresh: unknown): unknown {
     const agent = fresh as FetchAgent | undefined;
@@ -135,8 +136,14 @@ export class RawClient {
     return agent;
   }
 
+  private async authenticatedRequestInit(): Promise<RequestInit> {
+    const requestInit: RequestInit = {};
+    await this.kc.applyToHTTPSOptions(requestInit as unknown as HttpsRequestOptions);
+    return requestInit;
+  }
+
   private async requestOnce(path: string, init?: RawRequestInit): Promise<Response> {
-    const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
+    const requestInit = await this.authenticatedRequestInit();
     requestInit.agent = this.pooledAgent(requestInit.agent) as RequestInit['agent'];
     requestInit.method = init?.method ?? 'GET';
     if (init?.body !== undefined) requestInit.body = init.body;
@@ -154,7 +161,7 @@ export class RawClient {
   private async streamOnce(path: string, init?: RawRequestInit): Promise<StreamResponse> {
     const cluster = this.kc.getCurrentCluster();
     if (cluster?.server.startsWith('https')) {
-      const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
+      const requestInit = await this.authenticatedRequestInit();
       const agent = requestInit.agent as FetchAgent | undefined;
       if (agent?.options) {
         const headers = { ...copiedHeaders(requestInit.headers), ...init?.headers };
@@ -187,7 +194,7 @@ export class RawClient {
   async supportsMultiplexedWatch(): Promise<boolean> {
     const cluster = this.kc.getCurrentCluster();
     if (!cluster?.server.startsWith('https')) return false;
-    const requestInit = (await this.kc.applyToFetchOptions({})) as RequestInit;
+    const requestInit = await this.authenticatedRequestInit();
     const agent = requestInit.agent as FetchAgent | undefined;
     if (!agent?.options) return false;
     return this.h2.probe(this.agentIdentityKey(agent), this.h2Target(agent));
@@ -326,7 +333,7 @@ export class RawClient {
 }
 
 /**
- * applyToFetchOptions returns a Headers instance; spreading one yields {}
+ * Authentication may supply a Headers-like object; spreading one yields {}
  * and silently drops Authorization — token/exec clusters then probe as
  * anonymous and fail with 401/403. Copy entries explicitly instead.
  */

@@ -141,7 +141,10 @@ describe('RawClient watch streaming', () => {
     const headers = new Map([['authorization', 'Bearer token-1']]);
     return {
       getCurrentCluster: () => ({ server, proxyUrl }),
-      applyToFetchOptions: async () => ({ agent: { options: { ca: 'CA-PEM', servername: 'api.internal' } }, headers }),
+      applyToHTTPSOptions: async (options: Record<string, unknown>) => {
+        options.agent = { options: { ca: 'CA-PEM', servername: 'api.internal' } };
+        options.headers = headers;
+      },
     } as unknown as KubeConfig;
   }
 

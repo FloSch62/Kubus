@@ -1,6 +1,6 @@
 {
   "name": "@kubus/electron",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Kubus desktop app",
   "license": "MIT",
@@ -23,11 +23,11 @@
     "@kubus/server": "workspace:*",
     "@kubus/shared": "workspace:*",
     "@types/node": "^24.13.3",
-    "electron": "^43.4.0",
+    "electron": "^44.0.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "fix-path": "^5.0.0",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.4",
     "typescript": "^7.0.2"
   }
 }
