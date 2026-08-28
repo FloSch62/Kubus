@@ -194,11 +194,17 @@ export class H2WatchTransport {
   }
 
   async request(key: string, target: H2DialTarget, path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<H2StreamResponse> {
+    if (signal?.aborted) throw abortError(signal);
+    // http2 :path carries only what we send — an API server behind a path
+    // prefix (https://gateway.example/kubernetes) needs it prepended, matching
+    // how the HTTP/1.1 client concatenates serverUrl + path.
+    const basePath = new URL(target.serverUrl).pathname.replace(/\/+$/, '');
+    const fullPath = basePath ? basePath + path : path;
     let lastErr: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       const tracked = await this.getSession(key, target);
       try {
-        return await this.openStream(tracked, path, headers, signal);
+        return await this.openStream(tracked, fullPath, headers, signal);
       } catch (err) {
         if (signal?.aborted || !isSessionLevelError(err)) throw err;
         // The session died between pick and request (GOAWAY, refused stream):
@@ -273,6 +279,10 @@ export class H2WatchTransport {
   }
 
   private openStream(tracked: TrackedSession, path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<H2StreamResponse> {
+    // The signal may have fired while authentication or the session dial was
+    // pending; abort events do not replay to late listeners, so opening the
+    // stream now would leak it until the server-side watch timeout.
+    if (signal?.aborted) throw abortError(signal);
     const stream = tracked.session.request({ ':method': 'GET', ':path': path, ...headers }, { endStream: true });
     tracked.active += 1;
     let released = false;

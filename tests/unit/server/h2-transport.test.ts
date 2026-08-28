@@ -156,6 +156,46 @@ describe('H2WatchTransport', () => {
     expect(dial).toHaveBeenCalledTimes(2);
   });
 
+  it('prepends the API server base path to :path for gateway-prefixed clusters', async () => {
+    const transport = new H2WatchTransport(vi.fn(async () => h2Socket()));
+    const prefixed: H2DialTarget = { serverUrl: 'https://gateway.example/kubernetes', tls: {} };
+
+    const pending = transport.request('key', prefixed, '/api/v1/pods?watch=1', {});
+    await settle();
+    const stream = (connectMock.mock.results[0]!.value as FakeSession).requests[0]!;
+    expect(stream.headers[':path']).toBe('/kubernetes/api/v1/pods?watch=1');
+    stream.respond();
+    await expect(pending).resolves.toMatchObject({ ok: true });
+  });
+
+  it('rejects an already-aborted request without dialing or opening a stream', async () => {
+    const dial = vi.fn(async () => h2Socket());
+    const transport = new H2WatchTransport(dial);
+    const controller = new AbortController();
+    controller.abort(Object.assign(new Error('caller stopped'), { name: 'AbortError' }));
+
+    await expect(transport.request('key', target(), '/watch', {}, controller.signal)).rejects.toThrow('caller stopped');
+    expect(dial).not.toHaveBeenCalled();
+  });
+
+  it('does not open a stream when the signal aborted while the session dial was pending', async () => {
+    let releaseDial!: (socket: TLSSocket) => void;
+    const dial = vi.fn(() => new Promise<TLSSocket>((resolve) => {
+      releaseDial = resolve;
+    }));
+    const transport = new H2WatchTransport(dial);
+    const controller = new AbortController();
+
+    const pending = transport.request('key', target(), '/watch', {}, controller.signal);
+    await settle();
+    controller.abort(Object.assign(new Error('deadline'), { name: 'AbortError' }));
+    releaseDial(h2Socket());
+
+    await expect(pending).rejects.toThrow('deadline');
+    const session = connectMock.mock.results[0]!.value as FakeSession;
+    expect(session.requests).toHaveLength(0);
+  });
+
   it('destroys the stream with the abort reason when the caller signal fires', async () => {
     const transport = new H2WatchTransport(vi.fn(async () => h2Socket()));
     const controller = new AbortController();
