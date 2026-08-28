@@ -89,9 +89,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
       # Launches the actual Electron main/preload/renderer stack with isolated
-      # user data and an empty kubeconfig. Chromium headless needs no X server.
+      # user data and an empty kubeconfig. Electron 44's Chromium can crash in
+      # native headless mode on hosted runners, so exercise its X11 path.
       - name: Electron end-to-end tests
-        run: pnpm test:electron
+        run: xvfb-run --auto-servernum pnpm test:electron
       # Cluster name kubus-a matches the local dev clusters, so the suite
       # runs unchanged in both places (context kind-kubus-a).
       - name: Create kind cluster

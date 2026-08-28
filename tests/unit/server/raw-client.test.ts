@@ -1,8 +1,9 @@
-import type { KubeConfig } from '@kubernetes/client-node';
+import { KubeConfig } from '@kubernetes/client-node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KUBE_REQUEST_DEADLINE_MS, RawClient, isRetryableTransportError, resourcePath } from '../../../server/src/kube/raw-client.js';
 
 interface RawClientInternals {
+  authenticatedRequestInit(): Promise<{ agent?: unknown; headers?: unknown }>;
   withDeadline<T>(
     path: string,
     init: { method?: string; signal?: AbortSignal; deadlineMs?: number | false } | undefined,
@@ -137,6 +138,43 @@ describe('RawClient request deadline', () => {
 });
 
 describe('RawClient watch streaming', () => {
+  it('preserves TLS options through the Kubernetes client HTTPS adapter', async () => {
+    const kc = new KubeConfig();
+    kc.loadFromOptions({
+      clusters: [
+        {
+          name: 'cluster',
+          server: 'https://api.example.com:6443',
+          caData: Buffer.from('CA-PEM').toString('base64'),
+          skipTLSVerify: true,
+          tlsServerName: 'api.internal',
+        },
+      ],
+      contexts: [{ name: 'ctx', cluster: 'cluster', user: 'user' }],
+      users: [
+        {
+          name: 'user',
+          certData: Buffer.from('CERT-PEM').toString('base64'),
+          keyData: Buffer.from('KEY-PEM').toString('base64'),
+          token: 'token-1',
+        },
+      ],
+      currentContext: 'ctx',
+    });
+
+    const raw = new RawClient(kc) as unknown as RawClientInternals;
+    const requestInit = await raw.authenticatedRequestInit();
+    const agentOptions = (requestInit.agent as { options: Record<string, unknown> }).options;
+
+    expect(agentOptions).toMatchObject({
+      rejectUnauthorized: false,
+      servername: 'api.internal',
+    });
+    expect(agentOptions.ca).toEqual(Buffer.from('CA-PEM'));
+    expect(agentOptions.cert).toEqual(Buffer.from('CERT-PEM'));
+    expect(agentOptions.key).toEqual(Buffer.from('KEY-PEM'));
+  });
+
   function makeKc(server = 'https://api.example.com:6443', proxyUrl?: string): KubeConfig {
     const headers = new Map([['authorization', 'Bearer token-1']]);
     return {
