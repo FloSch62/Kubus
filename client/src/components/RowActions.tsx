@@ -80,7 +80,7 @@ import { FileCopyDialog } from './FileCopyDialog.js';
 import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { execTargetContainer, podContainerNames } from '../kube-display.js';
-import { isBuiltInDebugImage, mergeDebugPresets } from '../debug-presets.js';
+import { isBuiltInDebugImage, mergeDebugPresets, normalizeDebugImageName } from '../debug-presets.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
@@ -1155,20 +1155,22 @@ const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }
   { value: 'sysadmin', label: 'System admin', hint: 'Privileged container — full access, rejected in restricted namespaces.' },
 ];
 
-const CUSTOM_DEBUG_IMAGE = '__custom__';
-
 function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
   const debug = useDebugPod();
   const addTab = useDockStore((s) => s.addTab);
   const containers = podContainerNames(target.obj);
-  const presets = mergeDebugPresets(useDebugImages().data);
-  const [selection, setSelection] = useState('busybox');
+  const debugImages = useDebugImages();
+  const presets = mergeDebugPresets(debugImages.data);
+  const [selection, setSelection] = useState<string | null>('busybox');
   const [customImage, setCustomImage] = useState('');
   const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
-  const [profile, setProfile] = useState<DebugProfile>('general');
+  const [profileOverride, setProfileOverride] = useState<DebugProfile>();
   const name = target.obj.metadata.name;
-  const isCustom = selection === CUSTOM_DEBUG_IMAGE;
-  const image = isCustom ? customImage.trim() : (presets.find((p) => p.name === selection)?.image ?? '');
+  const isCustom = selection === null;
+  const normalizedSelection = selection === null ? null : normalizeDebugImageName(selection);
+  const selectedPreset = normalizedSelection === null ? undefined : presets.find((p) => normalizeDebugImageName(p.name) === normalizedSelection);
+  const image = isCustom ? customImage.trim() : (selectedPreset?.image ?? '');
+  const profile = profileOverride ?? selectedPreset?.profile ?? 'general';
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Debug container — {name}</DialogTitle>
@@ -1181,10 +1183,10 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           {presets.map((p) => (
             <ListItemButton
               key={p.name}
-              selected={!isCustom && selection === p.name}
+              selected={!isCustom && normalizedSelection === normalizeDebugImageName(p.name)}
               onClick={() => {
                 setSelection(p.name);
-                if (p.profile) setProfile(p.profile);
+                setProfileOverride(undefined);
               }}
             >
               <ListItemText
@@ -1207,7 +1209,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
               />
             </ListItemButton>
           ))}
-          <ListItemButton selected={isCustom} onClick={() => setSelection(CUSTOM_DEBUG_IMAGE)}>
+          <ListItemButton selected={isCustom} onClick={() => setSelection(null)}>
             <ListItemText
               primary={<Typography variant="body2">Custom image…</Typography>}
               secondary="Any image reference from any registry"
@@ -1239,7 +1241,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         </FormControl>
         <FormControl size="small" fullWidth>
           <InputLabel id="debug-profile">Profile</InputLabel>
-          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfile(e.target.value as DebugProfile)}>
+          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfileOverride(e.target.value as DebugProfile)}>
             {DEBUG_PROFILES.map((p) => (
               <MenuItem key={p.value} value={p.value}>
                 {p.label}
@@ -1257,7 +1259,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         </Button>
         <Button
           variant="contained"
-          disabled={debug.isPending || !image}
+          disabled={debug.isPending || debugImages.data === undefined || !image}
           onClick={() =>
             debug.mutate(
               { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image, target: targetContainer || undefined, profile } },

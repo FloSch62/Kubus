@@ -40,7 +40,7 @@ const queryMocks = vi.hoisted(() => {
     scale: mutation(),
     setImage: mutation(),
     debug: mutation({ containerName: 'debugger-1' }),
-    debugImages: [] as DebugImagePreset[],
+    debugImages: [] as DebugImagePreset[] | undefined,
     drain: mutation({ drainId: 'drain-1' }),
     startPort: mutation({ localPort: 8080, remotePort: 80 }),
     create: mutation({ metadata: { name: 'manual-job' } }),
@@ -335,6 +335,14 @@ describe('pod actions', () => {
     view.unmount();
   });
 
+  it('waits for the configured debug image catalog before enabling Start', () => {
+    queryMocks.debugImages = undefined;
+    const view = clickMenuAction(pod, 'Debug container…');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(queryMocks.debug.mutate).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it('accepts a free-text reference through the custom image entry', () => {
     const view = clickMenuAction(pod, 'Debug container…');
     expect(screen.queryByLabelText('Image')).not.toBeInTheDocument();
@@ -353,15 +361,17 @@ describe('pod actions', () => {
   it('offers user-defined debug images and lets one shadow a built-in preset', () => {
     queryMocks.debugImages = [
       { name: 'company toolbox', image: 'registry.acme.dev/debug:2', profile: 'sysadmin', description: 'Internal tooling.' },
-      { name: 'busybox', image: 'busybox:1.37' },
+      { name: 'Busybox', image: 'busybox:1.37', profile: 'netadmin' },
+      { name: '__custom__', image: 'registry.acme.dev/sentinel-safe:1' },
     ];
-    // The custom busybox replaces the built-in entry instead of duplicating it,
-    // and is preselected as the default — Start sends the pinned tag.
+    // Built-in shadowing follows the API's case-insensitive name rules. The
+    // replacement is selected by default together with its configured profile.
     let view = clickMenuAction(pod, 'Debug container…');
-    expect(screen.getAllByText('busybox')).toHaveLength(1);
+    expect(screen.getAllByText('Busybox')).toHaveLength(1);
+    expect(screen.queryByText('busybox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ body: expect.objectContaining({ image: 'busybox:1.37' }) }),
+      expect.objectContaining({ body: expect.objectContaining({ image: 'busybox:1.37', profile: 'netadmin' }) }),
       expect.anything(),
     );
     view.unmount();
@@ -372,6 +382,18 @@ describe('pod actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(queryMocks.debug.mutate).toHaveBeenLastCalledWith(
       expect.objectContaining({ body: expect.objectContaining({ image: 'registry.acme.dev/debug:2', profile: 'sysadmin' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+
+    // A saved preset can use the old sentinel string without being mistaken
+    // for the free-text custom-image choice.
+    view = clickMenuAction(pod, 'Debug container…');
+    fireEvent.click(screen.getByText('__custom__'));
+    expect(screen.queryByLabelText('Image')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(queryMocks.debug.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'registry.acme.dev/sentinel-safe:1' }) }),
       expect.anything(),
     );
     view.unmount();
