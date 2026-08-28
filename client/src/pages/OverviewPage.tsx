@@ -20,7 +20,6 @@ import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
-import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router';
@@ -202,12 +201,6 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
               warn={!data.counts.crdsUnavailable && data.counts.crdsEstablished < data.counts.crds}
               icon={<ExtensionOutlinedIcon />}
               onClick={() => navigate('/r/apiextensions.k8s.io/v1/customresourcedefinitions')}
-            />
-            <StatCard
-              label="Custom Resources"
-              value={data.counts.customResources}
-              sub={data.counts.customResourcesIndexed ? 'instances' : 'indexing'}
-              icon={<Inventory2OutlinedIcon />}
             />
             <StatCard
               label="TLS certificates"

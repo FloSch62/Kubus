@@ -1033,11 +1033,14 @@ export function useAudit(contexts: string[]) {
 export function useGlobalSearch(contexts: string[], query: string) {
   return useQuery({
     queryKey: ['global-search', contexts, query],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const q = query.trim();
       const batches = await Promise.all(
         contexts.map((ctx) =>
-          apiFetch<SearchResult[]>(`/api/contexts/${encodeURIComponent(ctx)}/search?q=${encodeURIComponent(q)}&limit=30`).catch(() => [] as SearchResult[]),
+          apiFetch<SearchResult[]>(`/api/contexts/${encodeURIComponent(ctx)}/search?q=${encodeURIComponent(q)}&limit=30`, { signal }).catch((err: unknown) => {
+            if (signal.aborted) throw err;
+            return [] as SearchResult[];
+          }),
         ),
       );
       return batches.flat().sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, 80);

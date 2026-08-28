@@ -244,7 +244,7 @@ export class ResourceWatcher {
       allowWatchBookmarks: 'true',
       timeoutSeconds: '300',
     });
-    const res = await this.raw.stream(this.path(query), this.abort.signal);
+    const res = await this.raw.stream(this.path(query), { signal: this.abort.signal });
     const body = res.body;
     if (!body) throw new Error('watch response had no body');
 

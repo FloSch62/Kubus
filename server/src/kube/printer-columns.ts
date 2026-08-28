@@ -1,5 +1,6 @@
 import type { PrinterColumn } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
+import { KUBE_LARGE_RESPONSE_DEADLINE_MS } from './raw-client.js';
 
 interface CrdVersion {
   name: string;
@@ -33,7 +34,9 @@ export async function getPrinterColumns(handle: ClusterHandle, group: string, ve
 
   let columns: PrinterColumn[] = [];
   try {
-    const crd = await handle.raw.json<Crd>(`/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${encodeURIComponent(`${plural}.${group}`)}`);
+    const crd = await handle.raw.json<Crd>(`/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${encodeURIComponent(`${plural}.${group}`)}`, {
+      deadlineMs: KUBE_LARGE_RESPONSE_DEADLINE_MS,
+    });
     const ver = crd.spec?.versions?.find((v) => v.name === version);
     columns = (ver?.additionalPrinterColumns ?? [])
       .filter((c) => c.jsonPath !== '.metadata.creationTimestamp')

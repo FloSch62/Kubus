@@ -194,6 +194,7 @@ describe('ClusterHandle', () => {
     const acquire = vi.spyOn(WatcherRegistry.prototype, 'acquire').mockReturnValue({} as never);
     const stopAll = vi.spyOn(WatcherRegistry.prototype, 'stopAll').mockImplementation(() => {});
     const warm = vi.spyOn(ResourceSearchIndex.prototype, 'warm').mockImplementation(() => {});
+    const invalidateCustomEntries = vi.spyOn(ResourceSearchIndex.prototype, 'invalidateCustomEntries').mockImplementation(() => {});
     const disposeIndex = vi.spyOn(ResourceSearchIndex.prototype, 'dispose').mockImplementation(() => {});
     const rawJson = vi.spyOn(RawClient.prototype, 'json').mockResolvedValue({ gitVersion: 'v1.31.7' });
 
@@ -228,6 +229,7 @@ describe('ClusterHandle', () => {
     handle.onDiscoveryChanged = discoveryChanged;
     (handle.crdTracker as unknown as TrackerInternals).onChange();
     expect(discoveryChanged).toHaveBeenCalled();
+    expect(invalidateCustomEntries).toHaveBeenCalledTimes(1);
 
     handle.activate();
     handle.activate();
@@ -242,7 +244,7 @@ describe('ClusterHandle', () => {
       ['', 'v1', 'namespaces'],
     ]);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(warm).toHaveBeenCalledTimes(1);
+    expect(warm).not.toHaveBeenCalled();
 
     handle.dispose();
     expect(metricsStop).toHaveBeenCalled();

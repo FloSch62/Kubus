@@ -1,4 +1,5 @@
 import type { ClusterHandle } from './cluster-manager.js';
+import { KUBE_LARGE_RESPONSE_DEADLINE_MS } from './raw-client.js';
 import { HttpProblem } from '../util/errors.js';
 
 interface OpenApiV3Discovery {
@@ -26,7 +27,7 @@ function fetchGroupDoc(handle: ClusterHandle, relativeUrl: string): Promise<Open
   const key = `${handle.contextName}|${relativeUrl}`;
   let doc = docCache.get(key);
   if (!doc) {
-    doc = handle.raw.json<OpenApiV3Doc>(relativeUrl);
+    doc = handle.raw.json<OpenApiV3Doc>(relativeUrl, { deadlineMs: KUBE_LARGE_RESPONSE_DEADLINE_MS });
     doc.catch(() => docCache.delete(key));
     if (docCache.size >= DOC_CACHE_MAX) {
       const oldest = docCache.keys().next().value;

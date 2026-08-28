@@ -106,7 +106,14 @@ async function searchContext(handle: ClusterHandle, query: string, limit: number
   const q = prepareQuery(query);
   const out: SearchResult[] = [];
 
-  const [resources, entries] = await Promise.all([handle.discovery.getResources(), handle.searchIndex.entries()]);
+  const resourcesPromise = handle.discovery.getResources();
+  const builtinEntriesPromise = handle.searchIndex.entries();
+  const resources = await resourcesPromise;
+  const [builtinEntries, customEntries] = await Promise.all([
+    builtinEntriesPromise,
+    q.rawQuery.length > 1 ? handle.searchIndex.customEntries(resources) : Promise.resolve([]),
+  ]);
+  const entries = [...builtinEntries, ...customEntries];
 
   for (const page of PAGES) {
     const score = scoreText(q, page.title, page.subtitle);

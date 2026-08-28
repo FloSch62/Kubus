@@ -117,11 +117,17 @@ function createHarness() {
     },
     { kind: kinds[1], name: 'worker-0', namespace: 'jobs', uid: 'worker-uid' },
   ];
+  const customEntries = [
+    { kind: kinds[2], name: 'eda-production', namespace: 'eda-system', uid: 'eda-uid', labelsText: 'app=eda environment=production' },
+  ];
   const handle = {
     contextName: 'kind-a',
     raw: { json: rawJson },
     discovery: { getResources: vi.fn(async () => kinds) },
-    searchIndex: { entries: vi.fn(async () => entries) },
+    searchIndex: {
+      entries: vi.fn(async () => entries),
+      customEntries: vi.fn(async () => customEntries),
+    },
     watchers: { acquire: vi.fn(() => ({ watcher: namespaceWatcher, release: namespaceRelease })) },
   } as unknown as ClusterHandle;
 
@@ -348,6 +354,7 @@ describe('search routes', () => {
     ['web api', 'resource', 'Deployment/web-api'],
     ['webapi', 'resource', 'Deployment/web-api'],
     ['tier backend', 'resource', 'Deployment/web-api'],
+    ['eda production', 'resource', 'Application/eda-production'],
     ['health dash', 'page', 'Overview'],
     ['ploy', 'kind', 'Deployment'],
   ])('scores %s across kinds, resources, pages, compact text, and ordered tokens', async (query, resultKind, title) => {

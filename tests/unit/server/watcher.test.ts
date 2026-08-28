@@ -81,10 +81,10 @@ class FakeRaw {
     return next.error ? Promise.reject(next.error) : Promise.resolve(next.value);
   }
 
-  stream(path: string, signal: AbortSignal): Promise<{ body: PushStream }> {
+  stream(path: string, init: { signal: AbortSignal }): Promise<{ body: PushStream }> {
     this.streamCalls.push(path);
     const stream = new PushStream();
-    signal.addEventListener('abort', () => stream.fail(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    init.signal.addEventListener('abort', () => stream.fail(Object.assign(new Error('aborted'), { name: 'AbortError' })));
     this.streams.push(stream);
     return Promise.resolve({ body: stream });
   }
