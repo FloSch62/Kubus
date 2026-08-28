@@ -50,6 +50,7 @@ import type {
   RolloutRevision,
   DebugPodRequest,
   DebugPodResponse,
+  DebugImagePreset,
   StopDebugRequest,
   HelmRepo,
   HelmChartSummary,
@@ -722,6 +723,34 @@ export function useStopDebug() {
     onSuccess: () => {
       setTimeout(() => void qc.invalidateQueries({ queryKey: ['resource'] }), 1500);
     },
+  });
+}
+
+// ---- Debug image presets (settings-backed, app-global) ----
+
+export function useDebugImages() {
+  return useQuery({
+    queryKey: ['debug-images'],
+    queryFn: () => apiFetch<DebugImagePreset[]>('/api/settings/debug-images'),
+  });
+}
+
+export function useAddDebugImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
+    mutationFn: (preset: DebugImagePreset) =>
+      apiFetch<DebugImagePreset>('/api/settings/debug-images', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(preset) }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['debug-images'] }),
+  });
+}
+
+export function useRemoveDebugImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    meta: LOCAL_ERROR_HANDLING_META,
+    mutationFn: (name: string) => apiFetch(`/api/settings/debug-images/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['debug-images'] }),
   });
 }
 

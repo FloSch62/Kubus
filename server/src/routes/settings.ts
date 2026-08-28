@@ -9,6 +9,7 @@ import type { AppContext } from '../app.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { mergeKubeconfig, writeKubeconfig } from '../kube/kubeconfig-file.js';
 import { authWarningForUser } from '../kube/auth-diagnostics.js';
+import { addDebugImage, listDebugImages, removeDebugImage } from '../debug-images.js';
 
 /** Credential problems (missing exec plugin, legacy auth-provider) in the users an import brings in. */
 function importAuthWarnings(incomingYaml: string, addedUsers: string[]): string[] {
@@ -86,6 +87,36 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: AppContext): v
       // the server was started with --kubeconfig; the flag wins on relaunch.
       if (p === null) ctx.cliKubeconfig = undefined;
       return kubeconfigSettings();
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  // ---- Debug container image presets (app-global, not per cluster) ----
+
+  app.get('/api/settings/debug-images', async () => listDebugImages(ctx.settings));
+
+  app.post<{ Body: { name?: unknown; image?: unknown; description?: unknown; profile?: unknown } }>('/api/settings/debug-images', async (req, reply) => {
+    try {
+      const { name, image, description, profile } = req.body ?? {};
+      if (typeof name !== 'string' || typeof image !== 'string' || !name || !image) throw new HttpProblem(422, 'name and image are required');
+      return addDebugImage(ctx.settings, {
+        name,
+        image,
+        description: typeof description === 'string' ? description : undefined,
+        profile: typeof profile === 'string' ? profile : undefined,
+      });
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.delete<{ Params: { name: string } }>('/api/settings/debug-images/:name', async (req, reply) => {
+    try {
+      removeDebugImage(ctx.settings, req.params.name);
+      return { ok: true };
     } catch (err) {
       sendError(reply, err);
       return reply;

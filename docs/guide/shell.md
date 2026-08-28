@@ -35,14 +35,18 @@ attach an **ephemeral debug container**:
 
 - **Pod** ⋮ menu → **Debug container…**
 
-1. Choose a debug **image** (default `busybox:1.36`). Preset chips offer curated
-   images without having to remember registry paths: busybox, the three
-   [DebugBox](https://github.com/ibtisam-iq/debugbox) tiers (lite ~15 MB for
-   DNS/HTTP checks, balanced ~47 MB with tcpdump and strace, power ~91 MB with
-   tshark and nmap) and [netshoot](https://github.com/nicolaka/netshoot)
-   (~200 MB, everything). Picking **DebugBox power** switches the profile to
-   **Network admin** for you, since its tools need `NET_ADMIN`. The field stays
-   editable — any image reference works.
+1. Pick a debug **image** from the catalog (default `busybox:1.36`). The
+   built-in presets cover the common cases without having to remember registry
+   paths: busybox, the three [DebugBox](https://github.com/ibtisam-iq/debugbox)
+   tiers (lite ~15 MB for DNS/HTTP checks, balanced ~47 MB with tcpdump and
+   strace, power ~91 MB with tshark and nmap) and
+   [netshoot](https://github.com/nicolaka/netshoot) (~200 MB, everything).
+   Picking **DebugBox power** switches the profile to **Network admin** for
+   you, since its tools need `NET_ADMIN`. **Custom image…** takes any image
+   reference, and you can add your own catalog entries (an internal toolbox
+   image, a different busybox tag) in
+   [Settings → Debug containers](settings.md#debug-containers); one named like
+   a built-in preset replaces it.
 2. Optionally pick a **target container** to share a process namespace with, so you can
    see and poke at its processes.
 3. Kubus attaches the ephemeral container and drops you into a shell inside it — the same

@@ -152,10 +152,10 @@ function createHarness() {
     setKubeconfigOverride: vi.fn(),
     reload: vi.fn(),
   };
-  const settingsState: { kubeconfigPath?: string } = {};
+  const settingsState: { kubeconfigPath?: string; debugImages?: unknown } = {};
   const settings = {
     load: vi.fn(() => settingsState),
-    save: vi.fn((next: { kubeconfigPath?: string }) => Object.assign(settingsState, next)),
+    save: vi.fn((next: Record<string, unknown>) => Object.assign(settingsState, next)),
   };
   const portForwards = {
     list: vi.fn(() => [{ id: 'pf-1' }]),
@@ -566,6 +566,55 @@ describe('settings routes', () => {
         })
       ).statusCode,
     ).toBe(400);
+  });
+});
+
+describe('debug image routes', () => {
+  it('lists, adds and removes user debug images', async () => {
+    const harness = createHarness();
+    const app = await buildApp(harness);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/debug-images' })).json()).toEqual([]);
+
+    const added = await app.inject({
+      method: 'POST',
+      url: '/api/settings/debug-images',
+      payload: { name: 'toolbox', image: 'ghcr.io/acme/toolbox:1.0.0', profile: 'netadmin', description: 'Company debug image.' },
+    });
+    expect(added.statusCode).toBe(200);
+    expect(added.json()).toEqual({ name: 'toolbox', image: 'ghcr.io/acme/toolbox:1.0.0', profile: 'netadmin', description: 'Company debug image.' });
+    expect((await app.inject({ method: 'GET', url: '/api/settings/debug-images' })).json()).toHaveLength(1);
+
+    // Name uniqueness is case-insensitive so a chip can't show up twice.
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { name: 'Toolbox', image: 'other:1' } })).statusCode).toBe(409);
+
+    expect((await app.inject({ method: 'DELETE', url: '/api/settings/debug-images/toolbox' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/debug-images' })).json()).toEqual([]);
+    expect((await app.inject({ method: 'DELETE', url: '/api/settings/debug-images/toolbox' })).statusCode).toBe(404);
+  });
+
+  it('validates names, image references and profiles', async () => {
+    const harness = createHarness();
+    const app = await buildApp(harness);
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { name: 'x' } })).statusCode).toBe(422);
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { image: 'busybox:1.37' } })).statusCode).toBe(422);
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { name: 'x', image: 'has space' } })).statusCode).toBe(422);
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { name: 'x', image: 'img:1', profile: 'root' } })).statusCode).toBe(422);
+    expect((await app.inject({ method: 'POST', url: '/api/settings/debug-images', payload: { name: 'y'.repeat(41), image: 'img:1' } })).statusCode).toBe(422);
+  });
+
+  it('filters malformed hand-edited settings entries instead of failing', async () => {
+    const harness = createHarness();
+    harness.settingsState.debugImages = [
+      { name: 'ok', image: 'busybox:1.37' },
+      { name: '', image: 'no-name:1' },
+      'junk',
+      { name: 'bad-profile', image: 'img:1', profile: 'root' },
+    ];
+    const app = await buildApp(harness);
+    expect((await app.inject({ method: 'GET', url: '/api/settings/debug-images' })).json()).toEqual([
+      { name: 'ok', image: 'busybox:1.37' },
+      { name: 'bad-profile', image: 'img:1' },
+    ]);
   });
 });
 

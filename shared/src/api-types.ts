@@ -534,6 +534,16 @@ export interface StopDebugRequest {
   container: string;
 }
 
+/** A debug-container image offered as a preset chip in the debug dialog. */
+export interface DebugImagePreset {
+  name: string;
+  image: string;
+  /** One-line hint shown while the preset is selected. */
+  description?: string;
+  /** Profile auto-selected with the image (e.g. netadmin for capture tools). */
+  profile?: DebugProfile;
+}
+
 export interface HelmRollbackResult {
   newRevision: number;
   applied: string[];

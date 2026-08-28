@@ -70,6 +70,18 @@ Defaults for the [log viewer](logs.md) and [terminals](shell.md):
 | --- | --- | --- |
 | Default shell | Auto (`bash`→`sh`) / `sh` / `bash` / custom path | Auto |
 
+## Debug containers { #debug-containers }
+
+The image catalog offered by the [debug container](shell.md#debug-containers)
+dialog. The built-in presets (busybox, the DebugBox tiers, netshoot) are listed
+alongside your own entries — add an internal toolbox image, a different busybox
+tag, anything your registry serves. Each entry has a name, an image reference,
+an optional description and an optional security profile that is pre-selected
+with it. An entry named like a built-in preset replaces it.
+
+Your entries are stored server-side in `settings.json` (key `debugImages`),
+next to your Helm repositories.
+
 ## See also
 
 <div class="grid cards" markdown>

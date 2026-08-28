@@ -10,6 +10,8 @@ export interface PersistedSettings {
   sshTunnels?: Record<string, string>;
   /** Configured Helm chart repositories (classic http(s) index.yaml repos). */
   helmRepos?: Array<{ name: string; url: string }>;
+  /** User-defined debug container images, offered alongside the built-in presets. */
+  debugImages?: Array<{ name: string; image: string; description?: string; profile?: string }>;
 }
 
 /**
