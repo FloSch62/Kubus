@@ -1,21 +1,28 @@
-import { Suspense, lazy, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import { useNavigate } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { HelmReleaseSummary } from '@kubus/shared';
-import { useAppInfo, useHelmOperations, useHelmReleases, useHelmUpdates } from '../api/queries.js';
-import { namespaceVisible, useClustersStore } from '../state/clusters.js';
+import { useAppInfo, useHelmOperations, useHelmReleases, useHelmUninstall, useHelmUpdates } from '../api/queries.js';
+import { namespaceVisible, useClustersStore, useIsProtected } from '../state/clusters.js';
 import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from '../components/CellCopy.js';
 import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -25,12 +32,20 @@ import { PageHeader } from '../components/PageHeader.js';
 import { helmOperationPhaseLabel, helmOperationReleaseKey } from '../components/HelmOperationStatus.js';
 import { HelmOperationsOverview } from '../components/HelmOperationsOverview.js';
 import { countLabel } from '../components/format.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { showToast } from '../state/toast.js';
 
 const HelmInstallDialog = lazy(() => import('../components/HelmInstallDialog.js'));
 
 interface Row {
   ctx: string;
   release: HelmReleaseSummary;
+}
+
+interface ReleaseContextMenu {
+  row: Row;
+  mouseX: number;
+  mouseY: number;
 }
 
 const releasesGridSx = { flex: 1, minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx };
@@ -41,9 +56,13 @@ export function HelmPage() {
   const { data, isLoading } = useHelmReleases(selected);
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ReleaseContextMenu | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<Row | null>(null);
   const gridRootRef = useRef<HTMLDivElement>(null);
   const helmEngine = useAppInfo().data?.helmEngine ?? false;
   const operations = useHelmOperations();
+  const uninstall = useHelmUninstall();
+  const uninstallTargetProtected = useIsProtected(uninstallTarget?.ctx ?? '');
 
   const rows = useMemo(() => {
     const all = data ?? [];
@@ -74,6 +93,29 @@ export function HelmPage() {
     }
     return byRelease;
   }, [visibleOperations]);
+  const rowsById = useMemo(() => new Map(rows.map((row) => [`${row.ctx}/${row.release.namespace}/${row.release.name}`, row])), [rows]);
+  const releasePath = useCallback(
+    (row: Row) => `/helm/${encodeURIComponent(row.ctx)}/${encodeURIComponent(row.release.namespace)}/${encodeURIComponent(row.release.name)}`,
+    [],
+  );
+  const openRelease = useCallback((row: Row) => void navigate(releasePath(row)), [navigate, releasePath]);
+  const openContextMenu = useCallback((row: Row, clientX: number, clientY: number) => {
+    setContextMenu({ row, mouseX: clientX + 2, mouseY: clientY - 6 });
+  }, []);
+  const rowSlotProps = useMemo(
+    () => ({
+      row: {
+        onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = event.currentTarget.getAttribute('data-id');
+          const row = id ? rowsById.get(id) : undefined;
+          if (row) openContextMenu(row, event.clientX, event.clientY);
+        },
+      },
+    }),
+    [openContextMenu, rowsById],
+  );
 
   const columns: GridColDef<Row>[] = useMemo(() => {
     const defs: GridColDef<Row>[] = [
@@ -196,21 +238,111 @@ export function HelmPage() {
         getRowId={(r) => `${r.ctx}/${r.release.namespace}/${r.release.name}`}
         density={grid.density}
         onColumnWidthChange={grid.onColumnWidthChange}
-        onRowClick={(p) => navigate(`/helm/${encodeURIComponent(p.row.ctx)}/${encodeURIComponent(p.row.release.namespace)}/${encodeURIComponent(p.row.release.name)}`)}
+        onRowClick={(p) => openRelease(p.row)}
+        slotProps={rowSlotProps}
         onCellKeyDown={(params, event, details) => {
           handleCopyCellKeyDown(params, event, details);
           // Keyboard equivalent of clicking the row.
           if (event.key === 'Enter') {
             event.preventDefault();
-            void navigate(
-              `/helm/${encodeURIComponent(params.row.ctx)}/${encodeURIComponent(params.row.release.namespace)}/${encodeURIComponent(params.row.release.name)}`,
-            );
+            openRelease(params.row);
+          } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+            event.preventDefault();
+            const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
+            const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
+            openContextMenu(params.row, rect.left + 8, rect.bottom - 4);
           }
         }}
         sx={releasesGridSx}
         initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
       />
       <CellCopyOverlay rootRef={gridRootRef} />
+      <Menu
+        open={contextMenu !== null}
+        onClose={() => setContextMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={contextMenu ? { top: contextMenu.mouseY, left: contextMenu.mouseX } : undefined}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <MenuItem
+          onClick={() => {
+            if (!contextMenu) return;
+            openRelease(contextMenu.row);
+            setContextMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <OpenInNewIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Open release</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          disabled={
+            !!contextMenu &&
+            latestOperationByRelease.get(`${contextMenu.row.ctx}/${contextMenu.row.release.namespace}/${contextMenu.row.release.name}`)?.status === 'running'
+          }
+          onClick={() => {
+            if (!contextMenu) return;
+            setUninstallTarget(contextMenu.row);
+            setContextMenu(null);
+          }}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText>Uninstall…</ListItemText>
+        </MenuItem>
+      </Menu>
+      <ConfirmDialog
+        open={uninstallTarget !== null}
+        title={`Uninstall ${uninstallTarget?.release.name ?? ''}`}
+        danger
+        confirmLabel="Uninstall"
+        busy={uninstall.isPending}
+        confirmText={uninstallTargetProtected ? uninstallTarget?.release.name : undefined}
+        message={
+          uninstallTarget ? (
+            <>
+              Uninstall <b>{uninstallTarget.release.namespace}/{uninstallTarget.release.name}</b> from cluster <b>{uninstallTarget.ctx}</b>? This deletes every
+              resource in the release manifest, then removes the release records only after cleanup succeeds. Stored pre-delete and post-delete hooks are executed.
+            </>
+          ) : null
+        }
+        onClose={() => setUninstallTarget(null)}
+        onConfirm={() => {
+          if (!uninstallTarget) return;
+          const target = uninstallTarget;
+          uninstall.mutate(
+            { ctx: target.ctx, ns: target.release.namespace, name: target.release.name },
+            {
+              onSuccess: (result) => {
+                setUninstallTarget(null);
+                if (result.failed.length) {
+                  showToast(
+                    'error',
+                    `Uninstall incomplete: ${result.failed.length} item${result.failed.length === 1 ? '' : 's'} failed${
+                      result.recordsRetained ? '; release history was retained for inspection and retry' : ''
+                    }`,
+                  );
+                  return;
+                }
+                showToast(
+                  'success',
+                  `Uninstalled ${target.release.name}: ${result.deleted.length} resources deleted${
+                    result.crdsDeleted.length ? `, ${result.crdsDeleted.length} CRDs` : ''
+                  }`,
+                );
+              },
+              onError: (error) => {
+                setUninstallTarget(null);
+                showToast('error', `Uninstall failed: ${error.message}`);
+              },
+            },
+          );
+        }}
+      />
       {installOpen && (
         <Suspense fallback={null}>
           <HelmInstallDialog contexts={selected} onClose={() => setInstallOpen(false)} />
