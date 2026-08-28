@@ -17,6 +17,8 @@ import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
 import LinearProgress from '@mui/material/LinearProgress';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Menu from '@mui/material/Menu';
@@ -55,6 +57,7 @@ import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind 
 import {
   resolveLogTargetPods,
   useCordon,
+  useDebugImages,
   useDebugPod,
   useDeleteResource,
   useDrain,
@@ -77,6 +80,7 @@ import { FileCopyDialog } from './FileCopyDialog.js';
 import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
 import { execTargetContainer, podContainerNames } from '../kube-display.js';
+import { isBuiltInDebugImage, mergeDebugPresets, normalizeDebugImageName } from '../debug-presets.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
@@ -1144,20 +1148,6 @@ export function SetImageDialog({
   );
 }
 
-/**
- * Version-pinned so a preset never silently changes underneath a user; the
- * field stays free-text for anything else. `profile` marks presets whose
- * tooling is useless without extra capabilities — selecting one adjusts the
- * profile dropdown.
- */
-const DEBUG_IMAGE_PRESETS: Array<{ label: string; image: string; hint: string; profile?: DebugProfile }> = [
-  { label: 'busybox', image: 'busybox:1.36', hint: 'Minimal shell and coreutils (~2 MB).' },
-  { label: 'DebugBox lite', image: 'ghcr.io/ibtisam-iq/debugbox:lite-1.2.0', hint: 'curl, dig, jq, yq (~15 MB) — DNS and HTTP checks.' },
-  { label: 'DebugBox balanced', image: 'ghcr.io/ibtisam-iq/debugbox:1.2.0', hint: 'Adds bash, vim, tcpdump, strace, openssl (~47 MB).' },
-  { label: 'DebugBox power', image: 'ghcr.io/ibtisam-iq/debugbox:power-1.2.0', hint: 'tshark, nmap, iptables, nftables (~91 MB) — needs the network admin profile.', profile: 'netadmin' },
-  { label: 'netshoot', image: 'nicolaka/netshoot:v0.16', hint: 'The kitchen-sink network toolbox (~200 MB).' },
-];
-
 const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }> = [
   { value: 'general', label: 'General', hint: 'No extra privileges — inherits the namespace defaults.' },
   { value: 'restricted', label: 'Restricted', hint: 'Non-root, all capabilities dropped — for PodSecurity-restricted namespaces (needs a non-root image).' },
@@ -1169,11 +1159,18 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
   const debug = useDebugPod();
   const addTab = useDockStore((s) => s.addTab);
   const containers = podContainerNames(target.obj);
-  const [image, setImage] = useState('busybox:1.36');
+  const debugImages = useDebugImages();
+  const presets = mergeDebugPresets(debugImages.data);
+  const [selection, setSelection] = useState<string | null>('busybox');
+  const [customImage, setCustomImage] = useState('');
   const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
-  const [profile, setProfile] = useState<DebugProfile>('general');
+  const [profileOverride, setProfileOverride] = useState<DebugProfile>();
   const name = target.obj.metadata.name;
-  const imagePreset = DEBUG_IMAGE_PRESETS.find((p) => p.image === image);
+  const isCustom = selection === null;
+  const normalizedSelection = selection === null ? null : normalizeDebugImageName(selection);
+  const selectedPreset = normalizedSelection === null ? undefined : presets.find((p) => normalizeDebugImageName(p.name) === normalizedSelection);
+  const image = isCustom ? customImage.trim() : (selectedPreset?.image ?? '');
+  const profile = profileOverride ?? selectedPreset?.profile ?? 'general';
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Debug container — {name}</DialogTitle>
@@ -1182,25 +1179,54 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           Attaches an ephemeral debug container to the running pod (like <code>kubectl debug</code>) and opens a shell into it. The
           container stays in the pod spec until the pod is recreated.
         </Typography>
-        <TextField autoFocus fullWidth label="Image" value={image} onChange={(e) => setImage(e.target.value)} />
-        <Stack direction="row" spacing={1} sx={{ mt: -1, flexWrap: 'wrap' }}>
-          {DEBUG_IMAGE_PRESETS.map((p) => (
-            <Chip
-              key={p.image}
-              label={p.label}
-              size="small"
-              variant={image === p.image ? 'filled' : 'outlined'}
+        <List dense sx={{ py: 0, maxHeight: 280, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}>
+          {presets.map((p) => (
+            <ListItemButton
+              key={p.name}
+              selected={!isCustom && normalizedSelection === normalizeDebugImageName(p.name)}
               onClick={() => {
-                setImage(p.image);
-                if (p.profile) setProfile(p.profile);
+                setSelection(p.name);
+                setProfileOverride(undefined);
               }}
-            />
+            >
+              <ListItemText
+                primary={
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Typography variant="body2">{p.name}</Typography>
+                    {!isBuiltInDebugImage(p.name) && <Chip size="small" variant="outlined" label="custom" sx={{ height: 18, fontSize: 10 }} />}
+                    {p.profile && p.profile !== 'general' && (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={DEBUG_PROFILES.find((d) => d.value === p.profile)?.label ?? p.profile}
+                        sx={{ height: 18, fontSize: 10 }}
+                      />
+                    )}
+                  </Stack>
+                }
+                secondary={p.description ? `${p.image} — ${p.description}` : p.image}
+                slotProps={{ secondary: { sx: { fontSize: 11 } } }}
+              />
+            </ListItemButton>
           ))}
-        </Stack>
-        {imagePreset && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-            {imagePreset.hint}
-          </Typography>
+          <ListItemButton selected={isCustom} onClick={() => setSelection(null)}>
+            <ListItemText
+              primary={<Typography variant="body2">Custom image…</Typography>}
+              secondary="Any image reference from any registry"
+              slotProps={{ secondary: { sx: { fontSize: 11 } } }}
+            />
+          </ListItemButton>
+        </List>
+        {isCustom && (
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            label="Image"
+            placeholder="registry.example.com/debug:tag"
+            value={customImage}
+            onChange={(e) => setCustomImage(e.target.value)}
+          />
         )}
         <FormControl size="small" fullWidth>
           <InputLabel id="debug-target">Target container (shared process namespace)</InputLabel>
@@ -1215,7 +1241,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         </FormControl>
         <FormControl size="small" fullWidth>
           <InputLabel id="debug-profile">Profile</InputLabel>
-          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfile(e.target.value as DebugProfile)}>
+          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfileOverride(e.target.value as DebugProfile)}>
             {DEBUG_PROFILES.map((p) => (
               <MenuItem key={p.value} value={p.value}>
                 {p.label}
@@ -1233,10 +1259,10 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         </Button>
         <Button
           variant="contained"
-          disabled={debug.isPending || !image.trim()}
+          disabled={debug.isPending || debugImages.data === undefined || !image}
           onClick={() =>
             debug.mutate(
-              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image: image.trim(), target: targetContainer || undefined, profile } },
+              { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image, target: targetContainer || undefined, profile } },
               {
                 onSuccess: ({ containerName }) => {
                   onClose();

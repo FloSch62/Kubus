@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KubeconfigSettings, KubeObject } from '@kubus/shared';
+import type { DebugImagePreset, KubeconfigSettings, KubeObject } from '@kubus/shared';
 import {
   DetailQuickActions,
   isLogTargetKind,
@@ -40,6 +40,7 @@ const queryMocks = vi.hoisted(() => {
     scale: mutation(),
     setImage: mutation(),
     debug: mutation({ containerName: 'debugger-1' }),
+    debugImages: [] as DebugImagePreset[] | undefined,
     drain: mutation({ drainId: 'drain-1' }),
     startPort: mutation({ localPort: 8080, remotePort: 80 }),
     create: mutation({ metadata: { name: 'manual-job' } }),
@@ -76,6 +77,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
   useScale: () => queryMocks.scale,
   useSetImage: () => queryMocks.setImage,
   useDebugPod: () => queryMocks.debug,
+  useDebugImages: () => ({ data: queryMocks.debugImages }),
   useDrain: () => queryMocks.drain,
   useStartPortForward: () => queryMocks.startPort,
   usePortForwardPreflight: () => ({ data: queryMocks.preflight }),
@@ -168,6 +170,7 @@ beforeEach(() => {
   queryMocks.resolveLogTargetPods.mockClear();
   queryMocks.hpas = [];
   queryMocks.services = [];
+  queryMocks.debugImages = [];
   queryMocks.preflight = { allowed: true };
   queryMocks.kubeconfig = {
     paths: ['/home/test/.kube/config'],
@@ -247,9 +250,11 @@ describe('pod actions', () => {
 
     view = clickMenuAction(pod, 'Debug container…');
     expect(screen.getByText('Debug container — pod-a')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Image'), { target: { value: 'alpine:3.21' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(queryMocks.debug.mutate).toHaveBeenCalled();
+    expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'busybox:1.36' }) }),
+      expect.anything(),
+    );
     expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'terminal', container: 'debugger-1' });
     view.unmount();
 
@@ -319,13 +324,76 @@ describe('pod actions', () => {
     view.unmount();
   });
 
-  it('debug image presets fill the field and pair the power tier with netadmin', () => {
+  it('debug image presets send the preset image and pair the power tier with netadmin', () => {
     const view = clickMenuAction(pod, 'Debug container…');
     fireEvent.click(screen.getByText('DebugBox power'));
-    expect(screen.getByLabelText('Image')).toHaveValue('ghcr.io/ibtisam-iq/debugbox:power-1.2.0');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
       expect.objectContaining({ body: expect.objectContaining({ image: 'ghcr.io/ibtisam-iq/debugbox:power-1.2.0', profile: 'netadmin' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+  });
+
+  it('waits for the configured debug image catalog before enabling Start', () => {
+    queryMocks.debugImages = undefined;
+    const view = clickMenuAction(pod, 'Debug container…');
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(queryMocks.debug.mutate).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('accepts a free-text reference through the custom image entry', () => {
+    const view = clickMenuAction(pod, 'Debug container…');
+    expect(screen.queryByLabelText('Image')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Custom image…'));
+    const startButton = screen.getByRole('button', { name: 'Start' });
+    expect(startButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Image'), { target: { value: ' my.registry/tools:3 ' } });
+    fireEvent.click(startButton);
+    expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'my.registry/tools:3' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+  });
+
+  it('offers user-defined debug images and lets one shadow a built-in preset', () => {
+    queryMocks.debugImages = [
+      { name: 'company toolbox', image: 'registry.acme.dev/debug:2', profile: 'sysadmin', description: 'Internal tooling.' },
+      { name: 'Busybox', image: 'busybox:1.37', profile: 'netadmin' },
+      { name: '__custom__', image: 'registry.acme.dev/sentinel-safe:1' },
+    ];
+    // Built-in shadowing follows the API's case-insensitive name rules. The
+    // replacement is selected by default together with its configured profile.
+    let view = clickMenuAction(pod, 'Debug container…');
+    expect(screen.getAllByText('Busybox')).toHaveLength(1);
+    expect(screen.queryByText('busybox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(queryMocks.debug.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'busybox:1.37', profile: 'netadmin' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+
+    view = clickMenuAction(pod, 'Debug container…');
+    fireEvent.click(screen.getByText('company toolbox'));
+    expect(screen.getByText('registry.acme.dev/debug:2 — Internal tooling.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(queryMocks.debug.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'registry.acme.dev/debug:2', profile: 'sysadmin' }) }),
+      expect.anything(),
+    );
+    view.unmount();
+
+    // A saved preset can use the old sentinel string without being mistaken
+    // for the free-text custom-image choice.
+    view = clickMenuAction(pod, 'Debug container…');
+    fireEvent.click(screen.getByText('__custom__'));
+    expect(screen.queryByLabelText('Image')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(queryMocks.debug.mutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ image: 'registry.acme.dev/sentinel-safe:1' }) }),
       expect.anything(),
     );
     view.unmount();

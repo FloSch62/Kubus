@@ -36,8 +36,8 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
-import type { AppInfo, ContextInfo, UpdateCheckResult } from '@kubus/shared';
-import { useContexts, useDeleteCluster, useKubeconfigSettings } from '../../api/queries.js';
+import type { AppInfo, ContextInfo, DebugProfile, UpdateCheckResult } from '@kubus/shared';
+import { useAddDebugImage, useContexts, useDebugImages, useDeleteCluster, useKubeconfigSettings, useRemoveDebugImage } from '../../api/queries.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { checkForUpdate, getAppInfo } from '../../api/app.js';
 import { AddClusterDialog } from './AddClusterDialog.js';
@@ -46,6 +46,7 @@ import { useClustersStore } from '../../state/clusters.js';
 import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
 import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type RightClickAction, type TableDensity } from '../../state/prefs.js';
 import { KubeconfigSection } from './KubeconfigSection.js';
+import { isBuiltInDebugImage, mergeDebugPresets } from '../../debug-presets.js';
 import { fetchAppLogs, formatLogEntry } from '../../api/logs.js';
 import { exportFilename, saveTextFile } from '../../save-file.js';
 import { showErrorToast } from '../../state/toast.js';
@@ -425,6 +426,136 @@ function LogsTerminalSection() {
   );
 }
 
+const DEBUG_PROFILE_LABELS: Record<string, string> = { general: 'General', restricted: 'Restricted', netadmin: 'Network admin', sysadmin: 'System admin' };
+
+/** The debug-container image catalog: built-in presets plus user-defined images. */
+function DebugContainersSection() {
+  const { data: images } = useDebugImages();
+  const add = useAddDebugImage();
+  const remove = useRemoveDebugImage();
+  const [name, setName] = useState('');
+  const [image, setImage] = useState('');
+  const [profile, setProfile] = useState('');
+  const [description, setDescription] = useState('');
+  const error = add.error ?? remove.error;
+  const catalog = mergeDebugPresets(images);
+  const customNames = new Set((images ?? []).map((p) => p.name));
+
+  return (
+    <Stack spacing={3}>
+      <Section title="Image catalog">
+        <Stack spacing={1.5}>
+          <Typography variant="caption" color="text.secondary">
+            The images offered when attaching a debug container to a pod (<b>Debug container…</b> in the pod menu). A profile on an entry is
+            pre-selected with it.
+          </Typography>
+          <List dense sx={{ border: 1, borderColor: 'divider', borderRadius: 1, py: 0 }}>
+            {catalog.map((p, i) => {
+              const custom = customNames.has(p.name);
+              return (
+                <ListItem
+                  key={p.name}
+                  divider={i < catalog.length - 1}
+                  secondaryAction={
+                    custom ? (
+                      <Tooltip title={isBuiltInDebugImage(p.name) ? 'Remove and restore the built-in entry' : 'Remove'}>
+                        <IconButton size="small" disabled={remove.isPending} onClick={() => remove.mutate(p.name)}>
+                          <DeleteOutlinedIcon sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>
+                    ) : undefined
+                  }
+                >
+                  <ListItemText
+                    primary={
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <Typography variant="body2">{p.name}</Typography>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={custom ? (isBuiltInDebugImage(p.name) ? 'replaces built-in' : 'custom') : 'built-in'}
+                          color={custom ? 'info' : 'default'}
+                          sx={{ height: 18, fontSize: 10 }}
+                        />
+                        {p.profile && p.profile !== 'general' && (
+                          <Chip size="small" variant="outlined" label={DEBUG_PROFILE_LABELS[p.profile]} sx={{ height: 18, fontSize: 10 }} />
+                        )}
+                      </Stack>
+                    }
+                    secondary={p.description ? `${p.image} — ${p.description}` : p.image}
+                    slotProps={{ secondary: { sx: { fontSize: 11 } } }}
+                  />
+                </ListItem>
+              );
+            })}
+          </List>
+        </Stack>
+      </Section>
+      <Section title="Add image">
+        <Stack spacing={1.5}>
+          <Typography variant="caption" color="text.secondary">
+            Add your own image — an internal toolbox, a different busybox tag, anything your registry serves. An entry named like a built-in
+            replaces it. Stored in the server-side <code>settings.json</code>, next to your Helm repositories.
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <TextField size="small" label="Name" value={name} onChange={(e) => setName(e.target.value)} sx={{ width: 170 }} />
+            <TextField
+              size="small"
+              label="Image"
+              placeholder="registry.example.com/debug:tag"
+              value={image}
+              onChange={(e) => setImage(e.target.value)}
+              sx={{ flex: 1 }}
+            />
+            <FormControl size="small" sx={{ width: 170, flexShrink: 0 }}>
+              <InputLabel id="settings-debug-image-profile">Profile</InputLabel>
+              <Select labelId="settings-debug-image-profile" label="Profile" value={profile} onChange={(e) => setProfile(e.target.value)}>
+                <MenuItem value="">General (default)</MenuItem>
+                <MenuItem value="restricted">Restricted</MenuItem>
+                <MenuItem value="netadmin">Network admin</MenuItem>
+                <MenuItem value="sysadmin">System admin</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <TextField size="small" label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} sx={{ flex: 1 }} />
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              disabled={add.isPending || !name.trim() || !image.trim()}
+              onClick={() =>
+                add.mutate(
+                  {
+                    name: name.trim(),
+                    image: image.trim(),
+                    profile: (profile || undefined) as DebugProfile | undefined,
+                    description: description.trim() || undefined,
+                  },
+                  {
+                    onSuccess: () => {
+                      setName('');
+                      setImage('');
+                      setProfile('');
+                      setDescription('');
+                    },
+                  },
+                )
+              }
+            >
+              Add
+            </Button>
+          </Stack>
+          {error && (
+            <Alert severity="error" variant="outlined">
+              {error.message}
+            </Alert>
+          )}
+        </Stack>
+      </Section>
+    </Stack>
+  );
+}
+
 /** Diagnostic logging: verbose capture plus viewer and export controls. */
 function DebugSection() {
   const debugMode = useUiPrefsStore((state) => state.debugMode);
@@ -587,7 +718,7 @@ function AboutSection() {
   );
 }
 
-const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug', 'About'];
+const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug containers', 'Diagnostics', 'About'];
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState(0);
@@ -611,8 +742,9 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           {tab === 2 && <AppearanceSection />}
           {tab === 3 && <RefreshSection />}
           {tab === 4 && <LogsTerminalSection />}
-          {tab === 5 && <DebugSection />}
-          {tab === 6 && <AboutSection />}
+          {tab === 5 && <DebugContainersSection />}
+          {tab === 6 && <DebugSection />}
+          {tab === 7 && <AboutSection />}
         </Box>
       </DialogContent>
       <DialogActions>
