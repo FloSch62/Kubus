@@ -288,7 +288,7 @@ interface FlowState {
 
 const emptyFlow: FlowState = { nodes: [], edges: [], warnings: [], problemNodes: [] };
 
-function toFlowState(layout: TopologyLayout): FlowState {
+export function toFlowState(layout: TopologyLayout): FlowState {
   // Fan-in/fan-out groups (a Service selecting 3 pods, 5 pods scheduled onto
   // one node) would repeat the same label on every edge — label each identical
   // text once per shared endpoint and let the rest stay bare lines.
@@ -299,7 +299,6 @@ function toFlowState(layout: TopologyLayout): FlowState {
       type: 'topology',
       position,
       data: { graphNode: node },
-      draggable: true,
     })),
     edges: placeEdgeLabels(layout.edges.map(({ edge, routePoints }) => {
       const text = edge.kind === 'owns' ? undefined : (edge.label ?? edge.kind);
@@ -353,6 +352,7 @@ export default function TopologyGraphImpl({
   const openDetail = useDetailStore((s) => s.open);
   const pushDetail = useDetailStore((s) => s.push);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [interactive, setInteractive] = useState(false);
   // Remounts (tab switches, drawer reopens) reuse the cached layout for the
   // current data synchronously, so the finished graph is on screen from the
   // very first frame instead of after an async layout pass.
@@ -542,9 +542,9 @@ export default function TopologyGraphImpl({
         fitView
         minZoom={0.12}
         maxZoom={2}
-        nodesDraggable
+        nodesDraggable={interactive}
         nodesConnectable={false}
-        elementsSelectable
+        elementsSelectable={interactive}
         onInit={(instance) => {
           instanceRef.current = instance;
         }}
@@ -555,7 +555,7 @@ export default function TopologyGraphImpl({
         onPaneClick={() => setSelectedNodeId(undefined)}
       >
         <Background color={theme.palette.divider} />
-        <Controls />
+        <Controls onInteractiveChange={setInteractive} />
       </ReactFlow>
 
       {!loading && !updating && (
