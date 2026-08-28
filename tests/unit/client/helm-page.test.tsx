@@ -140,7 +140,7 @@ describe('HelmPage release context menu', () => {
     expect(effects.toast).toHaveBeenCalledWith('success', 'Uninstalled web: 1 resources deleted');
   });
 
-  it('keeps protected-cluster confirmation and blocks uninstall during an active operation', () => {
+  it('disables an open confirmation when an operation starts in another window', () => {
     useClustersStore.setState({ contextSettings: { dev: { protected: true } } });
     const view = renderPage();
 
@@ -151,17 +151,27 @@ describe('HelmPage release context menu', () => {
     fireEvent.change(screen.getByPlaceholderText('web'), { target: { value: 'web' } });
     expect(confirm).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fixtures.operations = [operation('running')];
     view.rerender(
       <MemoryRouter initialEntries={['/helm']}>
         <Routes>
-          <Route path="*" element={<HelmPage />} />
+          <Route
+            path="*"
+            element={
+              <>
+                <HelmPage />
+                <LocationProbe />
+              </>
+            }
+          />
         </Routes>
       </MemoryRouter>,
     );
-    fireEvent.contextMenu(releaseRow(), { clientX: 24, clientY: 36 });
-    expect(screen.getByRole('menuitem', { name: 'Uninstall…' })).toHaveAttribute('aria-disabled', 'true');
+
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot uninstall while the upgrade operation is running.');
+    fireEvent.click(confirm);
+    expect(fixtures.uninstall.mutate).not.toHaveBeenCalled();
   });
 
   it('opens the context menu from Shift+F10', () => {

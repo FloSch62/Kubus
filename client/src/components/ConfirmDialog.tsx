@@ -15,13 +15,15 @@ interface Props {
   confirmLabel?: string;
   danger?: boolean;
   busy?: boolean;
+  /** Disable confirmation for a live precondition without presenting it as in-progress work. */
+  disabled?: boolean;
   /** When set, the user must type this exact text before the confirm button enables (protected clusters). */
   confirmText?: string;
   onConfirm: () => void;
   onClose: () => void;
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger, busy, confirmText, onConfirm, onClose }: Props) {
+export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger, busy, disabled, confirmText, onConfirm, onClose }: Props) {
   const [typed, setTyped] = useState('');
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
@@ -47,7 +49,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', 
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !blocked && !busy) onConfirm();
+                if (e.key === 'Enter' && !blocked && !busy && !disabled) onConfirm();
               }}
             />
           </>
@@ -55,7 +57,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', 
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" color={danger ? 'error' : 'primary'} onClick={onConfirm} disabled={busy || blocked}>
+        <Button variant="contained" color={danger ? 'error' : 'primary'} onClick={onConfirm} disabled={busy || blocked || disabled}>
           {busy ? 'Working…' : confirmLabel}
         </Button>
       </DialogActions>

@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -116,6 +117,10 @@ export function HelmPage() {
     }),
     [openContextMenu, rowsById],
   );
+  const uninstallTargetOperation = uninstallTarget
+    ? latestOperationByRelease.get(`${uninstallTarget.ctx}/${uninstallTarget.release.namespace}/${uninstallTarget.release.name}`)
+    : undefined;
+  const uninstallBlockedByOperation = uninstallTargetOperation?.status === 'running';
 
   const columns: GridColDef<Row>[] = useMemo(() => {
     const defs: GridColDef<Row>[] = [
@@ -301,18 +306,24 @@ export function HelmPage() {
         danger
         confirmLabel="Uninstall"
         busy={uninstall.isPending}
+        disabled={uninstallBlockedByOperation}
         confirmText={uninstallTargetProtected ? uninstallTarget?.release.name : undefined}
         message={
           uninstallTarget ? (
             <>
               Uninstall <b>{uninstallTarget.release.namespace}/{uninstallTarget.release.name}</b> from cluster <b>{uninstallTarget.ctx}</b>? This deletes every
               resource in the release manifest, then removes the release records only after cleanup succeeds. Stored pre-delete and post-delete hooks are executed.
+              {uninstallBlockedByOperation ? (
+                <Alert severity="warning" sx={{ mt: 1.5 }}>
+                  Cannot uninstall while the {uninstallTargetOperation.kind} operation is running.
+                </Alert>
+              ) : null}
             </>
           ) : null
         }
         onClose={() => setUninstallTarget(null)}
         onConfirm={() => {
-          if (!uninstallTarget) return;
+          if (!uninstallTarget || uninstallBlockedByOperation) return;
           const target = uninstallTarget;
           uninstall.mutate(
             { ctx: target.ctx, ns: target.release.namespace, name: target.release.name },
