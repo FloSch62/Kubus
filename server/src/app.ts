@@ -104,6 +104,13 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
         return url.searchParams.get('token') === config.token;
       },
     },
+    // The renderer disappears with the desktop window and cannot always
+    // complete a WebSocket close handshake. Terminate sockets during server
+    // shutdown so app.close() cannot wait forever for an absent peer.
+    preClose(done) {
+      for (const client of this.websocketServer.clients) client.terminate();
+      this.websocketServer.close(done);
+    },
   });
 
   // Bearer-token auth for all /api routes.
