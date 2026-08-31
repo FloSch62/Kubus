@@ -16,6 +16,20 @@ function harness(): QueryHarness {
 
 export const keepPreviousData = Symbol('keep-previous-data');
 
+/** Mirrors query-core's stable hash: sorted object keys, JSON stringify. */
+export function hashKey(queryKey: readonly unknown[]): string {
+  return JSON.stringify(queryKey, (_, val: unknown) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.keys(val)
+          .sort()
+          .reduce<Record<string, unknown>>((result, key) => {
+            result[key] = (val as Record<string, unknown>)[key];
+            return result;
+          }, {})
+      : val,
+  );
+}
+
 export function queryOptions<T>(config: T): T {
   return config;
 }

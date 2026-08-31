@@ -12,6 +12,7 @@ const harness = vi.hoisted(() => {
       cache.set(cacheKey, next);
       return next;
     }),
+    getQueryData: (key: readonly unknown[]) => cache.get(JSON.stringify(key)),
   };
   const value = {
     apiFetch: vi.fn(),
@@ -431,6 +432,78 @@ describe('watched and filtered lists', () => {
 
     unmount();
     expect(sub.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('feeds a watched single-resource query from the shared watch stream', () => {
+    const sel = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a' };
+    const cacheKey = JSON.stringify(['resource', sel]);
+    const { unmount } = renderHook(() => queries.useResource(sel, { liveMs: 5000, watch: true }));
+    const sub = harness.subscriptions[0]!;
+    expect(sub.params).toEqual({ ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments' });
+
+    const fresh = kubeObject('web');
+    act(() => sub.handlers.onSnapshot([kubeObject('other'), fresh]));
+    expect(harness.cache.get(cacheKey)).toEqual(fresh);
+
+    const updated = { ...fresh, metadata: { ...fresh.metadata, resourceVersion: '2' } };
+    act(() =>
+      sub.handlers.onEvents([
+        { type: 'MODIFIED', object: kubeObject('other') },
+        { type: 'MODIFIED', object: kubeObject('web', 'team-b') },
+        { type: 'MODIFIED', object: updated },
+      ]),
+    );
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
+
+    // DELETED keeps the terminal object for post-mortem but re-fetches so the
+    // 404 marks the query gone.
+    act(() => sub.handlers.onEvents([{ type: 'DELETED', object: updated }]));
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledExactlyOnceWith({ queryKey: ['resource', sel] });
+
+    // Absence from a later full snapshot (deletion missed while reconnecting)
+    // re-fetches too; a snapshot containing the object just updates it.
+    act(() => sub.handlers.onSnapshot([kubeObject('other')]));
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledTimes(2);
+
+    unmount();
+    expect(sub.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('rebinds the resource watch when the selection changes beyond its identity', () => {
+    // Same resource, but the list page sets `custom` while the topology map
+    // doesn't — the bridge must follow the query key, not just the identity.
+    type Sel = Parameters<typeof queries.useResource>[0];
+    const fromList = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a', custom: true } as Sel;
+    const fromMap = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a' } as Sel;
+    const { rerender, unmount } = renderHook(({ sel }: { sel: Sel }) => queries.useResource(sel, { watch: true }), {
+      initialProps: { sel: fromList },
+    });
+    expect(harness.subscriptions).toHaveLength(1);
+
+    rerender({ sel: fromMap });
+    expect(harness.subscriptions).toHaveLength(2);
+    expect(harness.subscriptions[0]!.unsubscribe).toHaveBeenCalledOnce();
+
+    act(() => harness.subscriptions[1]!.handlers.onSnapshot([kubeObject('web')]));
+    expect(harness.cache.get(JSON.stringify(['resource', fromMap]))).toEqual(kubeObject('web'));
+    expect(harness.cache.has(JSON.stringify(['resource', fromList]))).toBe(false);
+    unmount();
+  });
+
+  it('keeps unwatched and revealed-secret resource reads off the watch stream', () => {
+    const plain = renderHook(() => queries.useResource({ ctx: 'dev', group: '', version: 'v1', plural: 'pods', name: 'p' }, { liveMs: 5000 }));
+    const revealed = renderHook(() =>
+      queries.useResource(
+        { ctx: 'dev', group: '', version: 'v1', plural: 'secrets', name: 's', namespace: 'team-a', reveal: true },
+        { liveMs: 5000, watch: true },
+      ),
+    );
+    expect(harness.subscriptions).toHaveLength(0);
+    plain.unmount();
+    revealed.unmount();
   });
 
   it('filters watched rows by namespace and returns selector-query results', () => {

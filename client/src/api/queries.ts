@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
   ClusterMetricsSummary,
@@ -522,15 +522,65 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
 
 export function useResource(
   sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
-  opts?: { liveMs?: number },
+  opts?: { liveMs?: number; watch?: boolean },
 ) {
   const interval = useRefetchInterval(opts?.liveMs ?? 0);
+  const qc = useQueryClient();
+  // Watch-fed freshness: mirror the shared watch stream into the query so
+  // detail views track the tables within one event flush instead of waiting
+  // on the next poll (which the refresh-rate preference, an unfocused window
+  // or staleTime can defer indefinitely). Subscribing cluster-wide shares the
+  // wire sub an open list page already holds. Revealed secret reads stay on
+  // the poll — the watch stream carries redacted objects.
+  const watched = opts?.watch && sel && !sel.reveal ? sel : undefined;
+  // Rebind on the full query-key hash, not just the resource identity: events
+  // are written to ['resource', watched], which must stay hash-identical to
+  // the ['resource', sel] key the query observes, and selections for the same
+  // resource can differ in extra fields (e.g. the list page sets `custom`,
+  // the topology map doesn't).
+  const watchKey = watched ? hashKey(['resource', watched]) : '';
+  useEffect(() => {
+    if (!watched) return;
+    const queryKey = ['resource', watched];
+    const matches = (obj: KubeObject) => obj.metadata.name === watched.name && (obj.metadata.namespace ?? '') === (watched.namespace ?? '');
+    return watchClient.subscribe(
+      { ctx: watched.ctx, group: groupToPath(watched.group), version: watched.version, plural: watched.plural },
+      {
+        onSnapshot: (items) => {
+          const obj = items.find(matches);
+          if (obj) qc.setQueryData(queryKey, obj);
+          // Absent from a full snapshot (deleted while the watch was down):
+          // re-fetch so the 404 marks the query gone, keeping the data.
+          else if (qc.getQueryData(queryKey)) void qc.invalidateQueries({ queryKey });
+        },
+        onEvents: (events) => {
+          for (const ev of events) {
+            if (!matches(ev.object)) continue;
+            // DELETED keeps the terminal object on screen for post-mortem;
+            // the follow-up fetch's 404 tells views the resource is gone
+            // (an error a later setQueryData clears if the name comes back).
+            qc.setQueryData(queryKey, ev.object);
+            if (ev.type === 'DELETED') void qc.invalidateQueries({ queryKey });
+          }
+        },
+        onStatus: () => {},
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchKey, qc]);
   return useQuery({
     queryKey: ['resource', sel],
     queryFn: () => apiFetch<KubeObject>(resourceUrl(sel!.ctx, sel!.group, sel!.version, sel!.plural, sel!.name, sel!.namespace, sel!.reveal ? { reveal: 'true' } : undefined)),
     enabled: !!sel,
-    refetchInterval: opts?.liveMs ? interval : false,
+    // Once the object is gone, re-polling only repeats the 404; a watch event
+    // for a recreated name restores the data (and with it the interval).
+    refetchInterval: opts?.liveMs ? (query) => (isResourceGone(query.state.error) ? false : interval) : false,
   });
+}
+
+/** True when a resource read failed because the object no longer exists. */
+export function isResourceGone(error: unknown): boolean {
+  return (error as { status?: number } | null)?.status === 404;
 }
 
 /** JSON Schema for a kind, derived from the cluster's OpenAPI (covers CRDs). Best-effort: consumers degrade gracefully without it. */
