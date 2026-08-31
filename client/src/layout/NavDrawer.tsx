@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { layout } from '../theme.js';
 import Box from '@mui/material/Box';
 import Collapse from '@mui/material/Collapse';
@@ -63,6 +63,13 @@ function isFavoriteNavigation(state: unknown): boolean {
   return !!state && typeof state === 'object' && 'fromFavorite' in state && state.fromFavorite === true;
 }
 
+function navPathMatches(pathname: string, search: string, target: string): boolean {
+  const [targetPathname, targetSearch] = target.split('?', 2);
+  if (pathname !== targetPathname) return false;
+  if (!targetSearch) return true;
+  const currentParams = new URLSearchParams(search);
+  return [...new URLSearchParams(targetSearch)].every(([key, value]) => currentParams.getAll(key).includes(value));
+}
 
 /**
  * The first nine navigable favorites, in sidebar order, get Cmd/Ctrl+1–9.
@@ -249,7 +256,8 @@ function NavEntry({
 }) {
   const location = useLocation();
   const fromFavorite = isFavoriteNavigation(location.state);
-  const active = location.pathname === to && (!fromFavorite || inFavorites);
+  const preferFavorite = useContext(PreferFavoriteContext);
+  const active = navPathMatches(location.pathname, location.search, to) && (inFavorites || (!fromFavorite && !preferFavorite));
   const isFav = useNavigationStore((s) => (favorite ? s.favorites.some((x) => x.id === favorite.id) : false));
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
@@ -321,6 +329,8 @@ function NavEntry({
     </ListItem>
   );
 }
+
+const PreferFavoriteContext = createContext(false);
 
 function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: string) => void }) {
   const location = useLocation();
@@ -864,6 +874,45 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   }, [apiResources]);
   const customNav = useMemo(() => buildCustomNav(customKinds), [customKinds]);
 
+  // Kinds belonging to each favoritable category, used both to expand a
+  // favorited category inline and to recognize its entries during tab changes.
+  const categoryKindsMap = useMemo(() => {
+    const map = new Map<string, NavKind[]>();
+    for (const group of BUILTIN_NAV_GROUPS) {
+      map.set(
+        group.title,
+        group.kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
+      );
+    }
+    map.set(
+      'Custom Resources',
+      customKinds.flatMap(([, kinds]) => kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind }))),
+    );
+    return map;
+  }, [customKinds]);
+
+  // Tab switches restore pathname + search, but not the transient router state
+  // attached to the original favorite click. Prefer any matching entry that is
+  // actually present in Favorites, including children of favorite categories.
+  let activeFavoriteKey: string | undefined;
+  let activeFavoriteGroup: string | undefined;
+  for (const fav of visibleFavs) {
+    if (fav.path && navPathMatches(location.pathname, location.search, fav.path)) {
+      activeFavoriteKey = `${fav.id}:${fav.path}`;
+      break;
+    }
+    if (!fav.id.startsWith('category:')) continue;
+    const kind = (categoryKindsMap.get(fav.title) ?? []).find((candidate) =>
+      navPathMatches(location.pathname, location.search, kindPath(candidate.group, candidate.version, candidate.plural)),
+    );
+    if (kind) {
+      activeFavoriteKey = `${fav.id}:${kindPath(kind.group, kind.version, kind.plural)}`;
+      activeFavoriteGroup = `fav:${fav.title}`;
+      break;
+    }
+  }
+  const activeFavoriteEntry = activeFavoriteKey !== undefined;
+
   // Group chain (outermost first) containing each kind path, used to reveal
   // the entry for the active resource after a cross-kind jump.
   const groupChainByPath = useMemo(() => {
@@ -888,9 +937,8 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // Bring the active entry into view. A just-expanded Collapse animates open,
   // growing the drawer's scroll range as it goes, so a single scroll lands
   // short; keep nudging each frame until the entry's position settles.
-  // Favorites can render a second copy of the active entry; the canonical
-  // group entry is the last match, and expanding its chain guarantees it
-  // is present. Returns a canceller for use as an effect cleanup.
+  // Favorites render before canonical entries and take precedence when both
+  // match. Returns a canceller for use as an effect cleanup.
   const scrollActiveEntryIntoView = useCallback(() => {
     const deadline = performance.now() + 1200;
     let raf = 0;
@@ -898,7 +946,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     let stable = 0;
     const tick = () => {
       const entries = listRef.current?.querySelectorAll('.Mui-selected');
-      const el = entries?.[entries.length - 1];
+      const el = entries?.[0];
       if (el) {
         const top = el.getBoundingClientRect().top;
         stable = lastTop !== null && Math.abs(top - lastTop) < 0.5 ? stable + 1 : 0;
@@ -920,10 +968,22 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   const revealedPathRef = useRef<string | null>(null);
   useEffect(() => {
     if (isFavoriteNavigation(location.state)) return;
-    if (revealedPathRef.current === location.pathname) return;
+    const revealKey = activeFavoriteKey ? `favorite:${activeFavoriteKey}` : `canonical:${location.pathname}`;
+    if (revealedPathRef.current === revealKey) return;
+    if (activeFavoriteKey) {
+      revealedPathRef.current = revealKey;
+      setCollapsed((prev) => {
+        if (!prev.has('Favorites') && (!activeFavoriteGroup || !prev.has(activeFavoriteGroup))) return prev;
+        const next = new Set(prev);
+        next.delete('Favorites');
+        if (activeFavoriteGroup) next.delete(activeFavoriteGroup);
+        return next;
+      });
+      return scrollActiveEntryIntoView();
+    }
     const chain = groupChainByPath.get(location.pathname);
     if (!chain && location.pathname.startsWith('/r/')) return;
-    revealedPathRef.current = location.pathname;
+    revealedPathRef.current = revealKey;
     if (chain) {
       setCollapsed((prev) => {
         const next = new Set(prev);
@@ -937,7 +997,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       });
     }
     return scrollActiveEntryIntoView();
-  }, [location.pathname, location.state, groupChainByPath, scrollActiveEntryIntoView]);
+  }, [location.pathname, location.state, activeFavoriteKey, activeFavoriteGroup, groupChainByPath, scrollActiveEntryIntoView]);
 
   // Clearing the filter re-collapses groups; keep the active entry in view
   // instead of letting the selection vanish with them.
@@ -956,23 +1016,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     if (!overlay || !open) return;
     return scrollActiveEntryIntoView();
   }, [overlay, open, scrollActiveEntryIntoView]);
-
-  // Kinds belonging to each favoritable category, used to expand a favorited
-  // category inline under the Favorites group.
-  const categoryKindsMap = useMemo(() => {
-    const map = new Map<string, NavKind[]>();
-    for (const group of BUILTIN_NAV_GROUPS) {
-      map.set(
-        group.title,
-        group.kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
-      );
-    }
-    map.set(
-      'Custom Resources',
-      customKinds.flatMap(([, kinds]) => kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind }))),
-    );
-    return map;
-  }, [customKinds]);
 
   const f = deferredFilter.toLowerCase();
   const matches = (label: string) => !f || label.toLowerCase().includes(f);
@@ -1086,16 +1129,17 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
           }}
         />
       </Box>
-      <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
-        <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
-        <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
-        <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
-        <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
-        <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
-        <NavEntry to="/network" label="Network Metrics" icon={<NetworkCheckOutlinedIcon />} />
-        <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
-        <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
-        <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
+      <PreferFavoriteContext value={activeFavoriteEntry}>
+        <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
+          <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
+          <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
+          <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
+          <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
+          <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
+          <NavEntry to="/network" label="Network Metrics" icon={<NetworkCheckOutlinedIcon />} />
+          <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
+          <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
+          <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
         {visibleFavs.length > 0 && (
           <Box>
             <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
@@ -1284,7 +1328,8 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
             </Collapse>
           </>
         )}
-      </List>
+        </List>
+      </PreferFavoriteContext>
       <FavoriteScopeMenu
         state={scopeMenu}
         contexts={(contexts ?? []).map((c) => c.name)}

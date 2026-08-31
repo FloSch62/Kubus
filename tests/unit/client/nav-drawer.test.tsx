@@ -11,6 +11,7 @@ const queryMocks = vi.hoisted(() => ({
   byContext: {} as Record<string, Array<Record<string, unknown>>>,
   contexts: [] as Array<Record<string, unknown>>,
 }));
+const scrollIntoViewMock = vi.fn();
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useApiResourcesForContexts: () => ({
@@ -54,7 +55,8 @@ beforeEach(() => {
     ],
   });
   useTabsStore.setState({ tabs: [{ id: 'tab-1', path: '/' }], activeId: 'tab-1', closedPaths: [] });
-  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+  scrollIntoViewMock.mockClear();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoViewMock });
 });
 
 function renderDrawer(initial = '/r/appstore.eda.nokia.com/v1beta2/widgets', props = {}) {
@@ -143,6 +145,30 @@ describe('NavDrawer', () => {
     expect(favorite).toHaveClass('Mui-selected');
     await waitFor(() => expect(screen.getAllByRole('link', { name: /Pods/ })).toHaveLength(1));
   }, 15_000);
+
+  it('prefers the matching favorite when tab navigation restores only the URL', async () => {
+    renderDrawer('/r/core/v1/pods');
+
+    const [favorite, canonical] = screen.getAllByRole('link', { name: /Pods/ });
+    expect(favorite).toHaveClass('Mui-selected');
+    expect(canonical).not.toHaveClass('Mui-selected');
+
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalled());
+    expect(scrollIntoViewMock.mock.instances[0]).toBe(favorite);
+  });
+
+  it('reveals a matching child of a collapsed favorite category', async () => {
+    useNavigationStore.setState({
+      favorites: [{ id: 'category:Workloads', title: 'Workloads' }],
+      savedViews: [],
+    });
+    renderDrawer('/r/core/v1/pods');
+
+    const [favorite, canonical] = await screen.findAllByRole('link', { name: /Pods/ });
+    expect(favorite).toHaveClass('Mui-selected');
+    expect(canonical).not.toHaveClass('Mui-selected');
+    expect(screen.getAllByRole('button', { name: 'Workloads' })[0]).toHaveAttribute('aria-expanded', 'true');
+  });
 
   it('scopes a favorite to a cluster from its menu and hides it elsewhere', async () => {
     const legacy = () => useNavigationStore.getState().favorites.find((favorite) => favorite.id === 'legacy');
