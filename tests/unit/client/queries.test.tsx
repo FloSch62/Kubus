@@ -433,6 +433,48 @@ describe('watched and filtered lists', () => {
     expect(sub.unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it('feeds a watched single-resource query from the shared watch stream', () => {
+    const sel = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a' };
+    const cacheKey = JSON.stringify(['resource', sel]);
+    const { unmount } = renderHook(() => queries.useResource(sel, { liveMs: 5000, watch: true }));
+    const sub = harness.subscriptions[0]!;
+    expect(sub.params).toEqual({ ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments' });
+
+    const fresh = kubeObject('web');
+    act(() => sub.handlers.onSnapshot([kubeObject('other'), fresh]));
+    expect(harness.cache.get(cacheKey)).toEqual(fresh);
+
+    const updated = { ...fresh, metadata: { ...fresh.metadata, resourceVersion: '2' } };
+    act(() =>
+      sub.handlers.onEvents([
+        { type: 'MODIFIED', object: kubeObject('other') },
+        { type: 'MODIFIED', object: kubeObject('web', 'team-b') },
+        { type: 'MODIFIED', object: updated },
+      ]),
+    );
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+
+    // DELETED keeps the last object, matching the poll's behavior on 404.
+    act(() => sub.handlers.onEvents([{ type: 'DELETED', object: updated }]));
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+
+    unmount();
+    expect(sub.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps unwatched and revealed-secret resource reads off the watch stream', () => {
+    const plain = renderHook(() => queries.useResource({ ctx: 'dev', group: '', version: 'v1', plural: 'pods', name: 'p' }, { liveMs: 5000 }));
+    const revealed = renderHook(() =>
+      queries.useResource(
+        { ctx: 'dev', group: '', version: 'v1', plural: 'secrets', name: 's', namespace: 'team-a', reveal: true },
+        { liveMs: 5000, watch: true },
+      ),
+    );
+    expect(harness.subscriptions).toHaveLength(0);
+    plain.unmount();
+    revealed.unmount();
+  });
+
   it('filters watched rows by namespace and returns selector-query results', () => {
     useClustersStore.setState({ selected: ['dev'], namespaces: ['team-a'] });
     const plain = renderHook(() => queries.useFilteredList('', 'v1', 'pods', true));

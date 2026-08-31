@@ -204,6 +204,9 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Metrics' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Full screen')).not.toBeInTheDocument();
     expect(effects.yamlSchema).toHaveBeenCalledWith(expect.objectContaining({ kind: 'Pod' }));
+    const podCalls = () => queries.resourceCalls.filter(({ selection: call }) => call?.name === 'pod-a');
+    // Overview is live: watch-fed with the poll as fallback.
+    expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: 5000, watch: true });
 
     fireEvent.click(screen.getByRole('tab', { name: 'Map' }));
     expect(screen.getByText('Topology pod-a')).toBeInTheDocument();
@@ -214,6 +217,8 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
     expect(screen.getByTestId('yaml-editor')).toHaveTextContent('Replace');
     expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('name: pod-a');
+    // Off Overview the object freezes so live updates cannot clobber edits.
+    expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: undefined, watch: false });
     fireEvent.click(screen.getByRole('button', { name: 'Dry run YAML mock' }));
     expect(queries.dryRunMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ ctx: 'dev' }));
 

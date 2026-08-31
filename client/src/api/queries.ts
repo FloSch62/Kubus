@@ -522,9 +522,39 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
 
 export function useResource(
   sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
-  opts?: { liveMs?: number },
+  opts?: { liveMs?: number; watch?: boolean },
 ) {
   const interval = useRefetchInterval(opts?.liveMs ?? 0);
+  const qc = useQueryClient();
+  // Watch-fed freshness: mirror the shared watch stream into the query so
+  // detail views track the tables within one event flush instead of waiting
+  // on the next poll (which the refresh-rate preference, an unfocused window
+  // or staleTime can defer indefinitely). Subscribing cluster-wide shares the
+  // wire sub an open list page already holds. Revealed secret reads stay on
+  // the poll — the watch stream carries redacted objects.
+  const watched = opts?.watch && sel && !sel.reveal ? sel : undefined;
+  const watchKey = watched ? `${watched.ctx}|${watched.group}/${watched.version}/${watched.plural}|${watched.namespace ?? ''}|${watched.name}` : '';
+  useEffect(() => {
+    if (!watched) return;
+    const apply = (objects: KubeObject[]) => {
+      for (const obj of objects) {
+        if (obj.metadata.name === watched.name && (obj.metadata.namespace ?? '') === (watched.namespace ?? '')) {
+          qc.setQueryData(['resource', watched], obj);
+        }
+      }
+    };
+    return watchClient.subscribe(
+      { ctx: watched.ctx, group: groupToPath(watched.group), version: watched.version, plural: watched.plural },
+      {
+        onSnapshot: apply,
+        // DELETED keeps the last object on screen, matching the poll once the
+        // GET starts returning 404; a recreate under the same name re-matches.
+        onEvents: (events) => apply(events.filter((ev) => ev.type !== 'DELETED').map((ev) => ev.object)),
+        onStatus: () => {},
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchKey, qc]);
   return useQuery({
     queryKey: ['resource', sel],
     queryFn: () => apiFetch<KubeObject>(resourceUrl(sel!.ctx, sel!.group, sel!.version, sel!.plural, sel!.name, sel!.namespace, sel!.reveal ? { reveal: 'true' } : undefined)),

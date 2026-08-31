@@ -106,10 +106,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   }, [hasSel]);
 
   // Live-refresh the object while Overview is showing so stuck pods, rollouts
-  // and conditions update in place; other tabs (YAML editing!) keep the
-  // snapshot they opened with.
+  // and conditions update in place — fed by the watch stream so it keeps pace
+  // with the tables, with the poll as fallback; other tabs (YAML editing!)
+  // keep the snapshot they opened with.
   const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
     liveMs: tab === 'overview' ? 5000 : undefined,
+    watch: tab === 'overview',
   });
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
