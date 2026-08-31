@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
   ClusterMetricsSummary,
@@ -533,7 +533,12 @@ export function useResource(
   // wire sub an open list page already holds. Revealed secret reads stay on
   // the poll — the watch stream carries redacted objects.
   const watched = opts?.watch && sel && !sel.reveal ? sel : undefined;
-  const watchKey = watched ? `${watched.ctx}|${watched.group}/${watched.version}/${watched.plural}|${watched.namespace ?? ''}|${watched.name}` : '';
+  // Rebind on the full query-key hash, not just the resource identity: events
+  // are written to ['resource', watched], which must stay hash-identical to
+  // the ['resource', sel] key the query observes, and selections for the same
+  // resource can differ in extra fields (e.g. the list page sets `custom`,
+  // the topology map doesn't).
+  const watchKey = watched ? hashKey(['resource', watched]) : '';
   useEffect(() => {
     if (!watched) return;
     const queryKey = ['resource', watched];

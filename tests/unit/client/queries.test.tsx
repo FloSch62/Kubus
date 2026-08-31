@@ -472,6 +472,27 @@ describe('watched and filtered lists', () => {
     expect(sub.unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it('rebinds the resource watch when the selection changes beyond its identity', () => {
+    // Same resource, but the list page sets `custom` while the topology map
+    // doesn't — the bridge must follow the query key, not just the identity.
+    type Sel = Parameters<typeof queries.useResource>[0];
+    const fromList = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a', custom: true } as Sel;
+    const fromMap = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a' } as Sel;
+    const { rerender, unmount } = renderHook(({ sel }: { sel: Sel }) => queries.useResource(sel, { watch: true }), {
+      initialProps: { sel: fromList },
+    });
+    expect(harness.subscriptions).toHaveLength(1);
+
+    rerender({ sel: fromMap });
+    expect(harness.subscriptions).toHaveLength(2);
+    expect(harness.subscriptions[0]!.unsubscribe).toHaveBeenCalledOnce();
+
+    act(() => harness.subscriptions[1]!.handlers.onSnapshot([kubeObject('web')]));
+    expect(harness.cache.get(JSON.stringify(['resource', fromMap]))).toEqual(kubeObject('web'));
+    expect(harness.cache.has(JSON.stringify(['resource', fromList]))).toBe(false);
+    unmount();
+  });
+
   it('keeps unwatched and revealed-secret resource reads off the watch stream', () => {
     const plain = renderHook(() => queries.useResource({ ctx: 'dev', group: '', version: 'v1', plural: 'pods', name: 'p' }, { liveMs: 5000 }));
     const revealed = renderHook(() =>
