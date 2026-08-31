@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { layout } from '../theme.js';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
 import FormControlLabel from '@mui/material/FormControlLabel';
@@ -18,7 +19,7 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { SxProps, Theme } from '@mui/material/styles';
 import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
-import { useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
+import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { jobPhase, nodeStatus, podSummary, withoutManagedFields } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
@@ -109,10 +110,13 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   // and conditions update in place — fed by the watch stream so it keeps pace
   // with the tables, with the poll as fallback; other tabs (YAML editing!)
   // keep the snapshot they opened with.
-  const { data: obj, refetch } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
+  const { data: obj, refetch, error } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
     liveMs: tab === 'overview' ? 5000 : undefined,
     watch: tab === 'overview',
   });
+  // The last state stays on screen for post-mortem, but the drawer must say
+  // the object is gone instead of freezing on e.g. "Terminating" forever.
+  const objGone = !!obj && isResourceGone(error);
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
@@ -237,10 +241,10 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                     <AgeCell timestamp={obj.metadata.creationTimestamp} variant="caption" /> old
                   </>
                 )}
-                {obj && headerStatus(behaviorKind, obj) && (
+                {obj && (objGone || headerStatus(behaviorKind, obj)) && (
                   <>
                     {' · '}
-                    <StatusChip status={headerStatus(behaviorKind, obj)!} />
+                    <StatusChip status={objGone ? 'Deleted' : headerStatus(behaviorKind, obj)!} />
                   </>
                 )}
               </Typography>
@@ -270,7 +274,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
               <CloseIcon />
             </IconButton>
           </Stack>
-          {obj && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
+          {objGone && (
+            <Alert severity="warning" sx={{ borderRadius: 0, py: 0 }}>
+              Deleted from the cluster — showing the last known state.
+            </Alert>
+          )}
+          {obj && !objGone && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
           <Tabs
             value={tab}
             onChange={(_e, v) => guardLeave(() => setTab(v as string))}

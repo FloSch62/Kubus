@@ -536,20 +536,28 @@ export function useResource(
   const watchKey = watched ? `${watched.ctx}|${watched.group}/${watched.version}/${watched.plural}|${watched.namespace ?? ''}|${watched.name}` : '';
   useEffect(() => {
     if (!watched) return;
-    const apply = (objects: KubeObject[]) => {
-      for (const obj of objects) {
-        if (obj.metadata.name === watched.name && (obj.metadata.namespace ?? '') === (watched.namespace ?? '')) {
-          qc.setQueryData(['resource', watched], obj);
-        }
-      }
-    };
+    const queryKey = ['resource', watched];
+    const matches = (obj: KubeObject) => obj.metadata.name === watched.name && (obj.metadata.namespace ?? '') === (watched.namespace ?? '');
     return watchClient.subscribe(
       { ctx: watched.ctx, group: groupToPath(watched.group), version: watched.version, plural: watched.plural },
       {
-        onSnapshot: apply,
-        // DELETED keeps the last object on screen, matching the poll once the
-        // GET starts returning 404; a recreate under the same name re-matches.
-        onEvents: (events) => apply(events.filter((ev) => ev.type !== 'DELETED').map((ev) => ev.object)),
+        onSnapshot: (items) => {
+          const obj = items.find(matches);
+          if (obj) qc.setQueryData(queryKey, obj);
+          // Absent from a full snapshot (deleted while the watch was down):
+          // re-fetch so the 404 marks the query gone, keeping the data.
+          else if (qc.getQueryData(queryKey)) void qc.invalidateQueries({ queryKey });
+        },
+        onEvents: (events) => {
+          for (const ev of events) {
+            if (!matches(ev.object)) continue;
+            // DELETED keeps the terminal object on screen for post-mortem;
+            // the follow-up fetch's 404 tells views the resource is gone
+            // (an error a later setQueryData clears if the name comes back).
+            qc.setQueryData(queryKey, ev.object);
+            if (ev.type === 'DELETED') void qc.invalidateQueries({ queryKey });
+          }
+        },
         onStatus: () => {},
       },
     );
@@ -559,8 +567,15 @@ export function useResource(
     queryKey: ['resource', sel],
     queryFn: () => apiFetch<KubeObject>(resourceUrl(sel!.ctx, sel!.group, sel!.version, sel!.plural, sel!.name, sel!.namespace, sel!.reveal ? { reveal: 'true' } : undefined)),
     enabled: !!sel,
-    refetchInterval: opts?.liveMs ? interval : false,
+    // Once the object is gone, re-polling only repeats the 404; a watch event
+    // for a recreated name restores the data (and with it the interval).
+    refetchInterval: opts?.liveMs ? (query) => (isResourceGone(query.state.error) ? false : interval) : false,
   });
+}
+
+/** True when a resource read failed because the object no longer exists. */
+export function isResourceGone(error: unknown): boolean {
+  return (error as { status?: number } | null)?.status === 404;
 }
 
 /** JSON Schema for a kind, derived from the cluster's OpenAPI (covers CRDs). Best-effort: consumers degrade gracefully without it. */

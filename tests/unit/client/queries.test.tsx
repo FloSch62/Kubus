@@ -12,6 +12,7 @@ const harness = vi.hoisted(() => {
       cache.set(cacheKey, next);
       return next;
     }),
+    getQueryData: (key: readonly unknown[]) => cache.get(JSON.stringify(key)),
   };
   const value = {
     apiFetch: vi.fn(),
@@ -453,10 +454,19 @@ describe('watched and filtered lists', () => {
       ]),
     );
     expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
 
-    // DELETED keeps the last object, matching the poll's behavior on 404.
+    // DELETED keeps the terminal object for post-mortem but re-fetches so the
+    // 404 marks the query gone.
     act(() => sub.handlers.onEvents([{ type: 'DELETED', object: updated }]));
     expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledExactlyOnceWith({ queryKey: ['resource', sel] });
+
+    // Absence from a later full snapshot (deletion missed while reconnecting)
+    // re-fetches too; a snapshot containing the object just updates it.
+    act(() => sub.handlers.onSnapshot([kubeObject('other')]));
+    expect(harness.cache.get(cacheKey)).toEqual(updated);
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledTimes(2);
 
     unmount();
     expect(sub.unsubscribe).toHaveBeenCalledOnce();

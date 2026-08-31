@@ -16,6 +16,7 @@ const queries = vi.hoisted(() => ({
   resourceCalls: [] as Array<{ selection: Record<string, unknown> | undefined; options?: Record<string, unknown> }>,
   eventsCalls: [] as Array<Record<string, unknown> | undefined>,
   refetch: vi.fn(),
+  resourceError: null as Error | null,
   applyMode: 'success' as 'success' | 'conflict' | 'error',
   applyMutateAsync: vi.fn(),
   dryRunMutateAsync: vi.fn(),
@@ -37,8 +38,9 @@ vi.mock('../../../client/src/api/queries.js', () => ({
         : selection.plural === 'customresourcedefinitions'
           ? queries.backing
           : queries.current;
-    return { data, refetch: queries.refetch };
+    return { data, refetch: queries.refetch, error: queries.resourceError };
   },
+  isResourceGone: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useResourceEvents: (selection: Record<string, unknown> | undefined) => {
     queries.eventsCalls.push(selection);
     return { data: { items: queries.events } };
@@ -170,6 +172,7 @@ beforeEach(() => {
   queries.resourceCalls = [];
   queries.eventsCalls = [];
   queries.refetch.mockReset();
+  queries.resourceError = null;
   queries.applyMode = 'success';
   queries.applyMutateAsync.mockReset();
   queries.applyMutateAsync.mockImplementation(async () => {
@@ -250,6 +253,18 @@ describe('ResourceDetailDrawer', () => {
     expect(onBack).toHaveBeenCalledTimes(2);
     expect(onClose).toHaveBeenCalledOnce();
   }, 15_000);
+
+  it('marks a deleted resource and hides its actions, keeping the last state', () => {
+    const sel = selection('Pod');
+    queries.current = objectFor(sel, { status: { phase: 'Running' } });
+    queries.resourceError = Object.assign(new Error('pods "pod-a" not found'), { status: 404 });
+    render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Deleted from the cluster — showing the last known state.')).toBeInTheDocument();
+    expect(screen.getByText('Deleted')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Quick actions pod-a' })).not.toBeInTheDocument();
+    expect(screen.getByText('Pod overview pod-a')).toBeInTheDocument();
+  });
 
   it('guards dirty ConfigMap data before changing tabs or closing', () => {
     const sel = selection('ConfigMap');
