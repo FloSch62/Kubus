@@ -157,6 +157,19 @@ describe('NavDrawer', () => {
     expect(scrollIntoViewMock.mock.instances[0]).toBe(favorite);
   });
 
+  it('reveals a matching child of a collapsed favorite category', async () => {
+    useNavigationStore.setState({
+      favorites: [{ id: 'category:Workloads', title: 'Workloads' }],
+      savedViews: [],
+    });
+    renderDrawer('/r/core/v1/pods');
+
+    const [favorite, canonical] = await screen.findAllByRole('link', { name: /Pods/ });
+    expect(favorite).toHaveClass('Mui-selected');
+    expect(canonical).not.toHaveClass('Mui-selected');
+    expect(screen.getAllByRole('button', { name: 'Workloads' })[0]).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('scopes a favorite to a cluster from its menu and hides it elsewhere', async () => {
     const legacy = () => useNavigationStore.getState().favorites.find((favorite) => favorite.id === 'legacy');
     const { unmount } = renderDrawer('/');

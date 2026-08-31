@@ -895,6 +895,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // attached to the original favorite click. Prefer any matching entry that is
   // actually present in Favorites, including children of favorite categories.
   let activeFavoriteKey: string | undefined;
+  let activeFavoriteGroup: string | undefined;
   for (const fav of visibleFavs) {
     if (fav.path && navPathMatches(location.pathname, location.search, fav.path)) {
       activeFavoriteKey = `${fav.id}:${fav.path}`;
@@ -906,6 +907,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     );
     if (kind) {
       activeFavoriteKey = `${fav.id}:${kindPath(kind.group, kind.version, kind.plural)}`;
+      activeFavoriteGroup = `fav:${fav.title}`;
       break;
     }
   }
@@ -970,6 +972,13 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     if (revealedPathRef.current === revealKey) return;
     if (activeFavoriteKey) {
       revealedPathRef.current = revealKey;
+      setCollapsed((prev) => {
+        if (!prev.has('Favorites') && (!activeFavoriteGroup || !prev.has(activeFavoriteGroup))) return prev;
+        const next = new Set(prev);
+        next.delete('Favorites');
+        if (activeFavoriteGroup) next.delete(activeFavoriteGroup);
+        return next;
+      });
       return scrollActiveEntryIntoView();
     }
     const chain = groupChainByPath.get(location.pathname);
@@ -988,7 +997,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       });
     }
     return scrollActiveEntryIntoView();
-  }, [location.pathname, location.state, activeFavoriteKey, groupChainByPath, scrollActiveEntryIntoView]);
+  }, [location.pathname, location.state, activeFavoriteKey, activeFavoriteGroup, groupChainByPath, scrollActiveEntryIntoView]);
 
   // Clearing the filter re-collapses groups; keep the active entry in view
   // instead of letting the selection vanish with them.
