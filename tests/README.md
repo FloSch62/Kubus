@@ -106,15 +106,18 @@ pnpm test:electron     # no cluster or display server required on Linux
 Each spec launches the real Electron executable against a temporary user-data
 directory, temporary `XDG_CONFIG_HOME`, and empty kubeconfig. The suite checks
 the context-isolated preload surface, renderer-to-main state persistence,
-native accelerator IPC, and cold-start `kubus://` routing. Linux uses Chromium's
-headless Ozone platform; macOS and Windows launch through Electron normally.
-All temporary desktop state is removed after each test.
+native accelerator IPC, cold-start `kubus://` routing, and physical pointer
+interaction with controls inside the draggable title bar. The title-bar test
+stubs only its context and namespace HTTP responses; the Electron main,
+preload, renderer, CSS hit regions, and pointer input remain real. Linux uses
+Chromium's headless Ozone platform locally; CI exercises its X11 path under
+Xvfb. macOS and Windows launch through Electron normally. All temporary desktop
+state is removed after each test.
 
 ## CI
 
-The `build` matrix job runs the unit suites on every OS. Linux runs the
-repository-wide coverage command, enforces its thresholds, and uploads the
-HTML report; macOS and Windows run the faster unit command. The Linux `e2e` job
-first launches the Electron suite, then creates a kind cluster named `kubus-a`
-via `helm/kind-action` and runs the browser suite, uploading diagnostics on
-failure.
+The `build` matrix job runs both the unit and Electron suites on Ubuntu, macOS,
+and Windows. Linux runs the repository-wide coverage command, enforces its
+thresholds, and uploads the HTML report; macOS and Windows run the faster unit
+command. The Linux `e2e` job creates a kind cluster named `kubus-a` via
+`helm/kind-action` and runs the browser suite, uploading diagnostics on failure.

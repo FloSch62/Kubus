@@ -7,6 +7,12 @@ import Typography from '@mui/material/Typography';
 import { useNamespaces } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 
+export const namespaceFilterSx = {
+  minWidth: 260,
+  maxWidth: 480,
+  WebkitAppRegion: 'no-drag',
+} as const;
+
 export function NamespaceFilter() {
   const selected = useClustersStore((s) => s.selected);
   const namespaces = useClustersStore((s) => s.namespaces);
@@ -36,7 +42,10 @@ export function NamespaceFilter() {
         value.map((option, index) => <Chip {...getItemProps({ index })} key={option} label={option} size="small" />)
       }
       renderInput={(params) => <TextField {...params} placeholder={namespaces.length ? '' : 'All namespaces'} variant="outlined" />}
-      sx={{ minWidth: 260, maxWidth: 480 }}
+      // Electron/macOS computes native title-bar hit regions from the painted
+      // Autocomplete root. Marking only its input as no-drag leaves the root
+      // draggable and swallows physical pointer clicks.
+      sx={namespaceFilterSx}
     />
   );
 }

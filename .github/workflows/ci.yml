@@ -53,6 +53,24 @@ jobs:
       # test step so OS-specific behavior is visible without misleading skips.
       - name: Unit tests
         run: pnpm ${{ runner.os == 'Linux' && 'test:coverage' || 'test' }}
+      # The namespace selector lives inside a native draggable title bar. Run
+      # the real Electron renderer on every supported desktop OS so platform
+      # hit-testing differences cannot regress unnoticed.
+      - name: Electron end-to-end tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm test:electron
+      - name: Electron end-to-end tests (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: pnpm test:electron
+      - name: Upload Electron diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: electron-report-${{ runner.os }}
+          path: |
+            tests/electron-report
+            tests/electron/.results
+          retention-days: 7
       - name: Upload coverage report
         if: runner.os == 'Linux' && always()
         uses: actions/upload-artifact@v7
@@ -88,11 +106,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
-      # Launches the actual Electron main/preload/renderer stack with isolated
-      # user data and an empty kubeconfig. Electron 44's Chromium can crash in
-      # native headless mode on hosted runners, so exercise its X11 path.
-      - name: Electron end-to-end tests
-        run: xvfb-run --auto-servernum pnpm test:electron
       # Cluster name kubus-a matches the local dev clusters, so the suite
       # runs unchanged in both places (context kind-kubus-a).
       - name: Create kind cluster
@@ -109,6 +122,4 @@ jobs:
           path: |
             tests/playwright-report
             tests/e2e/.results
-            tests/electron-report
-            tests/electron/.results
           retention-days: 7
