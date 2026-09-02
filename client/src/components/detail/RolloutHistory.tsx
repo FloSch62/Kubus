@@ -60,13 +60,11 @@ export function RolloutHistory({ ctx, kind, obj }: { ctx: string; kind: 'Deploym
                 {rev.revision}
                 {rev.current && <Chip label="current" size="small" color="primary" variant="outlined" sx={{ ml: 1, height: 18 }} />}
               </TableCell>
-              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }} title={rev.images.join(', ')}>
-                <Box sx={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rev.images.join(', ') || '—'}</Box>
+              <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', verticalAlign: 'top' }}>
+                {rev.images.length ? rev.images.map((image) => <Box key={image}>{image}</Box>) : '—'}
               </TableCell>
               <TableCell>{rev.createdAt ? <AgeCell timestamp={rev.createdAt} /> : '—'}</TableCell>
-              <TableCell title={rev.changeCause}>
-                <Box sx={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rev.changeCause ?? ''}</Box>
-              </TableCell>
+              <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>{rev.changeCause ?? ''}</TableCell>
               <TableCell align="right">
                 {!rev.current && (
                   <Button size="small" startIcon={<UndoIcon />} onClick={() => setConfirmRevision(rev.revision)}>

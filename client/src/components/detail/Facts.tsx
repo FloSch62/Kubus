@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import { statusTextColor } from '../../theme.js';
 
 /**
  * Label→value rows for a resource's key facts — the summary block at the top
@@ -53,6 +54,15 @@ export function Fact({ label, hint, mono, children }: { label: string; hint?: st
         {children}
       </Box>
     </>
+  );
+}
+
+/** Warning-toned fact value for a non-default state worth noticing (Paused, Immutable). */
+export function WarnValue({ children }: { children: string }) {
+  return (
+    <Box component="span" sx={{ fontWeight: 550, color: statusTextColor('warning') }}>
+      {children}
+    </Box>
   );
 }
 

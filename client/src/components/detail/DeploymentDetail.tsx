@@ -1,39 +1,60 @@
 import Box from '@mui/material/Box';
+import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
 import type { ContainerUsage, KubeObject } from '@kubus/shared';
 import { useMemo, useState } from 'react';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { SetImageDialog } from '../RowActions.js';
 import { useResourceList, useResourceMetrics } from '../../api/queries.js';
-import { containerResources, podContainerNames, runningContainerNames, workloadReady } from '../../kube-display.js';
+import { containerResources, podContainerNames, podSummary, runningContainerNames, workloadReady } from '../../kube-display.js';
+import { useDetailStore } from '../../state/detail.js';
 import { useDockStore, dockTabId } from '../../state/dock.js';
 import { showToast } from '../../state/toast.js';
-import { ReadyCounter } from '../ReadyCounter.js';
+import { AgeCell } from '../AgeCell.js';
 import { ConditionRows, KeyValueSection, MetadataSection, hasUnhealthyCondition } from './GenericDetail.js';
-import { Fact, Facts } from './Facts.js';
-import { statusTextColor } from '../../theme.js';
-import { ContainerCards, type ContainerCardData } from './ContainerCards.js';
+import { Fact, Facts, WarnValue } from './Facts.js';
+import { ContainerPanels, type ContainerPanelData } from './ContainerPanels.js';
+import { mountRows, probeRows, templateEnv, type ContainerSpec, type VolumeSpec } from './container-spec.js';
 import { PodMiniList } from './PodMiniList.js';
-import { Section } from './Section.js';
+import { ProblemBanner, type ProblemItem } from './ProblemBanner.js';
+import { ReplicaBar } from './ReplicaBar.js';
+import { CountPill, DetailStack, Section } from './Section.js';
+import { SummaryStrip } from './SummaryStrip.js';
+import { gvkForKind } from '@kubus/shared';
 
 interface LabelSelector {
   matchLabels?: Record<string, string>;
   matchExpressions?: Array<{ key: string; operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'; values?: string[] }>;
 }
 
-interface TemplateContainer {
-  name: string;
-  image?: string;
-  restartPolicy?: string;
-  ports?: Array<{ containerPort: number; protocol?: string; name?: string }>;
-  resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
-}
-
 interface DeploymentSpec {
+  replicas?: number;
   selector?: LabelSelector;
   paused?: boolean;
+  minReadySeconds?: number;
+  progressDeadlineSeconds?: number;
+  revisionHistoryLimit?: number;
   strategy?: { type?: string; rollingUpdate?: { maxUnavailable?: number | string; maxSurge?: number | string } };
-  template?: { spec?: { containers?: TemplateContainer[]; initContainers?: TemplateContainer[] } };
+  template?: { spec?: { containers?: ContainerSpec[]; initContainers?: ContainerSpec[]; volumes?: VolumeSpec[]; serviceAccountName?: string } };
+}
+
+interface DeploymentStatus {
+  replicas?: number;
+  readyReplicas?: number;
+  updatedReplicas?: number;
+  availableReplicas?: number;
+  unavailableReplicas?: number;
+  conditions?: Array<{ type: string; status: string; reason?: string; message?: string; lastTransitionTime?: string }>;
+}
+
+interface ReplicaSetShape {
+  spec?: { replicas?: number };
+  status?: { replicas?: number; readyReplicas?: number; availableReplicas?: number };
 }
 
 function selectorToString(selector: LabelSelector | undefined): string | undefined {
@@ -53,14 +74,78 @@ function ownedBy(obj: KubeObject, uid: string | undefined): boolean {
   return (obj.metadata.ownerReferences ?? []).some((owner) => owner.uid === uid && owner.controller);
 }
 
+function revisionOf(rs: KubeObject): number {
+  return Number(rs.metadata.annotations?.['deployment.kubernetes.io/revision'] ?? 0);
+}
+
 // ReplicaFailure=True is the only bad-when-true Deployment condition.
 const deploymentGoodWhen = (type: string): 'True' | 'False' => (type === 'ReplicaFailure' ? 'False' : 'True');
+
+/** "2 Running · 1 ImagePullBackOff" — pod states by frequency. */
+export function podStatusSummary(pods: KubeObject[]): string | undefined {
+  if (!pods.length) return undefined;
+  const counts = new Map<string, number>();
+  for (const pod of pods) {
+    const s = podSummary(pod).status;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([s, n]) => `${n} ${s}`)
+    .join(' · ');
+}
+
+/**
+ * Why the rollout isn't complete: the failing Deployment conditions in full,
+ * plus the pods' own waiting/terminated reasons grouped by state — the
+ * image-pull or crash message is on the pod, not the Deployment.
+ */
+function rolloutProblems(status: DeploymentStatus | undefined, pods: KubeObject[]): ProblemItem[] {
+  const items: ProblemItem[] = [];
+  for (const c of status?.conditions ?? []) {
+    const bad = c.status !== deploymentGoodWhen(c.type) && c.status !== 'Unknown';
+    if (!bad) continue;
+    items.push({ title: `${c.type}: ${c.reason ?? c.status}`, message: c.message, at: c.lastTransitionTime });
+  }
+  const groups = new Map<string, { count: number; message?: string }>();
+  for (const pod of pods) {
+    const summary = podSummary(pod);
+    if (summary.status === 'Running' || summary.status === 'Succeeded' || summary.status === 'Completed') continue;
+    const entry = groups.get(summary.status) ?? { count: 0 };
+    entry.count += 1;
+    if (!entry.message) {
+      const st = pod.status as { containerStatuses?: Array<{ state?: { waiting?: { message?: string }; terminated?: { message?: string } } }> } | undefined;
+      for (const cs of st?.containerStatuses ?? []) {
+        const message = cs.state?.waiting?.message ?? cs.state?.terminated?.message;
+        if (message) {
+          entry.message = message;
+          break;
+        }
+      }
+    }
+    groups.set(summary.status, entry);
+  }
+  // Neighbouring states (ErrImagePull → ImagePullBackOff) carry the same
+  // message; say it once under a combined headline.
+  const byMessage = new Map<string, string[]>();
+  for (const [state, entry] of groups) {
+    const title = `${entry.count} pod${entry.count === 1 ? '' : 's'} ${state}`;
+    const key = entry.message ?? `\0${state}`;
+    byMessage.set(key, [...(byMessage.get(key) ?? []), title]);
+  }
+  for (const [key, titles] of byMessage) {
+    items.push({ title: titles.join(' · '), message: key.startsWith('\0') ? undefined : key });
+  }
+  return items;
+}
 
 export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const [forwardPort, setForwardPort] = useState<number>();
   const [editImageContainer, setEditImageContainer] = useState<string>();
+  const push = useDetailStore((s) => s.push);
   const namespace = obj.metadata.namespace;
   const spec = obj.spec as DeploymentSpec | undefined;
+  const dstatus = obj.status as DeploymentStatus | undefined;
   const labelSelector = selectorToString(spec?.selector);
   const enabled = !!namespace && !!labelSelector;
   const replicaSetsQuery = useResourceList(
@@ -68,12 +153,19 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
   );
   const podsQuery = useResourceList(enabled ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector } : undefined);
 
+  const replicaSets = useMemo(
+    () =>
+      (replicaSetsQuery.data?.items ?? [])
+        .filter((rs) => ownedBy(rs, obj.metadata.uid))
+        .sort((a, b) => revisionOf(b) - revisionOf(a)),
+    [obj.metadata.uid, replicaSetsQuery.data?.items],
+  );
   const pods = useMemo(() => {
-    const replicaSetUids = new Set((replicaSetsQuery.data?.items ?? []).filter((rs) => ownedBy(rs, obj.metadata.uid)).map((rs) => rs.metadata.uid));
+    const replicaSetUids = new Set(replicaSets.map((rs) => rs.metadata.uid));
     return (podsQuery.data?.items ?? [])
       .filter((pod) => (pod.metadata.ownerReferences ?? []).some((owner) => replicaSetUids.has(owner.uid) && owner.controller))
       .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
-  }, [obj.metadata.uid, podsQuery.data?.items, replicaSetsQuery.data?.items]);
+  }, [podsQuery.data?.items, replicaSets]);
 
   // Per-container usage summed across this Deployment's pods, with the number
   // of pods that reported each container so bars scale their denominator.
@@ -100,7 +192,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
   }, [metricsQuery.data, ctx, namespace, pods]);
 
   // Which template containers are live somewhere, and in which pod — a shell
-  // has to land in a concrete pod, so the card offers one only when a pod is
+  // has to land in a concrete pod, so the panel offers one only when a pod is
   // actually running that container.
   const podByContainer = useMemo(() => {
     const map = new Map<string, KubeObject>();
@@ -112,8 +204,9 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
     return map;
   }, [pods]);
 
-  const cards = useMemo(() => {
-    const toCard = (c: TemplateContainer, kind?: 'init' | 'sidecar'): ContainerCardData => {
+  const panels = useMemo(() => {
+    const template = spec?.template?.spec;
+    const toPanel = (c: ContainerSpec, kind?: 'init' | 'sidecar'): ContainerPanelData => {
       const usage = containerUsage.get(c.name);
       return {
         name: c.name,
@@ -124,11 +217,18 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
         resources: containerResources(c),
         usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
         podCount: usage?.pods,
+        probes: probeRows(c, undefined, false),
+        mounts: mountRows(c, template?.volumes),
+        env: templateEnv(c),
+        command: c.command,
+        args: c.args,
+        imagePullPolicy: c.imagePullPolicy,
+        workingDir: c.workingDir,
       };
     };
     return [
-      ...(spec?.template?.spec?.containers ?? []).map((c) => toCard(c)),
-      ...(spec?.template?.spec?.initContainers ?? []).map((c) => toCard(c, c.restartPolicy === 'Always' ? 'sidecar' : 'init')),
+      ...(template?.containers ?? []).map((c) => toPanel(c)),
+      ...(template?.initContainers ?? []).map((c) => toPanel(c, c.restartPolicy === 'Always' ? 'sidecar' : 'init')),
     ];
   }, [spec, containerUsage, podByContainer]);
 
@@ -173,60 +273,57 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
     });
   };
 
+  const openRef = (kind: 'ConfigMap' | 'Secret' | 'PersistentVolumeClaim', name: string) => {
+    const gvk = gvkForKind(kind);
+    if (!gvk) return;
+    push({ ctx, group: gvk.group, version: gvk.version, plural: gvk.plural, kind, name, namespace });
+  };
+  const openReplicaSet = (rs: KubeObject) =>
+    push({ ctx, group: 'apps', version: 'v1', plural: 'replicasets', kind: 'ReplicaSet', name: rs.metadata.name, namespace });
+
   const strategy = spec?.strategy?.type;
   const rolling = spec?.strategy?.rollingUpdate;
-  const hasConditions = ((obj.status as { conditions?: unknown[] } | undefined)?.conditions?.length ?? 0) > 0;
-  const dstatus = obj.status as { updatedReplicas?: number; availableReplicas?: number; unavailableReplicas?: number } | undefined;
+  const conditions = dstatus?.conditions ?? [];
+  const desired = spec?.replicas ?? dstatus?.replicas ?? 0;
+  const ready = dstatus?.readyReplicas ?? 0;
+  const problems = useMemo(() => (desired > 0 && ready < desired ? rolloutProblems(dstatus, pods) : []), [desired, ready, dstatus, pods]);
+  const readyTone = desired === 0 ? undefined : ready >= desired ? 'success' : ready === 0 ? 'error' : 'warning';
+  // Old ReplicaSets scaled to zero are history (the History tab has them
+  // with images and rollback); the overview shows what holds pods now.
+  const currentRevision = replicaSets.length ? revisionOf(replicaSets[0]!) : undefined;
+  const liveReplicaSets = replicaSets.filter((rs, i) => i === 0 || ((rs as ReplicaSetShape).spec?.replicas ?? 0) > 0 || ((rs as ReplicaSetShape).status?.replicas ?? 0) > 0);
+  const hiddenReplicaSets = replicaSets.length - liveReplicaSets.length;
 
   return (
-    <Stack spacing={2} sx={{ p: 2 }}>
-      <Facts>
-        <Fact label="Ready">
-          <ReadyCounter value={workloadReady(obj)} />
-        </Fact>
-        <Fact label="Replicas">
-          {dstatus &&
-            [
-              dstatus.updatedReplicas !== undefined ? `${dstatus.updatedReplicas} updated` : undefined,
-              dstatus.availableReplicas !== undefined ? `${dstatus.availableReplicas} available` : undefined,
-              dstatus.unavailableReplicas ? `${dstatus.unavailableReplicas} unavailable` : undefined,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-        </Fact>
-        <Fact label="Strategy">
-          {strategy && (
-            <>
-              {strategy}
-              {rolling && (
-                <Box component="span" sx={{ color: 'text.secondary' }}>
-                  {` · max unavailable ${rolling.maxUnavailable ?? '-'} · max surge ${rolling.maxSurge ?? '-'}`}
-                </Box>
-              )}
-            </>
-          )}
-        </Fact>
-        <Fact label="Selector" mono>
-          {labelSelector}
-        </Fact>
-        <Fact label="Rollout">
-          {spec?.paused && (
-            <Box component="span" sx={{ fontWeight: 550, color: statusTextColor('warning') }}>
-              Paused
-            </Box>
-          )}
-        </Fact>
-      </Facts>
-      <Section title="Containers" count={cards.length}>
-        <ContainerCards
-          items={cards}
+    <DetailStack>
+      <SummaryStrip
+        items={[
+          { label: 'Ready', value: workloadReady(obj), tone: readyTone },
+          { label: 'Updated', value: String(dstatus?.updatedReplicas ?? 0), hint: 'Replicas running the current pod template.' },
+          { label: 'Available', value: String(dstatus?.availableReplicas ?? 0), hint: 'Replicas ready for at least minReadySeconds.' },
+          { label: 'Unavailable', value: String(dstatus?.unavailableReplicas ?? 0), tone: dstatus?.unavailableReplicas ? 'warning' : undefined },
+        ]}
+      />
+      <ReplicaBar desired={desired} ready={ready} total={dstatus?.replicas ?? 0} updated={dstatus?.updatedReplicas ?? 0} paused={spec?.paused} />
+      {problems.length > 0 && (
+        <ProblemBanner severity={ready === 0 ? 'error' : 'warning'} title="Why this Deployment isn’t ready" items={problems} />
+      )}
+      <Section title="Containers" count={panels.length} flush description="pod template">
+        <ContainerPanels
+          items={panels}
           onLogs={openContainerLogs}
           onShell={openContainerShell}
           onForwardPort={setForwardPort}
           onEditImage={setEditImageContainer}
+          onOpenRef={openRef}
         />
       </Section>
-      <Section title="Pods" count={pods.length}>
+      <Section
+        title="Pods"
+        count={pods.length}
+        flush
+        description={podsQuery.isLoading || replicaSetsQuery.isLoading ? undefined : podStatusSummary(pods)}
+      >
         <PodMiniList
           ctx={ctx}
           pods={pods}
@@ -235,12 +332,90 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
           hideNamespace
         />
       </Section>
-      {hasConditions && (
-        <Section title="Conditions" defaultOpen={hasUnhealthyCondition(obj, deploymentGoodWhen)}>
-          <ConditionRows
-            conditions={(obj.status as { conditions: Array<{ type: string; status: string; reason?: string; message?: string; lastTransitionTime?: string }> }).conditions}
-            goodWhen={deploymentGoodWhen}
-          />
+      {liveReplicaSets.length > 0 && (
+        <Section
+          title="Replica sets"
+          count={liveReplicaSets.length}
+          flush
+          defaultOpen={liveReplicaSets.length > 1}
+          description={hiddenReplicaSets > 0 ? `${hiddenReplicaSets} older scaled to zero — see History` : currentRevision ? `revision ${currentRevision}` : undefined}
+        >
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Revision</TableCell>
+                <TableCell>Name</TableCell>
+                <TableCell>Ready</TableCell>
+                <TableCell>Age</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {liveReplicaSets.map((rs) => {
+                const shape = rs as ReplicaSetShape;
+                const rsDesired = shape.spec?.replicas ?? 0;
+                const rsReady = shape.status?.readyReplicas ?? 0;
+                const current = revisionOf(rs) === currentRevision;
+                return (
+                  <TableRow key={rs.metadata.uid} hover sx={{ cursor: 'pointer' }} onClick={() => openReplicaSet(rs)}>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
+                        {revisionOf(rs) || '—'}
+                        {current && <CountPill value="current" sx={{ color: 'primary.main', bgcolor: (t) => `${t.palette.primary.main}1a` }} />}
+                      </Stack>
+                    </TableCell>
+                    <TableCell sx={{ wordBreak: 'break-word' }}>
+                      <Link component="button" variant="body2" underline="hover" sx={{ textAlign: 'left', verticalAlign: 'baseline' }} onClick={(e) => { e.stopPropagation(); openReplicaSet(rs); }}>
+                        {rs.metadata.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Box component="span" sx={{ color: rsDesired > 0 && rsReady < rsDesired ? (t) => (t.palette.mode === 'dark' ? t.palette.warning.main : t.palette.warning.dark) : 'inherit' }}>
+                        {rsReady}/{rsDesired}
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <AgeCell timestamp={rs.metadata.creationTimestamp} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Section>
+      )}
+      <Section title="Details">
+        <Facts>
+          <Fact label="Selector" mono>
+            {labelSelector}
+          </Fact>
+          <Fact label="Strategy">
+            {strategy && (
+              <>
+                {strategy}
+                {rolling && (
+                  <Box component="span" sx={{ color: 'text.secondary' }}>
+                    {` · max unavailable ${rolling.maxUnavailable ?? '-'} · max surge ${rolling.maxSurge ?? '-'}`}
+                  </Box>
+                )}
+              </>
+            )}
+          </Fact>
+          <Fact label="Rollout">{spec?.paused && <WarnValue>Paused</WarnValue>}</Fact>
+          <Fact label="Min ready" hint="Seconds a new pod must be ready before it counts as available.">
+            {spec?.minReadySeconds !== undefined ? `${spec.minReadySeconds}s` : undefined}
+          </Fact>
+          <Fact label="Progress deadline" hint="Seconds without progress before the rollout is reported as stalled.">
+            {spec?.progressDeadlineSeconds !== undefined ? `${spec.progressDeadlineSeconds}s` : undefined}
+          </Fact>
+          <Fact label="History limit" hint="Old ReplicaSets kept for rollback.">
+            {spec?.revisionHistoryLimit !== undefined ? String(spec.revisionHistoryLimit) : undefined}
+          </Fact>
+          <Fact label="Service account">{spec?.template?.spec?.serviceAccountName}</Fact>
+        </Facts>
+      </Section>
+      {conditions.length > 0 && (
+        <Section title="Conditions" count={conditions.length} flush defaultOpen={hasUnhealthyCondition(obj, deploymentGoodWhen)}>
+          <ConditionRows conditions={conditions} goodWhen={deploymentGoodWhen} />
         </Section>
       )}
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
@@ -258,6 +433,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
           onError={(e) => showToast('error', e instanceof Error ? e.message : String(e))}
         />
       )}
-    </Stack>
+    </DetailStack>
   );
 }
+

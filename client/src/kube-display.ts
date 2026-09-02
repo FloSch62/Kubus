@@ -75,6 +75,39 @@ export function workloadReady(obj: KubeObject): string {
   return `${status?.readyReplicas ?? 0}/${spec?.replicas ?? status?.replicas ?? 0}`;
 }
 
+/**
+ * One-word rollout state for Deployments, StatefulSets, ReplicaSets and
+ * DaemonSets — the detail header's answer to "is it done", derived from the
+ * replica counters and the Progressing/ReplicaFailure conditions.
+ */
+export function workloadStatus(obj: KubeObject): string {
+  const spec = obj.spec as { replicas?: number; paused?: boolean } | undefined;
+  const status = obj.status as
+    | {
+        replicas?: number;
+        readyReplicas?: number;
+        updatedReplicas?: number;
+        desiredNumberScheduled?: number;
+        numberReady?: number;
+        updatedNumberScheduled?: number;
+        conditions?: Array<{ type: string; status: string }>;
+      }
+    | undefined;
+  if (spec?.paused) return 'Paused';
+  const conditions = status?.conditions ?? [];
+  if (conditions.some((c) => c.type === 'ReplicaFailure' && c.status === 'True')) return 'ReplicaFailure';
+  if (conditions.some((c) => c.type === 'Progressing' && c.status === 'False')) return 'Stalled';
+  const daemon = status?.desiredNumberScheduled !== undefined;
+  const desired = daemon ? (status?.desiredNumberScheduled ?? 0) : (spec?.replicas ?? status?.replicas ?? 0);
+  const ready = daemon ? (status?.numberReady ?? 0) : (status?.readyReplicas ?? 0);
+  const updated = daemon ? status?.updatedNumberScheduled : status?.updatedReplicas;
+  const total = daemon ? desired : (status?.replicas ?? desired);
+  if (desired === 0) return 'Scaled to zero';
+  if (ready >= desired && (updated ?? desired) >= desired && total <= desired) return 'Available';
+  if (ready === 0) return 'Unavailable';
+  return 'Progressing';
+}
+
 export function nodeStatus(node: KubeObject): string {
   const conditions = (node.status as { conditions?: Array<{ type: string; status: string }> })?.conditions ?? [];
   const ready = conditions.find((c) => c.type === 'Ready');

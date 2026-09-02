@@ -10,7 +10,7 @@ human-friendly view *and* the raw YAML, without leaving the list you're on.
 <figure markdown="span">
   ![The resource details drawer for a pod](../assets/screenshots/pod-detail.png#only-light){ .shadow }
   ![The resource details drawer for a pod](../assets/screenshots/pod-detail-dark.png#only-dark){ .shadow }
-  <figcaption>A readable overview up top, with tabs for YAML, events, map and metrics.</figcaption>
+  <figcaption>A summary strip and per-container panels up top, with tabs for YAML, events, map and metrics.</figcaption>
 </figure>
 
 ## The tabs
@@ -28,13 +28,24 @@ human-friendly view *and* the raw YAML, without leaving the list you're on.
 
 The Overview tab adapts to what you're looking at:
 
-- **Pods** — status, readiness, restarts, pod IP, QoS class, and a clickable node link;
-  a containers table (images, ports, mounts, state); init and ephemeral debug containers;
-  expandable env vars; volume mounts; and related ConfigMaps, Secrets and PVCs you can
-  click straight through to.
-- **Nodes** — roles, version, OS/arch, pod CIDR, kubelet info and allocatable resources.
-- **Services** — type, cluster/external IPs, a ports table (port → targetPort → nodePort),
-  the selector, and the pods behind it.
+Every overview opens with a **summary strip** — the handful of numbers that say how the
+object is doing — followed by a *why isn't this ready* banner whenever something is
+wrong, and then collapsible sections for the rest.
+
+- **Pods** — ready count, restarts, node and IP up top; then one panel per **container**
+  with its state, image, restarts, CPU/memory against requests and limits, ports, and its
+  own probes, environment, mounts and command a click away; init and ephemeral debug
+  containers; placement and identity details; volumes, scheduling, conditions and
+  metadata. Related ConfigMaps, Secrets, PVCs, nodes and owners are all clickable.
+- **Deployments** — ready/updated/available/unavailable replicas with a rollout progress
+  bar, the failing conditions and pod reasons in full, the pod template's containers,
+  the pods, and the ReplicaSets still holding pods.
+- **Services** — type, cluster IP, ready endpoints and port count; the in-cluster DNS
+  name; a ports table (port → targetPort, nodePort) with one-click port forwarding; the
+  live **endpoints** from the EndpointSlices with their pods and readiness; and the pods
+  the selector matches.
+- **Nodes** — roles, pod count, kubelet version, internal IP and condition health; then
+  system info, addresses, capacity and the pods on the node.
 - **Secrets** — the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
 - **Anything else** — metadata, owner references, labels and annotations (searchable and

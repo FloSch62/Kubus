@@ -20,7 +20,7 @@ import type { SxProps, Theme } from '@mui/material/styles';
 import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
 import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
-import { jobPhase, nodeStatus, podSummary, withoutManagedFields } from '../kube-display.js';
+import { jobPhase, nodeStatus, podSummary, withoutManagedFields, workloadStatus } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { YamlEditor, useYamlSchema } from './YamlEditor.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -210,13 +210,13 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           }}
           sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}
         >
-          <Stack direction="row" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center' }}>
+          <Stack direction="row" sx={{ px: 2, py: 1.25, borderBottom: 1, borderColor: 'divider', alignItems: 'center', gap: 1 }}>
             {onBack && (
-              <IconButton aria-label="Back" onClick={() => guardLeave(onBack)} sx={{ mr: 1 }}>
-                <ArrowBackIcon />
+              <IconButton aria-label="Back" size="small" onClick={() => guardLeave(onBack)} sx={{ ml: -0.5 }}>
+                <ArrowBackIcon fontSize="small" />
               </IconButton>
             )}
-            <Box sx={{ minWidth: 0 }}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
                 {sel.ctx} ·{' '}
                 {backingCrdSelection ? (
@@ -241,18 +241,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                     <AgeCell timestamp={obj.metadata.creationTimestamp} variant="caption" /> old
                   </>
                 )}
-                {obj && (objGone || headerStatus(behaviorKind, obj)) && (
-                  <>
-                    {' · '}
-                    <StatusChip status={objGone ? 'Deleted' : headerStatus(behaviorKind, obj)!} />
-                  </>
-                )}
               </Typography>
               <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5, minWidth: 0 }}>
                 <TruncationTooltip text={sel.namespace ? `${sel.namespace} / ${sel.name}` : sel.name}>
-                  <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
+                  <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, fontSize: 15.5, lineHeight: 1.3, minWidth: 0 }}>
                     {sel.namespace && (
-                      <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
+                      <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500, fontSize: 'inherit' }}>
                         {sel.namespace}{' / '}
                       </Typography>
                     )}
@@ -262,7 +256,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 <CopyValueButton text={sel.name} label={`Copy name ${sel.name}`} />
               </Stack>
             </Box>
-            <Box sx={{ flex: 1 }} />
+            {obj && (objGone || headerStatus(behaviorKind, obj)) && (
+              <Box sx={{ flexShrink: 0, px: 0.5 }}>
+                <StatusChip status={objGone ? 'Deleted' : headerStatus(behaviorKind, obj)!} size="md" />
+              </Box>
+            )}
             {(!inline || tab === 'map') && (
               <Tooltip title={fullScreen ? 'Restore drawer' : 'Full screen'}>
                 <IconButton onClick={() => setFullScreen((v) => !v)} aria-label={fullScreen ? 'Restore drawer' : 'Full screen'}>
@@ -384,6 +382,11 @@ function headerStatus(kind: string | undefined, obj: KubeObject): string | undef
       return jobPhase(obj);
     case 'CronJob':
       return (obj.spec as { suspend?: boolean } | undefined)?.suspend ? 'Suspended' : undefined;
+    case 'Deployment':
+    case 'StatefulSet':
+    case 'DaemonSet':
+    case 'ReplicaSet':
+      return workloadStatus(obj);
     default:
       return undefined;
   }

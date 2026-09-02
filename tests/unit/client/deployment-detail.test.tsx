@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import { DeploymentDetail } from '../../../client/src/components/detail/DeploymentDetail';
@@ -33,9 +33,38 @@ function deployment(): KubeObject {
       replicas: 2,
       selector: { matchLabels: { app: 'web' } },
       strategy: { type: 'RollingUpdate', rollingUpdate: { maxUnavailable: 1, maxSurge: '25%' } },
-      template: { spec: { containers: [{ name: 'app' }, { name: 'broken' }] } },
+      progressDeadlineSeconds: 600,
+      template: {
+        spec: {
+          containers: [
+            {
+              name: 'app',
+              image: 'example/app:v2',
+              env: [
+                { name: 'MODE', value: 'prod' },
+                { name: 'TOKEN', valueFrom: { secretKeyRef: { name: 'app-secret', key: 'token' } } },
+              ],
+              envFrom: [{ configMapRef: { name: 'app-config' } }],
+              volumeMounts: [{ name: 'data', mountPath: '/data' }],
+              readinessProbe: { httpGet: { path: '/healthz', port: 8080 } },
+            },
+            { name: 'broken' },
+          ],
+          volumes: [{ name: 'data', persistentVolumeClaim: { claimName: 'data-pvc' } }],
+        },
+      },
     },
-    status: { readyReplicas: 1, updatedReplicas: 2, availableReplicas: 1, unavailableReplicas: 1 },
+    status: {
+      replicas: 2,
+      readyReplicas: 1,
+      updatedReplicas: 2,
+      availableReplicas: 1,
+      unavailableReplicas: 1,
+      conditions: [
+        { type: 'Available', status: 'False', reason: 'MinimumReplicasUnavailable', message: 'Deployment does not have minimum availability.' },
+        { type: 'Progressing', status: 'True', reason: 'ReplicaSetUpdated' },
+      ],
+    },
   } as KubeObject;
 }
 
@@ -50,16 +79,37 @@ function pod(name: string, running: string[]): KubeObject {
       containerStatuses: ['app', 'broken'].map((name) => ({
         name,
         ready: running.includes(name),
-        state: running.includes(name) ? { running: {} } : { waiting: { reason: 'CrashLoopBackOff' } },
+        state: running.includes(name) ? { running: {} } : { waiting: { reason: 'CrashLoopBackOff', message: 'back-off 5m restarting failed container' } },
       })),
     },
   } as unknown as KubeObject;
 }
 
+function replicaSet(name: string, uid: string, revision: string, replicas: number, ready: number): KubeObject {
+  return {
+    apiVersion: 'apps/v1',
+    kind: 'ReplicaSet',
+    metadata: {
+      name,
+      namespace: 'team-a',
+      uid,
+      annotations: { 'deployment.kubernetes.io/revision': revision },
+      ownerReferences: [{ kind: 'Deployment', uid: 'deploy-uid', controller: true, name: 'web' }],
+    },
+    spec: { replicas },
+    status: { replicas, readyReplicas: ready },
+  } as unknown as KubeObject;
+}
+
+/** Value tile of the summary strip, addressed by its label (a <dt> has no accessible name of its own). */
+const tile = (label: string) => {
+  const term = screen.getAllByRole('term').find((el) => el.textContent === label);
+  if (!term) throw new Error(`no summary tile labelled ${label}`);
+  return term.nextElementSibling;
+};
+
 beforeEach(() => {
-  queries.replicaSets = [
-    { apiVersion: 'apps/v1', kind: 'ReplicaSet', metadata: { name: 'web-1', namespace: 'team-a', uid: 'rs-uid', ownerReferences: [{ kind: 'Deployment', uid: 'deploy-uid', controller: true, name: 'web' }] } } as KubeObject,
-  ];
+  queries.replicaSets = [replicaSet('web-1', 'rs-uid', '3', 2, 1), replicaSet('web-0', 'rs-old', '2', 0, 0)];
   // The first pod never got `app` running, so a shell must land in the second.
   queries.pods = [pod('web-aaa', ['broken']), pod('web-bbb', ['app', 'broken'])];
   queries.metrics = undefined;
@@ -69,15 +119,66 @@ beforeEach(() => {
 });
 
 describe('DeploymentDetail', () => {
-  it('summarizes rollout facts without chips', () => {
+  it('summarizes the rollout: counters, progress, and why it is not ready', () => {
     render(<DeploymentDetail obj={deployment()} ctx="dev" />);
 
-    expect(screen.getByText('2 updated · 1 available · 1 unavailable')).toBeInTheDocument();
+    expect(tile('Ready')).toHaveTextContent('1/2');
+    expect(tile('Updated')).toHaveTextContent('2');
+    expect(tile('Available')).toHaveTextContent('1');
+    expect(tile('Unavailable')).toHaveTextContent('1');
+    expect(screen.getByText('1 of 2 ready')).toBeInTheDocument();
+    // Ready tile plus one per pod row.
+    expect(screen.getAllByText('1/2').length).toBeGreaterThan(1);
+
+    // The failing condition in full, plus the pods' own reason.
+    const banner = screen.getByRole('alert');
+    expect(within(banner).getByText('Why this Deployment isn’t ready')).toBeInTheDocument();
+    expect(within(banner).getByText(/Available: MinimumReplicasUnavailable/)).toBeInTheDocument();
+    expect(within(banner).getByText('Deployment does not have minimum availability.')).toBeInTheDocument();
+    expect(within(banner).getByText('1 pod CrashLoopBackOff')).toBeInTheDocument();
+    expect(within(banner).getByText('back-off 5m restarting failed container')).toBeInTheDocument();
+
+    expect(screen.getByText('1 CrashLoopBackOff · 1 Running')).toBeInTheDocument();
+    expect(screen.getByText('app=web')).toBeInTheDocument();
     expect(screen.getByText(/RollingUpdate/)).toBeInTheDocument();
     expect(screen.getByText(/max unavailable 1 · max surge 25%/)).toBeInTheDocument();
-    expect(screen.getByText('app=web')).toBeInTheDocument();
-    // Ready fact for the Deployment, plus one per pod row.
-    expect(screen.getAllByText('1/2').length).toBeGreaterThan(1);
+    expect(screen.getByText('600s')).toBeInTheDocument();
+  });
+
+  it('shows the template’s declared environment, mounts and probes without a live pod', () => {
+    render(<DeploymentDetail obj={deployment()} ctx="dev" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Environment for app' }));
+    expect(screen.getByText('MODE')).toBeInTheDocument();
+    expect(screen.getByText('prod')).toBeInTheDocument();
+    expect(screen.getByText('TOKEN')).toBeInTheDocument();
+    expect(screen.getByText('secret/app-secret → token')).toBeInTheDocument();
+    expect(screen.getByText('configmap/app-config')).toBeInTheDocument();
+    // Declared references have no resolved value and no reveal toggle.
+    expect(screen.queryByRole('switch', { name: 'Reveal secret values' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mounts for app' }));
+    expect(screen.getByText('/data')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'persistentVolumeClaim/data-pvc' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'PersistentVolumeClaim', name: 'data-pvc', namespace: 'team-a' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Probes for app' }));
+    expect(screen.getByText('HTTP /healthz :8080')).toBeInTheDocument();
+    // Templates have no runtime, so no probe outcome is claimed.
+    expect(screen.getByText('HTTP /healthz :8080').closest('tr')).not.toHaveTextContent('Ready');
+  });
+
+  it('lists the replica sets that still hold pods and opens them', () => {
+    render(<DeploymentDetail obj={deployment()} ctx="dev" />);
+
+    // web-0 is scaled to zero and belongs to the History tab.
+    expect(screen.getByText('1 older scaled to zero — see History')).toBeInTheDocument();
+    expect(screen.queryByText('web-0')).not.toBeInTheDocument();
+    // A single live ReplicaSet is the normal case, so the section starts collapsed.
+    fireEvent.click(screen.getByRole('button', { name: /Replica sets/ }));
+    expect(screen.getByText('current')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'web-1' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'ReplicaSet', name: 'web-1' });
   });
 
   it('streams one container across every pod and shells into a pod running it', () => {
@@ -118,5 +219,16 @@ describe('DeploymentDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Logs for container app' }));
     expect(effects.toast).toHaveBeenCalledWith('error', expect.stringContaining('No running pods'));
     expect(useDockStore.getState().tabs).toHaveLength(0);
+  });
+
+  it('stays quiet when every replica is ready', () => {
+    const healthy = deployment();
+    healthy.status = { replicas: 2, readyReplicas: 2, updatedReplicas: 2, availableReplicas: 2, conditions: [{ type: 'Available', status: 'True' }] };
+    queries.pods = [pod('web-aaa', ['app', 'broken']), pod('web-bbb', ['app', 'broken'])];
+    render(<DeploymentDetail obj={healthy} ctx="dev" />);
+
+    expect(screen.getByText('2 of 2 ready')).toBeInTheDocument();
+    expect(screen.queryByText('Why this Deployment isn’t ready')).not.toBeInTheDocument();
+    expect(screen.getByText('2 Running')).toBeInTheDocument();
   });
 });
