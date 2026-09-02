@@ -12,6 +12,7 @@ import type { AppContext } from '../app.js';
 import { inspectChart } from '../helm/engine.js';
 import { installRelease } from '../helm/install.js';
 import { getHistory, getRelease, getRevisionDetail, listReleaseRecords, listReleases, revOf } from '../helm/release-reader.js';
+import { listReleaseResources } from '../helm/release-resources.js';
 import {
   addRepo,
   checkChartUpdates,
@@ -91,6 +92,7 @@ async function chartDetail(ctx: AppContext, key: string, archive: () => Promise<
 
 export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/api/helm/operations', async () => ctx.helmOperations.list());
+  app.get('/api/helm/watch-status', async () => ctx.clusters.helmWatchStatuses());
 
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string } }>('/api/contexts/:ctx/helm/releases', async (req, reply) => {
     try {
@@ -106,6 +108,16 @@ export function registerHelmRoutes(app: FastifyInstance, ctx: AppContext): void 
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       return await getRelease(handle, req.params.ns, req.params.name);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  app.get<{ Params: { ctx: string; ns: string; name: string } }>('/api/contexts/:ctx/helm/releases/:ns/:name/resources', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await listReleaseResources(handle, req.params.ns, req.params.name);
     } catch (err) {
       sendError(reply, err);
       return reply;

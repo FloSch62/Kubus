@@ -21,6 +21,18 @@ interface WatchLine {
 const MIN_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 const RETRYABLE_LIST_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const DEFAULT_UNAVAILABLE_STATUS_CODES = [404];
+
+export interface ResourceWatcherOptions {
+  /** Extra query parameters sent with every LIST and WATCH (label/field selectors). */
+  query?: Record<string, string>;
+  /** Extra headers for LIST requests, e.g. an alternate representation such as PartialObjectMetadataList. */
+  listHeaders?: Record<string, string>;
+  /** Extra headers for WATCH requests. */
+  watchHeaders?: Record<string, string>;
+  /** HTTP statuses that mark the resource unavailable (stop, no retries). Default: 404. */
+  unavailableStatusCodes?: number[];
+}
 
 /**
  * Generic list+watch for one (gvr, namespace) on one cluster. Maintains an
@@ -45,6 +57,7 @@ export class ResourceWatcher {
     public readonly plural: string,
     public readonly namespace: string | undefined,
     private log: FastifyBaseLogger,
+    private readonly options: ResourceWatcherOptions = {},
   ) {}
 
   /** Resolves once the initial LIST populated the cache. */
@@ -130,7 +143,13 @@ export class ResourceWatcher {
   }
 
   private path(query: URLSearchParams): string {
+    for (const [key, value] of Object.entries(this.options.query ?? {})) query.set(key, value);
     return resourcePath(this.group, this.version, this.plural, { namespace: this.namespace || undefined, query });
+  }
+
+  private isUnavailable(err: unknown): boolean {
+    const code = (err as { code?: number })?.code;
+    return typeof code === 'number' && (this.options.unavailableStatusCodes ?? DEFAULT_UNAVAILABLE_STATUS_CODES).includes(code);
   }
 
   /**
@@ -146,7 +165,7 @@ export class ResourceWatcher {
         return;
       } catch (err) {
         if (!this.running) throw err;
-        if (isUnavailable(err)) {
+        if (this.isUnavailable(err)) {
           this.markUnavailable(err);
           return;
         }
@@ -166,7 +185,10 @@ export class ResourceWatcher {
     target.clear();
     do {
       if (continueToken) query.set('continue', continueToken);
-      const list = await this.raw.json<{ metadata?: { resourceVersion?: string; continue?: string }; items?: KubeObject[] }>(this.path(query));
+      const list = await this.raw.json<{ metadata?: { resourceVersion?: string; continue?: string }; items?: KubeObject[] }>(
+        this.path(query),
+        this.options.listHeaders ? { headers: this.options.listHeaders } : undefined,
+      );
       rv = list.metadata?.resourceVersion ?? rv;
       continueToken = list.metadata?.continue || undefined;
       for (const item of list.items ?? []) {
@@ -195,7 +217,7 @@ export class ResourceWatcher {
         await this.relistWithRetry();
       } catch (err) {
         if (!this.running) break;
-        if (isUnavailable(err)) {
+        if (this.isUnavailable(err)) {
           this.log.info({ gvr: `${this.group}/${this.version}/${this.plural}` }, 'resource API unavailable, stopping watch');
           this.markUnavailable(err);
           break;
@@ -244,7 +266,7 @@ export class ResourceWatcher {
       allowWatchBookmarks: 'true',
       timeoutSeconds: '300',
     });
-    const res = await this.raw.stream(this.path(query), { signal: this.abort.signal });
+    const res = await this.raw.stream(this.path(query), { signal: this.abort.signal, headers: this.options.watchHeaders });
     const body = res.body;
     if (!body) throw new Error('watch response had no body');
 
@@ -314,11 +336,6 @@ function isGone(err: unknown): boolean {
   if (err instanceof GoneError) return true;
   const code = (err as { code?: number })?.code;
   return code === 410;
-}
-
-function isUnavailable(err: unknown): boolean {
-  const code = (err as { code?: number })?.code;
-  return code === 404;
 }
 
 function isRetryableListError(err: unknown): boolean {

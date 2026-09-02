@@ -1317,6 +1317,46 @@ export interface HelmChartUpdate {
   reason?: 'up-to-date' | 'chart-not-found' | 'current-version-not-found';
 }
 
+/** State of the server-side watch on a cluster's Helm release records (the live signal behind the Helm pages). */
+export type HelmWatchState = 'live' | 'reconnecting' | 'error' | 'unavailable';
+
+export interface HelmWatchStatus {
+  state: HelmWatchState;
+  message?: string;
+}
+
+/** One release whose stored record was created, patched or deleted. */
+export interface HelmReleaseChange {
+  namespace: string;
+  name: string;
+  /** Revision of the record that changed. */
+  revision: number;
+  /** Helm's `status` label on the record, when present. */
+  status?: string;
+  type: 'ADDED' | 'MODIFIED' | 'DELETED';
+}
+
+export type HelmReleaseResourceState = 'ready' | 'progressing' | 'failed' | 'present' | 'missing' | 'unknown';
+
+/** One object from a release manifest (or a stored hook) resolved against the live cluster. */
+export interface HelmReleaseResource {
+  kind: string;
+  apiVersion: string;
+  group: string;
+  version: string;
+  /** Empty when the cluster does not serve this kind. */
+  plural: string;
+  namespaced: boolean;
+  namespace?: string;
+  name: string;
+  state: HelmReleaseResourceState;
+  message?: string;
+  uid?: string;
+  createdAt?: string;
+  /** Set for resources stored as hooks rather than in the manifest. */
+  hookEvents?: string[];
+}
+
 // ---- Port forward ----
 
 export type PortForwardTargetKind = 'pod' | 'service' | 'deployment' | 'statefulset' | 'daemonset' | 'replicaset';

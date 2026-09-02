@@ -7,16 +7,17 @@ import { docLabel, pathForDoc, validateDoc } from './common.js';
 const POLL_MS = 2_000;
 const CRASH_LOOP_GRACE_MS = 90_000;
 const READ_ERROR_GRACE_MS = 60_000;
-const WAIT_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Pod', 'PersistentVolumeClaim']);
+export const READINESS_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Pod', 'PersistentVolumeClaim']);
 const POD_WARNING_REASONS = new Set(['FailedAttachVolume', 'FailedMount', 'FailedScheduling', 'FailedCreatePodSandBox']);
 const MULTI_ATTACH_RE = /multi-attach|already used by pod|already exclusively attached|can't be attached to another/i;
 
-interface LiveObject {
+export interface LiveObject {
   metadata?: {
     generation?: number;
     name?: string;
     namespace?: string;
     uid?: string;
+    creationTimestamp?: string;
     labels?: Record<string, string>;
     annotations?: Record<string, string>;
     ownerReferences?: Array<{ kind?: string; name?: string; controller?: boolean }>;
@@ -490,7 +491,7 @@ export async function waitForResources(
   onProgress?: (progress: ReadinessProgress) => void,
   options: ReadinessOptions = {},
 ): Promise<string[]> {
-  const waiting = docs.filter((doc) => WAIT_KINDS.has(doc.kind ?? ''));
+  const waiting = docs.filter((doc) => READINESS_KINDS.has(doc.kind ?? ''));
   if (!waiting.length) return [];
   const deadline = Date.now() + timeoutSeconds * 1_000;
   let pending: ReadinessIssue[] = waiting.map((doc) => ({ resource: docLabel(doc), message: 'checking readiness' }));

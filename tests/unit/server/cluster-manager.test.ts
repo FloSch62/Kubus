@@ -13,6 +13,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClusterHandle, ClusterManager } from '../../../server/src/kube/cluster-manager';
 import { CrdTracker } from '../../../server/src/kube/crd-tracker';
+import { HelmRecordWatcher } from '../../../server/src/helm/record-watcher';
 import { MetricsPoller } from '../../../server/src/kube/metrics-poller';
 import { NetworkMetricsPoller } from '../../../server/src/kube/network-poller';
 import { RawClient } from '../../../server/src/kube/raw-client';
@@ -57,6 +58,13 @@ interface ManagerInternals {
 
 interface TrackerInternals {
   onChange(): void;
+}
+
+interface HelmWatcherInternals {
+  handlers: {
+    onChanges(changes: unknown[]): void;
+    onStatus(status: unknown): void;
+  };
 }
 
 interface FakeFsWatcher {
@@ -191,6 +199,8 @@ describe('ClusterHandle', () => {
     const networkStop = vi.spyOn(NetworkMetricsPoller.prototype, 'stop').mockImplementation(() => {});
     const crdStart = vi.spyOn(CrdTracker.prototype, 'start').mockImplementation(() => {});
     const crdStop = vi.spyOn(CrdTracker.prototype, 'stop').mockImplementation(() => {});
+    const helmStart = vi.spyOn(HelmRecordWatcher.prototype, 'start').mockImplementation(() => {});
+    const helmStop = vi.spyOn(HelmRecordWatcher.prototype, 'stop').mockImplementation(() => {});
     const acquire = vi.spyOn(WatcherRegistry.prototype, 'acquire').mockReturnValue({} as never);
     const stopAll = vi.spyOn(WatcherRegistry.prototype, 'stopAll').mockImplementation(() => {});
     const warm = vi.spyOn(ResourceSearchIndex.prototype, 'warm').mockImplementation(() => {});
@@ -231,11 +241,21 @@ describe('ClusterHandle', () => {
     expect(discoveryChanged).toHaveBeenCalled();
     expect(invalidateCustomEntries).toHaveBeenCalledTimes(1);
 
+    const helmChanges = vi.fn();
+    const helmStatus = vi.fn();
+    handle.onHelmRecordsChanged = helmChanges;
+    handle.onHelmWatchStatus = helmStatus;
+    (handle.helmRecords as unknown as HelmWatcherInternals).handlers.onChanges([{ namespace: 'demo', name: 'podinfo', revision: 2, type: 'MODIFIED' }]);
+    (handle.helmRecords as unknown as HelmWatcherInternals).handlers.onStatus({ state: 'live' });
+    expect(helmChanges).toHaveBeenCalledWith([{ namespace: 'demo', name: 'podinfo', revision: 2, type: 'MODIFIED' }]);
+    expect(helmStatus).toHaveBeenCalledWith({ state: 'live' });
+
     handle.activate();
     handle.activate();
     expect(metricsStart).toHaveBeenCalledTimes(1);
     expect(networkStart).toHaveBeenCalledTimes(1);
     expect(crdStart).toHaveBeenCalledTimes(1);
+    expect(helmStart).toHaveBeenCalledTimes(1);
     expect(acquire.mock.calls.map((call) => call.slice(0, 3))).toEqual([
       ['', 'v1', 'pods'],
       ['apps', 'v1', 'deployments'],
@@ -250,6 +270,7 @@ describe('ClusterHandle', () => {
     expect(metricsStop).toHaveBeenCalled();
     expect(networkStop).toHaveBeenCalled();
     expect(crdStop).toHaveBeenCalled();
+    expect(helmStop).toHaveBeenCalled();
     expect(stopAll).toHaveBeenCalled();
     expect(disposeIndex).toHaveBeenCalled();
   });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { hashKey, keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
   ClusterMetricsSummary,
@@ -59,7 +59,9 @@ import type {
   HelmChartHit,
   HelmChartSourceRef,
   HelmChartUpdate,
+  HelmReleaseResource,
   HelmUpdateCheck,
+  HelmWatchStatus,
   HelmHubChart,
   HelmInstallRequest,
   HelmUpgradeRequest,
@@ -1187,36 +1189,139 @@ export function useTopologyGraphs(contexts: string[], namespaces: string[], focu
 
 // ---- Helm ----
 
-export function useHelmReleases(contexts: string[]) {
+export interface HelmReleaseRow {
+  ctx: string;
+  release: HelmReleaseSummary;
+}
+
+export interface HelmReleasesState {
+  rows: HelmReleaseRow[];
+  /** Clusters whose release list failed; rows from the other clusters stay visible. */
+  errors: Record<string, Error>;
+  /** No cluster has produced rows yet. */
+  isLoading: boolean;
+  isFetching: boolean;
+  /** Newest successful fetch across clusters (epoch ms); 0 before the first. */
+  dataUpdatedAt: number;
+  refetch: () => void;
+}
+
+/**
+ * Release data streams through the server's record watch; polling is only a
+ * safety net there, and the tight cadence is the fallback for clusters the
+ * watch cannot cover (no cluster-wide secret access).
+ */
+const HELM_LIVE_POLL_MS = 120_000;
+const HELM_FALLBACK_POLL_MS = 30_000;
+/** Release objects change on their own (pods restart, jobs finish), so the Resources tab keeps a short poll. */
+const HELM_RESOURCES_POLL_MS = 15_000;
+const HELM_RESOURCES_IDLE_POLL_MS = 60_000;
+
+/**
+ * Per-cluster state of the server's Helm record watch. useHelmLiveEvents is
+ * the sole poller; every other observer rides on the cache and on the
+ * helm-watch-status broadcasts.
+ */
+export function useHelmWatchStatus({ poll = false }: { poll?: boolean } = {}) {
+  const interval = useRefetchInterval(60_000);
   return useQuery({
-    queryKey: ['helm-releases', contexts],
-    queryFn: async () => {
-      const all = await Promise.all(
-        contexts.map(async (ctx) => {
-          const releases = await apiFetch<HelmReleaseSummary[]>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases`).catch(() => [] as HelmReleaseSummary[]);
-          return releases.map((r) => ({ ctx, release: r }));
-        }),
-      );
-      return all.flat();
-    },
-    enabled: contexts.length > 0,
-    refetchInterval: useRefetchInterval(30_000),
+    queryKey: ['helm-watch-status'],
+    queryFn: () => apiFetch<Record<string, HelmWatchStatus>>('/api/helm/watch-status'),
+    refetchInterval: poll ? interval : false,
+    refetchOnWindowFocus: poll,
   });
 }
 
+/** True when every given cluster streams record changes. */
+export function helmWatchLive(status: Record<string, HelmWatchStatus> | undefined, contexts: string[]): boolean {
+  return contexts.length > 0 && contexts.every((ctx) => status?.[ctx]?.state === 'live');
+}
+
+/** Poll cadence for release data: relaxed while every cluster streams record changes, tight otherwise. */
+function useHelmPollInterval(contexts: string[]): number | false {
+  const { data } = useHelmWatchStatus();
+  const liveInterval = useRefetchInterval(HELM_LIVE_POLL_MS);
+  const fallbackInterval = useRefetchInterval(HELM_FALLBACK_POLL_MS);
+  return helmWatchLive(data, contexts) ? liveInterval : fallbackInterval;
+}
+
+/**
+ * Polled queries pause while their pane is hidden, and React Query only
+ * re-arms the timer on reveal, so a tab revealed after minutes would show
+ * its old rows until the next tick. Refetch as soon as the pane is visible.
+ */
+export function useRefetchOnReveal(refetch: () => void): void {
+  const paneActive = usePaneActive();
+  const wasActive = useRef(paneActive);
+  useEffect(() => {
+    if (paneActive && !wasActive.current) refetch();
+    wasActive.current = paneActive;
+  }, [paneActive, refetch]);
+}
+
+export function useHelmReleases(contexts: string[]): HelmReleasesState {
+  const qc = useQueryClient();
+  const interval = useHelmPollInterval(contexts);
+  const combine = useCallback(
+    (results: Array<UseQueryResult<HelmReleaseSummary[]>>) => ({
+      rows: results.flatMap((result, i) => (Array.isArray(result.data) ? result.data : []).map((release) => ({ ctx: contexts[i]!, release }))),
+      errors: Object.fromEntries(results.flatMap((result, i) => (result.error ? [[contexts[i]!, result.error] as [string, Error]] : []))),
+      isLoading: results.some((result) => result.isLoading),
+      isFetching: results.some((result) => result.isFetching),
+      dataUpdatedAt: results.reduce((newest, result) => Math.max(newest, result.dataUpdatedAt ?? 0), 0),
+    }),
+    [contexts],
+  );
+  const state = useQueries({
+    queries: contexts.map((ctx) => ({
+      queryKey: ['helm-releases', ctx],
+      queryFn: () => apiFetch<HelmReleaseSummary[]>(`/api/contexts/${encodeURIComponent(ctx)}/helm/releases`),
+      refetchInterval: interval,
+      refetchOnWindowFocus: true,
+    })),
+    combine,
+  });
+  const refetch = useCallback(() => void qc.invalidateQueries({ queryKey: ['helm-releases'] }), [qc]);
+  useRefetchOnReveal(refetch);
+  return { ...state, refetch };
+}
+
 export function useHelmRelease(ctx: string | undefined, ns: string | undefined, name: string | undefined) {
+  const interval = useHelmPollInterval(ctx ? [ctx] : []);
   return useQuery({
     queryKey: ['helm-release', ctx, ns, name],
     queryFn: () => apiFetch<HelmReleaseDetail>(`/api/contexts/${encodeURIComponent(ctx!)}/helm/releases/${encodeURIComponent(ns!)}/${encodeURIComponent(name!)}`),
     enabled: !!ctx && !!ns && !!name,
+    refetchInterval: interval,
+    refetchOnWindowFocus: true,
   });
 }
 
 export function useHelmHistory(ctx: string | undefined, ns: string | undefined, name: string | undefined) {
+  const interval = useHelmPollInterval(ctx ? [ctx] : []);
   return useQuery({
     queryKey: ['helm-history', ctx, ns, name],
     queryFn: () => apiFetch<HelmRevision[]>(`/api/contexts/${encodeURIComponent(ctx!)}/helm/releases/${encodeURIComponent(ns!)}/${encodeURIComponent(name!)}/history`),
     enabled: !!ctx && !!ns && !!name,
+    refetchInterval: interval,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** The release manifest resolved against the cluster; `active` tightens the poll while the tab is in view. */
+export function useHelmReleaseResources(ctx: string | undefined, ns: string | undefined, name: string | undefined, opts?: { active?: boolean }) {
+  const activeInterval = useRefetchInterval(HELM_RESOURCES_POLL_MS);
+  const idleInterval = useRefetchInterval(HELM_RESOURCES_IDLE_POLL_MS);
+  return useQuery({
+    queryKey: ['helm-resources', ctx, ns, name],
+    queryFn: () =>
+      apiFetch<HelmReleaseResource[]>(
+        `/api/contexts/${encodeURIComponent(ctx!)}/helm/releases/${encodeURIComponent(ns!)}/${encodeURIComponent(name!)}/resources`,
+      ),
+    enabled: !!ctx && !!ns && !!name,
+    refetchInterval: opts?.active ? activeInterval : idleInterval,
+    refetchOnWindowFocus: true,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -1228,44 +1333,75 @@ export function useHelmOperations() {
   });
 }
 
-/**
- * One app-wide bridge from Helm progress broadcasts into React Query. The
- * HTTP list remains the reconnect/reload source of truth.
- */
-export function useHelmOperationEvents(): void {
-  const qc = useQueryClient();
-  useEffect(
-    () =>
-      watchClient.onBroadcast((message) => {
-        if (message.op !== 'helm-operation') return;
-        const operation = message.operation;
-        let previous: HelmOperation | undefined;
-        qc.setQueryData<HelmOperation[]>(['helm-operations'], (current) => {
-          previous = current?.find((item) => item.id === operation.id);
-          return [operation, ...(current ?? []).filter((item) => item.id !== operation.id)].toSorted((left, right) =>
-            right.startedAt.localeCompare(left.startedAt),
-          );
-        });
+const HELM_QUERY_ROOTS = ['helm-watch-status', 'helm-operations', 'helm-releases', 'helm-release', 'helm-history', 'helm-resources'];
 
-        const revisionBecameVisible = !previous?.revision && !!operation.revision;
-        const pendingRecordBecameVisible =
-          previous?.phase !== operation.phase && !!operation.revision && (operation.phase === 'pre-hook' || operation.phase === 'applying');
-        const becameTerminal = previous?.status === 'running' && operation.status !== 'running';
-        if (revisionBecameVisible || pendingRecordBecameVisible || becameTerminal) {
-          void qc.invalidateQueries({ queryKey: ['helm-releases'] });
-          void qc.invalidateQueries({ queryKey: ['helm-release', operation.ctx, operation.namespace, operation.releaseName] });
-          void qc.invalidateQueries({ queryKey: ['helm-history', operation.ctx, operation.namespace, operation.releaseName] });
+function invalidateHelmRelease(qc: ReturnType<typeof useQueryClient>, ctx: string, ns: string, name: string): void {
+  void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
+  void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
+  void qc.invalidateQueries({ queryKey: ['helm-resources', ctx, ns, name] });
+}
+
+/**
+ * One app-wide bridge from the Helm broadcasts into React Query: record
+ * changes (any writer, Kubus or not) refresh the affected release queries,
+ * watch-status frames keep the live badge current, and operation progress
+ * lands in the operations list with completion toasts. The HTTP endpoints
+ * remain the reload source of truth, and a socket reconnect resyncs them all
+ * because broadcasts sent while it was down are gone.
+ */
+export function useHelmLiveEvents(): void {
+  const qc = useQueryClient();
+  useHelmWatchStatus({ poll: true });
+  useEffect(() => {
+    const unsubscribeBroadcast = watchClient.onBroadcast((message) => {
+      if (message.op === 'helm-watch-status') {
+        qc.setQueryData<Record<string, HelmWatchStatus>>(['helm-watch-status'], (current) => ({ ...current, [message.ctx]: message.status }));
+        return;
+      }
+      if (message.op === 'helm-records-changed') {
+        void qc.invalidateQueries({ queryKey: ['helm-releases', message.ctx] });
+        for (const change of message.changes) invalidateHelmRelease(qc, message.ctx, change.namespace, change.name);
+        return;
+      }
+      if (message.op !== 'helm-operation') return;
+      const operation = message.operation;
+      let previous: HelmOperation | undefined;
+      qc.setQueryData<HelmOperation[]>(['helm-operations'], (current) => {
+        previous = current?.find((item) => item.id === operation.id);
+        return [operation, ...(current ?? []).filter((item) => item.id !== operation.id)].toSorted((left, right) =>
+          right.startedAt.localeCompare(left.startedAt),
+        );
+      });
+
+      const revisionBecameVisible = !previous?.revision && !!operation.revision;
+      const pendingRecordBecameVisible =
+        previous?.phase !== operation.phase && !!operation.revision && (operation.phase === 'pre-hook' || operation.phase === 'applying');
+      const becameTerminal = previous?.status === 'running' && operation.status !== 'running';
+      // A live record watch already announces the record writes behind these
+      // transitions; refetching here too would only restart those fetches.
+      const watch = qc.getQueryData<Record<string, HelmWatchStatus>>(['helm-watch-status']);
+      const watchLive = watch?.[operation.ctx]?.state === 'live';
+      if (!watchLive && (revisionBecameVisible || pendingRecordBecameVisible || becameTerminal)) {
+        void qc.invalidateQueries({ queryKey: ['helm-releases', operation.ctx] });
+        invalidateHelmRelease(qc, operation.ctx, operation.namespace, operation.releaseName);
+      }
+      if (becameTerminal) {
+        if (operation.status === 'succeeded') {
+          showToast('success', `${operation.kind} completed for ${operation.namespace}/${operation.releaseName}`);
+        } else {
+          showToast('error', `${operation.kind} failed for ${operation.namespace}/${operation.releaseName} — review the Helm Releases page for recovery guidance`);
         }
-        if (becameTerminal) {
-          if (operation.status === 'succeeded') {
-            showToast('success', `${operation.kind} completed for ${operation.namespace}/${operation.releaseName}`);
-          } else {
-            showToast('error', `${operation.kind} failed for ${operation.namespace}/${operation.releaseName} — review the Helm Releases page for recovery guidance`);
-          }
-        }
-      }),
-    [qc],
-  );
+      }
+    });
+    const unsubscribeOpen = watchClient.onOpen((reconnect) => {
+      if (!reconnect) return;
+      for (const root of HELM_QUERY_ROOTS) void qc.invalidateQueries({ queryKey: [root] });
+    });
+    return () => {
+      unsubscribeBroadcast();
+      unsubscribeOpen();
+    };
+  }, [qc]);
 }
 
 export function useHelmRevision(ctx: string | undefined, ns: string | undefined, name: string | undefined, revision: number | undefined) {
@@ -1295,9 +1431,8 @@ export function useHelmUninstall() {
       );
     },
     onSettled: (_result, _error, { ctx, ns, name }) => {
-      void qc.invalidateQueries({ queryKey: ['helm-releases'] });
-      void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
-      void qc.invalidateQueries({ queryKey: ['helm-history', ctx, ns, name] });
+      void qc.invalidateQueries({ queryKey: ['helm-releases', ctx] });
+      invalidateHelmRelease(qc, ctx, ns, name);
     },
   });
 }

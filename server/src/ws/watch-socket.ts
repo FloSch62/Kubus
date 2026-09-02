@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { groupFromPath, type KubeObject, type WatchServerMessage } from '@kubus/shared';
+import { groupFromPath, type HelmReleaseChange, type HelmWatchStatus, type KubeObject, type WatchServerMessage } from '@kubus/shared';
 import { watchClientMessageSchema } from '@kubus/shared/ws-protocol';
 import type { AppContext } from '../app.js';
 import { isSecretGVR, redactSecretData } from '../kube/redact.js';
@@ -65,6 +65,8 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
   ctx.clusters.on('contexts-changed', () => broadcastWatchMessage({ op: 'contexts-changed' }));
   ctx.clusters.on('context-reset', (name: string) => broadcastWatchMessage({ op: 'context-reset', ctx: name }));
   ctx.clusters.on('discovery-changed', (name: string) => broadcastWatchMessage({ op: 'discovery-update', ctx: name }));
+  ctx.clusters.on('helm-records-changed', (name: string, changes: HelmReleaseChange[]) => broadcastWatchMessage({ op: 'helm-records-changed', ctx: name, changes }));
+  ctx.clusters.on('helm-watch-status', (name: string, status: HelmWatchStatus) => broadcastWatchMessage({ op: 'helm-watch-status', ctx: name, status }));
   ctx.portForwards.on('update', (forwards) => broadcastWatchMessage({ op: 'pf-update', forwards }));
 
   app.get('/ws/watch', { websocket: true }, (socket: WebSocket) => {

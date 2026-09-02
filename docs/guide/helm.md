@@ -21,8 +21,24 @@ Open **Helm** from the nav (or ++ctrl+k++ → *Go to Helm Releases*). You get ev
 across your selected clusters, with namespace, status, chart and app version, revision and
 last-updated. Kubus also checks the configured source that contains each installed chart
 and shows the newest available stable version inline. The page header summarises how many
-releases have updates, and **Refresh updates** checks again without making one request per
-release.
+releases have updates, and **Check for chart updates** checks again without making one
+request per release.
+
+The list is live. The server watches each cluster's Helm release records, so an upgrade
+from the `helm` CLI, a GitOps controller or another Kubus window shows up within a second,
+with no refresh. Only record metadata is watched, never the payloads, so this costs the
+cluster almost nothing. The **Live** badge in the header confirms the watch per cluster;
+when a cluster does not allow Kubus to list secrets cluster-wide it reads **Polling**
+instead, with the reason in the tooltip, and the list falls back to a regular poll. A tab
+that was hidden catches up the moment you come back to it.
+
+Use the filter box to narrow the list by name, namespace, chart or cluster, and the
+**Needs attention** toggle to see only releases whose record is not settled (failed,
+pending, unknown) or whose latest operation failed. **Updates** shows the releases with a
+newer chart version available. When a cluster's releases cannot be loaded at all, the
+page says so and keeps the other clusters' rows on screen.
+
+Right-click a release for **Open release**, **Upgrade…** and **Uninstall…**.
 
 Update checks consult your configured repositories **and [Artifact Hub](https://artifacthub.io)**,
 so the names of installed charts are sent to artifacthub.io. Only sources whose version
@@ -127,13 +143,30 @@ correctly. Helm values schema validation also runs while rendering.
   <figcaption>Values, computed values, manifest, history and notes.</figcaption>
 </figure>
 
+The header names the release, its status and cluster, and carries the actions: **Upgrade**
+(labelled with the newest version when one is available, or *Retry / recover* after a
+failure), **Roll back** with a menu of the revisions Helm can return to, **Diff** against
+the previous revision, and **Uninstall**. The summary strip below answers the first
+questions at a glance: status, revision, chart and app version, how many of the release's
+objects are ready, whether an update is available, and when it was last changed. The page
+updates itself like the list does.
+
 | Tab | Shows |
 | --- | --- |
+| **Overview** | The release's objects resolved against the cluster, each with its live state, plus the release details (first deployed, chart sources, dependencies, hooks, shipped CRDs, storage driver). |
 | **Values** | The values *you* supplied at install/upgrade. |
 | **Computed values** | The fully-merged values Helm actually used (your values + chart defaults). |
 | **Manifest** | The rendered Kubernetes manifests for the release. |
-| **History** | Every revision, with chart/app version, change-cause, a **Diff** and a **Roll back** button. |
+| **History** | Every revision, with chart/app version, change-cause, a **Diff** and a **Roll back** button. The current revision is marked. |
 | **Notes** | The release `NOTES.txt`, if the chart provides one. |
+
+The **Resources** section on the Overview tab lists every object the current revision
+renders, in install order, together with the hooks stored in the release. Deployments,
+StatefulSets, DaemonSets, Jobs, Pods and PVCs show their rollout state (*Ready*,
+*Progressing* or *Failed*, with the reason on hover); other kinds show *Present* or
+*Missing*. Click any row to open that object's details drawer. The section re-checks the
+cluster every few seconds while it is in view, so a Deployment that is still rolling out
+after an upgrade is visible without leaving the release.
 
 If an install, upgrade or rollback fails, Kubus keeps the failed revision instead of
 reporting a false success. The error identifies the failed phase and resources, links the

@@ -42,8 +42,8 @@ The home for managing the clusters in your kubeconfig:
 
 ## Data & refresh { #data-refresh }
 
-Kubus keeps **lists** live over a WebSocket watch no matter what. Metrics, events, Helm and
-the overview are polled instead, and this setting controls how often:
+Kubus keeps **lists** and **Helm releases** live over a WebSocket watch no matter what.
+Metrics, events and the overview are polled instead, and this setting controls how often:
 
 | Setting | Effect |
 | --- | --- |
@@ -51,6 +51,10 @@ the overview are polled instead, and this setting controls how often:
 | **Normal** | The default cadence |
 | **Slow** | Poll about half as often |
 | **Off** | Stop polling. Useful on slow links or to save API calls |
+
+Helm keeps a slow safety-net poll on the same scale, and switches to the normal polling
+cadence for a cluster whose release records it is not allowed to watch. The badge on the
+Helm pages tells you which of the two you are looking at.
 
 ## Logs & terminal { #logs-terminal }
 

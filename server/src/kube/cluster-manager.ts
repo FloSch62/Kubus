@@ -16,7 +16,7 @@ import {
   type ApiConstructor,
   type ApiType,
 } from '@kubernetes/client-node';
-import type { ContextInfo, TestConnectionResponse } from '@kubus/shared';
+import type { ContextInfo, HelmReleaseChange, HelmWatchStatus, TestConnectionResponse } from '@kubus/shared';
 import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
@@ -24,6 +24,7 @@ import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { CrdTracker } from './crd-tracker.js';
+import { HelmRecordWatcher } from '../helm/record-watcher.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
@@ -47,12 +48,17 @@ export class ClusterHandle {
   readonly networkPoller: NetworkMetricsPoller;
   readonly searchIndex: ResourceSearchIndex;
   readonly crdTracker: CrdTracker;
+  readonly helmRecords: HelmRecordWatcher;
   health: ContextInfo['health'] = 'connecting';
   healthMessage?: string;
   kubernetesVersion?: string;
   activated = false;
   /** Set by ClusterManager: fires when the cluster's CRD set changed. */
   onDiscoveryChanged?: () => void;
+  /** Set by ClusterManager: Helm release records were written or deleted. */
+  onHelmRecordsChanged?: (changes: HelmReleaseChange[]) => void;
+  /** Set by ClusterManager: the Helm record watch changed state. */
+  onHelmWatchStatus?: (status: HelmWatchStatus) => void;
 
   private clients = new Map<string, unknown>();
   constructor(
@@ -80,6 +86,10 @@ export class ClusterHandle {
       this.discovery.invalidate();
       this.searchIndex.onCrdChange();
       this.onDiscoveryChanged?.();
+    });
+    this.helmRecords = new HelmRecordWatcher(this.raw, log, {
+      onChanges: (changes) => this.onHelmRecordsChanged?.(changes),
+      onStatus: (status) => this.onHelmWatchStatus?.(status),
     });
   }
 
@@ -139,6 +149,7 @@ export class ClusterHandle {
     this.metricsPoller.start();
     this.networkPoller.start();
     this.crdTracker.start();
+    this.helmRecords.start();
     // Pin overview watchers (never released; cheap and shared with the UI).
     this.watchers.acquire('', 'v1', 'pods');
     this.watchers.acquire('apps', 'v1', 'deployments');
@@ -151,6 +162,7 @@ export class ClusterHandle {
     this.metricsPoller.stop();
     this.networkPoller.stop();
     this.crdTracker.stop();
+    this.helmRecords.stop();
     this.watchers.stopAll();
     this.searchIndex.dispose();
     this.raw.dispose();
@@ -687,6 +699,13 @@ export class ClusterManager extends EventEmitter {
     return this.handles.has(contextName);
   }
 
+  /** Live-signal state of every connected cluster's Helm record watch. */
+  helmWatchStatuses(): Record<string, HelmWatchStatus> {
+    const out: Record<string, HelmWatchStatus> = {};
+    for (const [name, handle] of this.handles) out[name] = handle.helmRecords.status();
+    return out;
+  }
+
   async connect(contextName: string): Promise<ClusterHandle> {
     const existing = this.handles.get(contextName);
     if (existing) return existing;
@@ -712,6 +731,8 @@ export class ClusterManager extends EventEmitter {
     }
     const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
     handle.onDiscoveryChanged = () => this.emit('discovery-changed', contextName);
+    handle.onHelmRecordsChanged = (changes) => this.emit('helm-records-changed', contextName, changes);
+    handle.onHelmWatchStatus = (status) => this.emit('helm-watch-status', contextName, status);
     this.handles.set(contextName, handle);
     await handle.probe();
     // The context may have been removed (or the kubeconfig reloaded) while the
