@@ -45,3 +45,12 @@ whether that's code, docs, a bug report or a feature idea.
 
 - :simple-github: **Source & issues**: [github.com/FloSch62/Kubus](https://github.com/FloSch62/Kubus)
 - :material-download: **Releases**: [github.com/FloSch62/Kubus/releases](https://github.com/FloSch62/Kubus/releases)
+- :material-account-outline: **The author**: [About](../about.md), or [flosch.me](https://flosch.me/)
+
+## Support the project
+
+Kubus is built by me (FloSch) in my spare time, and it is free and stays free. If it saves you
+time, a coffee keeps the releases coming, and a star helps others find it.
+
+[:simple-buymeacoffee: Buy me a coffee](https://www.buymeacoffee.com/FloSch62){ .md-button .md-button--primary }
+[:material-star-outline: Star on GitHub](https://github.com/FloSch62/Kubus){ .md-button }

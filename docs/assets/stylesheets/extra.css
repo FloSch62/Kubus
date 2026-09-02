@@ -59,6 +59,17 @@
   font-size: 0.78rem;
 }
 
+/* An icon shortcode inside a button sits on the text baseline with a small gap. */
+.md-typeset .md-button .twemoji {
+  margin-right: 0.35em;
+  vertical-align: -0.2em;
+}
+
+.md-typeset .md-button .twemoji svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+
 /* ---------------------------------------------------------------------------
    Landing page hero. Rendered by overrides/partials/kubus-hero.html for pages
    with `hero: true`; the cube field comes from hack/docs-hero.mjs.

@@ -77,6 +77,7 @@ nav = [
     { "Test clusters" = "community/test-clusters.md" },
     { "FAQ" = "community/faq.md" },
   ] },
+  { "About" = "about.md" },
 ]
 
 # ----------------------------------------------------------------------------
@@ -134,6 +135,16 @@ code = "JetBrains Mono"
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
 link = "https://github.com/FloSch62/Kubus"
+
+[[project.extra.social]]
+icon = "simple/buymeacoffee"
+link = "https://www.buymeacoffee.com/FloSch62"
+name = "Buy me a coffee"
+
+[[project.extra.social]]
+icon = "material/web"
+link = "https://flosch.me/"
+name = "flosch.me"
 
 # ----------------------------------------------------------------------------
 # Markdown extensions, the same stack containerlab.dev / Material sites use.
