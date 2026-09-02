@@ -653,16 +653,9 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
   });
 
-  // Flush renderer state while its IPC payloads are still available. The
-  // embedded server is closed later, once Electron has torn down the windows
-  // and their HTTP/WebSocket connections.
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     flushClientState();
-  });
-
-  app.on('will-quit', (event) => {
     if (!server) return;
-    event.preventDefault();
     if (!closing) {
       closing = server.close().catch(() => undefined);
       void closing.then(() => {
@@ -670,5 +663,6 @@ if (!app.requestSingleInstanceLock()) {
         app.quit();
       });
     }
+    event.preventDefault();
   });
 }
