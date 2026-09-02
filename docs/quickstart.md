@@ -5,14 +5,14 @@ icon: lucide/rocket
 # Quickstart
 
 This page takes you from a fresh install to browsing, inspecting and acting on a real
-cluster — in about five minutes.
+cluster in about five minutes.
 
 !!! tip "No cluster handy?"
 
     Spin up two throwaway [kind](https://kind.sigs.k8s.io/) clusters with sample
     workloads (a Helm release, some intentionally broken pods, metrics) using the
-    bundled script — see [Test clusters](community/test-clusters.md). They're perfect
-    for following along.
+    bundled script described in [Test clusters](community/test-clusters.md). They're
+    perfect for following along.
 
 ## 1. Launch Kubus
 
@@ -23,7 +23,7 @@ pnpm start
 ```
 
 Kubus opens in a window (or your browser) showing the **Overview** page. On first launch
-no clusters are selected yet — that's the next step.
+no clusters are selected yet. That's the next step.
 
 ## 2. Select your clusters
 
@@ -33,7 +33,7 @@ Kubus reads the same contexts `kubectl config get-contexts` shows you.
 <figure markdown="span">
   ![Selecting kubeconfig contexts in the cluster switcher](assets/screenshots/cluster-switcher.png#only-light){ .shadow }
   ![Selecting kubeconfig contexts in the cluster switcher](assets/screenshots/cluster-switcher-dark.png#only-dark){ .shadow }
-  <figcaption>Pick any number of contexts — lists merge across all of them.</figcaption>
+  <figcaption>Pick any number of contexts. Lists merge across all of them.</figcaption>
 </figure>
 
 The moment you select clusters, the **Overview** dashboard fills in: node counts, pod
@@ -43,14 +43,14 @@ health, failing workloads and recent warnings, per cluster.
 
 ## 3. Browse a resource
 
-Open the left nav and pick a kind — say **Workloads → Pods**. You get a live list that
+Open the left nav and pick a kind, say **Workloads → Pods**. You get a live list that
 updates over a WebSocket watch; no refresh button needed. If you selected more than one
 cluster, a **Cluster** column tells you where each row lives.
 
 <figure markdown="span">
   ![The Pods list with live status](assets/screenshots/pods.png#only-light){ .shadow }
   ![The Pods list with live status](assets/screenshots/pods-dark.png#only-dark){ .shadow }
-  <figcaption>Every kind — including your CRDs — with sortable, filterable columns.</figcaption>
+  <figcaption>Sortable, filterable columns for every kind, including your CRDs.</figcaption>
 </figure>
 
 Use the **namespace filter** in the top bar to narrow things down.
@@ -61,8 +61,8 @@ Use the **namespace filter** in the top bar to narrow things down.
 
 Click a pod's name. A **details drawer** slides in with:
 
-- an **Overview** tab — status, containers, images, env, volumes, related objects;
-- a **YAML** tab — a full Monaco editor you can read or edit;
+- an **Overview** tab with status, containers, images, env, volumes and related objects;
+- a **YAML** tab with a full Monaco editor you can read or edit;
 - **Events**, a relationship **Map**, and (for pods) live **Metrics**.
 
 <figure markdown="span">
@@ -77,8 +77,8 @@ Click a pod's name. A **details drawer** slides in with:
 
 From any row's **⋮ menu** (or the details drawer, or the command palette) you can act:
 
-- :material-text-box-search: **Logs** — stream them, even aggregated across a Deployment's pods
-- :material-console: **Shell** — open a terminal straight into a container
+- :material-text-box-search: **Logs**: stream them, even aggregated across a Deployment's pods
+- :material-console: **Shell**: open a terminal straight into a container
 - :material-resize: **Scale**, :material-restart: **Rollout restart**, :material-history: **Roll back**
 - :material-lan-connect: **Port forward**, :material-file-tree: **Copy files**, :material-delete: **Delete**
 
@@ -93,7 +93,7 @@ type `>` to run app commands like *Toggle dark / light mode*.
 <figure markdown="span">
   ![The command palette](assets/screenshots/command-palette.png#only-light){ .shadow }
   ![The command palette](assets/screenshots/command-palette-dark.png#only-dark){ .shadow }
-  <figcaption>++ctrl+k++ — search anything, act on anything, never touch the mouse.</figcaption>
+  <figcaption>From ++ctrl+k++ you can search anything and act on it without touching the mouse.</figcaption>
 </figure>
 
 ## Where to next

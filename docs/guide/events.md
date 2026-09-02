@@ -5,8 +5,8 @@ icon: lucide/bell
 # Events
 
 The **Events** page is a live, cluster-wide timeline of everything Kubernetes is telling
-you — scheduling decisions, image pulls, probe failures, evictions — deduplicated and
-filterable, across every selected cluster.
+you: scheduling decisions, image pulls, probe failures, evictions. It is deduplicated
+and filterable, and covers every selected cluster.
 
 <figure markdown="span">
   ![The cluster-wide events timeline](../assets/screenshots/events.png#only-light){ .shadow }
@@ -16,11 +16,11 @@ filterable, across every selected cluster.
 
 ## What you get
 
-- **Live** — events stream in as they happen.
-- **Deduplicated** — repeated events (same object, reason and message) collapse into one
+- **Live**: events stream in as they happen.
+- **Deduplicated**: repeated events (same object, reason and message) collapse into one
   row with a count, instead of flooding the list.
-- **Cross-cluster** — a Cluster column when you've selected more than one.
-- **Columns** — type, reason, involved object, message, namespace, count and last-seen.
+- **Cross-cluster**: a Cluster column appears when you've selected more than one.
+- **Columns**: type, reason, involved object, message, namespace, count and last-seen.
 
 ## Filtering
 
@@ -34,8 +34,8 @@ filterable, across every selected cluster.
 ## Jump to the object
 
 Click the involved object in any row and Kubus opens its
-[details drawer](resource-details.md) — go straight from *"something's wrong"* to the
-thing that's wrong.
+[details drawer](resource-details.md), so you go straight from *"something's wrong"* to
+the thing that's wrong.
 
 !!! tip "From the Overview"
 
@@ -46,7 +46,7 @@ thing that's wrong.
 
 <div class="grid cards" markdown>
 
--   :material-view-dashboard: **[Overview dashboard](overview.md)** — the warnings rollup
--   :material-script-text: **[Logs](logs.md)** — once an event points you at a pod
+-   :material-view-dashboard: **[Overview dashboard](overview.md)** has the warnings rollup.
+-   :material-script-text: **[Logs](logs.md)** is the next stop once an event points you at a pod.
 
 </div>

@@ -4,7 +4,7 @@ icon: lucide/git-fork
 
 # Topology
 
-The **Topology** view draws the relationships between your resources as a graph — which
+The **Topology** view draws the relationships between your resources as a graph: which
 Deployment owns which ReplicaSet owns which Pods, what Service selects them, what
 ConfigMaps and Secrets they mount. Sometimes a picture is the fastest way to understand
 what's wired to what.
@@ -17,9 +17,9 @@ what's wired to what.
 
 ## Two ways in
 
-- **Full page** — open **Topology** from the nav (or ++ctrl+k++ → *Go to Topology*) for a
+- **Full page**: open **Topology** from the nav (or ++ctrl+k++ → *Go to Topology*) for a
   graph of the current namespace/cluster scope.
-- **Focused** — the **Map** tab in any [details drawer](resource-details.md) shows a graph
+- **Focused**: the **Map** tab in any [details drawer](resource-details.md) shows a graph
   centred on that one object and its immediate neighbours.
 
 ## Reading the graph
@@ -32,14 +32,14 @@ what's wired to what.
 
 !!! tip "Tracing a problem"
 
-    Start from a failing pod's **Map** tab and walk outward — to its owner, its service,
-    its config — to find where the chain breaks.
+    Start from a failing pod's **Map** tab and walk outward through its owner, its service
+    and its config until you find where the chain breaks.
 
 ## See also
 
 <div class="grid cards" markdown>
 
--   :material-file-document-edit: **[Resource details](resource-details.md)** — the Map tab, focused on one object
--   :material-table: **[Browsing resources](browsing-resources.md)** — the list view of the same objects
+-   :material-file-document-edit: **[Resource details](resource-details.md)** has the Map tab, focused on one object.
+-   :material-table: **[Browsing resources](browsing-resources.md)** is the list view of the same objects.
 
 </div>

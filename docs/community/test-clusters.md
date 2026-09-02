@@ -5,22 +5,22 @@ icon: lucide/flask-conical
 # Test clusters
 
 The repo ships a script that spins up two [kind](https://kind.sigs.k8s.io/) clusters
-loaded with sample workloads — perfect for exploring or developing against without
+loaded with sample workloads. Use them to explore or develop against Kubus without
 touching anything real.
 
 ## What it sets up
 
 `hack/dev-clusters.sh` creates:
 
-- **`kind-kubus-a`** — the full demo:
+- **`kind-kubus-a`** is the full demo:
     - [metrics-server](https://github.com/kubernetes-sigs/metrics-server) (patched for
       kind's self-signed kubelet certs), so the [metrics](../guide/metrics.md) and
       [overview](../guide/overview.md) charts light up;
-    - a **`podinfo`** Helm release with 3 replicas — great for
+    - a **`podinfo`** Helm release with 3 replicas to exercise
       [aggregated logs](../guide/logs.md) and [Helm](../guide/helm.md);
     - intentionally **broken workloads** (crash-loops, bad images, a failing Deployment, a
       CronJob) so the [overview dashboard](../guide/overview.md) has something to flag.
-- **`kind-kubus-b`** — an empty cluster, so you can try the
+- **`kind-kubus-b`** is an empty cluster, so you can try the
   [multi-cluster](../guide/clusters.md) merged views and the cluster column.
 
 ## Prerequisites
@@ -59,7 +59,7 @@ kind delete cluster --name kubus-b
 
 <div class="grid cards" markdown>
 
--   :material-rocket-launch: **[Quickstart](../quickstart.md)** — follow along against these clusters
--   :material-code: **[Building from source](development.md)** — the rest of the dev setup
+-   :material-rocket-launch: **[Quickstart](../quickstart.md)** for a walkthrough you can follow on these clusters
+-   :material-code: **[Building from source](development.md)** for the rest of the dev setup
 
 </div>

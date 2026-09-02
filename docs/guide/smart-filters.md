@@ -4,10 +4,10 @@ icon: lucide/filter
 
 # Smart filters
 
-Every resource list has a search box. By default it's a plain text search — every word
+Every resource list has a search box. By default it's a plain text search, so every word
 you type has to appear somewhere in the row (name, namespace, cluster, status, node,
-images or labels). Start your query with a **`/`** and it becomes a smart filter:
-**structured clauses** for status categories, numeric comparisons, labels and ages that
+images or labels). Start your query with a **`/`** and it becomes a smart filter, with
+structured clauses for status categories, numeric comparisons, labels and ages that
 narrow thousands of pods down to the ones that matter in one line:
 
 ```
@@ -23,7 +23,7 @@ you're looking at, including live values (your namespaces, clusters and nodes).
 - Clauses are separated by spaces and **ANDed** together.
 - A clause is either free text (`nginx`) or `key:value` / `key>value` / `key<value`.
 - **OR** alternatives with a comma: `/status:crash,oom`, `/ns:dev,staging`.
-- **Negate** with `!` — `/!ns:kube-system` or `/status:!running` both work.
+- **Negate** with `!`: both `/!ns:kube-system` and `/status:!running` work.
 - Quotes protect spaces: `/name:"billing worker"`.
 - Everything is case-insensitive, and an unknown key just falls back to free text.
 
@@ -43,9 +43,10 @@ you're looking at, including live values (your namespaces, clusters and nodes).
 
 - `crash` → CrashLoopBackOff, `oom` → OOMKilled
 - `error` → errors, failures and backoffs of any flavour
-- `unhealthy` / `healthy` — anything not fully up (works for pods, workloads and nodes)
-- `degraded` / `progressing` — workloads with fewer ready replicas than desired
-- `completed` — Succeeded pods and complete Jobs
+- `unhealthy` → anything not fully up, `healthy` → the rest; works for pods, workloads
+  and nodes
+- `degraded` / `progressing` → workloads with fewer ready replicas than desired
+- `completed` → Succeeded pods and complete Jobs
 
 ## Kind-specific keys
 
@@ -63,29 +64,29 @@ you're looking at, including live values (your namespaces, clusters and nodes).
 !!! tip "Absolute quantities, not just percentages"
 
     `cpu>` and `mem>` take real Kubernetes quantities (`250m`, `1.5`, `512Mi`, `2Gi`).
-    Percentages (`cpu>80%`) compare against capacity where Kubus knows it — node
-    utilisation, for example.
+    Percentages (`cpu>80%`) compare against capacity where Kubus knows it, such as node
+    utilisation.
 
 ## Filtering by label
 
 Next to the search box, the **Labels** dropdown filters server-side by label selector.
-It lists every label key and `key=value` pair present in the rows — tick as many as you
+It lists every label key and `key=value` pair present in the rows. Tick as many as you
 like (they're ANDed together), or type a raw selector like `env!=prod` and press ++enter++.
 
-Every row also shows its labels as chips in the **Labels column** — hover to see them
+Every row also shows its labels as chips in the **Labels column**. Hover to see them
 all, and click a chip to add it to the label filter.
 
 ## Saved views remember your filter
 
 A smart filter is part of the page URL, so [saved views](browsing-resources.md#saved-views)
-capture it — save *`/status:unhealthy` in prod* once and it's one click from the nav
-drawer forever.
+capture it. Save *`/status:unhealthy` in prod* once and it's one click from the nav
+drawer from then on.
 
 ## See also
 
 <div class="grid cards" markdown>
 
--   :material-table: **[Browsing resources](browsing-resources.md)** — the lists these filters power
--   :material-keyboard: **[Command palette](command-palette.md)** — fuzzy-find across every kind at once
+-   :material-table: **[Browsing resources](browsing-resources.md)** covers the lists these filters power.
+-   :material-keyboard: **[Command palette](command-palette.md)** fuzzy-finds across every kind at once.
 
 </div>

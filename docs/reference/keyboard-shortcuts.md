@@ -5,7 +5,7 @@ icon: lucide/keyboard
 # Keyboard shortcuts
 
 Kubus is designed to be driven from the keyboard. The [command palette](../guide/command-palette.md)
-is the hub — almost everything is reachable through it.
+is the hub, and almost everything is reachable through it.
 
 ## Global
 
@@ -70,6 +70,6 @@ Type `>` in the palette to run:
 
 <div class="grid cards" markdown>
 
--   :material-command: **[Command palette](../guide/command-palette.md)** — the full walkthrough
+-   :material-command: **[Command palette](../guide/command-palette.md)** has the full walkthrough.
 
 </div>

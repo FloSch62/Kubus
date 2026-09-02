@@ -4,9 +4,9 @@ icon: lucide/git-compare
 
 # Comparing resources
 
-The **Diff** page puts two resources side by side and highlights what's different — across
-clusters, namespaces or kinds. "Why does this work in staging but not prod?" usually has
-its answer here.
+The **Diff** page puts two resources side by side and highlights what's different. The two
+sides can come from different clusters, namespaces or kinds. "Why does this work in
+staging but not prod?" usually has its answer here.
 
 <figure markdown="span">
   ![A side-by-side resource diff](../assets/screenshots/diff.png#only-light){ .shadow }
@@ -18,20 +18,20 @@ its answer here.
 
 Open **Diff** from the nav (or ++ctrl+k++ → *Go to Diff*). For each side, choose:
 
-- **Cluster** — any of your selected contexts,
+- **Cluster** (any of your selected contexts),
 - **Kind**,
 - **Namespace** (for namespaced kinds),
 - **Name**.
 
-The two objects render in a Monaco diff view — the same side-by-side diff you know from VS
+The two objects render in a Monaco diff view, the same side-by-side diff you know from VS
 Code.
 
 ## Normalise the noise
 
-Server-set fields make almost any two objects look different — `resourceVersion`, `uid`,
-`creationTimestamp`, `status`, managed-fields. The **Normalise** toggle (on by default)
-strips that noise so you see the differences that *matter*: spec, labels, the things you
-actually set.
+Server-set fields such as `resourceVersion`, `uid`, `creationTimestamp`, `status` and
+managed-fields make almost any two objects look different. The **Normalise** toggle (on by
+default) strips that noise so you see the differences that *matter*: spec, labels and the
+other things you actually set.
 
 Turn it off when you specifically want to compare status or server metadata.
 
@@ -45,7 +45,7 @@ Turn it off when you specifically want to compare status or server metadata.
 
 <div class="grid cards" markdown>
 
--   :material-file-document-edit: **[Resource details & YAML](resource-details.md)** — edit once you've spotted the difference
--   :material-ship-wheel: **[Helm releases](helm.md)** — compare what two releases rendered
+-   :material-file-document-edit: **[Resource details & YAML](resource-details.md)** lets you edit once you've spotted the difference.
+-   :material-ship-wheel: **[Helm releases](helm.md)** compares what two releases rendered.
 
 </div>

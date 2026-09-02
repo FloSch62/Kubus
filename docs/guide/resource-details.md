@@ -26,40 +26,41 @@ human-friendly view *and* the raw YAML, without leaving the list you're on.
 
 ## Kind-aware overviews
 
-The Overview tab adapts to what you're looking at:
+The Overview tab adapts to what you're looking at.
 
-Every overview opens with a **summary strip** — the handful of numbers that say how the
-object is doing — followed by a *why isn't this ready* banner whenever something is
-wrong, and then collapsible sections for the rest.
+Every overview opens with a **summary strip**, the handful of numbers that say how the
+object is doing. A *why isn't this ready* banner follows whenever something is wrong, and
+collapsible sections hold the rest.
 
-- **Pods** — ready count, restarts, node and IP up top; then one panel per **container**
+- **Pods** show ready count, restarts, node and IP up top, then one panel per **container**
   with its state, image, restarts, CPU/memory against requests and limits, ports, and its
-  own probes, environment, mounts and command a click away; init and ephemeral debug
-  containers; placement and identity details; volumes, scheduling, conditions and
-  metadata. Related ConfigMaps, Secrets, PVCs, nodes and owners are all clickable.
-- **Deployments** — ready/updated/available/unavailable replicas with a rollout progress
-  bar, the failing conditions and pod reasons in full, the pod template's containers,
-  the pods, and the ReplicaSets still holding pods.
-- **Services** — type, cluster IP, ready endpoints and port count; the in-cluster DNS
+  own probes, environment, mounts and command a click away. Below that come init and
+  ephemeral debug containers, placement and identity details, volumes, scheduling,
+  conditions and metadata. Related ConfigMaps, Secrets, PVCs, nodes and owners are all
+  clickable.
+- **Deployments** show ready/updated/available/unavailable replicas with a rollout
+  progress bar, the failing conditions and pod reasons in full, the pod template's
+  containers, the pods, and the ReplicaSets still holding pods.
+- **Services** show type, cluster IP, ready endpoints and port count; the in-cluster DNS
   name; a ports table (port → targetPort, nodePort) with one-click port forwarding; the
   live **endpoints** from the EndpointSlices with their pods and readiness; and the pods
   the selector matches.
-- **Nodes** — roles, pod count, kubelet version, internal IP and condition health; then
+- **Nodes** show roles, pod count, kubelet version, internal IP and condition health, then
   system info, addresses, capacity and the pods on the node.
-- **Secrets** — the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
+- **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
-- **Anything else** — metadata, owner references, labels and annotations (searchable and
-  copyable), and a YAML preview of spec/status.
+- **Anything else** shows metadata, owner references, labels and annotations (searchable
+  and copyable), and a YAML preview of spec/status.
 
 !!! tip "Navigate and come back"
 
-    Click a related object — a pod's node, a referenced Secret — and the drawer follows
-    it, keeping a **back stack**. Use the back arrow to return to where you were.
+    Click a related object, such as a pod's node or a referenced Secret, and the drawer
+    follows it, keeping a **back stack**. Use the back arrow to return to where you were.
 
 ## Editing YAML
 
-The **YAML** tab is a full [Monaco](https://microsoft.github.io/monaco-editor/) editor —
-the same engine that powers VS Code — with syntax highlighting and folding.
+The **YAML** tab is a full [Monaco](https://microsoft.github.io/monaco-editor/) editor,
+the same engine that powers VS Code, with syntax highlighting and folding.
 
 1. Switch the tab to **edit** mode.
 2. Make your changes.
@@ -75,11 +76,11 @@ state, and you can re-apply your change against it. No silent overwrites.
 
     Applying YAML patches the live resource immediately. On a
     [protected cluster](production-guard.md), destructive edits are gated behind a typed
-    confirmation — but there's no undo for a normal edit beyond editing again.
+    confirmation. There is no undo for a normal edit beyond editing again.
 
 ## Creating resources
 
-You don't need an existing object to use the editor — Kubus can open a blank YAML buffer
+You don't need an existing object to use the editor. Kubus can open a blank YAML buffer
 so you can paste or write a manifest and apply it to create the resource, the same way
 `kubectl apply -f` would.
 
@@ -87,8 +88,8 @@ so you can paste or write a manifest and apply it to create the resource, the sa
 
 <div class="grid cards" markdown>
 
--   :material-lightning-bolt: **[Quick actions](quick-actions.md)** — scale, restart and more without editing YAML
--   :material-compare: **[Comparing resources](diff.md)** — diff two objects side by side
--   :material-graph-outline: **[Topology](topology.md)** — the Map tab, full-screen
+-   :material-lightning-bolt: **[Quick actions](quick-actions.md)** cover scaling, restarting and more without editing YAML.
+-   :material-compare: **[Comparing resources](diff.md)** puts two objects side by side.
+-   :material-graph-outline: **[Topology](topology.md)** is the Map tab as a full page.
 
 </div>

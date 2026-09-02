@@ -4,9 +4,9 @@ icon: lucide/download
 
 # Installation
 
-There are two ways to run Kubus. Most people want the **desktop app** — download an
-installer, double-click, done. If you'd rather run it as a local web server (or you're
-on a platform without a packaged build), run it **from source**.
+There are two ways to run Kubus. Most people want the **desktop app**, which you install
+like any other program. If you'd rather run it as a local web server (or you're on a
+platform without a packaged build), run it **from source**.
 
 <div class="grid cards" markdown>
 
@@ -14,8 +14,8 @@ on a platform without a packaged build), run it **from source**.
 
     ---
 
-    A native window for Windows, macOS and Linux. No terminal, no Node.js — just
-    install and launch. **Recommended.**
+    A native window for Windows, macOS and Linux, with no terminal or Node.js
+    required. **Recommended.**
 
     [:octicons-arrow-right-24: Install the desktop app](desktop.md)
 
@@ -32,14 +32,14 @@ on a platform without a packaged build), run it **from source**.
 
 ## Before you start
 
-Kubus drives your clusters through your existing **kubeconfig** — the same file
-`kubectl` uses. You don't configure clusters inside Kubus; it reads the contexts it finds.
+Kubus drives your clusters through your existing **kubeconfig**, the same file `kubectl`
+uses. You don't have to configure clusters inside Kubus; it reads the contexts it finds.
 
 !!! tip "Already use `kubectl`? You're ready."
 
     If `kubectl get pods` works in your terminal, Kubus will find the same clusters.
-    By default it reads `~/.kube/config` (or whatever `$KUBECONFIG` points at). You can
-    also point it at a specific file — see [command-line flags](../reference/cli.md).
+    By default it reads `~/.kube/config` (or whatever `$KUBECONFIG` points at). To point
+    it at a specific file, see [command-line flags](../reference/cli.md).
 
 A few features lean on cluster add-ons, and degrade gracefully when they're missing:
 

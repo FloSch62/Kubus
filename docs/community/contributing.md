@@ -4,18 +4,18 @@ icon: lucide/git-pull-request
 
 # Contributing
 
-Thanks for considering a contribution! Kubus is a community project and every bit helps —
+Thanks for considering a contribution! Kubus is a community project and every bit helps,
 from typo fixes to whole features.
 
 ## Ways to help
 
-- :material-bug: **Report a bug** — open an issue with steps to reproduce, your platform,
-  and what you expected.
-- :material-lightbulb: **Suggest a feature** — describe the problem you're trying to solve,
-  not just the solution.
-- :material-file-document: **Improve the docs** — every page has an edit pencil that takes
-  you straight to its source.
-- :material-code-tags: **Send a pull request** — see below.
+- :material-bug: **Report a bug** by opening an issue with steps to reproduce, your
+  platform, and what you expected.
+- :material-lightbulb: **Suggest a feature** by describing the problem you're trying to
+  solve, not just the solution.
+- :material-file-document: **Improve the docs** with the edit pencil on every page, which
+  takes you straight to its source.
+- :material-code-tags: **Send a pull request** following the steps below.
 
 ## Before you open a PR
 
@@ -33,7 +33,7 @@ from typo fixes to whole features.
 
 ## Pull request tips
 
-- Keep PRs focused — one logical change per PR is easier to review.
+- Keep PRs focused. One logical change per PR is easier to review.
 - Describe **what** and **why**, and link any related issue.
 - Screenshots or a short clip help enormously for UI changes.
 

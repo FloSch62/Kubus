@@ -19,7 +19,7 @@ Kubus is a pnpm workspace:
 | Package | What it is |
 | --- | --- |
 | `client/` | The React 19 + MUI 9 single-page app (Vite). |
-| `server/` | The Fastify 5 server — Kubernetes client, watches, exec, port-forward, Helm, metrics. |
+| `server/` | The Fastify 5 server: Kubernetes client, watches, exec, port-forward, Helm, metrics. |
 | `shared/` | Types and metadata shared between client and server. |
 | `electron/` | The Electron desktop shell. |
 | `hack/` | Dev scripts, including the [test-cluster](test-clusters.md) bootstrap. |
@@ -31,7 +31,7 @@ pnpm install
 pnpm dev            # tsx-watch server on :3001 + Vite client on :5173
 ```
 
-Open **`http://localhost:5173`** — the Vite dev server proxies `/api` and `/ws` to the
+Open **`http://localhost:5173`**. The Vite dev server proxies `/api` and `/ws` to the
 backend on `:3001`, so client and server both hot-reload.
 
 ## Production build
@@ -60,8 +60,8 @@ pnpm lint:perf     # optional performance audit; reports suggestions without fai
 
 <div class="grid cards" markdown>
 
--   :material-test-tube: **[Test clusters](test-clusters.md)** — sample workloads to develop against
--   :material-sitemap: **[Architecture](../reference/architecture.md)** — how the pieces fit
--   :material-tag: **[Releasing](releasing.md)** — how installers are built
+-   :material-test-tube: **[Test clusters](test-clusters.md)** for sample workloads to develop against
+-   :material-sitemap: **[Architecture](../reference/architecture.md)** for how the pieces fit together
+-   :material-tag: **[Releasing](releasing.md)** for the release workflow that builds the installers
 
 </div>
