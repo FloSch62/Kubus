@@ -132,3 +132,11 @@ machine.
     Kubus runs on your machine against clusters you already have credentials for. It is
     not a hosted, multi-tenant dashboard. The [security model](reference/security.md)
     spells out exactly what that means.
+
+## Made by
+
+Kubus is built by me (FloSch), in the open and in my spare time. It is free and stays free.
+If it saves you time, a coffee keeps the releases coming. [More about me](about.md).
+
+[:simple-buymeacoffee: Buy me a coffee](https://www.buymeacoffee.com/FloSch62){ .md-button .md-button--primary }
+[:material-star-outline: Star on GitHub](https://github.com/FloSch62/Kubus){ .md-button }

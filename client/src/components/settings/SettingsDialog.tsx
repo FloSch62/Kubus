@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
-import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -28,7 +27,6 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import CachedOutlinedIcon from '@mui/icons-material/CachedOutlined';
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import ShieldIcon from '@mui/icons-material/Shield';
@@ -36,15 +34,15 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import AddIcon from '@mui/icons-material/Add';
-import type { AppInfo, ContextInfo, DebugProfile, UpdateCheckResult } from '@kubus/shared';
+import type { ContextInfo, DebugProfile } from '@kubus/shared';
 import { useAddDebugImage, useContexts, useDebugImages, useDeleteCluster, useKubeconfigSettings, useRemoveDebugImage } from '../../api/queries.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { checkForUpdate, getAppInfo } from '../../api/app.js';
 import { AddClusterDialog } from './AddClusterDialog.js';
 import { EditClusterDialog } from './EditClusterDialog.js';
 import { useClustersStore } from '../../state/clusters.js';
 import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
 import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type RightClickAction, type TableDensity } from '../../state/prefs.js';
+import { AboutSection } from './AboutSection.js';
 import { KubeconfigSection } from './KubeconfigSection.js';
 import { isBuiltInDebugImage, mergeDebugPresets } from '../../debug-presets.js';
 import { fetchAppLogs, formatLogEntry } from '../../api/logs.js';
@@ -604,115 +602,6 @@ function DebugSection() {
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           Covers app startup and operations since launch. Logs are held in memory on this machine only and never leave it unless you export them. If the desktop app fails to launch entirely, its shell also writes logs/main.log in the app data directory.
         </Typography>
-      </Section>
-    </Stack>
-  );
-}
-
-function updateReasonLabel(reason?: string): string {
-  switch (reason) {
-    case 'timeout':
-      return 'The update check timed out.';
-    case 'network':
-      return 'The update check could not reach GitHub.';
-    case 'no-release':
-      return 'No published release was found.';
-    case 'missing-version':
-    case 'missing-release-url':
-      return 'The latest release metadata is incomplete.';
-    default:
-      return reason?.startsWith('manifest-')
-        ? `The update manifest returned ${reason.replace('manifest-', '')}.`
-        : 'The update check could not be completed.';
-  }
-}
-
-function AboutSection() {
-  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<UpdateCheckResult | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getAppInfo()
-      .then((info) => {
-        if (!cancelled) setAppInfo(info ?? null);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const checkForUpdates = () => {
-    setChecking(true);
-    setResult(null);
-    void checkForUpdate({ force: true })
-      .then(setResult)
-      .catch(() => setResult({ available: false, currentVersion: appInfo?.version ?? '', reason: 'network' }))
-      .finally(() => setChecking(false));
-  };
-
-  const version = appInfo?.version ?? (loaded ? 'Unavailable' : 'Loading…');
-  const updatesAvailable = result?.available === true;
-
-  return (
-    <Stack spacing={3}>
-      <Section title="Application">
-        <Stack spacing={1.25}>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              Version
-            </Typography>
-            <Typography variant="body2">{version}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              Repository
-            </Typography>
-            <Link href="https://github.com/FloSch62/Kubus" target="_blank" rel="noreferrer">
-              github.com/FloSch62/Kubus
-            </Link>
-          </Box>
-        </Stack>
-      </Section>
-      <Section title="Updates">
-        <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Button
-              variant="contained"
-              startIcon={checking ? <CircularProgress color="inherit" size={16} /> : <CachedOutlinedIcon />}
-              disabled={checking}
-              onClick={checkForUpdates}
-            >
-              Check for updates
-            </Button>
-            {updatesAvailable && (
-              <Button startIcon={<DownloadOutlinedIcon />} href={result.releaseUrl} target="_blank" rel="noreferrer">
-                Download
-              </Button>
-            )}
-          </Stack>
-          {result?.available === false && result.latestVersion && (
-            <Alert severity="success" variant="outlined">
-              Kubus is up to date. Latest release: {result.latestVersion}.
-            </Alert>
-          )}
-          {result?.available === false && !result.latestVersion && (
-            <Alert severity="warning" variant="outlined">
-              {updateReasonLabel(result.reason)}
-            </Alert>
-          )}
-          {updatesAvailable && (
-            <Alert severity="info" variant="outlined">
-              Kubus {result.latestVersion} is available. You are running {result.currentVersion}.
-            </Alert>
-          )}
-        </Stack>
       </Section>
     </Stack>
   );
