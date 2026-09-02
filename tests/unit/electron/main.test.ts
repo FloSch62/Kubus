@@ -492,7 +492,7 @@ describe('Electron main process', () => {
     });
   });
 
-  it('restores window bounds, reports native capabilities, and closes the server before quitting', async () => {
+  it('restores window bounds, reports native capabilities, and closes the server after windows close', async () => {
     writeFileSync(
       path.join(userDataPath, 'window-state.json'),
       JSON.stringify({ width: 1100, height: 700, x: 8, y: 12, maximized: true }),
@@ -520,9 +520,14 @@ describe('Electron main process', () => {
       maximized: false,
     });
 
-    const quitEvent = { preventDefault: vi.fn() };
-    appHandler('before-quit')(quitEvent);
-    expect(quitEvent.preventDefault).toHaveBeenCalledOnce();
+    const beforeQuitEvent = { preventDefault: vi.fn() };
+    appHandler('before-quit')(beforeQuitEvent);
+    expect(beforeQuitEvent.preventDefault).not.toHaveBeenCalled();
+    expect(electron.serverClose).not.toHaveBeenCalled();
+
+    const willQuitEvent = { preventDefault: vi.fn() };
+    appHandler('will-quit')(willQuitEvent);
+    expect(willQuitEvent.preventDefault).toHaveBeenCalledOnce();
     expect(electron.serverClose).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(electron.app.quit).toHaveBeenCalledOnce());
   });
