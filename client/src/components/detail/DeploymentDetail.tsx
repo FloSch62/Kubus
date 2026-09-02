@@ -10,7 +10,7 @@ import type { ContainerUsage, KubeObject } from '@kubus/shared';
 import { useMemo, useState } from 'react';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { SetImageDialog } from '../RowActions.js';
-import { useResourceList, useResourceMetrics } from '../../api/queries.js';
+import { DETAIL_LIST_LIVE_MS, useResourceList, useResourceMetrics } from '../../api/queries.js';
 import { containerResources, podContainerNames, podSummary, runningContainerNames, workloadReady } from '../../kube-display.js';
 import { useDetailStore } from '../../state/detail.js';
 import { useDockStore, dockTabId } from '../../state/dock.js';
@@ -148,10 +148,14 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
   const dstatus = obj.status as DeploymentStatus | undefined;
   const labelSelector = selectorToString(spec?.selector);
   const enabled = !!namespace && !!labelSelector;
+  // Polled while the drawer is open so a rollout can be watched from here.
   const replicaSetsQuery = useResourceList(
     enabled ? { ctx, group: 'apps', version: 'v1', plural: 'replicasets', namespace, labelSelector } : undefined,
+    { liveMs: DETAIL_LIST_LIVE_MS },
   );
-  const podsQuery = useResourceList(enabled ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector } : undefined);
+  const podsQuery = useResourceList(enabled ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector } : undefined, {
+    liveMs: DETAIL_LIST_LIVE_MS,
+  });
 
   const replicaSets = useMemo(
     () =>

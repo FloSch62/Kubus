@@ -7,15 +7,24 @@ import { useDetailStore } from '../../../client/src/state/detail';
 const queries = vi.hoisted(() => ({
   pods: [] as KubeObject[],
   slices: undefined as KubeObject[] | undefined,
+  slicesError: undefined as Error | undefined,
   requests: [] as Array<Record<string, unknown>>,
+  options: [] as Array<Record<string, unknown> | undefined>,
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
-  useResourceList: (selection: { plural?: string } | undefined) => {
-    if (selection) queries.requests.push(selection);
-    if (!selection) return { data: undefined, isLoading: false };
-    if (selection.plural === 'endpointslices') return { data: queries.slices ? { items: queries.slices } : undefined, isLoading: !queries.slices };
-    return { data: { items: queries.pods }, isLoading: false };
+  DETAIL_LIST_LIVE_MS: 5000,
+  useResourceList: (selection: { plural?: string } | undefined, options?: Record<string, unknown>) => {
+    if (selection) {
+      queries.requests.push(selection);
+      queries.options.push(options);
+    }
+    if (!selection) return { data: undefined, isLoading: false, isError: false };
+    if (selection.plural === 'endpointslices') {
+      if (queries.slicesError) return { data: undefined, isLoading: false, isError: true, error: queries.slicesError };
+      return { data: queries.slices ? { items: queries.slices } : undefined, isLoading: !queries.slices, isError: false };
+    }
+    return { data: { items: queries.pods }, isLoading: false, isError: false };
   },
   useResourceMetrics: () => ({ data: undefined }),
 }));
@@ -62,7 +71,9 @@ beforeEach(() => {
       { addresses: ['10.0.0.2'], conditions: { ready: false }, targetRef: { kind: 'Pod', name: 'web-b' }, nodeName: 'node-2' },
     ]),
   ];
+  queries.slicesError = undefined;
   queries.requests = [];
+  queries.options = [];
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, pendingDiscard: undefined });
 });
 
@@ -106,6 +117,8 @@ describe('ServiceDetail', () => {
       namespace: 'team-a',
       labelSelector: 'kubernetes.io/service-name=web',
     });
+    // Both related lists keep polling while the drawer is open.
+    expect(queries.options.every((o) => o?.liveMs === 5000)).toBe(true);
     expect(tile('Endpoints')).toHaveTextContent('1/2');
     expect(screen.getByText('web.team-a.svc.cluster.local')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy DNS name' })).toBeInTheDocument();
@@ -142,6 +155,16 @@ describe('ServiceDetail', () => {
 
     expect(screen.getByText('No ready endpoints')).toBeInTheDocument();
     expect(screen.getByText('1 endpoint, none ready')).toBeInTheDocument();
+  });
+
+  it('says when EndpointSlices cannot be read instead of loading forever', () => {
+    queries.slicesError = new Error('endpointslices.discovery.k8s.io is forbidden');
+    render(<ServiceDetail obj={service({ type: 'ClusterIP', clusterIP: '10.96.0.10', selector: { app: 'web' } })} ctx="dev" />);
+
+    expect(tile('Endpoints')).toHaveTextContent('unavailable');
+    expect(screen.getByText(/Couldn’t read this Service’s EndpointSlices: endpointslices.discovery.k8s.io is forbidden/)).toBeInTheDocument();
+    expect(screen.queryByText('No endpoints')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
   });
 
   it('describes ExternalName and selector-less services without endpoint noise', () => {

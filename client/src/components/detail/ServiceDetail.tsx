@@ -20,8 +20,9 @@ import { DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
 import { CopyValueButton } from '../CellCopy.js';
 import { StatusChip } from '../StatusChip.js';
-import { useResourceList } from '../../api/queries.js';
+import { DETAIL_LIST_LIVE_MS, useResourceList } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
+import { statusTextColor } from '../../theme.js';
 
 interface ServicePort {
   name?: string;
@@ -108,8 +109,11 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
     .join(',');
   const headless = spec.clusterIP === 'None';
   const externalName = spec.type === 'ExternalName';
+  // Both lists keep polling while the drawer is open so readiness flips and
+  // pod churn show up without reopening it.
   const podsQuery = useResourceList(
     labelSelector ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector } : undefined,
+    { liveMs: DETAIL_LIST_LIVE_MS },
   );
   // EndpointSlices are the truth about where traffic goes — they cover
   // selector-less Services too, and show pods the selector matches but
@@ -118,10 +122,14 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
     namespace && !externalName
       ? { ctx, group: 'discovery.k8s.io', version: 'v1', plural: 'endpointslices', namespace, labelSelector: `kubernetes.io/service-name=${name}` }
       : undefined,
+    { liveMs: DETAIL_LIST_LIVE_MS },
   );
   const endpoints = useMemo(() => endpointRows(slicesQuery.data?.items ?? []), [slicesQuery.data?.items]);
   const readyEndpoints = endpoints.filter((e) => e.state === 'Ready').length;
   const endpointsKnown = !!slicesQuery.data;
+  // Reading EndpointSlices needs its own RBAC verb — say so instead of
+  // pretending to load forever.
+  const endpointsError = slicesQuery.isError ? (slicesQuery.error instanceof Error ? slicesQuery.error.message : String(slicesQuery.error)) : undefined;
   const pods = podsQuery.data?.items ?? [];
   const ports = spec.ports ?? [];
   const dnsName = namespace ? `${name}.${namespace}.svc.cluster.local` : undefined;
@@ -143,9 +151,9 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
             : { label: 'Cluster IP', value: headless ? 'None' : spec.clusterIP, mono: true },
           !externalName && {
             label: 'Endpoints',
-            value: endpointsKnown ? `${readyEndpoints}/${endpoints.length}` : '…',
+            value: endpointsError ? 'unavailable' : endpointsKnown ? `${readyEndpoints}/${endpoints.length}` : '…',
             tone: endpointTone,
-            hint: 'Ready endpoints out of all addresses in this Service’s EndpointSlices.',
+            hint: endpointsError ? `EndpointSlices could not be read: ${endpointsError}` : 'Ready endpoints out of all addresses in this Service’s EndpointSlices.',
           },
           { label: 'Ports', value: String(ports.length) },
           externalAddresses.length > 0 && { label: 'External', value: externalAddresses.join(', '), mono: true },
@@ -247,8 +255,8 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           description={endpointsKnown && endpoints.length ? `${readyEndpoints} ready${endpoints.length - readyEndpoints ? ` · ${endpoints.length - readyEndpoints} not ready` : ''}` : undefined}
         >
           {endpoints.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
-              {endpointsKnown ? 'No endpoints.' : 'Loading…'}
+            <Typography variant="body2" sx={{ p: 1.5, wordBreak: 'break-word', color: endpointsError ? statusTextColor('warning') : 'text.secondary' }}>
+              {endpointsError ? `Couldn’t read this Service’s EndpointSlices: ${endpointsError}` : endpointsKnown ? 'No endpoints.' : 'Loading…'}
             </Typography>
           ) : (
             <Table size="small">

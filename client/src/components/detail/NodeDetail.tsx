@@ -13,7 +13,7 @@ import { SummaryStrip } from './SummaryStrip.js';
 import { CopyValueButton } from '../CellCopy.js';
 import { formatBytes } from '../format.js';
 import { nodeRoles, parseQuantity, podSummary } from '../../kube-display.js';
-import { useResourceList } from '../../api/queries.js';
+import { DETAIL_LIST_LIVE_MS, useResourceList } from '../../api/queries.js';
 
 interface NodeStatus {
   addresses?: Array<{ type: string; address: string }>;
@@ -37,7 +37,7 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const name = obj.metadata.name;
   const roles = nodeRoles(obj);
   const spec = obj.spec as { providerID?: string; podCIDR?: string; podCIDRs?: string[]; taints?: Array<{ key: string; value?: string; effect: string }> } | undefined;
-  const podsQuery = useResourceList({ ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${name}` });
+  const podsQuery = useResourceList({ ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${name}` }, { liveMs: DETAIL_LIST_LIVE_MS });
   const pods = podsQuery.data?.items ?? [];
   const runningPods = pods.filter((p) => podSummary(p).status === 'Running').length;
   const unhealthy = hasUnhealthyCondition(obj, nodeGoodWhen);

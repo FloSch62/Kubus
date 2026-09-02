@@ -288,6 +288,8 @@ export interface KubeObjectMeta {
   namespace?: string;
   uid: string;
   resourceVersion?: string;
+  /** Bumped by the API server on every spec change; status.observedGeneration says which one the controller has seen. */
+  generation?: number;
   creationTimestamp?: string;
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
