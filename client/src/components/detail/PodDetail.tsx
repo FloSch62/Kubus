@@ -450,7 +450,7 @@ function SchedulingSection({ spec }: { spec: PodSpec | undefined }) {
                 Affinity
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {affinityKinds.join(', ')} — see the YAML tab for the rules.
+                {affinityKinds.join(', ')} — see the Manifest tab for the rules.
               </Typography>
             </Box>
           )}

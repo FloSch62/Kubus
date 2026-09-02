@@ -141,6 +141,8 @@ export interface ManifestViewProps {
   readOnly?: boolean;
   /** Secret data is redacted, so its rows stay locked. */
   secretRedacted?: boolean;
+  /** Leading toolbar content (the tree/YAML view toggle). */
+  toolbarStart?: ReactNode;
   /** Extra toolbar content (e.g. the reveal-secrets toggle). */
   toolbar?: ReactNode;
   onApplied: (updated: KubeObject) => void;
@@ -151,9 +153,9 @@ export interface ManifestViewProps {
 /**
  * The Manifest tab: the object as sectioned trees (metadata, spec, status,
  * everything else) with filtering, inline editing against a draft shared
- * with the YAML tab, and a diff + dry-run review before the apply.
+ * with the YAML view, and a diff + dry-run review before the apply.
  */
-export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false, secretRedacted = false, toolbar, onApplied, onConflict }: ManifestViewProps) {
+export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false, secretRedacted = false, toolbarStart, toolbar, onApplied, onConflict }: ManifestViewProps) {
   const liveBase = useMemo(() => withoutManagedFields(live), [live]);
   const base = draft?.base ?? liveBase;
   const current = draft?.obj ?? liveBase;
@@ -239,6 +241,7 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', rowGap: 0.5 }}>
+        {toolbarStart}
         {toolbar}
         <TextField
           size="small"

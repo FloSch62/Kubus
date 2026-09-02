@@ -45,6 +45,8 @@ interface UiPrefsState {
   columnVisibility: Record<string, Record<string, boolean>>;
   /** User-chosen sort, keyed by table id. */
   sortModels: Record<string, TableSortModel>;
+  /** Manifest tab: the object as a tree or as YAML text. */
+  manifestView: ManifestViewMode;
   set: (patch: Partial<Omit<UiPrefsState, 'set'>>) => void;
   setColumnWidth: (tableId: string, field: string, width: number) => void;
   setColumnVisibility: (tableId: string, model: Record<string, boolean>) => void;
@@ -57,6 +59,7 @@ interface UiPrefsState {
 }
 
 export type TableSortModel = ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
+export type ManifestViewMode = 'tree' | 'yaml';
 
 const sessionStateStorage: StateStorage = {
   getItem: (name) => sessionStorage.getItem(name),
@@ -116,6 +119,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       columnWidths: {},
       columnVisibility: {},
       sortModels: {},
+      manifestView: 'tree',
       set: (patch) => set(patch),
       setColumnWidth: (tableId, field, width) =>
         set((state) => ({
@@ -156,6 +160,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
         columnWidths: state.columnWidths,
         columnVisibility: state.columnVisibility,
         sortModels: state.sortModels,
+        manifestView: state.manifestView,
       }),
       merge: (persisted, current) => ({
         ...current,

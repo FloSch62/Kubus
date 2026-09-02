@@ -19,8 +19,7 @@ you're on.
 | Tab | Shows | Available for |
 | --- | --- | --- |
 | **Overview** | A kind-aware summary (see below). | Every kind |
-| **Manifest** | The object as a [browsable tree](#the-manifest-tab): every field with its value, type and description, editable in place. | Every kind |
-| **YAML** | A Monaco editor to read or [edit](#editing-yaml) the object. | Every kind |
+| **Manifest** | The object as a [browsable tree](#the-manifest-tab) or as [YAML](#editing-yaml), editable either way. | Every kind |
 | **Schema** | The CRD's OpenAPI schema, with a picker for the served versions. | CustomResourceDefinitions |
 | **Events** | Events involving this object, newest first, Warnings highlighted. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
@@ -66,6 +65,9 @@ The **Manifest** tab shows the whole object as a tree, one section per top-level
 Metadata, Spec, Status and whatever else the kind carries (rules, subjects, data). Each
 row is a field with its value, and the field's type sits at the right edge. List items
 are named after their natural key, so a container shows up as `nginx` rather than `[0]`.
+The **Tree / YAML** switch at the start of the toolbar swaps the tree for a
+[Monaco editor](#editing-yaml) holding the same object, and Kubus remembers which one
+you prefer.
 
 <figure markdown="span">
   ![The Manifest tab for a Deployment](../assets/screenshots/manifest.png#only-light){ .shadow }
@@ -104,22 +106,24 @@ Some rows are locked with a padlock: the status block belongs to the controller,
 fields (name, namespace, UID, resource version) belong to the API server, and a Secret's
 data stays locked until you reveal it.
 
-The Manifest and YAML tabs share one draft. Edit a value in the tree, switch to YAML and
-the text already contains it; edit the text, switch back and the tree shows the change.
-If the YAML does not parse, the tab switch waits until it does. Leaving the resource with
-unapplied edits asks first.
+Tree and YAML share one draft. Edit a value in the tree, switch to YAML and the text
+already contains it; edit the text, switch back and the tree shows the change. If the
+YAML does not parse, the switch waits until it does. Leaving the resource with unapplied
+edits asks first.
 
 The tree is keyboard friendly: arrow keys move between rows, `Right` and `Left` expand and
 collapse, `Home` and `End` jump, and `Enter` edits a value.
 
 ## Editing YAML
 
-The **YAML** tab is a full [Monaco](https://microsoft.github.io/monaco-editor/) editor,
-the same engine that powers VS Code, with syntax highlighting and folding.
+The Manifest tab's **YAML** view is a full [Monaco](https://microsoft.github.io/monaco-editor/)
+editor, the same engine that powers VS Code, with syntax highlighting, folding and the
+object's API schema for completion and hover help.
 
-1. Switch the tab to **edit** mode.
+1. Switch the Manifest tab to **YAML**.
 2. Make your changes.
-3. **Apply** to patch the live object, or **Reset** to reload from the server.
+3. **Dry run** to have the server validate them, then **Replace** to write the object, or
+   **Reset** to reload from the server.
 
 ### Conflict detection
 

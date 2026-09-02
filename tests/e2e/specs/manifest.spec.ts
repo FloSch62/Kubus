@@ -53,11 +53,11 @@ test('adds an annotation in the tree and applies it through review and dry-run',
   await value.press('Enter');
   await expect(page.getByText('1 change')).toBeVisible();
 
-  // The draft carries into the YAML tab and back.
-  await page.getByRole('tab', { name: 'YAML' }).click();
+  // The draft carries into the YAML view and back.
+  await page.getByRole('button', { name: 'YAML', exact: true }).click();
   await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.monaco-editor').first()).toContainText('from-the-tree');
-  await page.getByRole('tab', { name: 'Manifest' }).click();
+  await page.getByRole('button', { name: 'Tree', exact: true }).click();
   await expect(page.getByText('1 change')).toBeVisible();
 
   await page.getByRole('button', { name: 'Review & apply' }).click();

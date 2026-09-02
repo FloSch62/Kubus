@@ -10,6 +10,8 @@ import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
@@ -45,6 +47,7 @@ import { StatusChip } from './StatusChip.js';
 import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
 import { useDetailStore, type DirtySource } from '../state/detail.js';
+import { useUiPrefsStore, type ManifestViewMode } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
 
 export interface ResourceSelection {
@@ -110,17 +113,23 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
     setReveal(false);
   }, [selKey]);
   const draft = storeDraft && storeDraft.selKey === selKey ? storeDraft : undefined;
+  // The Manifest tab shows the object as a tree or as YAML. A draft pins the
+  // view to its own mode (switching converts it); otherwise the preference applies.
+  const preferredView = useUiPrefsStore((s) => s.manifestView);
+  const setPrefs = useUiPrefsStore((s) => s.set);
+  const view: ManifestViewMode = draft ? draft.mode : preferredView;
 
   const hasSel = !!sel;
   useEffect(() => {
     if (!hasSel) setFullScreen(false);
   }, [hasSel]);
 
-  // Live-refresh the object while Overview or Manifest is showing so stuck
-  // pods, rollouts and conditions update in place — fed by the watch stream
-  // so it keeps pace with the tables, with the poll as fallback. The YAML tab
-  // keeps the snapshot it opened with; a manifest draft freezes its own base.
-  const liveTab = tab === 'overview' || tab === 'manifest';
+  // Live-refresh the object while Overview or the Manifest tree is showing so
+  // stuck pods, rollouts and conditions update in place — fed by the watch
+  // stream so it keeps pace with the tables, with the poll as fallback. The
+  // YAML view keeps the snapshot it opened with (an editor that reloads under
+  // the cursor is unusable); a manifest draft freezes its own base.
+  const liveTab = tab === 'overview' || (tab === 'manifest' && view === 'tree');
   const { data: obj, refetch, error } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
     liveMs: liveTab ? 5000 : undefined,
     watch: liveTab,
@@ -133,36 +142,42 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
   // Warm the schema (fetch + yaml-worker registration) while the drawer is on
-  // Overview, so hover/validation are ready the moment the YAML tab opens.
+  // Overview, so hover/validation are ready the moment the YAML view opens.
   useYamlSchema(sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined);
 
   const liveBase = useMemo(() => (obj ? withoutManagedFields(obj) : undefined), [obj]);
-  // Only serialize on the YAML tab — dumping a large object mid-open would
+  const showYaml = tab === 'manifest' && view === 'yaml';
+  // Only serialize for the YAML view — dumping a large object mid-open would
   // stall the drawer's slide-in animation.
-  const yamlText = useMemo(() => (liveBase && tab === 'yaml' ? dumpManifest(liveBase) : ''), [liveBase, tab]);
+  const yamlText = useMemo(() => (liveBase && showYaml ? dumpManifest(liveBase) : ''), [liveBase, showYaml]);
   // The editor measures dirtiness against the draft's base, and starts from
-  // the carried-over text when the draft came from the Manifest tab.
+  // the carried-over text when the draft came from the tree.
   const yamlValue = draft ? draft.baseText : yamlText;
-  const yamlDraftText = useMemo(() => (draft && tab === 'yaml' ? (draft.mode === 'yaml' ? draft.text : dumpManifest(draft.obj)) : undefined), [draft, tab]);
+  const yamlDraftText = draft?.mode === 'yaml' ? draft.text : undefined;
 
-  // Manifest ⇄ YAML share one draft: entering the tree parses the YAML
-  // (unparsable text stays on the YAML tab until fixed), entering the editor
-  // serializes the tree.
-  const switchTab = (next: string) => {
+  // Tree ⇄ YAML share one draft: entering the tree parses the YAML
+  // (unparsable text stays in the editor until fixed), entering the editor
+  // serializes the tree. The chosen view is remembered.
+  const switchView = (next: ManifestViewMode) => {
     setTabError(undefined);
-    if (next === tab) return;
-    if (draft?.mode === 'yaml' && next !== 'yaml') {
+    if (next === view) return;
+    if (draft?.mode === 'yaml') {
       const parsed = parseYamlMapping(draft.text);
       if (!parsed.ok) {
-        setTabError(`The YAML does not parse — fix it or reset the editor before leaving this tab. ${parsed.error}`);
+        setTabError(`The YAML does not parse — fix it or reset the editor before switching to the tree. ${parsed.error}`);
         return;
       }
       setDraft({ ...draft, obj: parsed.value as KubeObject, mode: 'tree' });
-    } else if (draft?.mode === 'tree' && next === 'yaml') {
+    } else if (draft?.mode === 'tree') {
       setDraft({ ...draft, text: dumpManifest(draft.obj), mode: 'yaml' });
     }
+    setPrefs({ manifestView: next });
+  };
+  const switchTab = (next: string) => {
+    setTabError(undefined);
     setTab(next);
   };
+  const viewToggle = <ManifestViewToggle view={view} onChange={switchView} />;
 
   const schemaSource = isCrd ? obj : backingCrd;
   const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
@@ -338,7 +353,6 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
             {versions.length > 0 && <Tab value="schema" label="Schema" sx={{ minHeight: 36 }} />}
             {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
-            <Tab value="yaml" label="YAML" sx={{ minHeight: 36 }} />
             <Tab value="events" label="Events" sx={{ minHeight: 36 }} />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
             {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
@@ -349,13 +363,14 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             </Alert>
           )}
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {tab === 'manifest' && obj && (
+            {tab === 'manifest' && obj && view === 'tree' && (
               <ManifestView
                 sel={sel}
                 live={obj}
                 draft={draft?.mode === 'tree' ? draft : undefined}
                 readOnly={objGone}
                 secretRedacted={isSecret && !reveal}
+                toolbarStart={viewToggle}
                 toolbar={revealToggle}
                 onDraftChange={(next, base) =>
                   setDraft(next ? { selKey, base, baseText: draft && draft.base === base ? draft.baseText : dumpManifest(base), obj: next, text: '', mode: 'tree' } : undefined)
@@ -397,7 +412,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 />
               </Box>
             )}
-            {tab === 'yaml' && (
+            {showYaml && (
               <YamlEditor
                 value={yamlValue}
                 draft={yamlDraftText}
@@ -409,7 +424,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 onApply={handleApply}
                 onDryRun={sel ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
                 schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
-                toolbar={revealToggle}
+                toolbar={
+                  <>
+                    {viewToggle}
+                    {revealToggle}
+                  </>
+                }
               />
             )}
             {tab === 'events' && <EventsList events={events?.items ?? []} />}
@@ -437,6 +457,25 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
 
 export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
   return <ResourceDetailDrawer {...props} inline />;
+}
+
+/** Tree / YAML switch at the start of the Manifest toolbar. */
+function ManifestViewToggle({ view, onChange }: { view: ManifestViewMode; onChange: (next: ManifestViewMode) => void }) {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={view}
+      onChange={(_e, next: ManifestViewMode | null) => {
+        if (next) onChange(next);
+      }}
+      aria-label="Manifest view"
+      sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: 1.25, py: 0.25, textTransform: 'none', fontSize: 12.5, lineHeight: 1.7 } }}
+    >
+      <ToggleButton value="tree">Tree</ToggleButton>
+      <ToggleButton value="yaml">YAML</ToggleButton>
+    </ToggleButtonGroup>
+  );
 }
 
 function discardMessage(source: DirtySource | false): string {
