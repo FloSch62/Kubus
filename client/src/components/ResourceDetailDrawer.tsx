@@ -424,7 +424,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                   showToast('success', `${sel.kind} ${sel.name} updated`);
                   void refetch();
                 }}
-                onConflict={() => void refetch()}
+                onConflict={() => void (isSecret ? refetchRevealed() : refetch())}
               />
             )}
             {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}

@@ -316,7 +316,7 @@ export function ManifestTree({
         break;
       }
       case 'Enter':
-        if (expandable) toggle(pointer);
+        if (expandable) toggle(pointer, !expanded);
         else if (target.dataset.editable === 'true') setEditing(pointer);
         else return;
         break;
@@ -465,7 +465,7 @@ const TreeRow = memo(function TreeRow({ ctx, path, pointer, value, base, schema,
 
   if (!inFilter) return null;
 
-  const toggle = () => ctx.toggle(pointer);
+  const toggle = () => ctx.toggle(pointer, !expanded);
   const copyValue = () => {
     const text = container ? dumpManifest(shown) : scalarText(shown);
     void copyToClipboard(text).then((ok) => showToast(ok ? 'success' : 'error', ok ? `Copied ${label}` : 'Copy to clipboard failed'));

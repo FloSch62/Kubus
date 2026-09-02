@@ -296,6 +296,18 @@ describe('ManifestView', () => {
     expect(onDraftChange.mock.lastCall?.[0].spec.minReadySeconds).toBe(0);
   });
 
+  it('collapses a row that started open on the first click and on Enter', () => {
+    renderView(deployment());
+    expect(row('strategy')).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(row('strategy'));
+    expect(row('strategy')).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(row('strategy'));
+    expect(row('strategy')).toHaveAttribute('aria-expanded', 'true');
+    row('template').focus();
+    fireEvent.keyDown(row('template'), { key: 'Enter' });
+    expect(row('template')).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('navigates rows with the keyboard', () => {
     renderView(deployment());
     const first = row('replicas');

@@ -210,7 +210,8 @@ export function buildManifest(latest: KubeObject, entries: DataEntry[], isSecret
  */
 export function maskSecretValues(obj: KubeObject, shown: (name: string) => boolean): KubeObject {
   const clone = JSON.parse(JSON.stringify(obj)) as KubeObject;
-  for (const field of ['data', 'binaryData'] as const) {
+  // stringData never comes back from the API, but a draft may carry it.
+  for (const field of ['data', 'binaryData', 'stringData'] as const) {
     const map = clone[field] as Record<string, unknown> | undefined;
     if (!map) continue;
     for (const key of Object.keys(map)) {

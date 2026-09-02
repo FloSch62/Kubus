@@ -17,6 +17,7 @@ const queries = vi.hoisted(() => ({
   resourceCalls: [] as Array<{ selection: Record<string, unknown> | undefined; options?: Record<string, unknown> }>,
   eventsCalls: [] as Array<Record<string, unknown> | undefined>,
   refetch: vi.fn(),
+  refetchRevealed: vi.fn(),
   resourceError: null as Error | null,
   applyMode: 'success' as 'success' | 'conflict' | 'error',
   applyMutateAsync: vi.fn(),
@@ -39,7 +40,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
         : selection.plural === 'customresourcedefinitions'
           ? queries.backing
           : queries.current;
-    return { data, refetch: queries.refetch, error: queries.resourceError };
+    return { data, refetch: selection?.reveal ? queries.refetchRevealed : queries.refetch, error: queries.resourceError };
   },
   isResourceGone: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useResourceEvents: (selection: Record<string, unknown> | undefined) => {
@@ -224,6 +225,7 @@ beforeEach(() => {
   queries.resourceCalls = [];
   queries.eventsCalls = [];
   queries.refetch.mockReset();
+  queries.refetchRevealed.mockReset();
   queries.resourceError = null;
   queries.applyMode = 'success';
   queries.applyMutateAsync.mockReset();
@@ -478,6 +480,12 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText('read-only editor')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
     expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toBe('kind: [');
+    // A tree conflict on a Secret refreshes the revealed object the tree is built from.
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    showTree();
+    fireEvent.click(screen.getByRole('button', { name: 'Manifest conflict mock' }));
+    expect(queries.refetchRevealed).toHaveBeenCalled();
+    expect(queries.refetch).not.toHaveBeenCalled();
 
     const next = selection('Secret', { name: 'other-secret' });
     queries.current = objectFor(next, { data: {} });

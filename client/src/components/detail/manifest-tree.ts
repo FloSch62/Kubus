@@ -264,10 +264,11 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
   for (const change of diffChanges(base, draft).rows.values()) {
     // Removed rows are addressed in base coordinates, everything else in draft coordinates.
     const source = change.kind === 'removed' ? base : draft;
+    const conflicts = { base, latest };
     if (change.keyed !== undefined) {
       // Membership of a keyed list: add or drop the item by label, leaving the
       // server's other items (and any it added meanwhile) untouched.
-      const listPath = resolvePathByIdentity(source, next, change.path.slice(0, -1));
+      const listPath = resolvePathByIdentity(source, next, change.path.slice(0, -1), conflicts);
       const list = listPath ? getAt(next, listPath) : undefined;
       if (!listPath || !Array.isArray(list)) {
         skipped.push(change);
@@ -282,8 +283,11 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
       next = found === -1 ? insertAt(next, listPath, Math.min(change.path[change.path.length - 1] as number, list.length), value) : setAt(next, [...listPath, found], value);
       continue;
     }
-    const path = resolvePathByIdentity(source, next, change.path);
-    if (!path) {
+    const path = resolvePathByIdentity(source, next, change.path, conflicts);
+    // A positional list the draft replaced as a whole (its length changed)
+    // cannot be merged with a server-side change to the same list.
+    const replacedList = change.kind === 'changed' && Array.isArray(getAt(base, change.path));
+    if (!path || (replacedList && !deepEqual(getAt(base, change.path), getAt(latest, path)))) {
       skipped.push(change);
       continue;
     }
@@ -295,9 +299,11 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
 /**
  * Translate a path from `source` into `target`: keyed list items are found
  * by their label, positional ones keep their index. Undefined when a keyed
- * item along the way does not exist in the target.
+ * item along the way does not exist in the target — or, with `conflicts`,
+ * when a positional list shifted between the base snapshot and the latest
+ * object (an index would then name a different element).
  */
-export function resolvePathByIdentity(source: unknown, target: unknown, path: JsonPath): PathSegment[] | undefined {
+export function resolvePathByIdentity(source: unknown, target: unknown, path: JsonPath, conflicts?: { base: unknown; latest: unknown }): PathSegment[] | undefined {
   const out: PathSegment[] = [];
   for (let i = 0; i < path.length; i += 1) {
     const segment = path[i]!;
@@ -311,6 +317,11 @@ export function resolvePathByIdentity(source: unknown, target: unknown, path: Js
           if (found === -1) return undefined;
           out.push(found);
           continue;
+        }
+        if (conflicts) {
+          const baseList = getAt(conflicts.base, path.slice(0, i));
+          const latestList = getAt(conflicts.latest, out);
+          if (!Array.isArray(baseList) || !Array.isArray(latestList) || baseList.length !== latestList.length || !deepEqual(baseList[segment], latestList[segment])) return undefined;
         }
       }
     }

@@ -135,10 +135,18 @@ describe('change tracking', () => {
     expect(vanished.value.spec.template.spec.containers).toEqual([{ name: 'nginx', image: 'nginx:1.27' }]);
     expect(vanished.skipped.map((c) => c.path)).toEqual([[...containersPath, 1, 'image']]);
 
-    // Positional lists (no natural key) stay positional.
-    const args = { spec: { args: ['a', 'b', 'c'] } };
+    // Positional lists (no natural key) stay positional while the server left them alone…
+    const args = { spec: { args: ['a', 'b', 'c'] }, other: 1 };
     const edited = setAt(args, ['spec', 'args', 1], 'B');
-    expect(rebaseEdits(args, edited, { spec: { args: ['x', 'y', 'z'] } }).value.spec.args).toEqual(['x', 'B', 'z']);
+    expect(rebaseEdits(args, edited, { spec: { args: ['a', 'b', 'c'] }, other: 2 }).value).toEqual({ spec: { args: ['a', 'B', 'c'] }, other: 2 });
+    // …but an index means a different element once the server inserted or changed something: report, don't misplace.
+    const shifted = rebaseEdits(args, edited, { spec: { args: ['new', 'a', 'b', 'c'] } });
+    expect(shifted.value.spec.args).toEqual(['new', 'a', 'b', 'c']);
+    expect(shifted.skipped.map((c) => c.path)).toEqual([['spec', 'args', 1]]);
+    // A positional list the draft replaced as a whole only replays if the server did not touch it.
+    const appended = setAt(args, ['spec', 'args'], ['a', 'b', 'c', 'd']);
+    expect(rebaseEdits(args, appended, { spec: { args: ['a', 'b', 'c'] } }).value.spec.args).toEqual(['a', 'b', 'c', 'd']);
+    expect(rebaseEdits(args, appended, { spec: { args: ['a', 'b'] } }).skipped.map((c) => c.path)).toEqual([['spec', 'args']]);
   });
 
   it('replays keyed-list additions and removals without clobbering the server list', () => {

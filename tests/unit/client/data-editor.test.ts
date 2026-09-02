@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import {
-  REDACTED,
   b64ByteLength,
   b64ToBytes,
   b64ToText,
@@ -10,6 +9,7 @@ import {
   entriesFromObject,
   entryDirty,
   isValidB64,
+  REDACTED,
   maskSecretValues,
   textToB64,
   validateEntries,
@@ -220,6 +220,13 @@ describe('buildManifest', () => {
 });
 
 describe('maskSecretValues', () => {
+  it('masks stringData a draft may carry, not only data and binaryData', () => {
+    const obj = { apiVersion: 'v1', kind: 'Secret', metadata: { name: 's', uid: 'u' }, data: { a: 'YQ==' }, stringData: { b: 'plain' } } as unknown as KubeObject;
+    const masked = maskSecretValues(obj, () => false) as unknown as { data: Record<string, string>; stringData: Record<string, string> };
+    expect(masked.data.a).toBe(REDACTED);
+    expect(masked.stringData.b).toBe(REDACTED);
+  });
+
   it('masks keys the shown predicate rejects, in both fields', () => {
     const obj: KubeObject = {
       metadata: { name: 's', uid: 'u' },
