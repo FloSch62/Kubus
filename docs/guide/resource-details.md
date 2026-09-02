@@ -5,7 +5,8 @@ icon: lucide/file-text
 # Resource details & YAML
 
 Click any resource name and a **details drawer** slides in from the right. It gives you a
-human-friendly view *and* the raw YAML, without leaving the list you're on.
+human-friendly view, a browsable manifest *and* the raw YAML, without leaving the list
+you're on.
 
 <figure markdown="span">
   ![The resource details drawer for a pod](../assets/screenshots/pod-detail.png#only-light){ .shadow }
@@ -18,7 +19,9 @@ human-friendly view *and* the raw YAML, without leaving the list you're on.
 | Tab | Shows | Available for |
 | --- | --- | --- |
 | **Overview** | A kind-aware summary (see below). | Every kind |
+| **Manifest** | The object as a [browsable tree](#the-manifest-tab): every field with its value, type and description, editable in place. | Every kind |
 | **YAML** | A Monaco editor to read or [edit](#editing-yaml) the object. | Every kind |
+| **Schema** | The CRD's OpenAPI schema, with a picker for the served versions. | CustomResourceDefinitions |
 | **Events** | Events involving this object, newest first, Warnings highlighted. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
 | **Metrics** | Live CPU/memory [history charts](metrics.md). | Pods, Nodes |
@@ -50,12 +53,64 @@ collapsible sections hold the rest.
 - **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
-  and copyable), and a YAML preview of spec/status.
+  and copyable). The full spec and status live one tab over, in the Manifest tab.
 
 !!! tip "Navigate and come back"
 
     Click a related object, such as a pod's node or a referenced Secret, and the drawer
     follows it, keeping a **back stack**. Use the back arrow to return to where you were.
+
+## The Manifest tab
+
+The **Manifest** tab shows the whole object as a tree, one section per top-level key:
+Metadata, Spec, Status and whatever else the kind carries (rules, subjects, data). Each
+row is a field with its value, and the field's type sits at the right edge. List items
+are named after their natural key, so a container shows up as `nginx` rather than `[0]`.
+
+<figure markdown="span">
+  ![The Manifest tab for a Deployment](../assets/screenshots/manifest.png#only-light){ .shadow }
+  ![The Manifest tab for a Deployment](../assets/screenshots/manifest-dark.png#only-dark){ .shadow }
+  <figcaption>Spec and status as aligned key/value rows, with types on the right and locked fields marked.</figcaption>
+</figure>
+
+Reading tools:
+
+- **Filter** fields and values from the box at the top. Matching rows stay, their parents
+  open, everything else hides.
+- **Expand all** and **collapse all** switch between a full dump and the outline. Shallow
+  fields start open, long lists start closed.
+- The **descriptions** toggle prints each field's documentation from the API schema under
+  its row. Off by default; hover a field name for the same text.
+- Values that point at other objects are links: a pod's node, a `configMapRef`, an owner
+  reference, a scale target. Click one and the drawer follows it with a back stack.
+- Timestamps show relative and absolute time, status-like fields get a colored chip, long
+  strings clamp with a *Show more*.
+
+Editing works in place:
+
+1. Click a value to edit it. Booleans and enums become pickers, numbers refuse text, and
+   `Enter` commits while `Escape` cancels.
+2. Hover a row for its actions: copy the value, add a field, add a list item, delete, or
+   open the `...` menu to copy the path or replace a whole subtree as YAML. The field
+   picker lists what the schema still allows, with descriptions, and accepts any other
+   name too. The **+** on a section header adds directly under Spec, Metadata or any
+   other top-level key.
+3. Changed rows are marked and counted. Each one can be reset on its own, and **Reset**
+   drops everything.
+4. **Review & apply** shows the YAML diff, runs a server dry-run and only then enables
+   **Apply**.
+
+Some rows are locked with a padlock: the status block belongs to the controller, identity
+fields (name, namespace, UID, resource version) belong to the API server, and a Secret's
+data stays locked until you reveal it.
+
+The Manifest and YAML tabs share one draft. Edit a value in the tree, switch to YAML and
+the text already contains it; edit the text, switch back and the tree shows the change.
+If the YAML does not parse, the tab switch waits until it does. Leaving the resource with
+unapplied edits asks first.
+
+The tree is keyboard friendly: arrow keys move between rows, `Right` and `Left` expand and
+collapse, `Home` and `End` jump, and `Enter` edits a value.
 
 ## Editing YAML
 
@@ -70,7 +125,9 @@ the same engine that powers VS Code, with syntax highlighting and folding.
 
 If the object changed on the server while you were editing, Kubus won't blindly clobber
 it. The apply is rejected, you're shown the conflict, the view refreshes to the latest
-state, and you can re-apply your change against it. No silent overwrites.
+state, and you can re-apply your change against it. No silent overwrites. In the Manifest
+tab a banner offers to **rebase** your edits onto the refreshed object, so you keep them
+instead of starting over.
 
 !!! warning "Edits are real"
 

@@ -35,6 +35,7 @@
         "client/src/components/ConfirmDialog.tsx",
         "client/src/components/FileCopyDialog.tsx",
         "client/src/components/RowActions.tsx",
+        "client/src/components/detail/ManifestTree.tsx",
         "client/src/layout/ClusterSwitcher.tsx",
         "client/src/layout/SearchDialog.tsx"
       ],

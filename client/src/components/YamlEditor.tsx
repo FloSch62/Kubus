@@ -15,6 +15,8 @@ export interface YamlEditorProps {
   applyUnchanged?: boolean;
   /** Observe the edited text (e.g. to carry edits across a form/YAML tab switch). */
   onChange?: (yamlText: string) => void;
+  /** Text to start from instead of `value` — carried-over edits; dirtiness is still measured against `value`. */
+  draft?: string;
   /** Extra toolbar content (e.g. reveal-secrets toggle). */
   toolbar?: React.ReactNode;
   /** Kind being edited; enables schema-based hover docs, completion and validation. */

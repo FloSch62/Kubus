@@ -6,10 +6,6 @@ import ButtonBase from '@mui/material/ButtonBase';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Collapse from '@mui/material/Collapse';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
@@ -30,11 +26,11 @@ import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { dump as dumpYaml } from 'js-yaml';
 import type { KubeObject } from '@kubus/shared';
-import { useApplyResource, useDryRunResource, useResource } from '../../api/queries.js';
+import { useResource } from '../../api/queries.js';
 import { copyToClipboard } from '../../clipboard.js';
 import { showToast } from '../../state/toast.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { DiffViewer } from '../DiffViewer.js';
+import { ReviewApplyDialog } from './ReviewApplyDialog.js';
 import { formatBytes } from '../format.js';
 import {
   REDACTED,
@@ -501,7 +497,7 @@ function EntryRow({
 }
 
 /**
- * Diff + server dry-run gate in front of the apply. Secret values stay masked
+ * Diff + server dry-run review before the apply. Secret values stay masked
  * in the diff unless the key was revealed or its value was authored by the
  * user in this draft (an edit must never be invisible in the review).
  */
@@ -526,10 +522,6 @@ function ReviewDialog({
   onApplied: (updated: KubeObject) => void;
   onConflict: () => void;
 }) {
-  const apply = useApplyResource();
-  const dryRun = useDryRunResource();
-  const [error, setError] = useState<string>();
-
   const manifest = useMemo(() => buildManifest(latest, entries, isSecret), [latest, entries, isSecret]);
   const yamlBody = useMemo(() => dumpYaml(manifest, YAML_OPTS), [manifest]);
   const { left, right } = useMemo(() => {
@@ -544,70 +536,22 @@ function ReviewDialog({
     };
   }, [latest, manifest, entries, isSecret, revealAll, revealedIds]);
 
-  const dryRunMutate = dryRun.mutate;
-  useEffect(() => {
-    dryRunMutate({ ctx: sel.ctx, yamlBody });
-  }, [dryRunMutate, sel.ctx, yamlBody]);
-
-  const doApply = async () => {
-    setError(undefined);
-    try {
-      const updated = await apply.mutateAsync({ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, name: sel.name, namespace: sel.namespace, yamlBody });
-      onApplied(updated);
-    } catch (err) {
-      if ((err as { status?: number }).status === 409) {
-        onConflict();
-        setError(`${(err as Error).message} — the resource changed on the server; the diff has been refreshed, review it and apply again.`);
-        return;
-      }
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const findings = dryRun.data?.findings ?? [];
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle>
-        Review changes — {sel.namespace ? `${sel.namespace}/` : ''}
-        {sel.name}
-      </DialogTitle>
-      <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column', height: '68vh' }}>
-        {error && (
-          <Alert severity="error" onClose={() => setError(undefined)} sx={{ borderRadius: 0, flexShrink: 0 }}>
-            {error}
-          </Alert>
-        )}
-        {dryRun.isError && (
-          <Alert severity="error" sx={{ borderRadius: 0, flexShrink: 0 }}>
-            Dry-run failed: {dryRun.error instanceof Error ? dryRun.error.message : 'unknown error'}
-          </Alert>
-        )}
-        {findings.map((finding, i) => (
-          <Alert key={`${finding.field ?? ''}:${i}`} severity={finding.severity === 'error' ? 'error' : finding.severity} sx={{ borderRadius: 0, flexShrink: 0 }}>
-            {finding.field ? `${finding.field}: ` : ''}
-            {finding.message}
-          </Alert>
-        ))}
-        {dryRun.data?.ok && findings.length === 0 && (
-          <Alert severity="success" sx={{ borderRadius: 0, flexShrink: 0 }}>
-            Server dry-run accepted this change.
-          </Alert>
-        )}
-        {isSecret && (
+    <ReviewApplyDialog
+      sel={sel}
+      yamlBody={yamlBody}
+      left={left}
+      right={right}
+      notice={
+        isSecret ? (
           <Alert severity="info" sx={{ borderRadius: 0, flexShrink: 0 }}>
             Unrevealed Secret values are shown as {REDACTED} in this diff; the apply uses the real values.
           </Alert>
-        )}
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          <DiffViewer left={left} right={right} />
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" disabled={apply.isPending || dryRun.isPending || !dryRun.data?.ok} onClick={() => void doApply()}>
-          {apply.isPending ? 'Applying…' : 'Apply'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+        ) : undefined
+      }
+      onClose={onClose}
+      onApplied={onApplied}
+      onConflict={onConflict}
+    />
   );
 }

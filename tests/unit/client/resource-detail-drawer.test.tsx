@@ -53,23 +53,57 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
   useYamlSchema: (selection: unknown) => effects.yamlSchema(selection),
   YamlEditor: ({
     value,
+    draft,
     applyLabel,
     onApply,
     onDryRun,
+    onChange,
     toolbar,
   }: {
     value: string;
+    draft?: string;
     applyLabel?: string;
     onApply?: (value: string) => Promise<unknown>;
     onDryRun?: (value: string) => Promise<unknown>;
+    onChange?: (value: string) => void;
     toolbar?: ReactNode;
   }) => (
     <div data-testid="yaml-editor">
       {toolbar}
       <textarea aria-label="YAML input" value={value} readOnly />
+      <textarea aria-label="YAML draft" value={draft ?? ''} readOnly />
       <span>{applyLabel}</span>
-      <button onClick={() => void onApply?.(value).catch((error: unknown) => effects.yamlError(error))}>Apply YAML mock</button>
+      <button onClick={() => void onApply?.(draft ?? value).catch((error: unknown) => effects.yamlError(error))}>Apply YAML mock</button>
       <button onClick={() => void onDryRun?.(value)}>Dry run YAML mock</button>
+      <button onClick={() => onChange?.('kind: [')}>Type broken YAML</button>
+      <button onClick={() => onChange?.('kind: Pod\nmetadata:\n  name: pod-a\nspec:\n  hostname: edited\n')}>Type valid YAML</button>
+    </div>
+  ),
+}));
+
+vi.mock('../../../client/src/components/detail/ManifestView.js', () => ({
+  ManifestView: ({
+    live,
+    draft,
+    readOnly,
+    onDraftChange,
+    onApplied,
+    onConflict,
+  }: {
+    live: KubeObject;
+    draft?: { obj: KubeObject };
+    readOnly?: boolean;
+    onDraftChange: (obj: KubeObject | undefined, base: KubeObject) => void;
+    onApplied: (updated: KubeObject) => void;
+    onConflict: () => void;
+  }) => (
+    <div data-testid="manifest-view">
+      <span>Manifest {draft ? `draft ${JSON.stringify(draft.obj.spec)}` : 'clean'}</span>
+      <span>{readOnly ? 'read-only' : 'editable'}</span>
+      <button onClick={() => onDraftChange({ ...live, spec: { ...live.spec, replicas: 3 } }, live)}>Stage manifest edit</button>
+      <button onClick={() => onDraftChange(undefined, live)}>Discard manifest draft</button>
+      <button onClick={() => onApplied(live)}>Applied manifest mock</button>
+      <button onClick={onConflict}>Manifest conflict mock</button>
     </div>
   ),
 }));
@@ -108,7 +142,7 @@ vi.mock('../../../client/src/components/detail/CustomResourceDetail.js', () => (
 vi.mock('../../../client/src/components/detail/CrdDetail.js', () => ({
   crdVersions: (obj: KubeObject | undefined) => ((obj?.spec as { versions?: unknown[] } | undefined)?.versions ?? []),
   CrdDetail: ({ obj }: { obj: KubeObject }) => <div>CRD overview {obj.metadata.name}</div>,
-  CrdSchemaDetail: ({ versionName }: { versionName: string }) => <div>CRD schema {versionName}</div>,
+  CrdSchemaDetail: ({ versionName }: { versionName?: string }) => <div>CRD schema {versionName ?? 'default'}</div>,
 }));
 vi.mock('../../../client/src/components/detail/RolloutHistory.js', () => ({ RolloutHistory: ({ obj }: { obj: KubeObject }) => <div>Rollout history {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/MetricsChart.js', () => ({ MetricsChart: ({ kind, name }: { kind: string; name: string }) => <div>Metrics {kind} {name}</div> }));
@@ -188,7 +222,7 @@ beforeEach(() => {
   effects.yamlSchema.mockClear();
   effects.yamlError.mockClear();
   effects.detailProps = [];
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dirty: false, draft: undefined, pendingDiscard: undefined });
 });
 
 describe('ResourceDetailDrawer', () => {
@@ -254,6 +288,82 @@ describe('ResourceDetailDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   }, 15_000);
 
+  it('carries a manifest draft into the YAML tab and back, guarding close until it is discarded', async () => {
+    const sel = selection('Deployment');
+    queries.current = objectFor(sel, { spec: { replicas: 2 } });
+    const onClose = vi.fn();
+    render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('Manifest clean')).toBeInTheDocument();
+    expect(screen.getByText('editable')).toBeInTheDocument();
+    // Manifest stays live like Overview.
+    const deploymentCalls = queries.resourceCalls.filter(({ selection: call }) => call?.name === sel.name);
+    expect(deploymentCalls.at(-1)?.options).toMatchObject({ liveMs: 5000, watch: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().dirty).toBe('manifest');
+
+    // No guard between Manifest and YAML: the draft travels along, serialized.
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('replicas: 3');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('replicas: 2');
+    expect(useDetailStore.getState().dirty).toBe('yaml');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().dirty).toBe('manifest');
+
+    // Closing with a dirty draft asks first; confirming drops the draft.
+    fireEvent.click(screen.getByLabelText('Close resource details'));
+    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(useDetailStore.getState().draft).toBeUndefined();
+    expect(useDetailStore.getState().dirty).toBe(false);
+
+    // A successful apply from the tree clears the draft and refreshes.
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Applied manifest mock' }));
+    await waitFor(() => expect(useDetailStore.getState().draft).toBeUndefined());
+    expect(queries.refetch).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Manifest conflict mock' }));
+    expect(queries.refetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps unparsable YAML on the YAML tab and parses valid YAML into the tree', async () => {
+    const sel = selection('Pod');
+    queries.current = objectFor(sel, { spec: { hostname: 'orig' } });
+    render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
+    expect(useDetailStore.getState().dirty).toBe('yaml');
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText(/The YAML does not parse/)).toBeInTheDocument();
+    expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('manifest-view')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.queryByText(/The YAML does not parse/)).not.toBeInTheDocument();
+    expect(screen.getByText('Manifest draft {"hostname":"edited"}')).toBeInTheDocument();
+
+    // Applying the YAML text (a 409 first) rebases the draft on the refreshed object.
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    queries.refetch.mockResolvedValue({ data: objectFor(sel, { spec: { hostname: 'server' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } }) });
+    queries.applyMode = 'conflict';
+    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
+    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('view has been refreshed') })));
+    await waitFor(() => expect(useDetailStore.getState().draft?.base.metadata.resourceVersion).toBe('2'));
+    queries.applyMode = 'success';
+    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
+    await waitFor(() => expect(useDetailStore.getState().draft).toBeUndefined());
+  });
+
   it('marks a deleted resource and hides its actions, keeping the last state', () => {
     const sel = selection('Pod');
     queries.current = objectFor(sel, { status: { phase: 'Running' } });
@@ -264,6 +374,8 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText('Deleted')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quick actions pod-a' })).not.toBeInTheDocument();
     expect(screen.getByText('Pod overview pod-a')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('read-only')).toBeInTheDocument();
   });
 
   it('guards dirty ConfigMap data before changing tabs or closing', () => {
@@ -277,9 +389,9 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Make data dirty' }));
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
     expect(screen.getByText('Data editor configmap-a secret=false')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Discard data changes?' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel discard mock' }));
-    expect(screen.queryByRole('dialog', { name: 'Discard data changes?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
@@ -318,8 +430,8 @@ describe('ResourceDetailDrawer', () => {
     const first = render(<ResourceDetailPanel sel={crdSel} onClose={vi.fn()} />);
     expect(screen.getByText('CRD overview widgets.example.io')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Map' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'v1' }));
-    expect(screen.getByText('CRD schema v1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schema' }));
+    expect(screen.getByText('CRD schema default')).toBeInTheDocument();
     first.unmount();
 
     const customSel = selection('Widget', { custom: true, name: 'blue-widget' });
