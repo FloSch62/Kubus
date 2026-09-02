@@ -61,3 +61,41 @@ it('closes promptly when a WebSocket peer does not answer the close handshake', 
   server = undefined;
   await expect.poll(() => socket?.destroyed).toBe(true);
 });
+
+it('closes promptly when an HTTP client leaves a request in flight', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kubus-app-shutdown-'));
+  tempDirs.push(root);
+  const kubeconfig = path.join(root, 'kubeconfig');
+  fs.writeFileSync(kubeconfig, 'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\ncurrent-context: ""\n');
+  vi.stubEnv('XDG_CONFIG_HOME', path.join(root, 'config'));
+
+  server = await startServer({
+    host: '127.0.0.1',
+    port: 0,
+    token: 'test',
+    openBrowser: false,
+    prettyLogs: false,
+    staticRoot: path.join(root, 'missing-client'),
+    kubeconfigOverride: kubeconfig,
+  });
+  socket = net.createConnection({ host: '127.0.0.1', port: server.port });
+  await once(socket, 'connect');
+
+  const requestStarted = once(server.app.server, 'request');
+  socket.write(
+    [
+      'PUT /api/settings/kubeconfig HTTP/1.1',
+      'Host: 127.0.0.1',
+      'Authorization: Bearer test',
+      'Content-Type: application/json',
+      'Content-Length: 100',
+      '',
+      '{',
+    ].join('\r\n'),
+  );
+  await requestStarted;
+
+  await expect(server.close()).resolves.toBeUndefined();
+  server = undefined;
+  await expect.poll(() => socket?.destroyed).toBe(true);
+});

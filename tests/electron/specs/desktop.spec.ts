@@ -100,7 +100,7 @@ test('opens a routed native window and synchronizes shared renderer state both w
     // Theme is durable app-wide configuration and should update live.
     await launched.page.getByRole('button', { name: 'Toggle theme' }).click();
     await secondary.getByRole('button', { name: 'Toggle theme' }).hover();
-    await expect(secondary.getByRole('tooltip')).toContainText('Switch to dark mode');
+    await expect(secondary.getByRole('tooltip', { name: 'Switch to dark mode' })).toBeVisible();
 
     await secondary.evaluate(() => window.kubusDesktop?.closeWindow());
     await expect.poll(() => secondary.isClosed()).toBe(true);

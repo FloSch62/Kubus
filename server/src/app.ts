@@ -71,6 +71,9 @@ function buildLogger(config: ServerConfig): FastifyBaseLogger {
 export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const app = Fastify({
     loggerInstance: buildLogger(config),
+    // Desktop shutdown must not wait for renderer requests that are still in
+    // flight while Electron is trying to close the application.
+    forceCloseConnections: true,
     // Resource lists can be large; YAML applies too.
     bodyLimit: 32 * 1024 * 1024,
   });
