@@ -110,8 +110,9 @@ the real ones.
 
 Tree and YAML share one draft. Edit a value in the tree, switch to YAML and the text
 already contains it; edit the text, switch back and the tree shows the change. If the
-YAML does not parse, the switch waits until it does. Leaving the resource with unapplied
-edits asks first.
+YAML does not parse, the switch waits until it does. Unapplied edits stay with their
+resource: close the drawer, browse elsewhere, come back, and the Manifest tab (marked with
+a dot) still holds them until you apply or reset them.
 
 The tree is keyboard friendly: arrow keys move between rows, `Right` and `Left` expand and
 collapse, `Home` and `End` jump, and `Enter` edits a value.

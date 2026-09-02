@@ -42,6 +42,7 @@ import {
   dumpManifest,
   editorKindFor,
   emptyValueFor,
+  enumValueFor,
   hasNaturalKeys,
   isContainer,
   isPlainObject,
@@ -50,8 +51,10 @@ import {
   parseScalarInput,
   pointerOf,
   referenceAt,
+  removedItemPointer,
   scalarText,
   suggestedKeys,
+  uniqueLabels,
   type ChangeKind,
   type ChangeSet,
   type EditorKind,
@@ -108,6 +111,8 @@ export interface ManifestTreeProps {
   onDelete?: (path: JsonPath) => void;
   /** Restore a row (and its subtree) to the base snapshot. */
   onReset?: (path: JsonPath) => void;
+  /** Bring back a removed row (base coordinates); falls back to onReset. */
+  onRestore?: (path: JsonPath) => void;
 }
 
 const NO_DEFINITIONS: SchemaDefinitions = {};
@@ -183,6 +188,7 @@ interface TreeContext {
   onEdit?: (path: JsonPath, value: unknown) => void;
   onDelete?: (path: JsonPath) => void;
   onReset?: (path: JsonPath) => void;
+  onRestore?: (path: JsonPath) => void;
 }
 
 /**
@@ -214,6 +220,7 @@ export function ManifestTree({
   onEdit,
   onDelete,
   onReset,
+  onRestore,
 }: ManifestTreeProps) {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [forced, setForced] = useState<'expand' | 'collapse'>();
@@ -264,8 +271,9 @@ export function ManifestTree({
       onEdit,
       onDelete,
       onReset,
+      onRestore,
     }),
-    [rootPath, definitions, readOnly, lock, changes, flash, filter, showDocs, forced, overrides, toggle, editing, ownerNamespace, onOpenRef, canOpenRef, onEdit, onDelete, onReset],
+    [rootPath, definitions, readOnly, lock, changes, flash, filter, showDocs, forced, overrides, toggle, editing, ownerNamespace, onOpenRef, canOpenRef, onEdit, onDelete, onReset, onRestore],
   );
 
   // Keyboard navigation over the visible rows: arrows move, right/left
@@ -378,15 +386,28 @@ interface ChildEntry {
 function childEntries(value: unknown, base: unknown, hideKeys?: ReadonlySet<string>, parentPath: JsonPath = []): ChildEntry[] {
   if (Array.isArray(value)) {
     const natural = hasNaturalKeys(value);
-    const baseList = Array.isArray(base) && base.length === value.length ? base : undefined;
-    return value.map((item, i) => ({
+    // Keyed lists pair items by label (so a reordered or grown list still
+    // compares like with like) and keep removed items as ghost rows.
+    const labels = uniqueLabels(value);
+    const baseLabels = Array.isArray(base) ? uniqueLabels(base) : undefined;
+    const keyed = !!labels && !!baseLabels;
+    const positional = !keyed && Array.isArray(base) && base.length === value.length ? base : undefined;
+    const entries: ChildEntry[] = value.map((item, i) => ({
       segment: i,
       pointer: pointerOf([...parentPath, i]),
       value: item,
-      base: baseList ? baseList[i] : item,
+      base: keyed ? (base as unknown[])[baseLabels.indexOf(labels[i]!)] : positional ? positional[i] : item,
       label: natural ? itemLabel(item, i) : String(i),
       indexLabel: natural ? `#${i}` : undefined,
     }));
+    if (keyed) {
+      (base as unknown[]).forEach((item, baseIndex) => {
+        const label = baseLabels[baseIndex]!;
+        if (labels.includes(label)) return;
+        entries.push({ segment: baseIndex, pointer: removedItemPointer(parentPath, label), value: undefined, base: item, label, indexLabel: `#${baseIndex}` });
+      });
+    }
+    return entries;
   }
   if (!isPlainObject(value)) return [];
   const baseObject = isPlainObject(base) ? base : undefined;
@@ -605,7 +626,7 @@ const TreeRow = memo(function TreeRow({ ctx, path, pointer, value, base, schema,
           >
             {(change || touched) && ctx.onReset && !ctx.readOnly && (
               <Tooltip title={removed ? 'Restore' : 'Reset to server value'}>
-                <IconButton size="small" aria-label={`${removed ? 'Restore' : 'Reset'} ${label}`} onClick={() => ctx.onReset?.(path)} sx={{ p: 0.25 }}>
+                <IconButton size="small" aria-label={`${removed ? 'Restore' : 'Reset'} ${label}`} onClick={() => (removed ? (ctx.onRestore ?? ctx.onReset)?.(path) : ctx.onReset?.(path))} sx={{ p: 0.25 }}>
                   <UndoIcon sx={{ fontSize: 15 }} />
                 </IconButton>
               </Tooltip>
@@ -924,7 +945,8 @@ function InlineEditor({ value, schema, onCommit, onCancel }: { value: unknown; s
       return;
     }
     committed.current = true;
-    onCommit(parsed.value);
+    // Enum members keep their declared type: picking 1 commits the number 1.
+    onCommit(kind === 'enum' ? enumValueFor(schema, raw) : parsed.value);
   };
   const cancel = () => {
     committed.current = true;

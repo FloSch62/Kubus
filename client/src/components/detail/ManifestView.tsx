@@ -35,11 +35,14 @@ import {
   filterTree,
   getAt,
   hasAt,
+  insertAt,
   isContainer,
+  itemLabel,
   lockReason,
   manifestGroups,
   pointerOf,
   rebaseEdits,
+  resolvePathByIdentity,
   setAt,
   splitApiVersion,
   type FilterResult,
@@ -190,8 +193,31 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const update = useCallback((next: KubeObject) => onDraftChange(next, base), [onDraftChange, base]);
   const onEdit = useCallback((path: JsonPath, value: unknown) => update(setAt(current, path, value)), [update, current]);
   const onDelete = useCallback((path: JsonPath) => update(deleteAt(current, path)), [update, current]);
+  // Reset follows list items by identity: a row inside a container that
+  // moved still restores its own base value.
   const onReset = useCallback(
-    (path: JsonPath) => update(hasAt(base, path) ? setAt(current, path, getAt(base, path)) : deleteAt(current, path)),
+    (path: JsonPath) => {
+      const basePath = resolvePathByIdentity(current, base, path);
+      update(basePath && hasAt(base, basePath) ? setAt(current, path, getAt(base, basePath)) : deleteAt(current, path));
+    },
+    [update, current, base],
+  );
+  // Restore a removed row from the base (its own coordinates): a keyed list
+  // item goes back by label, anything else back to its key.
+  const onRestore = useCallback(
+    (path: JsonPath) => {
+      const last = path[path.length - 1];
+      const listPath = path.slice(0, -1);
+      const list = getAt(current, listPath);
+      const item = getAt(base, path);
+      if (typeof last === 'number' && Array.isArray(list)) {
+        const label = itemLabel(item, last);
+        const found = list.findIndex((candidate, index) => itemLabel(candidate, index) === label);
+        update(found === -1 ? insertAt(current, listPath, Math.min(last, list.length), item) : setAt(current, [...listPath, found], item));
+        return;
+      }
+      update(setAt(current, path, item));
+    },
     [update, current, base],
   );
 
@@ -251,6 +277,7 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
     onEdit: readOnly ? undefined : onEdit,
     onDelete: readOnly ? undefined : onDelete,
     onReset: readOnly ? undefined : onReset,
+    onRestore: readOnly ? undefined : onRestore,
   };
 
   return (

@@ -240,7 +240,7 @@ beforeEach(() => {
   effects.yamlSchema.mockClear();
   effects.yamlError.mockClear();
   effects.detailProps = [];
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dirty: false, draft: undefined, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
   useUiPrefsStore.setState({ manifestView: 'tree' });
 });
 
@@ -308,11 +308,12 @@ describe('ResourceDetailDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   }, 15_000);
 
-  it('carries a manifest draft into the YAML tab and back, guarding close until it is discarded', async () => {
+  it('carries a manifest draft into the YAML view and back, and keeps it across a close', async () => {
     const sel = selection('Deployment');
     queries.current = objectFor(sel, { spec: { replicas: 2 } });
     const onClose = vi.fn();
-    render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
+    const key = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace}|${sel.name}`;
+    const view = render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
     expect(screen.getByText('Manifest clean')).toBeInTheDocument();
@@ -323,32 +324,35 @@ describe('ResourceDetailDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
     expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
-    expect(useDetailStore.getState().dirty).toBe('manifest');
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('tree');
 
     // No guard between the tree and the YAML view: the draft travels along, serialized.
     fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('replicas: 3');
     expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('replicas: 2');
-    expect(useDetailStore.getState().dirty).toBe('yaml');
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('yaml');
 
     showTree();
     expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
-    expect(useDetailStore.getState().dirty).toBe('manifest');
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('tree');
 
-    // Closing with a dirty draft asks first; confirming drops the draft.
+    // Closing keeps the draft with its resource: no prompt, and reopening shows it again.
     fireEvent.click(screen.getByLabelText('Close resource details'));
-    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(onClose).toHaveBeenCalledOnce();
-    expect(useDetailStore.getState().draft).toBeUndefined();
-    expect(useDetailStore.getState().dirty).toBe(false);
+    expect(useDetailStore.getState().drafts[key]?.obj.spec).toEqual({ replicas: 3 });
+    view.unmount();
+    render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard manifest draft' }));
+    expect(useDetailStore.getState().drafts[key]).toBeUndefined();
 
     // A successful apply from the tree clears the draft and refreshes.
     fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
     fireEvent.click(screen.getByRole('button', { name: 'Applied manifest mock' }));
-    await waitFor(() => expect(useDetailStore.getState().draft).toBeUndefined());
+    await waitFor(() => expect(useDetailStore.getState().drafts[key]).toBeUndefined());
     expect(queries.refetch).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Manifest conflict mock' }));
     expect(queries.refetch).toHaveBeenCalledTimes(2);
@@ -359,9 +363,10 @@ describe('ResourceDetailDrawer', () => {
     queries.current = objectFor(sel, { spec: { hostname: 'orig' } });
     render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
 
+    const podKey = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace}|${sel.name}`;
     showYaml();
     fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
-    expect(useDetailStore.getState().dirty).toBe('yaml');
+    expect(useDetailStore.getState().drafts[podKey]?.mode).toBe('yaml');
     showTree();
     expect(screen.getByText(/The YAML does not parse/)).toBeInTheDocument();
     expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
@@ -378,15 +383,15 @@ describe('ResourceDetailDrawer', () => {
     queries.applyMode = 'conflict';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
     await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('replayed onto the latest version') })));
-    await waitFor(() => expect(useDetailStore.getState().draft?.base.metadata.resourceVersion).toBe('2'));
-    const rebased = useDetailStore.getState().draft!;
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('2'));
+    const rebased = useDetailStore.getState().drafts[podKey]!;
     expect(rebased.text).toContain('hostname: edited');
     expect(rebased.text).toContain('nodeName: n1');
     expect(rebased.text).toContain("resourceVersion: '2'");
     expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('hostname: edited');
     queries.applyMode = 'success';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(useDetailStore.getState().draft).toBeUndefined());
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]).toBeUndefined());
   });
 
   it('marks a deleted resource and hides its actions, keeping the last state', () => {
@@ -441,7 +446,8 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toHaveTextContent('The Data tab has key edits');
     fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
     expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
-    expect(useDetailStore.getState().dirty).toBe('manifest');
+    expect(useDetailStore.getState().dataDirty).toBe(false);
+    expect(Object.keys(useDetailStore.getState().drafts)).toHaveLength(1);
   });
 
   it('reveals Secret YAML and resets the per-selection view state', () => {
@@ -463,6 +469,15 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
     expect(screen.getByText('editable editor')).toBeInTheDocument();
     expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain(btoa('secret'));
+    // Broken YAML typed while revealed cannot be masked: hiding it hides the draft entirely.
+    fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect(screen.getByText(/YAML edits are hidden while the Secret is masked/)).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).not.toContain(btoa('secret'));
+    expect(screen.getByText('read-only editor')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toBe('kind: [');
 
     const next = selection('Secret', { name: 'other-secret' });
     queries.current = objectFor(next, { data: {} });

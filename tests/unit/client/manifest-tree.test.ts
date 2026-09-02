@@ -19,6 +19,9 @@ import {
   pointerOf,
   rebaseEdits,
   referenceAt,
+  removedItemPointer,
+  resolvePathByIdentity,
+  enumValueFor,
   setAt,
   splitApiVersion,
   suggestedKeys,
@@ -87,10 +90,22 @@ describe('change tracking', () => {
     expect([...changes.touched].sort()).toEqual(['/metadata', '/metadata/labels', '/spec']);
   });
 
-  it('treats a list whose length changed as one changed row', () => {
-    const draft = deleteAt(deployment, ['spec', 'template', 'spec', 'containers', 0]);
-    const changes = diffChanges(deployment, draft);
-    expect([...changes.rows.keys()]).toEqual(['/spec/template/spec/containers']);
+  it('diffs keyed lists by item identity and positional lists by index', () => {
+    const containers = ['spec', 'template', 'spec', 'containers'];
+    // Removing the first container: one removed row for "nginx", "sidecar" (now index 0) keeps its own comparison.
+    const shrunk = deleteAt(deployment, [...containers, 0]);
+    expect([...diffChanges(deployment, shrunk).rows.entries()]).toEqual([
+      [removedItemPointer(containers, 'nginx'), { kind: 'removed', path: [...containers, 0], keyed: 'nginx' }],
+    ]);
+    // Prepending a container plus editing an existing one: the edit is tracked at its draft index.
+    const grown = setAt(insertAt(deployment, containers, 0, { name: 'init', image: 'i' }), [...containers, 2, 'image'], 'busybox:2');
+    expect([...diffChanges(deployment, grown).rows.entries()]).toEqual([
+      ['/spec/template/spec/containers/0', { kind: 'added', path: [...containers, 0], keyed: 'init' }],
+      ['/spec/template/spec/containers/2/image', { kind: 'changed', path: [...containers, 2, 'image'] }],
+    ]);
+    // Positional lists that change length are one changed row.
+    const args = { spec: { args: ['a', 'b'] } };
+    expect([...diffChanges(args, { spec: { args: ['a'] } }).rows.keys()]).toEqual(['/spec/args']);
     expect(diffChanges(deployment, deployment).rows.size).toBe(0);
   });
 
@@ -124,6 +139,32 @@ describe('change tracking', () => {
     const args = { spec: { args: ['a', 'b', 'c'] } };
     const edited = setAt(args, ['spec', 'args', 1], 'B');
     expect(rebaseEdits(args, edited, { spec: { args: ['x', 'y', 'z'] } }).value.spec.args).toEqual(['x', 'B', 'z']);
+  });
+
+  it('replays keyed-list additions and removals without clobbering the server list', () => {
+    const containersPath = ['spec', 'template', 'spec', 'containers'];
+    const containers = (obj: typeof deployment) => obj.spec.template.spec.containers.map((c) => `${c.name}=${c.image}`);
+    // The draft appends "metrics" and removes "sidecar"; meanwhile the server bumped nginx's image and appended "log".
+    const draft = deleteAt(insertAt(deployment, containersPath, 2, { name: 'metrics', image: 'm' }), [...containersPath, 1]);
+    const latest = insertAt(setAt(deployment, [...containersPath, 0, 'image'], 'nginx:1.28'), containersPath, 2, { name: 'log', image: 'l' });
+    const rebased = rebaseEdits(deployment, draft, latest);
+    expect(rebased.skipped).toEqual([]);
+    expect(containers(rebased.value)).toEqual(['nginx=nginx:1.28', 'metrics=m', 'log=l']);
+    // An item the server added with the same name takes the draft's version.
+    const dup = insertAt(deployment, containersPath, 2, { name: 'metrics', image: 'server' });
+    expect(containers(rebaseEdits(deployment, draft, dup).value)).toEqual(['nginx=nginx:1.27', 'metrics=m']);
+  });
+
+  it('resolves paths across reordered keyed lists and keeps enum members typed', () => {
+    const containers = ['spec', 'template', 'spec', 'containers'];
+    const reordered = { spec: { template: { spec: { containers: [{ name: 'sidecar' }, { name: 'nginx' }] } } } };
+    expect(resolvePathByIdentity(deployment, reordered, [...containers, 0, 'image'])).toEqual([...containers, 1, 'image']);
+    expect(resolvePathByIdentity(deployment, { spec: { template: { spec: { containers: [] } } } }, [...containers, 0])).toBeUndefined();
+    expect(resolvePathByIdentity({ a: ['x', 'y'] }, { a: ['p', 'q'] }, ['a', 1])).toEqual(['a', 1]);
+    expect(enumValueFor({ enum: [1, 2, true, 'x'] }, '1')).toBe(1);
+    expect(enumValueFor({ enum: [1, 2, true, 'x'] }, 'true')).toBe(true);
+    expect(enumValueFor({ enum: [1, 2, true, 'x'] }, 'x')).toBe('x');
+    expect(enumValueFor(undefined, 'free')).toBe('free');
   });
 });
 

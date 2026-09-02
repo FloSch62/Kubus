@@ -166,7 +166,22 @@ export type ChangeKind = 'added' | 'removed' | 'changed';
 
 export interface Change {
   kind: ChangeKind;
+  /** Draft coordinates for added/changed rows, base coordinates for removed ones. */
   path: PathSegment[];
+  /** Natural key of a keyed-list item that was added to or removed from its list. */
+  keyed?: string;
+}
+
+/** Pointer under which a removed keyed-list item is tracked (it has no draft index). */
+export function removedItemPointer(listPath: JsonPath, label: string): string {
+  return `${pointerOf(listPath)}/~removed:${label}`;
+}
+
+/** Labels of a keyed list when every item has a natural key and no two share one. */
+export function uniqueLabels(list: unknown[]): string[] | undefined {
+  if (!hasNaturalKeys(list)) return undefined;
+  const labels = list.map(itemLabel);
+  return new Set(labels).size === labels.length ? labels : undefined;
 }
 
 export interface ChangeSet {
@@ -202,9 +217,28 @@ function walkDiff(base: unknown, draft: unknown, path: PathSegment[], out: Map<s
     }
     return;
   }
-  if (Array.isArray(base) && Array.isArray(draft) && base.length === draft.length) {
-    base.forEach((item, i) => walkDiff(item, draft[i], [...path, i], out));
-    return;
+  if (Array.isArray(base) && Array.isArray(draft)) {
+    // Keyed lists (containers, ports, conditions…) diff by item identity, so
+    // adding or removing one item is one change and the others keep theirs.
+    const baseLabels = uniqueLabels(base);
+    const draftLabels = uniqueLabels(draft);
+    if (baseLabels && draftLabels) {
+      draft.forEach((item, i) => {
+        const label = draftLabels[i]!;
+        const baseIndex = baseLabels.indexOf(label);
+        if (baseIndex === -1) out.set(pointerOf([...path, i]), { kind: 'added', path: [...path, i], keyed: label });
+        else walkDiff(base[baseIndex], item, [...path, i], out);
+      });
+      base.forEach((_item, baseIndex) => {
+        const label = baseLabels[baseIndex]!;
+        if (!draftLabels.includes(label)) out.set(removedItemPointer(path, label), { kind: 'removed', path: [...path, baseIndex], keyed: label });
+      });
+      return;
+    }
+    if (base.length === draft.length) {
+      base.forEach((item, i) => walkDiff(item, draft[i], [...path, i], out));
+      return;
+    }
   }
   out.set(pointerOf(path), { kind: 'changed', path });
 }
@@ -228,7 +262,27 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
   let next = latest;
   const skipped: Change[] = [];
   for (const change of diffChanges(base, draft).rows.values()) {
-    const path = resolveByIdentity(base, next, change.path);
+    // Removed rows are addressed in base coordinates, everything else in draft coordinates.
+    const source = change.kind === 'removed' ? base : draft;
+    if (change.keyed !== undefined) {
+      // Membership of a keyed list: add or drop the item by label, leaving the
+      // server's other items (and any it added meanwhile) untouched.
+      const listPath = resolvePathByIdentity(source, next, change.path.slice(0, -1));
+      const list = listPath ? getAt(next, listPath) : undefined;
+      if (!listPath || !Array.isArray(list)) {
+        skipped.push(change);
+        continue;
+      }
+      const found = list.findIndex((item, index) => itemLabel(item, index) === change.keyed);
+      if (change.kind === 'removed') {
+        if (found !== -1) next = deleteAt(next, [...listPath, found]);
+        continue;
+      }
+      const value = getAt(draft, change.path);
+      next = found === -1 ? insertAt(next, listPath, Math.min(change.path[change.path.length - 1] as number, list.length), value) : setAt(next, [...listPath, found], value);
+      continue;
+    }
+    const path = resolvePathByIdentity(source, next, change.path);
     if (!path) {
       skipped.push(change);
       continue;
@@ -238,18 +292,22 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
   return { value: next, skipped };
 }
 
-/** Translate a base path into the latest object; keyed list items are found by label, positional ones by index. */
-function resolveByIdentity(base: unknown, latest: unknown, path: PathSegment[]): PathSegment[] | undefined {
+/**
+ * Translate a path from `source` into `target`: keyed list items are found
+ * by their label, positional ones keep their index. Undefined when a keyed
+ * item along the way does not exist in the target.
+ */
+export function resolvePathByIdentity(source: unknown, target: unknown, path: JsonPath): PathSegment[] | undefined {
   const out: PathSegment[] = [];
   for (let i = 0; i < path.length; i += 1) {
     const segment = path[i]!;
     if (typeof segment === 'number') {
-      const baseList = getAt(base, path.slice(0, i));
-      const latestList = getAt(latest, out);
-      if (Array.isArray(baseList) && Array.isArray(latestList) && segment < baseList.length) {
-        const label = itemLabel(baseList[segment], segment);
+      const sourceList = getAt(source, path.slice(0, i));
+      const targetList = getAt(target, out);
+      if (Array.isArray(sourceList) && Array.isArray(targetList) && segment < sourceList.length) {
+        const label = itemLabel(sourceList[segment], segment);
         if (label !== String(segment)) {
-          const found = latestList.findIndex((item, index) => itemLabel(item, index) === label);
+          const found = targetList.findIndex((item, index) => itemLabel(item, index) === label);
           if (found === -1) return undefined;
           out.push(found);
           continue;
@@ -448,6 +506,11 @@ export function parseScalarInput(text: string, kind: EditorKind): { ok: true; va
     default:
       return { ok: true, value: text };
   }
+}
+
+/** The enum member a picker's text stands for, keeping numbers and booleans typed. */
+export function enumValueFor(schema: JsonSchema | undefined, text: string): unknown {
+  return schema?.enum?.find((member) => String(member) === text) ?? text;
 }
 
 /** Starting value for a field added under a schema (its default when declared). */

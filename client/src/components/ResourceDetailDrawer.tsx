@@ -47,7 +47,7 @@ import { DetailQuickActions } from './RowActions.js';
 import { StatusChip } from './StatusChip.js';
 import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
-import { useDetailStore, type DirtySource } from '../state/detail.js';
+import { useDetailStore, type ManifestDraft } from '../state/detail.js';
 import { useUiPrefsStore, type ManifestViewMode } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
 
@@ -82,10 +82,10 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   // dirty Data tab) through the same guard and dialog. The manifest draft
   // survives tab switches, so only the Data tab guards those.
   const guardLeave = useDetailStore((s) => s.guard);
-  const dirty = useDetailStore((s) => s.dirty);
+  const dataDirty = useDetailStore((s) => s.dataDirty);
   const setDataDirty = useDetailStore((s) => s.setDataDirty);
-  const storeDraft = useDetailStore((s) => s.draft);
-  const setDraft = useDetailStore((s) => s.setDraft);
+  const storeSetDraft = useDetailStore((s) => s.setDraft);
+  const clearDraft = useDetailStore((s) => s.clearDraft);
   const pendingDiscard = useDetailStore((s) => s.pendingDiscard);
   const confirmDiscard = useDetailStore((s) => s.confirmDiscard);
   const cancelDiscard = useDetailStore((s) => s.cancelDiscard);
@@ -113,7 +113,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
     setTabError(undefined);
     setReveal(false);
   }, [selKey]);
-  const draft = storeDraft && storeDraft.selKey === selKey ? storeDraft : undefined;
+  const draft = useDetailStore((s) => s.drafts[selKey]);
+  const setDraft = (next: ManifestDraft | undefined) => (next ? storeSetDraft(next) : clearDraft(selKey));
   // The Manifest tab shows the object as a tree or as YAML. A draft pins the
   // view to its own mode (switching converts it); otherwise the preference applies.
   const preferredView = useUiPrefsStore((s) => s.manifestView);
@@ -164,12 +165,15 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   // The editor measures dirtiness against the draft's base, and starts from
   // the carried-over text when the draft came from the tree.
   const yamlValue = draft ? (secretMasked ? dumpManifest(maskAll(draft.base)) : draft.baseText) : yamlText;
+  // Masked Secret YAML shows the draft re-serialized from its parsed form;
+  // text that does not parse cannot be masked, so it stays hidden until revealed.
   const yamlDraftText = useMemo(() => {
     if (draft?.mode !== 'yaml') return undefined;
     if (!secretMasked) return draft.text;
     const parsed = parseYamlMapping(draft.text);
-    return parsed.ok ? dumpManifest(maskAll(parsed.value as KubeObject)) : draft.text;
+    return parsed.ok ? dumpManifest(maskAll(parsed.value as KubeObject)) : undefined;
   }, [draft, secretMasked]);
+  const hiddenUnparsableDraft = secretMasked && draft?.mode === 'yaml' && yamlDraftText === undefined;
 
   // Tree ⇄ YAML share one draft: entering the tree parses the YAML
   // (unparsable text stays in the editor until fixed), entering the editor
@@ -236,7 +240,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
       // (picking up its resourceVersion) so the next apply can succeed.
       if ((err as { status?: number }).status === 409) {
         const latest = (await (isSecret ? refetchRevealed() : refetch()))?.data;
-        const current = useDetailStore.getState().draft;
+        const current = useDetailStore.getState().drafts[selKey];
         let outcome = 'the resource changed on the server; the editor has been refreshed, re-apply your edits.';
         if (latest && current?.selKey === selKey) {
           const base = withoutManagedFields(latest);
@@ -368,13 +372,23 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           {obj && !objGone && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
           <Tabs
             value={tab}
-            onChange={(_e, v) => (dirty === 'data' ? guardLeave(() => switchTab(v as string)) : switchTab(v as string))}
+            onChange={(_e, v) => (dataDirty ? guardLeave(() => switchTab(v as string)) : switchTab(v as string))}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
           >
             <Tab value="overview" label="Overview" sx={{ minHeight: 36 }} />
-            <Tab value="manifest" label="Manifest" sx={{ minHeight: 36 }} />
+            <Tab
+              value="manifest"
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                  Manifest
+                  {draft && <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />}
+                </Box>
+              }
+              title={draft ? 'Unapplied edits' : undefined}
+              sx={{ minHeight: 36 }}
+            />
             {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
             {versions.length > 0 && <Tab value="schema" label="Schema" sx={{ minHeight: 36 }} />}
             {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
@@ -385,6 +399,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           {tabError && (
             <Alert severity="error" onClose={() => setTabError(undefined)} sx={{ borderRadius: 0, flexShrink: 0 }}>
               {tabError}
+            </Alert>
+          )}
+          {hiddenUnparsableDraft && showYaml && (
+            <Alert severity="info" sx={{ borderRadius: 0, flexShrink: 0 }}>
+              Your YAML edits are hidden while the Secret is masked because they do not parse. Reveal the Secret to continue editing them.
             </Alert>
           )}
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
@@ -474,7 +493,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           <ConfirmDialog
             open={!!pendingDiscard}
             title="Discard changes?"
-            message={discardMessage(dirty)}
+            message="The Data tab has key edits that have not been applied. Leaving discards them."
             confirmLabel="Discard"
             danger
             onConfirm={confirmDiscard}
@@ -514,16 +533,6 @@ function ManifestViewToggle({ view, onChange }: { view: ManifestViewMode; onChan
   );
 }
 
-function discardMessage(source: DirtySource | false): string {
-  switch (source) {
-    case 'data':
-      return 'The Data tab has key edits that have not been applied. Leaving discards them.';
-    case 'yaml':
-      return 'The YAML editor has edits that have not been applied. Leaving discards them.';
-    default:
-      return 'The Manifest tab has edits that have not been applied. Leaving discards them.';
-  }
-}
 
 /** Summary status word shown next to the kind in the header, for kinds with a
  *  cheap one-word answer. Others rely on their overview's Status fact. */

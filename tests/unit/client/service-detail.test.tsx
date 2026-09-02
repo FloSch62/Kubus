@@ -74,7 +74,7 @@ beforeEach(() => {
   queries.slicesError = undefined;
   queries.requests = [];
   queries.options = [];
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dirty: false, draft: undefined, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
 });
 
 describe('endpointRows', () => {

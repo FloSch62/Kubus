@@ -44,11 +44,15 @@ interface DetailState {
   width: number;
   /** Bumped when keyboard flows want focus moved into the panel. */
   focusSeq: number;
-  /** An editor holds staged, unapplied edits. */
-  dirty: DirtySource | false;
-  /** Manifest/YAML edits for the open resource; dropped when they equal the base again. */
-  draft?: ManifestDraft;
-  /** Action stalled behind the discard confirmation while dirty. */
+  /** The Data editor holds staged edits; they live in the editor, so leaving it is guarded. */
+  dataDirty: boolean;
+  /**
+   * Unapplied manifest/YAML edits per resource (keyed by selection). They
+   * outlive the drawer: closing it, navigating away or opening a dock action
+   * keeps them, and they are back the next time the resource is opened.
+   */
+  drafts: Record<string, ManifestDraft>;
+  /** Action stalled behind the discard confirmation while the Data editor is dirty. */
   pendingDiscard?: () => void;
   open: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
   push: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
@@ -57,11 +61,11 @@ interface DetailState {
   setCollapsed: (collapsed: boolean) => void;
   setWidth: (width: number) => void;
   requestFocus: () => void;
-  /** The Data editor's staged-edits flag; the manifest draft keeps its own dirtiness. */
   setDataDirty: (dirty: boolean) => void;
-  /** Stage manifest/YAML edits; a draft equal to its base is dropped. */
-  setDraft: (draft: ManifestDraft | undefined) => void;
-  /** Run now, or stall behind the discard confirmation while an editor is dirty. */
+  /** Stage manifest/YAML edits for their resource; a draft equal to its base is dropped. */
+  setDraft: (draft: ManifestDraft) => void;
+  clearDraft: (selKey: string) => void;
+  /** Run now, or stall behind the discard confirmation while the Data editor is dirty. */
   guard: (action: () => void) => void;
   confirmDiscard: () => void;
   cancelDiscard: () => void;
@@ -83,62 +87,67 @@ export function draftDirty(draft: ManifestDraft): DirtySource | false {
   return deepEqual(draft.obj, draft.base) ? false : 'manifest';
 }
 
-export const useDetailStore = create<DetailState>((set, get) => ({
-  stack: [],
-  embedded: false,
-  collapsed: false,
-  width: DEFAULT_DETAIL_WIDTH,
-  focusSeq: 0,
-  dirty: false,
-  // Selection changes come from anywhere (row clicks, topology, events,
-  // search) and replace the mounted detail — guard them so staged Data-tab
-  // edits aren't dropped without confirmation. Re-opening the same resource
-  // doesn't remount the editor, so it passes through.
-  open: (sel, opts) => {
-    const embedded = opts?.embedded ?? false;
-    const { stack } = get();
-    const sameSel = stack.length === 1 && selKeyOf(stack[0]!) === selKeyOf(sel);
-    if (sameSel) set({ stack: [sel], embedded });
-    else get().guard(() => set({ stack: [sel], embedded, draft: undefined }));
-  },
-  // Pushes can come from outside the panel (e.g. the API-resource drawer's
-  // CRD link), so surface the result even if the panel was collapsed. A push
-  // extends whichever surface owns the stack, so the embedded flag is kept
-  // unless the caller states ownership — needed when a push seeds an empty
-  // stack (list pages can open their CRD with no row selected).
-  push: (sel, opts) =>
-    get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false, embedded: opts?.embedded ?? s.embedded, draft: undefined }))),
-  back: () => set((s) => ({ stack: s.stack.slice(0, -1), draft: undefined })),
-  // Bail when already closed — close() is called liberally (e.g. on page
-  // unmounts), and a fresh [] would re-render every stack subscriber.
-  close: () => set((s) => (s.stack.length ? { stack: [], draft: undefined, dirty: false } : s)),
-  setCollapsed: (collapsed) => set({ collapsed }),
-  setWidth: (width) => set({ width: clampDetailWidth(width) }),
-  requestFocus: () => set((s) => ({ focusSeq: s.focusSeq + 1, collapsed: false })),
-  setDataDirty: (dataDirty) =>
-    set((s) => {
-      const dirty: DirtySource | false = dataDirty ? 'data' : s.draft ? draftDirty(s.draft) : false;
-      return s.dirty === dirty ? s : { dirty };
-    }),
-  setDraft: (draft) => {
-    const dirty = draft ? draftDirty(draft) : false;
-    set({ draft: dirty ? draft : undefined, dirty });
-  },
-  guard: (action) => {
-    if (get().dirty) set({ pendingDiscard: action });
-    else action();
-  },
-  // Discarding answers the guard that was raised: for the Data tab's edits a
-  // manifest draft the dialog never mentioned survives, for a manifest/YAML
-  // draft the draft itself is dropped.
-  confirmDiscard: () => {
-    const action = get().pendingDiscard;
-    set((s) =>
-      s.dirty === 'data'
-        ? { dirty: s.draft ? draftDirty(s.draft) : false, pendingDiscard: undefined }
-        : { dirty: false, draft: undefined, pendingDiscard: undefined },
-    );
-    action?.();
-  },
-  cancelDiscard: () => set({ pendingDiscard: undefined }),
-}));
+export const useDetailStore = create<DetailState>((set, get) => {
+  const update = (patch: Partial<DetailState>) => set(patch);
+  return {
+    stack: [],
+    embedded: false,
+    collapsed: false,
+    width: DEFAULT_DETAIL_WIDTH,
+    focusSeq: 0,
+    dataDirty: false,
+    drafts: {},
+    // Selection changes come from anywhere (row clicks, topology, events,
+    // search) and replace the mounted detail — guard them so staged Data-tab
+    // edits aren't dropped without confirmation. Re-opening the same resource
+    // doesn't remount the editor, so it passes through.
+    open: (sel, opts) => {
+      const embedded = opts?.embedded ?? false;
+      const { stack } = get();
+      const sameSel = stack.length === 1 && selKeyOf(stack[0]!) === selKeyOf(sel);
+      if (sameSel) update({ stack: [sel], embedded });
+      else get().guard(() => update({ stack: [sel], embedded }));
+    },
+    // Pushes can come from outside the panel (e.g. the API-resource drawer's
+    // CRD link), so surface the result even if the panel was collapsed. A push
+    // extends whichever surface owns the stack, so the embedded flag is kept
+    // unless the caller states ownership — needed when a push seeds an empty
+    // stack (list pages can open their CRD with no row selected).
+    push: (sel, opts) => get().guard(() => set((s) => ({ stack: [...s.stack, sel], collapsed: false, embedded: opts?.embedded ?? s.embedded }))),
+    back: () => update({ stack: get().stack.slice(0, -1) }),
+    // Bail when already closed — close() is called liberally (e.g. on page
+    // unmounts), and a fresh [] would re-render every stack subscriber.
+    // Drafts stay: nothing typed into the tree or the editor is lost by closing.
+    close: () => {
+      if (get().stack.length) update({ stack: [] });
+    },
+    setCollapsed: (collapsed) => set({ collapsed }),
+    setWidth: (width) => set({ width: clampDetailWidth(width) }),
+    requestFocus: () => set((s) => ({ focusSeq: s.focusSeq + 1, collapsed: false })),
+    setDataDirty: (dataDirty) => {
+      if (get().dataDirty !== dataDirty) update({ dataDirty });
+    },
+    setDraft: (draft) => {
+      const drafts = { ...get().drafts };
+      if (draftDirty(draft)) drafts[draft.selKey] = draft;
+      else delete drafts[draft.selKey];
+      update({ drafts });
+    },
+    clearDraft: (selKey) => {
+      if (!get().drafts[selKey]) return;
+      const drafts = { ...get().drafts };
+      delete drafts[selKey];
+      update({ drafts });
+    },
+    guard: (action) => {
+      if (get().dataDirty) set({ pendingDiscard: action });
+      else action();
+    },
+    confirmDiscard: () => {
+      const action = get().pendingDiscard;
+      update({ dataDirty: false, pendingDiscard: undefined });
+      action?.();
+    },
+    cancelDiscard: () => set({ pendingDiscard: undefined }),
+  };
+});

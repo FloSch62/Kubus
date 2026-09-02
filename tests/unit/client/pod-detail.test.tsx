@@ -240,7 +240,7 @@ beforeEach(() => {
     else options.onSuccess();
   });
   effects.toast.mockClear();
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dirty: false, draft: undefined, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
 });
 

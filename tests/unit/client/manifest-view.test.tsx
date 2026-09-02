@@ -95,7 +95,7 @@ beforeEach(() => {
   queries.dryRunData = { ok: true, findings: [] };
   effects.toast.mockReset();
   effects.copy.mockReset();
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dirty: false, draft: undefined, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
 });
 
 describe('ManifestView', () => {
@@ -177,6 +177,28 @@ describe('ManifestView', () => {
     await waitFor(() => expect(onApplied).toHaveBeenCalledOnce());
     expect(queries.applyMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ name: 'web', namespace: 'team-a', yamlBody: expect.stringContaining('replicas: 3') }));
   }, 15_000);
+
+  it('shows removed keyed list items as ghost rows and restores or resets them by identity', () => {
+    const live = deployment({
+      spec: { ...(deployment().spec as object), template: { spec: { containers: [{ name: 'nginx', image: 'nginx:1.27' }, { name: 'sidecar', image: 'busybox' }] } } },
+    });
+    // The draft drops nginx and edits sidecar's image (sidecar is now index 0).
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as { template: { spec: { containers: Array<{ name: string; image: string }> } } }).template.spec.containers = [{ name: 'sidecar', image: 'busybox:2' }];
+    const draft = draftFor(live, obj);
+    const { onDraftChange } = renderView(live, { draft });
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByText('2 changes')).toBeInTheDocument();
+    expect(within(row('nginx')).getByText('removed')).toBeInTheDocument();
+    expect(within(row('sidecar')).queryByText('removed')).not.toBeInTheDocument();
+    // The image row compares against sidecar's own base value, not the item that used to sit at index 0.
+    expect(within(row('image')).getByText('changed')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset image', hidden: true }));
+    expect(onDraftChange.mock.lastCall?.[0].spec.template.spec.containers).toEqual([{ name: 'sidecar', image: 'busybox' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore nginx', hidden: true }));
+    expect(onDraftChange.mock.lastCall?.[0].spec.template.spec.containers).toEqual([{ name: 'nginx', image: 'nginx:1.27' }, { name: 'sidecar', image: 'busybox:2' }]);
+  });
 
   it('discards the whole draft after confirmation and rebases when the server moved', () => {
     const live = deployment();
