@@ -17,7 +17,7 @@ export type ContextWatchIssues = ReadonlyMap<string, ContextWatchIssue>;
 export type BroadcastHandler = (
   msg: Extract<
     WatchServerMessage,
-    { op: 'drain-progress' | 'helm-operation' | 'helm-records-changed' | 'helm-watch-status' | 'pf-update' | 'contexts-changed' | 'discovery-update' }
+    { op: 'drain-progress' | 'helm-operation' | 'helm-records-changed' | 'helm-watch-status' | 'pf-update' | 'contexts-changed' | 'discovery-update' | 'context-reset' }
   >,
 ) => void;
 
@@ -215,7 +215,8 @@ class WatchClient {
           // The server-side session for this context was torn down or rebuilt:
           // resubscribe so lists attach to the new session instead of silently
           // going stale on the disposed one. The cache is kept so rows stay
-          // visible until the fresh snapshot replaces them.
+          // visible until the fresh snapshot replaces them. Broadcast consumers
+          // that cache HTTP data per context (Helm) resync on it too.
           for (const sub of this.subs.values()) {
             if (sub.params.ctx !== msg.ctx) continue;
             sub.pending = [];
@@ -224,6 +225,7 @@ class WatchClient {
               this.sendSub(sub);
             }
           }
+          for (const handler of this.broadcastHandlers) handler(msg);
           break;
         }
       }

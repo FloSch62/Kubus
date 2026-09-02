@@ -424,8 +424,14 @@ describe('query hook contracts', () => {
     };
     const { unmount } = renderHook(() => queries.useHelmLiveEvents());
 
+    // A watch turning live has no memory of what changed before: resync that cluster once.
     emitBroadcast({ op: 'helm-watch-status', ctx: 'dev', status: { state: 'live' } });
     expect(harness.cache.get(JSON.stringify(['helm-watch-status']))).toEqual({ dev: { state: 'live' } });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-resources', 'dev'] });
+    harness.queryClient.invalidateQueries.mockClear();
+    emitBroadcast({ op: 'helm-watch-status', ctx: 'dev', status: { state: 'live', message: 'configmaps records cannot be watched' } });
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
 
     emitBroadcast({ op: 'helm-records-changed', ctx: 'dev', changes: [{ namespace: 'team-a', name: 'demo', revision: 2, status: 'deployed', type: 'MODIFIED' }] });
     expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
@@ -441,12 +447,19 @@ describe('query hook contracts', () => {
     expect(harness.showToast).toHaveBeenCalledWith('success', expect.stringContaining('install completed'));
     expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
 
-    // The first socket open is not a resync; a reconnect is.
+    // A rebuilt context session drops that cluster's caches.
+    emitBroadcast({ op: 'context-reset', ctx: 'dev' });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-watch-status'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-release', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-history', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['helm-releases', 'prod'] });
+
+    // Every socket open resyncs (the first can trail the initial fetches), keeping in-flight fetches.
+    harness.queryClient.invalidateQueries.mockClear();
     for (const handler of harness.openHandlers) handler(false);
-    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
-    for (const handler of harness.openHandlers) handler(true);
     for (const root of ['helm-watch-status', 'helm-operations', 'helm-releases', 'helm-release', 'helm-history', 'helm-resources']) {
-      expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: [root] });
+      expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: [root] }, { cancelRefetch: false });
     }
 
     unmount();

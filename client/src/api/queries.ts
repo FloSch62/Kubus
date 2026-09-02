@@ -1334,6 +1334,7 @@ export function useHelmOperations() {
 }
 
 const HELM_QUERY_ROOTS = ['helm-watch-status', 'helm-operations', 'helm-releases', 'helm-release', 'helm-history', 'helm-resources'];
+const HELM_CONTEXT_QUERY_ROOTS = ['helm-releases', 'helm-release', 'helm-history', 'helm-resources'];
 
 function invalidateHelmRelease(qc: ReturnType<typeof useQueryClient>, ctx: string, ns: string, name: string): void {
   void qc.invalidateQueries({ queryKey: ['helm-release', ctx, ns, name] });
@@ -1341,13 +1342,21 @@ function invalidateHelmRelease(qc: ReturnType<typeof useQueryClient>, ctx: strin
   void qc.invalidateQueries({ queryKey: ['helm-resources', ctx, ns, name] });
 }
 
+/** Everything cached for one cluster's releases: for sessions rebuilt under the same name. */
+function invalidateHelmContext(qc: ReturnType<typeof useQueryClient>, ctx: string): void {
+  for (const root of HELM_CONTEXT_QUERY_ROOTS) void qc.invalidateQueries({ queryKey: [root, ctx] });
+}
+
 /**
  * One app-wide bridge from the Helm broadcasts into React Query: record
  * changes (any writer, Kubus or not) refresh the affected release queries,
  * watch-status frames keep the live badge current, and operation progress
  * lands in the operations list with completion toasts. The HTTP endpoints
- * remain the reload source of truth, and a socket reconnect resyncs them all
- * because broadcasts sent while it was down are gone.
+ * remain the reload source of truth: every socket open resyncs them all
+ * (broadcasts have no replay, and the first open can trail the initial
+ * fetches), a rebuilt context session drops its cluster's caches, and a
+ * watch turning live refetches its cluster because a fresh watcher has no
+ * memory of what changed while there was none.
  */
 export function useHelmLiveEvents(): void {
   const qc = useQueryClient();
@@ -1355,7 +1364,14 @@ export function useHelmLiveEvents(): void {
   useEffect(() => {
     const unsubscribeBroadcast = watchClient.onBroadcast((message) => {
       if (message.op === 'helm-watch-status') {
+        const before = qc.getQueryData<Record<string, HelmWatchStatus>>(['helm-watch-status'])?.[message.ctx]?.state;
         qc.setQueryData<Record<string, HelmWatchStatus>>(['helm-watch-status'], (current) => ({ ...current, [message.ctx]: message.status }));
+        if (message.status.state === 'live' && before !== 'live') invalidateHelmContext(qc, message.ctx);
+        return;
+      }
+      if (message.op === 'context-reset') {
+        void qc.invalidateQueries({ queryKey: ['helm-watch-status'] });
+        invalidateHelmContext(qc, message.ctx);
         return;
       }
       if (message.op === 'helm-records-changed') {
@@ -1393,9 +1409,10 @@ export function useHelmLiveEvents(): void {
         }
       }
     });
-    const unsubscribeOpen = watchClient.onOpen((reconnect) => {
-      if (!reconnect) return;
-      for (const root of HELM_QUERY_ROOTS) void qc.invalidateQueries({ queryKey: [root] });
+    const unsubscribeOpen = watchClient.onOpen(() => {
+      // Fetches already in flight are as fresh as this open; only settled
+      // queries need another round trip.
+      for (const root of HELM_QUERY_ROOTS) void qc.invalidateQueries({ queryKey: [root] }, { cancelRefetch: false });
     });
     return () => {
       unsubscribeBroadcast();
