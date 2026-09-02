@@ -66,8 +66,9 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 ## Updating
 
-Download the newer installer and install over the top — your settings live in the
-browser/app profile and are preserved. There's no telemetry and no auto-updater phoning home.
+Download the newer installer and install over the top. Your settings live in the
+browser/app profile and are preserved. There's no telemetry and no auto-updater phoning
+home.
 
 ## Next steps
 

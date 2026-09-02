@@ -4,8 +4,8 @@ icon: lucide/folder-tree
 
 # Copying files
 
-Move files in and out of a running container — like `kubectl cp`, but with a file picker
-and a progress readout.
+Move files in and out of a running container, the way `kubectl cp` does, with a file
+picker and a progress readout.
 
 - **Pod** ⋮ menu → **Files…**
 
@@ -44,7 +44,7 @@ few common binaries:
 
 <div class="grid cards" markdown>
 
--   :material-console: **[Shell & debug](shell.md)** — open a terminal in the same container
--   :material-cable: **[Port forwarding](port-forwarding.md)** — reach a service locally
+-   :material-console: **[Shell & debug](shell.md)** opens a terminal in the same container.
+-   :material-cable: **[Port forwarding](port-forwarding.md)** makes a service reachable locally.
 
 </div>

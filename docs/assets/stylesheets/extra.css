@@ -59,30 +59,409 @@
   font-size: 0.78rem;
 }
 
-/* Hero block on the landing page */
+/* ---------------------------------------------------------------------------
+   Landing page hero. Rendered by overrides/partials/kubus-hero.html for pages
+   with `hero: true`; the cube field comes from hack/docs-hero.mjs.
+   Colours are theme variables: the dark values are the defaults, the light
+   scheme overrides them below.
+   --------------------------------------------------------------------------- */
 .kubus-hero {
-  text-align: center;
-  padding: 1.2rem 0 0.4rem;
-}
-.kubus-hero h1 {
-  font-weight: 800;
-  font-size: 2.6rem;
-  margin: 0.2rem 0 0.4rem;
-  letter-spacing: -0.02em;
+  --kh-bg-a: #0a1020;
+  --kh-bg-b: #0d1530;
+  --kh-bg-c: #0b1326;
+  --kh-tint-1: rgba(52, 190, 251, 0.30);
+  --kh-tint-2: rgba(116, 48, 230, 0.38);
+  --kh-tint-3: rgba(35, 96, 226, 0.36);
+  --kh-glow: rgba(68, 120, 255, 0.30);
+  --kh-shade: 10, 16, 32;
+  --kh-shade-strength: 0.82;
+  --kh-fg: #fff;
+  --kh-fg-muted: rgba(255, 255, 255, 0.78);
+  --kh-fg-faint: rgba(255, 255, 255, 0.66);
+  --kh-line: #9fc0ff;
+  --kh-line-opacity: 0.45;
+  --kh-grid-opacity: 0.08;
+  --kh-cube: 1;
+  --kh-pill-border: rgba(255, 255, 255, 0.16);
+  --kh-pill-bg: rgba(255, 255, 255, 0.06);
+  --kh-pill-fg: rgba(255, 255, 255, 0.8);
+  --kh-btn-border: rgba(255, 255, 255, 0.3);
+  --kh-btn-border-hover: rgba(255, 255, 255, 0.55);
+  --kh-btn-hover: rgba(255, 255, 255, 0.1);
+  --kh-primary-bg: #fff;
+  --kh-primary-fg: #0b1326;
+  --kh-primary-hover: #e6f1ff;
+  --kh-icon: #5fd0ff;
+
+  position: relative;
+  overflow: hidden;
+  color: var(--kh-fg);
+  padding: 3.6rem 0 7.6rem;
+  background:
+    radial-gradient(70% 90% at 50% -20%, var(--kh-tint-1), transparent 70%),
+    radial-gradient(45% 65% at 88% 85%, var(--kh-tint-2), transparent 70%),
+    radial-gradient(40% 60% at 8% 95%, var(--kh-tint-3), transparent 70%),
+    linear-gradient(180deg, var(--kh-bg-a) 0%, var(--kh-bg-b) 55%, var(--kh-bg-c) 100%);
 }
 
-/* Use the app logo in place of the old helm-wheel glyph in the hero title */
-.kubus-hero h1 .kubus-hero-logo {
-  height: 1.15em;
-  width: auto;
-  vertical-align: -0.18em;
-  margin-right: 0.2em;
+[data-md-color-scheme="default"] .kubus-hero {
+  --kh-bg-a: #f8faff;
+  --kh-bg-b: #eef3ff;
+  --kh-bg-c: #f3f6ff;
+  --kh-tint-1: rgba(52, 190, 251, 0.22);
+  --kh-tint-2: rgba(150, 110, 240, 0.20);
+  --kh-tint-3: rgba(70, 120, 240, 0.16);
+  --kh-glow: rgba(120, 160, 255, 0.28);
+  --kh-shade: 246, 249, 255;
+  --kh-shade-strength: 0.86;
+  --kh-fg: #0b1326;
+  --kh-fg-muted: #3d4763;
+  --kh-fg-faint: #5a6480;
+  --kh-line: #3b6fe0;
+  --kh-line-opacity: 0.4;
+  --kh-grid-opacity: 0.16;
+  --kh-cube: 0.72;
+  --kh-pill-border: rgba(11, 19, 38, 0.12);
+  --kh-pill-bg: rgba(255, 255, 255, 0.75);
+  --kh-pill-fg: #2b3550;
+  --kh-btn-border: rgba(11, 19, 38, 0.28);
+  --kh-btn-border-hover: rgba(11, 19, 38, 0.5);
+  --kh-btn-hover: rgba(11, 19, 38, 0.06);
+  --kh-primary-bg: #111c3f;
+  --kh-primary-fg: #fff;
+  --kh-primary-hover: #1e2c5e;
+  --kh-icon: #2f6fe8;
 }
-.kubus-hero p.tagline {
-  font-size: 1.05rem;
-  color: var(--md-default-fg-color--light);
-  max-width: 42rem;
-  margin: 0 auto 1.2rem;
+
+.kubus-hero::after {
+  /* thin brand line where the tab bar meets the hero */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #4fd2ff 25%, #7f8cff 55%, #c77dff 80%, transparent 100%);
+  opacity: 0.8;
+}
+
+.kubus-hero__bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: size;
+}
+
+.kubus-hero__bg::before {
+  /* soft glow behind the title */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 60rem;
+  height: 28rem;
+  translate: -50% -50%;
+  background: radial-gradient(closest-side, var(--kh-glow), transparent 100%);
+}
+
+.kubus-hero__defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* The scene is a fixed 1600x560 box scaled up to cover the hero. Cubes sit at
+   percentage positions inside it, so they line up with the static SVG's viewBox.
+   --u is one scene unit in px, used by the packets' travel distance. */
+.kubus-hero__scene {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  width: 100%;
+  width: max(100cqw, calc(100cqh * 2.857143));
+  aspect-ratio: 1600 / 560;
+  --u: calc(max(100cqw, 100cqh * 2.857143) / 1600);
+}
+
+.kubus-hero__static {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.kubus-hero__grid {
+  opacity: var(--kh-grid-opacity);
+}
+
+.kubus-hero__links line {
+  stroke: var(--kh-line);
+  stroke-opacity: var(--kh-line-opacity);
+  stroke-width: 1;
+  stroke-dasharray: 3 8;
+}
+
+.kubus-hero__layer {
+  position: absolute;
+  inset: 0;
+  opacity: var(--kh-cube);
+}
+
+/* Each cube rises and lights up in one animation. Only transform and opacity move, with
+   literal keyframe values, so the compositor runs it without main-thread work. */
+.kb-cube {
+  position: absolute;
+  display: block;
+  opacity: 0.28;
+  animation: kb-pulse var(--t) ease-in-out var(--d) infinite;
+  will-change: transform, opacity;
+}
+
+.kb-cube svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.kubus-hero__layer--far .kb-cube {
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+}
+
+.kubus-hero__layer--mid .kb-cube {
+  width: 42px;
+  height: 42px;
+  margin: -21px 0 0 -21px;
+}
+
+.kubus-hero__layer--near .kb-cube {
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+}
+
+.kubus-hero__packets {
+  position: absolute;
+  inset: 0;
+}
+
+.kb-packet {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--kh-line);
+  opacity: 0;
+  animation: kb-travel var(--t) ease-in-out var(--d) infinite;
+  will-change: transform, opacity;
+}
+
+.kubus-hero__shade {
+  /* keep the middle calm so the copy stays readable over the field */
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(48% 62% at 50% 44%, rgba(var(--kh-shade), var(--kh-shade-strength)), rgba(var(--kh-shade), 0) 100%),
+    linear-gradient(180deg, rgba(var(--kh-shade), 0) 70%, rgba(var(--kh-shade), 0.55) 100%);
+}
+
+@keyframes kb-pulse {
+  0%, 100% { transform: translateY(0);     opacity: 0.28; }
+  50%      { transform: translateY(-18px); opacity: 1; }
+}
+
+@keyframes kb-travel {
+  0%   { transform: translate(0, 0); opacity: 0; }
+  12%  { opacity: 0.95; }
+  88%  { opacity: 0.95; }
+  100% { transform: translate(calc(var(--dx) * var(--u)), calc(var(--dy) * var(--u))); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kubus-hero .kb-cube {
+    animation: none;
+    opacity: 0.6;
+  }
+  .kb-packet {
+    display: none;
+  }
+}
+
+.kubus-hero__inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0 1rem;
+}
+
+.kubus-hero__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.25rem 0.8rem 0.25rem 0.45rem;
+  border: 1px solid var(--kh-pill-border);
+  border-radius: 999px;
+  background: var(--kh-pill-bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kh-pill-fg);
+}
+
+.kubus-hero__brand img {
+  height: 1.25rem;
+  width: auto;
+}
+
+.kubus-hero h1 {
+  margin: 1.1rem auto 0.8rem;
+  font-size: clamp(2.2rem, 5.2vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--kh-fg);
+}
+
+.kubus-hero h1 em {
+  /* Gradient text. The clip follows the box, so pad it or the last glyph's
+     overhang (tightened by the negative letter-spacing) gets cut off. */
+  font-style: normal;
+  padding: 0.06em 0.12em 0.06em 0.04em;
+  margin: -0.06em -0.08em -0.06em -0.04em;
+  background: linear-gradient(90deg, #4fd2ff 0%, #7f8cff 55%, #c77dff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+[data-md-color-scheme="default"] .kubus-hero h1 em {
+  background-image: linear-gradient(90deg, #0ea5e9 0%, #4f5fe6 55%, #9333ea 100%);
+}
+
+.kubus-hero__lead {
+  margin: 0 auto 1.6rem;
+  max-width: 40rem;
+  font-size: clamp(0.95rem, 1.5vw, 1.1rem);
+  line-height: 1.65;
+  color: var(--kh-fg-muted);
+}
+
+.kubus-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.kubus-hero .md-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.6em 1.4em;
+  border-color: var(--kh-btn-border);
+  border-radius: 999px;
+  color: var(--kh-fg);
+  font-weight: 600;
+}
+
+.kubus-hero .md-button svg {
+  width: 1.05em;
+  height: 1.05em;
+  fill: currentcolor;
+}
+
+.kubus-hero .md-button:hover,
+.kubus-hero .md-button:focus {
+  background: var(--kh-btn-hover);
+  border-color: var(--kh-btn-border-hover);
+  color: var(--kh-fg);
+}
+
+.kubus-hero .md-button--primary,
+.kubus-hero .md-button--primary:hover,
+.kubus-hero .md-button--primary:focus {
+  background: var(--kh-primary-bg);
+  border-color: var(--kh-primary-bg);
+  color: var(--kh-primary-fg);
+}
+
+.kubus-hero .md-button--primary:hover,
+.kubus-hero .md-button--primary:focus {
+  background: var(--kh-primary-hover);
+  border-color: var(--kh-primary-hover);
+}
+
+.kubus-hero__facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.6rem;
+  margin: 2.2rem auto 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.76rem;
+  color: var(--kh-fg-faint);
+}
+
+.md-typeset .kubus-hero__facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.kubus-hero__facts svg {
+  width: 1rem;
+  height: 1rem;
+  fill: var(--kh-icon);
+}
+
+/* The screenshot below the hero overlaps its lower edge. The negative margin sits on
+   the wrapping paragraph, since a margin on the image itself collapses into it. */
+.md-typeset p:has(> img.kubus-shot) {
+  position: relative;
+  z-index: 2;
+  margin-top: -5.6rem;
+}
+
+.md-typeset img.kubus-shot {
+  display: block;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(20, 30, 70, 0.14), 0 24px 60px rgba(20, 30, 70, 0.22);
+}
+
+[data-md-color-scheme="slate"] .md-typeset img.kubus-shot {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+/* The hero carries the page title, so drop the theme's fallback h1 and the edit/view
+   buttons, which would otherwise sit between the hero and the screenshot. */
+.md-content__inner:has(.kubus-shot) > h1,
+.md-content__inner:has(.kubus-shot) > .md-content__button {
+  display: none;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .kubus-hero {
+    padding: 2.6rem 0 5.4rem;
+  }
+  .kubus-hero__facts {
+    gap: 0.4rem 1rem;
+  }
+  .md-typeset p:has(> img.kubus-shot) {
+    margin-top: -3.6rem;
+  }
+  .md-typeset img.kubus-shot {
+    border-radius: 8px;
+  }
 }
 
 /* Feature grid (uses Material's grid cards) */
@@ -93,7 +472,7 @@
   transition: border-color 125ms ease, box-shadow 125ms ease;
 }
 
-/* The default card border is nearly invisible in light mode — darken it. */
+/* The default card border is nearly invisible in light mode, so darken it. */
 [data-md-color-scheme="default"] .md-typeset .grid.cards > ul > li,
 [data-md-color-scheme="default"] .md-typeset .grid.cards > ol > li {
   border-color: rgba(0, 0, 0, 0.16);

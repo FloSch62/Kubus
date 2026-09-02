@@ -4,7 +4,7 @@ icon: lucide/users
 
 # Community
 
-Kubus is free and open source under the MIT license, and contributions are welcome —
+Kubus is free and open source under the MIT license, and contributions are welcome,
 whether that's code, docs, a bug report or a feature idea.
 
 <div class="grid cards" markdown>
@@ -19,7 +19,7 @@ whether that's code, docs, a bug report or a feature idea.
 
     ---
 
-    The dev workflow — hot reload, the desktop shell, project layout.
+    The dev workflow: hot reload, the desktop shell and the project layout.
 
 -   :material-tag: **[Releasing](releasing.md)**
 
@@ -43,5 +43,5 @@ whether that's code, docs, a bug report or a feature idea.
 
 ## Links
 
-- :simple-github: **Source & issues** — [github.com/FloSch62/Kubus](https://github.com/FloSch62/Kubus)
-- :material-download: **Releases** — [github.com/FloSch62/Kubus/releases](https://github.com/FloSch62/Kubus/releases)
+- :simple-github: **Source & issues**: [github.com/FloSch62/Kubus](https://github.com/FloSch62/Kubus)
+- :material-download: **Releases**: [github.com/FloSch62/Kubus/releases](https://github.com/FloSch62/Kubus/releases)

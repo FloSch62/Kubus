@@ -27,29 +27,29 @@ anything destructive: you must **type the resource's name** to confirm.
 - **Node shell** (a privileged pod on the host)
 - **Restart pods**, Helm **rollback** and **uninstall**
 
-Non-destructive actions stay one click away — the guard only stands in front of the things
+Non-destructive actions stay one click away. The guard only stands in front of the things
 you can't undo.
 
 ### Turning it on
 
 In [Settings → Clusters](settings.md), toggle protection per cluster. You can also set
-**protect by default**, so every cluster is guarded unless you explicitly mark it safe —
-a good default if you mostly work against production.
+**protect by default**, so every cluster is guarded unless you explicitly mark it safe.
+That's a good default if you mostly work against production.
 
 !!! warning "A guard, not a wall"
 
     The production guard lives in **this browser's UI**. It protects against slips and
-    fat-fingers — it is **not** a server-side permission boundary. Anyone with your
+    fat-fingers, but it is not a server-side permission boundary: anyone with your
     kubeconfig still has whatever access it grants. For real authorization, use
     **Kubernetes RBAC**.
 
 ## Secrets are redacted by default
 
-Kubus never shows Secret data unless you ask. Values are redacted **everywhere** — in
-lists, in details, and in the live watch streams that back them — and shown as `••••`.
+Kubus never shows Secret data unless you ask. Values are redacted in lists, in details and
+in the live watch streams that back them, and appear as `••••`.
 
 To see a value, open the Secret's [details drawer](resource-details.md) and **reveal** it
-explicitly. Revealing is a deliberate, per-resource action — there's no global "show all
+explicitly. Revealing is a deliberate, per-resource action. There's no global "show all
 secrets" switch to leave on by accident.
 
 !!! tip "Safe to screen-share"
@@ -61,7 +61,7 @@ secrets" switch to leave on by accident.
 
 <div class="grid cards" markdown>
 
--   :material-shield-lock: **[Security model](../reference/security.md)** — how Kubus stays local and authenticated
--   :material-cog: **[Settings](settings.md)** — where to toggle protection
+-   :material-shield-lock: **[Security model](../reference/security.md)** explains how Kubus stays local and authenticated.
+-   :material-cog: **[Settings](settings.md)** is where you toggle protection.
 
 </div>

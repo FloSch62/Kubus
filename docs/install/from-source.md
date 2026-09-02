@@ -24,7 +24,7 @@ pnpm build
 pnpm start          # serves the UI and opens your browser
 ```
 
-`pnpm start` builds nothing new — it runs the compiled server (`node server/dist/index.js`),
+`pnpm start` builds nothing new. It runs the compiled server (`node server/dist/index.js`),
 binds to `127.0.0.1`, picks a port (default **3001**) and opens your browser at a URL that
 already carries the per-run access token.
 
@@ -59,7 +59,7 @@ If you're hacking on Kubus itself, the dev servers give you instant reloads:
 pnpm dev            # tsx-watch server on :3001 + Vite client on :5173
 ```
 
-Open **`http://localhost:5173`** — the Vite dev server proxies `/api` and `/ws` to the
+Open **`http://localhost:5173`**. The Vite dev server proxies `/api` and `/ws` to the
 backend on `:3001`.
 
 [More on the dev workflow :octicons-arrow-right-24:](../community/development.md)

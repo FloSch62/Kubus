@@ -4,7 +4,7 @@ icon: lucide/book-marked
 
 # Reference
 
-The precise bits — flags, shortcuts, and how Kubus is put together.
+The precise bits: flags, shortcuts, and how Kubus is put together.
 
 <div class="grid cards" markdown>
 

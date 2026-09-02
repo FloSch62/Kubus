@@ -24,7 +24,7 @@ That's it. The release workflow then:
 
 !!! tip "Releasing from the GitHub UI"
 
-    Creating a GitHub release with a **new** `v*` tag also pushes that tag — which triggers
+    Creating a GitHub release with a **new** `v*` tag also pushes that tag, which triggers
     the same workflow. Either path works.
 
 ## Versioning
@@ -36,7 +36,7 @@ commit before tagging so the in-app version and the release line up.
 
 <div class="grid cards" markdown>
 
--   :material-source-branch: **[Building from source](development.md)** — the build commands the workflow runs
--   :material-download: **[Desktop app](../install/desktop.md)** — what users download
+-   :material-source-branch: **[Building from source](development.md)** for the build commands the workflow runs
+-   :material-download: **[Desktop app](../install/desktop.md)** for what users download
 
 </div>

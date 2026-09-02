@@ -12,8 +12,8 @@ is built so that nothing leaves your laptop. This page spells out exactly what t
 - The server binds to **`127.0.0.1`** and nothing else. Other machines on your network
   can't reach it.
 - It talks to your cluster API servers **directly**, using your existing **kubeconfig**
-  credentials. There is no Kubus cloud, no account, and no telemetry — no data is sent
-  anywhere except between your machine and the clusters you point it at.
+  credentials. There is no Kubus cloud, no account, and no telemetry. Data only moves
+  between your machine and the clusters you point it at.
 
 ## Per-run access token
 
@@ -29,9 +29,9 @@ token isn't persisted; restart Kubus and a new one is generated.
 
 ## Secrets are redacted by default
 
-Secret values are hidden **everywhere** — lists, details, and the live watch streams that
-back them — and only revealed when you explicitly ask, per resource. There is no global
-"reveal all" toggle to leave on by accident. See
+Secret values are hidden everywhere: in lists, in details, and in the live watch streams
+that back them. They are only revealed when you explicitly ask, per resource. There is
+no global "reveal all" toggle to leave on by accident. See
 [Production guard & secrets](../guide/production-guard.md).
 
 ## The production guard is a guard, not a wall
@@ -43,14 +43,14 @@ name first. This is a safety net against slips.
 
     The production guard runs in the browser UI. It does **not** restrict what the server
     (and therefore anyone with your kubeconfig) can do. For actual access control, use
-    **Kubernetes RBAC** — scope the credentials in your kubeconfig to what each cluster
+    **Kubernetes RBAC** and scope the credentials in your kubeconfig to what each cluster
     should allow.
 
 ## What Kubus can do is what your kubeconfig can do
 
-Kubus has exactly the permissions your kubeconfig grants — no more, no less. If you want a
-read-only experience, point it at a kubeconfig with read-only RBAC. If a context can
-delete namespaces, so can Kubus (behind the guard, if protected).
+Kubus has exactly the permissions your kubeconfig grants. If you want a read-only
+experience, point it at a kubeconfig with read-only RBAC. If a context can delete
+namespaces, so can Kubus (behind the guard, if protected).
 
 ## Code signing
 
@@ -62,7 +62,7 @@ not run unsigned binaries, [build from source](../install/from-source.md).
 
 <div class="grid cards" markdown>
 
--   :material-sitemap: **[Architecture](architecture.md)** — where the trust boundaries sit
--   :material-shield-alert: **[Production guard & secrets](../guide/production-guard.md)** — the UI guard rails
+-   :material-sitemap: **[Architecture](architecture.md)** shows where the trust boundaries sit.
+-   :material-shield-alert: **[Production guard & secrets](../guide/production-guard.md)** covers the UI guard rails.
 
 </div>

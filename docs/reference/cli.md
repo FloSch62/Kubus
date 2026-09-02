@@ -32,8 +32,8 @@ node server/dist/index.js [flags]
 
 ## How it binds
 
-- The server listens on **`127.0.0.1`** only — never `0.0.0.0`. It is not reachable from
-  other machines on your network.
+- The server listens on **`127.0.0.1`** only, never on `0.0.0.0`. It is not reachable
+  from other machines on your network.
 - On startup it prints (and, unless `--no-open` is set, opens) a URL of the form:
 
   ```
@@ -44,8 +44,8 @@ node server/dist/index.js [flags]
 
 Every run mints a fresh random **bearer token**. The browser receives it in the launch
 URL, and every API and WebSocket request must carry it. This protects the local server
-against DNS-rebinding and CSRF from other pages in your browser. The token isn't persisted
-— restart Kubus and you get a new one.
+against DNS-rebinding and CSRF from other pages in your browser. The token isn't
+persisted, so every restart gives you a new one.
 
 See the [security model](security.md) for the full picture.
 
@@ -61,7 +61,7 @@ See the [security model](security.md) for the full picture.
 
 <div class="grid cards" markdown>
 
--   :material-shield-lock: **[Security model](security.md)**
--   :material-cog: **[Settings](../guide/settings.md)** — preferences set inside the app
+-   :material-shield-lock: **[Security model](security.md)** goes deeper on the token and local-only binding.
+-   :material-cog: **[Settings](../guide/settings.md)** covers preferences set inside the app.
 
 </div>

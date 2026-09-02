@@ -1,34 +1,21 @@
 ---
 icon: lucide/house
+hero: true
 hide:
   - navigation
   - toc
 ---
 
-<div class="kubus-hero" markdown>
+![The Kubus overview dashboard](assets/screenshots/overview.png#only-light){ .shadow .kubus-shot }
+![The Kubus overview dashboard](assets/screenshots/overview-dark.png#only-dark){ .shadow .kubus-shot }
 
-# ![](assets/kubus.svg){ .kubus-hero-logo } Kubus
+## Where Kubus fits
 
-<p class="tagline">
-A free, open-source Kubernetes GUI. Connect to all your clusters at once — browse
-and edit every resource (CRDs included), stream aggregated logs, open shells, forward
-ports, watch metrics and manage Helm — from one polished UI that runs entirely on your machine.
-</p>
-
-[Get started :material-arrow-right:](install/index.md){ .md-button .md-button--primary }
-[Download :simple-github:](https://github.com/FloSch62/Kubus/releases){ .md-button }
-
-</div>
-
-![The Kubus overview dashboard](assets/screenshots/overview.png#only-light){ .shadow }
-![The Kubus overview dashboard](assets/screenshots/overview-dark.png#only-dark){ .shadow }
-
-## Why Kubus?
-
-`kubectl` is fast but invisible — you can't *see* your clusters. Dashboards are pretty
-but live in a pod and need RBAC, ingress and a login. Kubus sits in between: a desktop-grade
-UI that runs as a **local app**, talks to your clusters with **your existing kubeconfig**, and
-never sends a byte off your machine.
+`kubectl` is fast, but it shows you one thing at a time and you have to know what to ask
+for. Dashboards give you a picture, but they live inside a cluster and need RBAC, an ingress
+and a login before you see anything. Kubus is a desktop app instead. It reads the kubeconfig
+you already have, connects to as many clusters as you select, and keeps everything on your
+machine.
 
 <div class="grid cards" markdown>
 
@@ -36,8 +23,8 @@ never sends a byte off your machine.
 
     ---
 
-    Select any number of kubeconfig contexts and lists merge into one view with a
-    cluster column. Stop juggling `kubectl config use-context`.
+    Select any number of kubeconfig contexts. Lists merge into one view with a
+    cluster column, so you stop switching contexts to compare things.
 
     [:octicons-arrow-right-24: Connecting clusters](guide/clusters.md)
 
@@ -45,8 +32,8 @@ never sends a byte off your machine.
 
     ---
 
-    Built-in workloads, networking, config, storage and RBAC — **plus every CRD**,
-    discovered dynamically with its printer columns rendered as real columns.
+    Built-in workloads, networking, config, storage and RBAC, plus every CRD in the
+    cluster. CRDs are discovered live and their printer columns become real columns.
 
     [:octicons-arrow-right-24: Browsing resources](guide/browsing-resources.md)
 
@@ -54,8 +41,8 @@ never sends a byte off your machine.
 
     ---
 
-    Stream logs from many pods at once, colour-coded per pod, with regex filter,
-    follow, timestamps, previous-container logs and one-click download.
+    Stream logs from many pods at once, colour-coded per pod. Filter with a regex,
+    follow the tail, show timestamps, read the previous container and download the lot.
 
     [:octicons-arrow-right-24: Logs](guide/logs.md)
 
@@ -64,7 +51,7 @@ never sends a byte off your machine.
     ---
 
     A real terminal into any container, ephemeral debug containers for distroless
-    pods, and a privileged **node shell** that `nsenter`s into the host.
+    pods, and a privileged node shell that runs `nsenter` on the host.
 
     [:octicons-arrow-right-24: Shell & debug](guide/shell.md)
 
@@ -72,17 +59,17 @@ never sends a byte off your machine.
 
     ---
 
-    CPU/memory history charts from metrics-server, and an overview dashboard that
+    CPU and memory history from metrics-server, and an overview dashboard that
     flags failing pods, unavailable workloads, restarts and warnings.
 
     [:octicons-arrow-right-24: Metrics & health](guide/metrics.md)
 
--   :material-ship-wheel: **Helm, no binary**
+-   :material-ship-wheel: **Helm without the binary**
 
     ---
 
     List releases, inspect user and computed values, read manifests, browse history,
-    roll back and uninstall — the server decodes release secrets itself.
+    roll back and uninstall. The server decodes release secrets itself.
 
     [:octicons-arrow-right-24: Helm releases](guide/helm.md)
 
@@ -90,8 +77,8 @@ never sends a byte off your machine.
 
     ---
 
-    ++ctrl+k++ searches resources, kinds and pages, runs actions on anything and
-    drives the whole app from the keyboard.
+    ++ctrl+k++ searches resources, kinds and pages and runs actions on anything, so
+    you can drive the whole app from the keyboard.
 
     [:octicons-arrow-right-24: Command palette](guide/command-palette.md)
 
@@ -99,7 +86,7 @@ never sends a byte off your machine.
 
     ---
 
-    Binds to `127.0.0.1` only, guards every request with a per-run token, and
+    Kubus binds to `127.0.0.1` only, guards every request with a per-run token and
     redacts Secret values by default. Nothing leaves your laptop.
 
     [:octicons-arrow-right-24: Security model](reference/security.md)
@@ -118,7 +105,7 @@ never sends a byte off your machine.
   </iframe>
 </div>
 
-## Ready?
+## Get Kubus
 
 <div class="grid cards" markdown>
 
@@ -126,7 +113,7 @@ never sends a byte off your machine.
 
     ---
 
-    Grab the desktop installer for Windows, macOS or Linux — or run it from source.
+    Grab the desktop installer for Windows, macOS or Linux, or run it from source.
 
     [:octicons-arrow-right-24: Installation](install/index.md)
 
@@ -142,6 +129,6 @@ never sends a byte off your machine.
 
 !!! info "Kubus is a local tool"
 
-    Kubus is meant to run on *your* machine against clusters *you* already have
-    credentials for. It is not a hosted multi-tenant dashboard. See the
-    [security model](reference/security.md) for exactly what that means.
+    Kubus runs on your machine against clusters you already have credentials for. It is
+    not a hosted, multi-tenant dashboard. The [security model](reference/security.md)
+    spells out exactly what that means.

@@ -6,14 +6,14 @@ icon: lucide/network
 
 Kubus is a small, two-tier app: a React single-page app in your browser, talking to a
 local Node.js server that holds the connections to your clusters. The server is the only
-thing that touches Kubernetes — the browser never connects to an API server directly.
+thing that touches Kubernetes. The browser never connects to an API server directly.
 
 ```mermaid
 graph TD
-  subgraph Browser["Browser — React 19 + MUI 7 SPA"]
+  subgraph Browser["Browser: React 19 + MUI 7 SPA"]
     UI["TanStack Query · Monaco · xterm.js"]
   end
-  subgraph Server["Node.js — Fastify 5 (binds 127.0.0.1)"]
+  subgraph Server["Node.js: Fastify 5 (binds 127.0.0.1)"]
     K["@kubernetes/client-node"]
     W["watch multiplexing · log fan-in"]
     E["exec bridge · port-forward manager"]
@@ -44,21 +44,21 @@ It talks to the server over REST and WebSocket on the **same origin**, carrying 
 A Fastify 5 server using the official **`@kubernetes/client-node`**. It does the heavy
 lifting that a browser can't:
 
-- **Watch multiplexing** — one set of informer-style watches per cluster, fanned out to
-  every list that needs them, with automatic `410 Gone` reconnect/resync.
-- **Log fan-in** — aggregates logs from many pods into a single stream.
-- **Exec bridge** — proxies the Kubernetes `exec` API to xterm.js over WebSocket, for
+- **Watch multiplexing**: keeps one set of informer-style watches per cluster and fans
+  them out to every list that needs them, with automatic `410 Gone` reconnect/resync.
+- **Log fan-in**: aggregates logs from many pods into a single stream.
+- **Exec bridge**: proxies the Kubernetes `exec` API to xterm.js over WebSocket, for
   container shells and the node shell.
-- **Port-forward manager** — owns long-lived forwards and reports their state.
-- **Helm** — decodes release secrets (base64 → gzip → JSON) so there's no `helm` binary
+- **Port-forward manager**: owns long-lived forwards and reports their state.
+- **Helm**: decodes release secrets (base64 → gzip → JSON) so there's no `helm` binary
   dependency.
-- **Metrics** — polls metrics-server and keeps a rolling history buffer for the charts.
+- **Metrics**: polls metrics-server and keeps a rolling history buffer for the charts.
 
 ## The desktop shell
 
 The desktop app is an **Electron** wrapper. It runs the very same server in-process on a
 random localhost port, opens it in a native window, and persists window state between
-launches. There's no separate codebase for the desktop UI — it's the same SPA.
+launches. There's no separate codebase for the desktop UI; it's the same SPA.
 
 ## Data flow in one sentence
 
@@ -69,7 +69,7 @@ kubeconfig credentials; nothing leaves your machine.
 
 <div class="grid cards" markdown>
 
--   :material-shield-lock: **[Security model](security.md)** — the trust boundaries in detail
--   :material-source-branch: **[Building from source](../community/development.md)** — run it yourself
+-   :material-shield-lock: **[Security model](security.md)** covers the trust boundaries in detail.
+-   :material-source-branch: **[Building from source](../community/development.md)** shows how to run it yourself.
 
 </div>

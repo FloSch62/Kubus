@@ -15,13 +15,14 @@ you get little trend charts rather than a single instantaneous number.
 
 ## Where you'll see metrics
 
-- **Metrics page** — the sidebar entry below Topology: cluster-wide CPU/memory trends,
-  per-node lines, top pods, and a per-namespace breakdown for every selected cluster.
-  If a cluster has no metrics-server yet, the page offers a one-click install instead.
-- **Details drawer → Metrics tab** — for **Pods** and **Nodes**, live CPU/memory charts
+- **Metrics page**: the sidebar entry below Topology, with cluster-wide CPU/memory
+  trends, per-node lines, top pods, and a per-namespace breakdown for every selected
+  cluster. If a cluster has no metrics-server yet, the page offers a one-click install
+  instead.
+- **Details drawer → Metrics tab**: live CPU/memory charts for **Pods** and **Nodes**,
   with the current value called out.
-- **Resource lists** — CPU and memory columns on the Pods list.
-- **Overview dashboard** — a per-node usage table. [More →](overview.md)
+- **Resource lists**: CPU and memory columns on the Pods list.
+- **Overview dashboard**: a per-node usage table. [More →](overview.md)
 
 <figure markdown="span">
   ![The cluster-wide Metrics page](../assets/screenshots/cluster-metrics.png#only-light){ .shadow }
@@ -34,36 +35,36 @@ opening a chart and fill in from there.
 
 ## Installing metrics-server from Kubus
 
-If a cluster has no metrics-server, Kubus can install it for you — no `kubectl` or
-Helm required:
+If a cluster has no metrics-server, Kubus can install it for you without `kubectl` or
+Helm:
 
 - On the **Overview** page, the *Node usage* card shows an **Install metrics-server**
   button whenever usage data is unavailable.
 - The install dialog has one option: **Skip kubelet TLS verification**
-  (`--kubelet-insecure-tls`). Enable it on local/dev clusters — kind, minikube,
-  docker-desktop — whose kubelets serve self-signed certificates.
+  (`--kubelet-insecure-tls`). Enable it on local/dev clusters such as kind, minikube
+  and docker-desktop, whose kubelets serve self-signed certificates.
 
 Kubus applies the official pinned `components.yaml` (Deployment, Service, RBAC and the
 `metrics.k8s.io` APIService in `kube-system`) via server-side apply, and labels the
 resources as managed by Kubus. Graphs appear within a minute of the pod becoming ready.
-Re-running the install is safe — it re-applies the same manifest, which also repairs a
+Re-running the install is safe: it re-applies the same manifest, which also repairs a
 broken install.
 
 To remove it again, use the **Uninstall** button in the Metrics page header. If the
 metrics-server wasn't installed by Kubus (k3s bundles one; cloud distributions often
-manage their own), Kubus warns you first — your distribution may recreate it or expect
-removal through its own tooling.
+manage their own), Kubus warns you first, since your distribution may recreate it or
+expect removal through its own tooling.
 
-Prefer the CLI? The equivalent manual install:
+If you prefer the CLI, the equivalent manual install is:
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 ```
 
-!!! note "No metrics-server? No problem."
+!!! note "Without metrics-server"
 
-    Without it, Kubus just hides the charts and shows *"Metrics unavailable"* — every
-    other feature works normally.
+    Kubus hides the charts and shows *"Metrics unavailable"*. Every other feature works
+    normally.
 
 ## Controlling refresh
 
@@ -75,7 +76,7 @@ Watched **lists** stay live over their WebSocket regardless of this setting.
 
 <div class="grid cards" markdown>
 
--   :material-view-dashboard: **[Overview dashboard](overview.md)** — node usage at a glance
--   :material-bell-outline: **[Events](events.md)** — the *why* behind a spike
+-   :material-view-dashboard: **[Overview dashboard](overview.md)** shows node usage at a glance.
+-   :material-bell-outline: **[Events](events.md)** often explain what caused a spike.
 
 </div>
