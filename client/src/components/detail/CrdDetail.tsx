@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import MenuItem from '@mui/material/MenuItem';
+import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -14,28 +17,19 @@ import type { KubeObject } from '@kubus/shared';
 import { GenericDetail } from './GenericDetail.js';
 import { Section } from './Section.js';
 import { statusTextColor } from '../../theme.js';
-
-interface JsonSchema {
-  $ref?: string;
-  type?: string | string[];
-  format?: string;
-  title?: string;
-  description?: string;
-  properties?: Record<string, JsonSchema>;
-  items?: JsonSchema;
-  additionalProperties?: boolean | JsonSchema;
-  required?: string[];
-  enum?: unknown[];
-  default?: unknown;
-  nullable?: boolean;
-  oneOf?: JsonSchema[];
-  anyOf?: JsonSchema[];
-  allOf?: JsonSchema[];
-  definitions?: Record<string, JsonSchema>;
-  'x-kubernetes-int-or-string'?: boolean;
-  'x-kubernetes-preserve-unknown-fields'?: boolean;
-  'x-kubernetes-list-type'?: string;
-}
+import {
+  MAX_SCHEMA_DEPTH,
+  STANDARD_ROOT_FIELDS,
+  childFields,
+  displayType,
+  mergeSchema,
+  mergedProperties,
+  mergedRequired,
+  resolveSchema,
+  schemaMeta,
+  typeColor,
+  type JsonSchema,
+} from './schema-walk.js';
 
 export interface CrdVersion {
   name: string;
@@ -72,24 +66,6 @@ interface CrdSpec {
   additionalPrinterColumns?: CrdVersion['additionalPrinterColumns'];
 }
 
-const MAX_SCHEMA_DEPTH = 12;
-
-const TYPE_BASE_RE = /[<( ]/;
-
-const STANDARD_ROOT_FIELDS: Record<string, JsonSchema> = {
-  apiVersion: {
-    type: 'string',
-    description: 'Versioned API group and version used by this object.',
-  },
-  kind: {
-    type: 'string',
-    description: 'REST resource kind represented by this object.',
-  },
-  metadata: {
-    type: 'object',
-    description: 'Standard Kubernetes metadata for the object.',
-  },
-};
 
 function crdSpec(obj: KubeObject): CrdSpec {
   return (obj.spec ?? {}) as CrdSpec;
@@ -140,12 +116,28 @@ export function CrdDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   );
 }
 
-export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; versionName: string }) {
-  const version = crdVersions(obj).find((v) => v.name === versionName);
+/** "Expand all" / "Collapse all" request; `seq` makes repeats observable. */
+interface ExpandAll {
+  kind: 'expand' | 'collapse';
+  seq: number;
+}
+
+/**
+ * One tab for every version of a CRD: a version picker (storage version
+ * first) over the schema browser, with expand/collapse-all for deep schemas.
+ * `versionName` seeds the picker (the version a custom resource was opened
+ * with); an unknown name shows a hint instead of an empty tree.
+ */
+export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; versionName?: string }) {
+  const versions = crdVersions(obj);
+  const fallback = versions.find((v) => v.storage)?.name ?? versions[0]?.name;
+  const [selected, setSelected] = useState(versionName ?? fallback);
+  const [expandAll, setExpandAll] = useState<ExpandAll>();
+  const version = versions.find((v) => v.name === selected);
   if (!version) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
-        Version {versionName} is not defined on this CRD.
+        Version {selected ?? ''} is not defined on this CRD.
       </Typography>
     );
   }
@@ -156,13 +148,47 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
 
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
-      <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap' }}>
-        <Chip label={version.name} color="primary" variant="outlined" />
+      <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+        <TextField
+          select
+          size="small"
+          value={version.name}
+          onChange={(e) => setSelected(e.target.value)}
+          slotProps={{
+            // The closed picker shows only the name; storage/served hints live in the menu.
+            select: { 'aria-label': 'Schema version', renderValue: (value) => String(value) },
+            input: { sx: { fontFamily: '"JetBrains Mono", monospace', fontSize: 13 } },
+          }}
+          sx={{ minWidth: 140 }}
+        >
+          {versions.map((v) => (
+            <MenuItem key={v.name} value={v.name} sx={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 13, gap: 1 }}>
+              {v.name}
+              {v.storage && (
+                <Typography component="span" variant="caption" color="text.secondary">
+                  storage
+                </Typography>
+              )}
+              {v.served === false && (
+                <Typography component="span" variant="caption" color="text.secondary">
+                  not served
+                </Typography>
+              )}
+            </MenuItem>
+          ))}
+        </TextField>
         {version.served !== false && <Chip label="served" variant="outlined" />}
         {version.storage && <Chip label="storage" variant="outlined" />}
         {version.subresources?.status !== undefined && <Chip label="status subresource" variant="outlined" />}
         {version.subresources?.scale !== undefined && <Chip label="scale subresource" variant="outlined" />}
         {version.deprecated && <Chip label="deprecated" color="warning" variant="outlined" />}
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" onClick={() => setExpandAll({ kind: 'expand', seq: Date.now() })}>
+          Expand all
+        </Button>
+        <Button size="small" onClick={() => setExpandAll({ kind: 'collapse', seq: Date.now() })}>
+          Collapse all
+        </Button>
       </Stack>
       {version.deprecationWarning && (
         <Typography variant="body2" sx={{ color: statusTextColor('warning') }}>
@@ -176,7 +202,7 @@ export function CrdSchemaDetail({ obj, versionName }: { obj: KubeObject; version
       )}
       <Box>
         {rootFields.map(({ name, fieldSchema, required }) => (
-          <SchemaField key={name} name={name} schema={fieldSchema} required={required} depth={0} definitions={{}} />
+          <SchemaField key={name} name={name} schema={fieldSchema} required={required} depth={0} definitions={{}} expandAll={expandAll} />
         ))}
       </Box>
       {printerColumns.length > 0 && (
@@ -258,12 +284,14 @@ function SchemaField({
   required,
   depth,
   definitions,
+  expandAll,
 }: {
   name: string;
   schema: JsonSchema;
   required: boolean;
   depth: number;
   definitions: Record<string, JsonSchema>;
+  expandAll?: ExpandAll;
 }) {
   const resolvedSchema = resolveSchema(schema, definitions);
   const description = resolvedSchema.description ?? resolvedSchema.title;
@@ -271,6 +299,13 @@ function SchemaField({
   const children = depth < MAX_SCHEMA_DEPTH ? nestedChildren : [];
   const canExpand = children.length > 0;
   const [expanded, setExpanded] = useState(false);
+  // Expand/collapse-all applies in render so the next paint is consistent;
+  // later manual toggles win until the next command.
+  const lastCommand = useRef<number>(undefined);
+  if (expandAll && lastCommand.current !== expandAll.seq) {
+    lastCommand.current = expandAll.seq;
+    if (expanded !== (expandAll.kind === 'expand')) setExpanded(expandAll.kind === 'expand');
+  }
   const meta = schemaMeta(resolvedSchema);
   const typeLabel = displayType(resolvedSchema, definitions);
 
@@ -344,99 +379,9 @@ function SchemaField({
           required={child.required}
           depth={depth + 1}
           definitions={definitions}
+          expandAll={expandAll}
         />
       ))}
     </Box>
   );
-}
-
-function childFields(schema: JsonSchema, definitions: Record<string, JsonSchema>): Array<{ name: string; fieldSchema: JsonSchema; required: boolean }> {
-  const container = resolveSchema(schema.type === 'array' && schema.items ? schema.items : schema, definitions);
-  const properties = mergedProperties(container, definitions);
-  const required = new Set(mergedRequired(container, definitions));
-  const entries = Object.entries(properties).map(([name, fieldSchema]) => ({ name, fieldSchema, required: required.has(name) }));
-
-  if (entries.length > 0) return entries;
-  const additional = container.additionalProperties;
-  if (typeof additional === 'object' && additional) {
-    const mapChildren = Object.entries(mergedProperties(additional, definitions)).map(([name, fieldSchema]) => ({
-      name: `<value>.${name}`,
-      fieldSchema,
-      required: mergedRequired(additional, definitions).includes(name),
-    }));
-    if (mapChildren.length > 0) return mapChildren;
-  }
-  return [];
-}
-
-function mergedProperties(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): Record<string, JsonSchema> {
-  if (!schema) return {};
-  const resolved = resolveSchema(schema, definitions);
-  const properties: Record<string, JsonSchema> = {};
-  for (const branch of resolved.allOf ?? []) Object.assign(properties, mergedProperties(branch, definitions));
-  if (resolved.properties) Object.assign(properties, resolved.properties);
-  return properties;
-}
-
-function mergedRequired(schema: JsonSchema | undefined, definitions: Record<string, JsonSchema>): string[] {
-  if (!schema) return [];
-  const resolved = resolveSchema(schema, definitions);
-  return [...new Set([...(resolved.allOf?.flatMap((branch) => mergedRequired(branch, definitions)) ?? []), ...(resolved.required ?? [])])];
-}
-
-function resolveSchema(schema: JsonSchema, definitions: Record<string, JsonSchema>): JsonSchema {
-  if (!schema.$ref?.startsWith('#/definitions/')) return schema;
-  const referenced = definitions[schema.$ref.slice('#/definitions/'.length)];
-  return referenced ? { ...referenced, ...schema, $ref: undefined } : schema;
-}
-
-function mergeSchema(base: JsonSchema | undefined, override: JsonSchema | undefined): JsonSchema {
-  if (!base) return override ?? {};
-  if (!override) return base;
-  return { ...base, ...override, description: override.description ?? base.description };
-}
-
-function typeColor(typeLabel: string): string {
-  const base = typeLabel.split(TYPE_BASE_RE)[0];
-  switch (base) {
-    case 'string':
-      return 'success.main';
-    case 'integer':
-    case 'number':
-    case 'int-or-string':
-    case 'date':
-      return 'info.main';
-    case 'boolean':
-      return 'warning.main';
-    case 'object':
-    case 'map':
-      return 'secondary.main';
-    case 'array':
-      return 'primary.main';
-    default:
-      return 'text.secondary';
-  }
-}
-
-function displayType(schema: JsonSchema, definitions: Record<string, JsonSchema> = {}): string {
-  const resolved = resolveSchema(schema, definitions);
-  if (resolved['x-kubernetes-int-or-string']) return 'int-or-string';
-  if (Array.isArray(resolved.type)) return resolved.type.join(' | ');
-  if (resolved.type === 'array') return `array<${displayType(resolved.items ?? {}, definitions)}>`;
-  if (resolved.type === 'object' && typeof resolved.additionalProperties === 'object') {
-    return `map<${displayType(resolved.additionalProperties, definitions)}>`;
-  }
-  if (resolved.type) return resolved.format ? `${resolved.type} (${resolved.format})` : resolved.type;
-  const union = resolved.oneOf ?? resolved.anyOf;
-  if (union?.length) return union.map((s) => displayType(s, definitions)).join(' | ');
-  if (resolved.allOf?.length) return resolved.allOf.map((s) => displayType(s, definitions)).find((t) => t !== 'unknown') ?? 'object';
-  return 'unknown';
-}
-
-function schemaMeta(schema: JsonSchema): string[] {
-  const meta: string[] = [];
-  if (schema.enum?.length) meta.push(`enum: ${schema.enum.map((v) => String(v)).join(', ')}`);
-  if (schema.default !== undefined) meta.push(`default: ${JSON.stringify(schema.default)}`);
-  if (schema['x-kubernetes-list-type']) meta.push(`list: ${schema['x-kubernetes-list-type']}`);
-  return meta;
 }

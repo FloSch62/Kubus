@@ -399,21 +399,24 @@ export function GlobalShortcuts() {
       }
       const detail = useDetailStore.getState();
       if (detail.stack.length) {
-        detail.close();
-        // Drop the ?sel deep link so the tab doesn't reopen the selection.
-        const { pathname, search } = window.location;
-        const params = new URLSearchParams(search);
-        if (params.has('sel')) {
-          params.delete('sel');
-          void navRef.current({ pathname, search: params.toString() }, { replace: true });
-        }
-        // Hand focus to the visible list's grid so arrow keys keep working.
-        requestAnimationFrame(() => {
-          const page = [...document.querySelectorAll<HTMLElement>('.kubus-resource-page')].find((el) => !el.closest('[aria-hidden="true"]'));
-          const cell =
-            page?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"]') ??
-            page?.querySelector<HTMLElement>('.MuiDataGrid-cell');
-          cell?.focus();
+        // Unapplied Data/Manifest/YAML edits stall behind the discard dialog.
+        detail.guard(() => {
+          detail.close();
+          // Drop the ?sel deep link so the tab doesn't reopen the selection.
+          const { pathname, search } = window.location;
+          const params = new URLSearchParams(search);
+          if (params.has('sel')) {
+            params.delete('sel');
+            void navRef.current({ pathname, search: params.toString() }, { replace: true });
+          }
+          // Hand focus to the visible list's grid so arrow keys keep working.
+          requestAnimationFrame(() => {
+            const page = [...document.querySelectorAll<HTMLElement>('.kubus-resource-page')].find((el) => !el.closest('[aria-hidden="true"]'));
+            const cell =
+              page?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"]') ??
+              page?.querySelector<HTMLElement>('.MuiDataGrid-cell');
+            cell?.focus();
+          });
         });
       }
     };

@@ -24,14 +24,15 @@ test('detail deep link restores the drawer on load', async ({ page }) => {
   await gotoApp(page, detailLink('pods', 'kubus-e2e', 'logger'));
 
   await expect(page.getByText('kubus-e2e / logger')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab', { name: 'YAML' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Manifest' })).toBeVisible();
 });
 
-test('YAML tab renders the live manifest in the editor', async ({ page }) => {
+test('the Manifest tab switches to a YAML editor with the live manifest', async ({ page }) => {
   await gotoApp(page, detailLink('pods', 'kubus-e2e', 'logger'));
   await expect(page.getByText('kubus-e2e / logger')).toBeVisible({ timeout: 20_000 });
 
-  await page.getByRole('tab', { name: 'YAML' }).click();
+  await page.getByRole('tab', { name: 'Manifest' }).click();
+  await page.getByRole('button', { name: 'YAML', exact: true }).click();
   await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 20_000 });
 });
 

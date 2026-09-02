@@ -10,6 +10,8 @@ import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
@@ -17,7 +19,6 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { SxProps, Theme } from '@mui/material/styles';
-import { dump as dumpYaml } from 'js-yaml';
 import { gvkForResource, type KubeObject } from '@kubus/shared';
 import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { jobPhase, nodeStatus, podSummary, withoutManagedFields, workloadStatus } from '../kube-display.js';
@@ -35,6 +36,9 @@ import { SecretDetail } from './detail/SecretDetail.js';
 import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
+import { ManifestView } from './detail/ManifestView.js';
+import { dumpManifest, parseYamlMapping, rebaseEdits } from './detail/manifest-tree.js';
+import { maskSecretValues } from './detail/data-editor.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { CopyValueButton } from './CellCopy.js';
@@ -43,7 +47,9 @@ import { DetailQuickActions } from './RowActions.js';
 import { StatusChip } from './StatusChip.js';
 import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
-import { useDetailStore } from '../state/detail.js';
+import { useDetailStore, type ManifestDraft } from '../state/detail.js';
+import { useUiPrefsStore, type ManifestViewMode } from '../state/prefs.js';
+import { showToast } from '../state/toast.js';
 
 export interface ResourceSelection {
   ctx: string;
@@ -65,15 +71,21 @@ interface Props {
 
 export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: Props) {
   const [tab, setTab] = useState('overview');
+  const [tabError, setTabError] = useState<string>();
   const [reveal, setReveal] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const pushDetail = useDetailStore((s) => s.push);
-  // Leaving the Data tab drops its staged per-key edits. The guard lives in
-  // the detail store because selection replacements (row clicks, topology,
-  // search) bypass the drawer entirely; the drawer routes its own affordances
-  // (tab switch, back, close) through the same guard and dialog.
+  // Leaving the drawer drops staged edits: the Data tab's per-key edits and
+  // the Manifest/YAML draft. The guard lives in the detail store because
+  // selection replacements (row clicks, topology, search) bypass the drawer
+  // entirely; the drawer routes its own affordances (back, close, leaving a
+  // dirty Data tab) through the same guard and dialog. The manifest draft
+  // survives tab switches, so only the Data tab guards those.
   const guardLeave = useDetailStore((s) => s.guard);
+  const dataDirty = useDetailStore((s) => s.dataDirty);
   const setDataDirty = useDetailStore((s) => s.setDataDirty);
+  const storeSetDraft = useDetailStore((s) => s.setDraft);
+  const clearDraft = useDetailStore((s) => s.clearDraft);
   const pendingDiscard = useDetailStore((s) => s.pendingDiscard);
   const confirmDiscard = useDetailStore((s) => s.confirmDiscard);
   const cancelDiscard = useDetailStore((s) => s.cancelDiscard);
@@ -98,39 +110,95 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const selKey = sel ? `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace ?? ''}|${sel.name}` : '';
   useEffect(() => {
     setTab('overview');
+    setTabError(undefined);
     setReveal(false);
   }, [selKey]);
+  const draft = useDetailStore((s) => s.drafts[selKey]);
+  const setDraft = (next: ManifestDraft | undefined) => (next ? storeSetDraft(next) : clearDraft(selKey));
+  // The Manifest tab shows the object as a tree or as YAML. A draft pins the
+  // view to its own mode (switching converts it); otherwise the preference applies.
+  const preferredView = useUiPrefsStore((s) => s.manifestView);
+  const setPrefs = useUiPrefsStore((s) => s.set);
+  const view: ManifestViewMode = draft ? draft.mode : preferredView;
 
   const hasSel = !!sel;
   useEffect(() => {
     if (!hasSel) setFullScreen(false);
   }, [hasSel]);
 
-  // Live-refresh the object while Overview is showing so stuck pods, rollouts
-  // and conditions update in place — fed by the watch stream so it keeps pace
-  // with the tables, with the poll as fallback; other tabs (YAML editing!)
-  // keep the snapshot they opened with.
+  // Live-refresh the object while Overview or the Manifest tree is showing so
+  // stuck pods, rollouts and conditions update in place — fed by the watch
+  // stream so it keeps pace with the tables, with the poll as fallback. The
+  // YAML view keeps the snapshot it opened with (an editor that reloads under
+  // the cursor is unusable); a manifest draft freezes its own base.
+  const liveTab = tab === 'overview' || (tab === 'manifest' && view === 'tree');
   const { data: obj, refetch, error } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
-    liveMs: tab === 'overview' ? 5000 : undefined,
-    watch: tab === 'overview',
+    liveMs: liveTab ? 5000 : undefined,
+    watch: liveTab,
   });
   // The last state stays on screen for post-mortem, but the drawer must say
   // the object is gone instead of freezing on e.g. "Terminating" forever.
   const objGone = !!obj && isResourceGone(error);
+  // Secret manifests are edited from the revealed object so an apply never
+  // writes the redaction placeholders back; the tree and the YAML view mask
+  // the values until the reveal switch is on. Revealed reads stay on the poll
+  // (the watch stream carries redacted objects).
+  const { data: revealedSecret, refetch: refetchRevealed } = useResource(isSecret && tab === 'manifest' && sel ? { ...sel, reveal: true } : undefined, {
+    liveMs: view === 'tree' ? 5000 : undefined,
+  });
+  const manifestObj = isSecret ? revealedSecret : obj;
+  const secretMasked = isSecret && !reveal;
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
   // Warm the schema (fetch + yaml-worker registration) while the drawer is on
-  // Overview, so hover/validation are ready the moment the YAML tab opens.
+  // Overview, so hover/validation are ready the moment the YAML view opens.
   useYamlSchema(sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined);
 
-  // Only serialize on the YAML tab — dumping a large object mid-open would
-  // stall the drawer's slide-in animation.
-  const yamlText = useMemo(
-    () => (obj && tab === 'yaml' ? dumpYaml(withoutManagedFields(obj), { noRefs: true, lineWidth: 140 }) : ''),
-    [obj, tab],
-  );
+  const liveBase = useMemo(() => (manifestObj ? withoutManagedFields(manifestObj) : undefined), [manifestObj]);
+  const showYaml = tab === 'manifest' && view === 'yaml';
+  // Only serialize for the YAML view — dumping a large object mid-open would
+  // stall the drawer's slide-in animation. An unrevealed Secret shows masked
+  // text, read-only, so nothing can be typed over placeholders.
+  const yamlText = useMemo(() => (liveBase && showYaml ? dumpManifest(secretMasked ? maskAll(liveBase) : liveBase) : ''), [liveBase, showYaml, secretMasked]);
+  // The editor measures dirtiness against the draft's base, and starts from
+  // the carried-over text when the draft came from the tree.
+  const yamlValue = draft ? (secretMasked ? dumpManifest(maskAll(draft.base)) : draft.baseText) : yamlText;
+  // Masked Secret YAML shows the draft re-serialized from its parsed form;
+  // text that does not parse cannot be masked, so it stays hidden until revealed.
+  const yamlDraftText = useMemo(() => {
+    if (draft?.mode !== 'yaml') return undefined;
+    if (!secretMasked) return draft.text;
+    const parsed = parseYamlMapping(draft.text);
+    return parsed.ok ? dumpManifest(maskAll(parsed.value as KubeObject)) : undefined;
+  }, [draft, secretMasked]);
+  const hiddenUnparsableDraft = secretMasked && draft?.mode === 'yaml' && yamlDraftText === undefined;
+
+  // Tree ⇄ YAML share one draft: entering the tree parses the YAML
+  // (unparsable text stays in the editor until fixed), entering the editor
+  // serializes the tree. The chosen view is remembered.
+  const switchView = (next: ManifestViewMode) => {
+    setTabError(undefined);
+    if (next === view) return;
+    if (draft?.mode === 'yaml') {
+      const parsed = parseYamlMapping(draft.text);
+      if (!parsed.ok) {
+        setTabError(`The YAML does not parse — fix it or reset the editor before switching to the tree. ${parsed.error}`);
+        return;
+      }
+      setDraft({ ...draft, obj: parsed.value as KubeObject, mode: 'tree' });
+    } else if (draft?.mode === 'tree') {
+      setDraft({ ...draft, text: dumpManifest(draft.obj), mode: 'yaml' });
+    }
+    setPrefs({ manifestView: next });
+  };
+  const switchTab = (next: string) => {
+    setTabError(undefined);
+    setTab(next);
+  };
+  const viewToggle = <ManifestViewToggle view={view} onChange={switchView} />;
+
   const schemaSource = isCrd ? obj : backingCrd;
   const versions = useMemo(() => crdVersions(schemaSource), [schemaSource]);
   const hasMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node';
@@ -157,22 +225,46 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
     ? '100vw'
     : tab === 'map'
       ? 'min(1060px, 92vw)'
-      : 'min(720px, 80vw)';
+      : tab === 'manifest'
+        ? 'min(980px, 92vw)'
+        : 'min(720px, 80vw)';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
 
   const handleApply = async (text: string) => {
     if (!sel) return;
     try {
       await apply.mutateAsync({ ...sel, yamlBody: text });
+      setDraft(undefined);
     } catch (err) {
-      // 409 → refresh so the editor shows the server's current state on Reset.
+      // 409 → refresh, then replay the edits onto the server's current state
+      // (picking up its resourceVersion) so the next apply can succeed.
       if ((err as { status?: number }).status === 409) {
-        void refetch();
-        throw new Error(`${(err as Error).message} — the resource changed on the server; the view has been refreshed, re-apply your edits.`);
+        const latest = (await (isSecret ? refetchRevealed() : refetch()))?.data;
+        const current = useDetailStore.getState().drafts[selKey];
+        let outcome = 'the resource changed on the server; the editor has been refreshed, re-apply your edits.';
+        if (latest && current?.selKey === selKey) {
+          const base = withoutManagedFields(latest);
+          const baseText = dumpManifest(base);
+          const parsed = current.mode === 'yaml' ? parseYamlMapping(current.text) : undefined;
+          if (parsed?.ok) {
+            const { value, skipped } = rebaseEdits(current.base, parsed.value, base);
+            setDraft({ ...current, base, baseText, obj: value, text: dumpManifest(value) });
+            outcome = `the resource changed on the server; your edits were replayed onto the latest version${skipped.length ? ` (${skipped.length} to list items that no longer exist were dropped)` : ''} — dry-run and apply again.`;
+          } else {
+            setDraft({ ...current, base, baseText, obj: base, text: current.mode === 'yaml' ? current.text : baseText });
+          }
+        }
+        throw new Error(`${(err as Error).message} — ${outcome}`);
       }
       throw err;
     }
   };
+  const revealToggle = isSecret ? (
+    <FormControlLabel
+      control={<Switch size="small" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />}
+      label={<Typography variant="caption">Reveal secret data</Typography>}
+    />
+  ) : undefined;
 
   return (
     <Drawer
@@ -280,23 +372,61 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           {obj && !objGone && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
           <Tabs
             value={tab}
-            onChange={(_e, v) => guardLeave(() => setTab(v as string))}
+            onChange={(_e, v) => (dataDirty ? guardLeave(() => switchTab(v as string)) : switchTab(v as string))}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}
           >
             <Tab value="overview" label="Overview" sx={{ minHeight: 36 }} />
+            <Tab
+              value="manifest"
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                  Manifest
+                  {draft && <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />}
+                </Box>
+              }
+              title={draft ? 'Unapplied edits' : undefined}
+              sx={{ minHeight: 36 }}
+            />
             {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
-            {versions.map((v) => (
-              <Tab key={v.name} value={`crd:${v.name}`} label={v.name} sx={{ minHeight: 36 }} />
-            ))}
+            {versions.length > 0 && <Tab value="schema" label="Schema" sx={{ minHeight: 36 }} />}
             {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
-            <Tab value="yaml" label="YAML" sx={{ minHeight: 36 }} />
             <Tab value="events" label="Events" sx={{ minHeight: 36 }} />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
             {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
           </Tabs>
+          {tabError && (
+            <Alert severity="error" onClose={() => setTabError(undefined)} sx={{ borderRadius: 0, flexShrink: 0 }}>
+              {tabError}
+            </Alert>
+          )}
+          {hiddenUnparsableDraft && showYaml && (
+            <Alert severity="info" sx={{ borderRadius: 0, flexShrink: 0 }}>
+              Your YAML edits are hidden while the Secret is masked because they do not parse. Reveal the Secret to continue editing them.
+            </Alert>
+          )}
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            {tab === 'manifest' && manifestObj && view === 'tree' && (
+              <ManifestView
+                sel={sel}
+                live={manifestObj}
+                draft={draft?.mode === 'tree' ? draft : undefined}
+                readOnly={objGone}
+                secretRedacted={secretMasked}
+                toolbarStart={viewToggle}
+                toolbar={revealToggle}
+                onDraftChange={(next, base) =>
+                  setDraft(next ? { selKey, base, baseText: draft && draft.base === base ? draft.baseText : dumpManifest(base), obj: next, text: '', mode: 'tree' } : undefined)
+                }
+                onApplied={() => {
+                  setDraft(undefined);
+                  showToast('success', `${sel.kind} ${sel.name} updated`);
+                  void refetch();
+                }}
+                onConflict={() => void (isSecret ? refetchRevealed() : refetch())}
+              />
+            )}
             {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
             {hasDataTab && tab === 'data' && (
               <DataEditor
@@ -306,7 +436,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 onDirtyChange={setDataDirty}
               />
             )}
-            {tab.startsWith('crd:') && schemaSource && <CrdSchemaDetail obj={schemaSource} versionName={tab.slice('crd:'.length)} />}
+            {tab === 'schema' && schemaSource && <CrdSchemaDetail key={selKey} obj={schemaSource} versionName={isCrd ? undefined : sel.version} />}
             {showMap && tab === 'map' && (
               <Box sx={{ height: '100%', p: 1.25 }}>
                 <TopologyGraph
@@ -326,20 +456,29 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                 />
               </Box>
             )}
-            {tab === 'yaml' && (
+            {showYaml && (
               <YamlEditor
-                value={yamlText}
+                value={yamlValue}
+                draft={yamlDraftText}
+                readOnly={secretMasked}
+                onChange={(text) => {
+                  if (!liveBase || secretMasked) return;
+                  setDraft({ selKey, base: draft?.base ?? liveBase, baseText: draft?.baseText ?? yamlText, obj: draft?.obj ?? liveBase, text, mode: 'yaml' });
+                }}
                 applyLabel="Replace"
-                onApply={handleApply}
-                onDryRun={sel ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
+                onApply={secretMasked ? undefined : handleApply}
+                onDryRun={sel && !secretMasked ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
                 schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
                 toolbar={
-                  isSecret ? (
-                    <FormControlLabel
-                      control={<Switch size="small" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />}
-                      label={<Typography variant="caption">Reveal secret data</Typography>}
-                    />
-                  ) : undefined
+                  <>
+                    {viewToggle}
+                    {revealToggle}
+                    {secretMasked && (
+                      <Typography variant="caption" color="text.secondary">
+                        Read-only until revealed
+                      </Typography>
+                    )}
+                  </>
                 }
               />
             )}
@@ -353,7 +492,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
           </Box>
           <ConfirmDialog
             open={!!pendingDiscard}
-            title="Discard data changes?"
+            title="Discard changes?"
             message="The Data tab has key edits that have not been applied. Leaving discards them."
             confirmLabel="Discard"
             danger
@@ -369,6 +508,31 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
 export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
   return <ResourceDetailDrawer {...props} inline />;
 }
+
+/** Every Secret value replaced by the redaction placeholder, for display while not revealed. */
+function maskAll(obj: KubeObject): KubeObject {
+  return maskSecretValues(obj, () => false);
+}
+
+/** Tree / YAML switch at the start of the Manifest toolbar. */
+function ManifestViewToggle({ view, onChange }: { view: ManifestViewMode; onChange: (next: ManifestViewMode) => void }) {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={view}
+      onChange={(_e, next: ManifestViewMode | null) => {
+        if (next) onChange(next);
+      }}
+      aria-label="Manifest view"
+      sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: 1.25, py: 0.25, textTransform: 'none', fontSize: 12.5, lineHeight: 1.7 } }}
+    >
+      <ToggleButton value="tree">Tree</ToggleButton>
+      <ToggleButton value="yaml">YAML</ToggleButton>
+    </ToggleButtonGroup>
+  );
+}
+
 
 /** Summary status word shown next to the kind in the header, for kinds with a
  *  cheap one-word answer. Others rely on their overview's Status fact. */

@@ -8,6 +8,7 @@ import {
   type ResourceSelection,
 } from '../../../client/src/components/ResourceDetailDrawer';
 import { useDetailStore } from '../../../client/src/state/detail';
+import { useUiPrefsStore } from '../../../client/src/state/prefs';
 
 const queries = vi.hoisted(() => ({
   current: undefined as KubeObject | undefined,
@@ -16,6 +17,7 @@ const queries = vi.hoisted(() => ({
   resourceCalls: [] as Array<{ selection: Record<string, unknown> | undefined; options?: Record<string, unknown> }>,
   eventsCalls: [] as Array<Record<string, unknown> | undefined>,
   refetch: vi.fn(),
+  refetchRevealed: vi.fn(),
   resourceError: null as Error | null,
   applyMode: 'success' as 'success' | 'conflict' | 'error',
   applyMutateAsync: vi.fn(),
@@ -38,7 +40,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
         : selection.plural === 'customresourcedefinitions'
           ? queries.backing
           : queries.current;
-    return { data, refetch: queries.refetch, error: queries.resourceError };
+    return { data, refetch: selection?.reveal ? queries.refetchRevealed : queries.refetch, error: queries.resourceError };
   },
   isResourceGone: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useResourceEvents: (selection: Record<string, unknown> | undefined) => {
@@ -53,32 +55,76 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
   useYamlSchema: (selection: unknown) => effects.yamlSchema(selection),
   YamlEditor: ({
     value,
+    draft,
+    readOnly,
     applyLabel,
     onApply,
     onDryRun,
+    onChange,
     toolbar,
   }: {
     value: string;
+    draft?: string;
+    readOnly?: boolean;
     applyLabel?: string;
     onApply?: (value: string) => Promise<unknown>;
     onDryRun?: (value: string) => Promise<unknown>;
+    onChange?: (value: string) => void;
     toolbar?: ReactNode;
   }) => (
     <div data-testid="yaml-editor">
       {toolbar}
+      <span>{readOnly ? 'read-only editor' : 'editable editor'}</span>
       <textarea aria-label="YAML input" value={value} readOnly />
+      <textarea aria-label="YAML draft" value={draft ?? ''} readOnly />
       <span>{applyLabel}</span>
-      <button onClick={() => void onApply?.(value).catch((error: unknown) => effects.yamlError(error))}>Apply YAML mock</button>
+      <button onClick={() => void onApply?.(draft ?? value).catch((error: unknown) => effects.yamlError(error))}>Apply YAML mock</button>
       <button onClick={() => void onDryRun?.(value)}>Dry run YAML mock</button>
+      <button onClick={() => onChange?.('kind: [')}>Type broken YAML</button>
+      <button onClick={() => onChange?.('kind: Pod\nmetadata:\n  name: pod-a\nspec:\n  hostname: edited\n')}>Type valid YAML</button>
+    </div>
+  ),
+}));
+
+vi.mock('../../../client/src/components/detail/ManifestView.js', () => ({
+  ManifestView: ({
+    live,
+    draft,
+    readOnly,
+    toolbarStart,
+    toolbar,
+    onDraftChange,
+    onApplied,
+    onConflict,
+  }: {
+    live: KubeObject;
+    draft?: { obj: KubeObject };
+    readOnly?: boolean;
+    toolbarStart?: ReactNode;
+    toolbar?: ReactNode;
+    onDraftChange: (obj: KubeObject | undefined, base: KubeObject) => void;
+    onApplied: (updated: KubeObject) => void;
+    onConflict: () => void;
+  }) => (
+    <div data-testid="manifest-view">
+      {toolbarStart}
+      {toolbar}
+      <span>Manifest {draft ? `draft ${JSON.stringify(draft.obj.spec)}` : 'clean'}</span>
+      <span>{readOnly ? 'read-only' : 'editable'}</span>
+      <button onClick={() => onDraftChange({ ...live, spec: { ...live.spec, replicas: 3 } }, live)}>Stage manifest edit</button>
+      <button onClick={() => onDraftChange(undefined, live)}>Discard manifest draft</button>
+      <button onClick={() => onApplied(live)}>Applied manifest mock</button>
+      <button onClick={onConflict}>Manifest conflict mock</button>
     </div>
   ),
 }));
 
 vi.mock('../../../client/src/components/ConfirmDialog.js', () => ({
-  ConfirmDialog: ({ open, title, onConfirm, onClose }: { open: boolean; title: string; onConfirm: () => void; onClose: () => void }) =>
+  ConfirmDialog: ({ open, title, message, onConfirm, onClose }: { open: boolean; title: string; message: string; onConfirm: () => void; onClose: () => void }) =>
     open ? (
       <dialog open aria-label={title}>
         {title}
+        <p>{message}</p>
         <button onClick={onConfirm}>Confirm discard mock</button>
         <button onClick={onClose}>Cancel discard mock</button>
       </dialog>
@@ -108,7 +154,7 @@ vi.mock('../../../client/src/components/detail/CustomResourceDetail.js', () => (
 vi.mock('../../../client/src/components/detail/CrdDetail.js', () => ({
   crdVersions: (obj: KubeObject | undefined) => ((obj?.spec as { versions?: unknown[] } | undefined)?.versions ?? []),
   CrdDetail: ({ obj }: { obj: KubeObject }) => <div>CRD overview {obj.metadata.name}</div>,
-  CrdSchemaDetail: ({ versionName }: { versionName: string }) => <div>CRD schema {versionName}</div>,
+  CrdSchemaDetail: ({ versionName }: { versionName?: string }) => <div>CRD schema {versionName ?? 'default'}</div>,
 }));
 vi.mock('../../../client/src/components/detail/RolloutHistory.js', () => ({ RolloutHistory: ({ obj }: { obj: KubeObject }) => <div>Rollout history {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/MetricsChart.js', () => ({ MetricsChart: ({ kind, name }: { kind: string; name: string }) => <div>Metrics {kind} {name}</div> }));
@@ -118,6 +164,13 @@ vi.mock('../../../client/src/components/RowActions.js', () => ({
 }));
 vi.mock('../../../client/src/components/AgeCell.js', () => ({ AgeCell: ({ timestamp }: { timestamp?: string }) => <span>{timestamp ? 'age' : 'unknown age'}</span> }));
 vi.mock('../../../client/src/components/truncation.js', () => ({ TruncationTooltip: ({ children }: { children: ReactNode }) => <>{children}</> }));
+
+/** The YAML editor lives behind the Manifest tab's Tree/YAML toggle. */
+function showYaml() {
+  fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+  fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
+}
+const showTree = () => fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
 
 function selection(kind: string, overrides: Partial<ResourceSelection> = {}): ResourceSelection {
   const byKind: Record<string, Pick<ResourceSelection, 'group' | 'version' | 'plural'>> = {
@@ -172,6 +225,7 @@ beforeEach(() => {
   queries.resourceCalls = [];
   queries.eventsCalls = [];
   queries.refetch.mockReset();
+  queries.refetchRevealed.mockReset();
   queries.resourceError = null;
   queries.applyMode = 'success';
   queries.applyMutateAsync.mockReset();
@@ -188,7 +242,8 @@ beforeEach(() => {
   effects.yamlSchema.mockClear();
   effects.yamlError.mockClear();
   effects.detailProps = [];
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
+  useUiPrefsStore.setState({ manifestView: 'tree' });
 });
 
 describe('ResourceDetailDrawer', () => {
@@ -217,17 +272,18 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByLabelText('Restore drawer')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Restore drawer'));
 
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    showYaml();
     expect(screen.getByTestId('yaml-editor')).toHaveTextContent('Replace');
     expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('name: pod-a');
-    // Off Overview the object freezes so live updates cannot clobber edits.
+    // In the YAML view the object freezes so live updates cannot reload the editor.
     expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: undefined, watch: false });
+    expect(useUiPrefsStore.getState().manifestView).toBe('yaml');
     fireEvent.click(screen.getByRole('button', { name: 'Dry run YAML mock' }));
     expect(queries.dryRunMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ ctx: 'dev' }));
 
     queries.applyMode = 'conflict';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('view has been refreshed') })));
+    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('has been refreshed') })));
     expect(queries.refetch).toHaveBeenCalled();
     queries.applyMode = 'error';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
@@ -254,6 +310,92 @@ describe('ResourceDetailDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   }, 15_000);
 
+  it('carries a manifest draft into the YAML view and back, and keeps it across a close', async () => {
+    const sel = selection('Deployment');
+    queries.current = objectFor(sel, { spec: { replicas: 2 } });
+    const onClose = vi.fn();
+    const key = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace}|${sel.name}`;
+    const view = render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('Manifest clean')).toBeInTheDocument();
+    expect(screen.getByText('editable')).toBeInTheDocument();
+    // Manifest stays live like Overview.
+    const deploymentCalls = queries.resourceCalls.filter(({ selection: call }) => call?.name === sel.name);
+    expect(deploymentCalls.at(-1)?.options).toMatchObject({ liveMs: 5000, watch: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('tree');
+
+    // No guard between the tree and the YAML view: the draft travels along, serialized.
+    fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('replicas: 3');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('replicas: 2');
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('yaml');
+
+    showTree();
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().drafts[key]?.mode).toBe('tree');
+
+    // Closing keeps the draft with its resource: no prompt, and reopening shows it again.
+    fireEvent.click(screen.getByLabelText('Close resource details'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(useDetailStore.getState().drafts[key]?.obj.spec).toEqual({ replicas: 3 });
+    view.unmount();
+    render(<ResourceDetailPanel sel={sel} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard manifest draft' }));
+    expect(useDetailStore.getState().drafts[key]).toBeUndefined();
+
+    // A successful apply from the tree clears the draft and refreshes.
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Applied manifest mock' }));
+    await waitFor(() => expect(useDetailStore.getState().drafts[key]).toBeUndefined());
+    expect(queries.refetch).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Manifest conflict mock' }));
+    expect(queries.refetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps unparsable YAML in the editor and parses valid YAML into the tree', async () => {
+    const sel = selection('Pod');
+    queries.current = objectFor(sel, { spec: { hostname: 'orig' } });
+    render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+
+    const podKey = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace}|${sel.name}`;
+    showYaml();
+    fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
+    expect(useDetailStore.getState().drafts[podKey]?.mode).toBe('yaml');
+    showTree();
+    expect(screen.getByText(/The YAML does not parse/)).toBeInTheDocument();
+    expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('manifest-view')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    showTree();
+    expect(screen.queryByText(/The YAML does not parse/)).not.toBeInTheDocument();
+    expect(screen.getByText('Manifest draft {"hostname":"edited"}')).toBeInTheDocument();
+
+    // Applying the YAML text (a 409 first) replays the edits onto the refreshed object, keeping them.
+    fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
+    queries.refetch.mockResolvedValue({ data: objectFor(sel, { spec: { hostname: 'server', nodeName: 'n1' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } }) });
+    queries.applyMode = 'conflict';
+    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
+    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('replayed onto the latest version') })));
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('2'));
+    const rebased = useDetailStore.getState().drafts[podKey]!;
+    expect(rebased.text).toContain('hostname: edited');
+    expect(rebased.text).toContain('nodeName: n1');
+    expect(rebased.text).toContain("resourceVersion: '2'");
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('hostname: edited');
+    queries.applyMode = 'success';
+    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]).toBeUndefined());
+  });
+
   it('marks a deleted resource and hides its actions, keeping the last state', () => {
     const sel = selection('Pod');
     queries.current = objectFor(sel, { status: { phase: 'Running' } });
@@ -264,6 +406,8 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText('Deleted')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Quick actions pod-a' })).not.toBeInTheDocument();
     expect(screen.getByText('Pod overview pod-a')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByText('read-only')).toBeInTheDocument();
   });
 
   it('guards dirty ConfigMap data before changing tabs or closing', () => {
@@ -275,20 +419,37 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Data' }));
     expect(screen.getByText('Data editor configmap-a secret=false')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Make data dirty' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
     expect(screen.getByText('Data editor configmap-a secret=false')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Discard data changes?' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel discard mock' }));
-    expect(screen.queryByRole('dialog', { name: 'Discard data changes?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
-    expect(screen.getByTestId('yaml-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('manifest-view')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Data' }));
     fireEvent.click(screen.getByRole('button', { name: 'Make data clean' }));
     fireEvent.click(screen.getByLabelText('Close resource details'));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a manifest draft when only the Data edits are discarded', () => {
+    const sel = selection('ConfigMap');
+    queries.current = objectFor(sel, { data: { key: 'value' } });
+    render(<ResourceDetailDrawer sel={sel} onClose={vi.fn()} inline />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Make data dirty' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toHaveTextContent('The Data tab has key edits');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().dataDirty).toBe(false);
+    expect(Object.keys(useDetailStore.getState().drafts)).toHaveLength(1);
   });
 
   it('reveals Secret YAML and resets the per-selection view state', () => {
@@ -300,9 +461,31 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByRole('tab', { name: 'Data' })).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Full screen'));
     expect(screen.getByLabelText('Restore drawer')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    showYaml();
+    // The manifest is built from the revealed object, but stays masked and read-only until revealed.
     expect(queries.resourceCalls.some(({ selection: call }) => call?.reveal === true)).toBe(true);
+    expect(screen.getByText('read-only editor')).toBeInTheDocument();
+    expect(screen.getByText('Read-only until revealed')).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('••••••••');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).not.toContain(btoa('secret'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect(screen.getByText('editable editor')).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain(btoa('secret'));
+    // Broken YAML typed while revealed cannot be masked: hiding it hides the draft entirely.
+    fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect(screen.getByText(/YAML edits are hidden while the Secret is masked/)).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).not.toContain(btoa('secret'));
+    expect(screen.getByText('read-only editor')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toBe('kind: [');
+    // A tree conflict on a Secret refreshes the revealed object the tree is built from.
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    showTree();
+    fireEvent.click(screen.getByRole('button', { name: 'Manifest conflict mock' }));
+    expect(queries.refetchRevealed).toHaveBeenCalled();
+    expect(queries.refetch).not.toHaveBeenCalled();
 
     const next = selection('Secret', { name: 'other-secret' });
     queries.current = objectFor(next, { data: {} });
@@ -318,8 +501,8 @@ describe('ResourceDetailDrawer', () => {
     const first = render(<ResourceDetailPanel sel={crdSel} onClose={vi.fn()} />);
     expect(screen.getByText('CRD overview widgets.example.io')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Map' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'v1' }));
-    expect(screen.getByText('CRD schema v1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schema' }));
+    expect(screen.getByText('CRD schema default')).toBeInTheDocument();
     first.unmount();
 
     const customSel = selection('Widget', { custom: true, name: 'blue-widget' });
