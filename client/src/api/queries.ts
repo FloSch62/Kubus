@@ -598,9 +598,17 @@ export function useResourceSchema(sel: { ctx: string; group: string; version: st
 }
 
 /** One-shot (non-watched) list of a resource kind, with optional selectors. */
-export function useResourceList(sel: { ctx: string; group: string; version: string; plural: string; namespace?: string; labelSelector?: string; fieldSelector?: string } | undefined) {
+/** Poll cadence for the related-object lists a detail drawer keeps open (pods behind a Service, ReplicaSets of a Deployment). */
+export const DETAIL_LIST_LIVE_MS = 5000;
+
+export function useResourceList(
+  sel: { ctx: string; group: string; version: string; plural: string; namespace?: string; labelSelector?: string; fieldSelector?: string } | undefined,
+  opts?: { liveMs?: number },
+) {
+  const interval = useRefetchInterval(opts?.liveMs ?? 0);
   return useQuery({
     queryKey: ['resource-list', sel],
+    refetchInterval: interval || false,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (sel!.namespace) params.set('namespace', sel!.namespace);

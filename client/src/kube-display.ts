@@ -75,6 +75,57 @@ export function workloadReady(obj: KubeObject): string {
   return `${status?.readyReplicas ?? 0}/${spec?.replicas ?? status?.replicas ?? 0}`;
 }
 
+/**
+ * One-word rollout state for Deployments, StatefulSets, ReplicaSets and
+ * DaemonSets — the detail header's answer to "is it done", derived from the
+ * replica counters and the Progressing/ReplicaFailure conditions.
+ */
+export function workloadStatus(obj: KubeObject): string {
+  const spec = obj.spec as
+    | {
+        replicas?: number;
+        paused?: boolean;
+        updateStrategy?: { type?: string; rollingUpdate?: { partition?: number } };
+      }
+    | undefined;
+  const status = obj.status as
+    | {
+        observedGeneration?: number;
+        replicas?: number;
+        readyReplicas?: number;
+        updatedReplicas?: number;
+        desiredNumberScheduled?: number;
+        numberReady?: number;
+        updatedNumberScheduled?: number;
+        conditions?: Array<{ type: string; status: string }>;
+      }
+    | undefined;
+  if (spec?.paused) return 'Paused';
+  // Right after a spec change the counters and conditions still describe
+  // the previous generation — nothing they say is trustworthy yet.
+  const generation = obj.metadata.generation;
+  if (generation !== undefined && status?.observedGeneration !== undefined && status.observedGeneration < generation) return 'Progressing';
+  const conditions = status?.conditions ?? [];
+  if (conditions.some((c) => c.type === 'ReplicaFailure' && c.status === 'True')) return 'ReplicaFailure';
+  if (conditions.some((c) => c.type === 'Progressing' && c.status === 'False')) return 'Stalled';
+  const daemon = status?.desiredNumberScheduled !== undefined;
+  const desired = daemon ? (status?.desiredNumberScheduled ?? 0) : (spec?.replicas ?? status?.replicas ?? 0);
+  const ready = daemon ? (status?.numberReady ?? 0) : (status?.readyReplicas ?? 0);
+  const updated = daemon ? status?.updatedNumberScheduled : status?.updatedReplicas;
+  const total = daemon ? desired : (status?.replicas ?? desired);
+  // How many replicas the rollout is meant to move to the new template:
+  // a partitioned StatefulSet deliberately leaves the ordinals below the
+  // partition on the old one, and OnDelete strategies update nothing until
+  // pods are deleted by hand — neither is a rollout in progress.
+  const strategy = spec?.updateStrategy;
+  const partition = strategy?.rollingUpdate?.partition ?? 0;
+  const updateTarget = strategy?.type === 'OnDelete' ? 0 : Math.max(0, desired - partition);
+  if (desired === 0) return 'Scaled to zero';
+  if (ready >= desired && (updated ?? updateTarget) >= updateTarget && total <= desired) return 'Available';
+  if (ready === 0) return 'Unavailable';
+  return 'Progressing';
+}
+
 export function nodeStatus(node: KubeObject): string {
   const conditions = (node.status as { conditions?: Array<{ type: string; status: string }> })?.conditions ?? [];
   const ready = conditions.find((c) => c.type === 'Ready');

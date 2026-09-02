@@ -51,9 +51,11 @@ export function PodMiniList({
         </Typography>
       )}
       {loading ? (
-        <CircularProgress size={18} />
+        <Box sx={{ p: 1.5 }}>
+          <CircularProgress size={18} />
+        </Box>
       ) : pods.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
           {emptyText ?? 'No pods.'}
         </Typography>
       ) : (

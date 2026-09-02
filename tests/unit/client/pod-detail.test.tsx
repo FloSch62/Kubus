@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, PodEnvResponse } from '@kubus/shared';
 import { PodDetail } from '../../../client/src/components/detail/PodDetail';
@@ -63,10 +63,14 @@ function richPod(): KubeObject {
     spec: {
       nodeName: 'node-a',
       serviceAccountName: 'workload-sa',
+      priorityClassName: 'high',
+      priority: 1000,
       containers: [
         {
           name: 'app',
           image: 'example/app:v1',
+          command: ['/bin/app'],
+          args: ['--serve'],
           ports: [
             { containerPort: 8080, protocol: 'TCP', name: 'http' },
             { containerPort: 5353, protocol: 'UDP', name: 'dns' },
@@ -144,7 +148,7 @@ function richPod(): KubeObject {
           started: false,
           restartCount: 2,
           state: { running: {} },
-          lastState: { terminated: { reason: 'Error', finishedAt: '2026-07-22T09:55:00Z' } },
+          lastState: { terminated: { reason: 'Error', exitCode: 137, finishedAt: '2026-07-22T09:55:00Z' } },
         },
         {
           name: 'worker',
@@ -166,6 +170,13 @@ function richPod(): KubeObject {
     },
   } as KubeObject;
 }
+
+/** Value tile of the summary strip, addressed by its label (a <dt> has no accessible name of its own). */
+const tile = (label: string) => {
+  const term = screen.getAllByRole('term').find((el) => el.textContent === label);
+  if (!term) throw new Error(`no summary tile labelled ${label}`);
+  return term.nextElementSibling;
+};
 
 beforeEach(() => {
   queries.metrics = new Map([
@@ -234,40 +245,31 @@ beforeEach(() => {
 });
 
 describe('PodDetail', () => {
-  it('renders live diagnostics, probes, environment, volumes, scheduling, and debug controls', () => {
+  it('leads with the summary strip and the reasons the pod is not ready', () => {
     render(<PodDetail obj={richPod()} ctx="dev" />);
+
+    // Headline numbers: one ready container of two, two restarts, node and IP.
+    expect(tile('Ready')).toHaveTextContent('1/2');
+    expect(tile('Restarts')).toHaveTextContent('2');
+    expect(screen.getByText('10.0.0.7')).toBeInTheDocument();
 
     expect(screen.getByText('Why this pod isn’t ready')).toBeInTheDocument();
     expect(screen.getByText(/Pod: SchedulingGated/)).toBeInTheDocument();
     expect(screen.getByText(/PodScheduled: Unschedulable/)).toBeInTheDocument();
     expect(screen.getByText(/worker: CrashLoopBackOff/)).toBeInTheDocument();
     expect(screen.getByText(/FailedScheduling ×3/)).toBeInTheDocument();
+
     expect(screen.getByText('Init containers')).toBeInTheDocument();
     expect(screen.getByText('Debug containers')).toBeInTheDocument();
-    expect(screen.getByText('Probes')).toBeInTheDocument();
-    expect(screen.getByText('Environment')).toBeInTheDocument();
     expect(screen.getByText('Volumes')).toBeInTheDocument();
     expect(screen.getByText('Scheduling')).toBeInTheDocument();
-    expect(screen.getByText('HTTPS /ready :8080')).toBeInTheDocument();
-    expect(screen.getByText('TCP :http')).toBeInTheDocument();
-    expect(screen.getByText('gRPC :9090 health')).toBeInTheDocument();
-    expect(screen.getByText('exec test -f /tmp/ready')).toBeInTheDocument();
-    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Pending').length).toBeGreaterThan(0);
+    expect(screen.getByText('Burstable')).toBeInTheDocument();
+    expect(screen.getByText('high (1000)')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'node-a' }));
     fireEvent.click(screen.getByRole('button', { name: 'workload-sa' }));
-    fireEvent.click(screen.getByRole('button', { name: 'configmap/app-config → feature' }));
     fireEvent.click(screen.getByRole('button', { name: 'persistentVolumeClaim/data-pvc' }));
-    expect(useDetailStore.getState().stack.map((selection) => selection.kind)).toEqual([
-      'Node',
-      'ServiceAccount',
-      'ConfigMap',
-      'PersistentVolumeClaim',
-    ]);
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret values' }));
-    expect(queries.envSelections.at(-1)).toMatchObject({ reveal: true });
+    expect(useDetailStore.getState().stack.map((selection) => selection.kind)).toEqual(['Node', 'ServiceAccount', 'PersistentVolumeClaim']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Shell' }));
     expect(useDockStore.getState().tabs[0]).toMatchObject({ kind: 'terminal', container: 'debug-live' });
@@ -280,6 +282,51 @@ describe('PodDetail', () => {
     expect(screen.queryByText('Forward 8080')).not.toBeInTheDocument();
   }, 15_000);
 
+  it('keeps each container’s probes, environment, mounts and command inside its panel', () => {
+    render(<PodDetail obj={richPod()} ctx="dev" />);
+
+    // A running container that lost readiness says so; the crashlooping one
+    // carries its waiting message and the restart history shows the exit code.
+    // …once in the problems banner and once on the container itself.
+    expect(screen.getAllByText('backing off')).toHaveLength(2);
+    expect(screen.getByText(/2 restarts · last Error \(exit 137\)/)).toBeInTheDocument();
+
+    // Nothing is expanded until asked.
+    expect(screen.queryByText('HTTPS /ready :8080')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Probes for app' }));
+    expect(screen.getByText('HTTPS /ready :8080')).toBeInTheDocument();
+    expect(screen.getByText('TCP :http')).toBeInTheDocument();
+    expect(screen.getByText('gRPC :9090 health')).toBeInTheDocument();
+    const probes = within(screen.getByText('HTTPS /ready :8080').closest('table')!);
+    expect(probes.getByText('Ready')).toBeInTheDocument();
+    expect(probes.getByText('Pending')).toBeInTheDocument();
+
+    // One detail at a time per container: opening the environment closes the probes.
+    fireEvent.click(screen.getByRole('button', { name: 'Environment for app' }));
+    expect(screen.queryByText('HTTPS /ready :8080')).not.toBeInTheDocument();
+    expect(screen.getByText('missing key')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'configmap/app-config → feature' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'ConfigMap', name: 'app-config' });
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret values' }));
+    expect(queries.envSelections.at(-1)).toMatchObject({ reveal: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mounts for app' }));
+    const mounts = within(screen.getByText(/subPath app.conf · read-only/).closest('table')!);
+    expect(mounts.getByText('/etc/config')).toBeInTheDocument();
+    expect(mounts.getByText('/tmp')).toBeInTheDocument();
+    fireEvent.click(mounts.getByRole('button', { name: 'configMap/app-config' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'ConfigMap', name: 'app-config' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Command for app' }));
+    expect(screen.getByText('/bin/app')).toBeInTheDocument();
+    expect(screen.getByText('--serve')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Command for worker' })).not.toBeInTheDocument();
+
+    // Another container's probes open independently.
+    fireEvent.click(screen.getByRole('button', { name: 'Probes for worker' }));
+    expect(screen.getByText('exec test -f /tmp/ready')).toBeInTheDocument();
+  }, 15_000);
+
   it('opens logs and a shell scoped to a single container', () => {
     render(<PodDetail obj={richPod()} ctx="dev" />);
 
@@ -287,7 +334,6 @@ describe('PodDetail', () => {
     // the finished init container still expose their logs.
     expect(screen.getByRole('button', { name: 'Shell into container app' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Shell into container worker' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Shell into container migrate' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Logs for container worker' }));
     expect(useDockStore.getState().tabs.at(-1)).toMatchObject({
@@ -298,6 +344,11 @@ describe('PodDetail', () => {
       container: 'worker',
     });
 
+    // Finished init containers start collapsed — they're history, not the problem.
+    expect(screen.getByText('all completed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Logs for container migrate' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Init containers/ }));
+    expect(screen.queryByRole('button', { name: 'Shell into container migrate' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Logs for container migrate' }));
     expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'logs', container: 'migrate' });
 
@@ -307,12 +358,15 @@ describe('PodDetail', () => {
 
   it('handles unavailable metrics, loading and empty environment data, and stop failures', () => {
     queries.metrics = new Map([['dev', { available: false, items: [] }]]);
-    queries.env = { containers: [] };
+    queries.env = undefined;
     queries.envLoading = true;
     queries.events = { items: [event('normal', 'Normal', '2026-07-22T10:00:00Z', { reason: 'Pulling' })] };
     queries.stopFails = true;
     const view = render(<PodDetail obj={richPod()} ctx="dev" />);
 
+    expect(screen.getAllByText('no usage data').length).toBeGreaterThan(0);
+    // While the env is loading the toggle exists and shows a spinner once opened.
+    fireEvent.click(screen.getByRole('button', { name: 'Environment for app' }));
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
     expect(screen.getByText('Pulling')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
@@ -320,8 +374,9 @@ describe('PodDetail', () => {
 
     view.unmount();
     queries.envLoading = false;
+    queries.env = { containers: [] };
     render(<PodDetail obj={richPod()} ctx="dev" />);
-    expect(screen.queryByText('Environment')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Environment for app' })).not.toBeInTheDocument();
   });
 
   it('omits live-only and empty sections for a completed minimal pod', () => {
@@ -342,6 +397,9 @@ describe('PodDetail', () => {
     expect(screen.queryByText('Volumes')).not.toBeInTheDocument();
     expect(screen.queryByText('Scheduling')).not.toBeInTheDocument();
     expect(screen.queryByText('Conditions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Shell into container main' })).not.toBeInTheDocument();
     expect(screen.getByText('8080/TCP')).not.toHaveAttribute('role', 'button');
+    const containers = screen.getByText('Containers').closest('div')!;
+    expect(within(containers).queryByText('Ready')).not.toBeInTheDocument();
   });
 });

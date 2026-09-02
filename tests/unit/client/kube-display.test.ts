@@ -16,6 +16,7 @@ import {
   servicePorts,
   statusLikeName,
   workloadReady,
+  workloadStatus,
 } from '../../../client/src/kube-display';
 
 let uidSeq = 0;
@@ -545,5 +546,54 @@ describe('statusLikeName', () => {
     for (const name of ['Name', 'Age', 'Replicas', 'CPU', 'stateful', 'status-reason', '']) {
       expect(statusLikeName(name)).toBe(false);
     }
+  });
+});
+
+describe('workloadStatus', () => {
+  const deploy = (spec: Record<string, unknown>, status: Record<string, unknown>) => kobj({ kind: 'Deployment', spec, status });
+
+  it('reports Available once every desired replica is ready on the current template', () => {
+    expect(workloadStatus(deploy({ replicas: 3 }, { replicas: 3, readyReplicas: 3, updatedReplicas: 3 }))).toBe('Available');
+  });
+
+  it('reports Progressing while replicas are still catching up or surging', () => {
+    expect(workloadStatus(deploy({ replicas: 3 }, { replicas: 3, readyReplicas: 2, updatedReplicas: 3 }))).toBe('Progressing');
+    expect(workloadStatus(deploy({ replicas: 3 }, { replicas: 4, readyReplicas: 3, updatedReplicas: 1 }))).toBe('Progressing');
+  });
+
+  it('reports Unavailable when nothing is ready and Stalled when the deadline passed', () => {
+    expect(workloadStatus(deploy({ replicas: 2 }, { replicas: 2, readyReplicas: 0 }))).toBe('Unavailable');
+    expect(workloadStatus(deploy({ replicas: 2 }, { readyReplicas: 0, conditions: [{ type: 'Progressing', status: 'False' }] }))).toBe('Stalled');
+    expect(workloadStatus(deploy({ replicas: 2 }, { readyReplicas: 2, conditions: [{ type: 'ReplicaFailure', status: 'True' }] }))).toBe('ReplicaFailure');
+  });
+
+  it('prefers Paused and names a zero-replica workload', () => {
+    expect(workloadStatus(deploy({ replicas: 2, paused: true }, { readyReplicas: 0 }))).toBe('Paused');
+    expect(workloadStatus(deploy({ replicas: 0 }, {}))).toBe('Scaled to zero');
+  });
+
+  it('treats a partitioned StatefulSet rollout as complete at the partition', () => {
+    const sts = (partition: number, updated: number) =>
+      kobj({ kind: 'StatefulSet', spec: { replicas: 5, updateStrategy: { type: 'RollingUpdate', rollingUpdate: { partition } } }, status: { replicas: 5, readyReplicas: 5, updatedReplicas: updated } });
+    expect(workloadStatus(sts(2, 3))).toBe('Available');
+    expect(workloadStatus(sts(2, 2))).toBe('Progressing');
+    expect(workloadStatus(sts(0, 5))).toBe('Available');
+  });
+
+  it('does not wait for updated replicas under an OnDelete strategy', () => {
+    const sts = kobj({ kind: 'StatefulSet', spec: { replicas: 3, updateStrategy: { type: 'OnDelete' } }, status: { replicas: 3, readyReplicas: 3, updatedReplicas: 0 } });
+    expect(workloadStatus(sts)).toBe('Available');
+  });
+
+  it('reports Progressing while the status lags the spec generation', () => {
+    const stale = kobj({ kind: 'Deployment', spec: { replicas: 2 }, status: { observedGeneration: 3, replicas: 2, readyReplicas: 2, updatedReplicas: 2 } }, { generation: 4 });
+    expect(workloadStatus(stale)).toBe('Progressing');
+    const current = kobj({ kind: 'Deployment', spec: { replicas: 2 }, status: { observedGeneration: 4, replicas: 2, readyReplicas: 2, updatedReplicas: 2 } }, { generation: 4 });
+    expect(workloadStatus(current)).toBe('Available');
+  });
+
+  it('reads DaemonSet counters', () => {
+    expect(workloadStatus(kobj({ kind: 'DaemonSet', status: { desiredNumberScheduled: 3, numberReady: 3, updatedNumberScheduled: 3 } }))).toBe('Available');
+    expect(workloadStatus(kobj({ kind: 'DaemonSet', status: { desiredNumberScheduled: 3, numberReady: 1, updatedNumberScheduled: 3 } }))).toBe('Progressing');
   });
 });
