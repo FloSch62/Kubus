@@ -18,6 +18,8 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
   const [text, setText] = useState(draft ?? value);
   const lastValueRef = useRef(value);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [dryRunBusy, setDryRunBusy] = useState(false);
@@ -31,12 +33,13 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
   // schema matches this editor without reconfiguring the yaml worker.
   const modelPath = useMemo(() => newYamlModelPath(schemaRef), [schemaRef]);
 
-  // A new base value (server refresh, different object) replaces the text;
-  // the initial mount keeps a carried-over draft.
+  // A new base value (server refresh, different object) replaces the text
+  // unless the caller supplies a draft for it (edits rebased onto the
+  // refreshed object); the initial mount keeps a carried-over draft too.
   useEffect(() => {
     if (lastValueRef.current === value) return;
     lastValueRef.current = value;
-    setText(value);
+    setText(draftRef.current ?? value);
     setError(undefined);
     setDryRun(undefined);
     setDryRunText(undefined);

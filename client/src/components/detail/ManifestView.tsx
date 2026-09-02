@@ -22,12 +22,14 @@ import { withoutManagedFields } from '../../kube-display.js';
 import { useDetailStore, type ManifestDraft } from '../../state/detail.js';
 import { showToast } from '../../state/toast.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
+import { REDACTED, maskSecretValues } from './data-editor.js';
 import { AddFieldPopover, ManifestTree, type EditRequest, type ExpandCommand } from './ManifestTree.js';
 import { ReviewApplyDialog, type ReviewTarget } from './ReviewApplyDialog.js';
 import { CountPill, Section } from './Section.js';
 import {
   deleteAt,
   diffChanges,
+  displayPath,
   dumpManifest,
   emptyValueFor,
   filterTree,
@@ -78,9 +80,10 @@ export function useOpenReference(ctx: string): { open: (ref: ResourceLink) => vo
   const { data: apiResources } = useApiResources(ctx);
   const resolve = useCallback(
     (ref: ResourceLink) => {
-      const { group } = splitApiVersion(ref.apiVersion);
+      const { group, version } = splitApiVersion(ref.apiVersion);
       const served = apiResources?.filter((r) => r.kind === ref.kind) ?? [];
-      const info = (ref.apiVersion ? served.find((r) => r.group === group) : undefined) ?? served[0];
+      // A declared apiVersion names the exact GVR; fall back to the group, then to any served version.
+      const info = (ref.apiVersion ? (served.find((r) => r.group === group && r.version === version) ?? served.find((r) => r.group === group)) : undefined) ?? served[0];
       if (info) return { group: info.group, version: info.version, plural: info.plural, namespaced: info.namespaced, custom: info.custom };
       const builtin = gvkForKind(ref.kind);
       return builtin ? { group: builtin.group, version: builtin.version, plural: builtin.plural, namespaced: builtin.namespaced, custom: false } : undefined;
@@ -139,7 +142,7 @@ export interface ManifestViewProps {
   /** Stage `obj` as the draft (undefined discards); `base` is the snapshot it applies to. */
   onDraftChange: (obj: KubeObject | undefined, base: KubeObject) => void;
   readOnly?: boolean;
-  /** Secret data is redacted, so its rows stay locked. */
+  /** Secret data is not revealed: its rows stay locked and its values render masked, in the tree and in the diff. */
   secretRedacted?: boolean;
   /** Leading toolbar content (the tree/YAML view toggle). */
   toolbarStart?: ReactNode;
@@ -159,6 +162,10 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const liveBase = useMemo(() => withoutManagedFields(live), [live]);
   const base = draft?.base ?? liveBase;
   const current = draft?.obj ?? liveBase;
+  // Edits always apply to the real object; what the tree, the filter and the
+  // diff show is masked while the Secret is not revealed.
+  const shownBase = useMemo(() => (secretRedacted ? maskSecretValues(base, () => false) : base), [base, secretRedacted]);
+  const shown = useMemo(() => (secretRedacted ? maskSecretValues(current, () => false) : current), [current, secretRedacted]);
   const changes = useMemo(() => (draft ? diffChanges(base, current) : undefined), [draft, base, current]);
   const changeCount = changes?.rows.size ?? 0;
 
@@ -167,7 +174,7 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const definitions = useMemo(() => schemaDefinitions(schemaDoc), [schemaDoc]);
 
   const [query, setQuery] = useState('');
-  const filter = useMemo(() => filterTree(current, [], query), [current, query]);
+  const filter = useMemo(() => filterTree(shown, [], query), [shown, query]);
   const [expandCommand, setExpandCommand] = useState<ExpandCommand>();
   const [showDocs, setShowDocs] = useState(false);
   const [sectionAdd, setSectionAdd] = useState<{ key: string; anchor: HTMLElement }>();
@@ -193,7 +200,11 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const serverMoved = !!draft && live.metadata.resourceVersion !== draft.base.metadata.resourceVersion;
   const rebase = useCallback(() => {
     if (!draft) return;
-    onDraftChange(rebaseEdits(draft.base, draft.obj, liveBase), liveBase);
+    const { value, skipped } = rebaseEdits(draft.base, draft.obj, liveBase);
+    onDraftChange(value, liveBase);
+    if (skipped.length) {
+      showToast('warning', `${skipped.length} ${skipped.length === 1 ? 'edit' : 'edits'} could not be replayed: the list item no longer exists (${skipped.map((c) => displayPath(c.path)).join(', ')}).`);
+    }
   }, [draft, liveBase, onDraftChange]);
   useEffect(() => {
     if (!rebaseOnRefresh || !serverMoved) return;
@@ -203,12 +214,16 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   }, [rebaseOnRefresh, serverMoved, rebase]);
 
   const groups = useMemo(() => manifestGroups(current), [current]);
-  const sections = groups.filter((group) => isContainer(current[group.key]));
+  const sections = groups.filter((group) => isContainer(current[group.key]) && (!filter || hasMatchUnder(filter, group.key)));
   const scalarKeys = groups.filter((group) => !isContainer(current[group.key])).map((group) => group.key);
-  const scalars = useMemo(() => pick(current, scalarKeys), [current, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
-  const scalarBase = useMemo(() => pick(base, scalarKeys), [base, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
+  const scalars = useMemo(() => pick(shown, scalarKeys), [shown, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
+  const scalarBase = useMemo(() => pick(shownBase, scalarKeys), [shownBase, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
   const showScalars = scalarKeys.length > 0 && (!filter || scalarKeys.some((key) => hasMatchUnder(filter, key)));
   const yamlBody = useMemo(() => (draft ? dumpManifest(current) : ''), [draft, current]);
+  const diffSides = useMemo(
+    () => (draft ? { left: dumpManifest(shownBase), right: dumpManifest(shown) } : undefined),
+    [draft, shownBase, shown],
+  );
 
   // Adding under a section root: lists append an item straight away, objects
   // open the field picker; a new scalar goes straight into its inline editor.
@@ -325,7 +340,6 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <Stack spacing={1.5} sx={{ p: 2 }}>
           {sections.map((group) => {
-            if (filter && !hasMatchUnder(filter, group.key)) return null;
             const value = current[group.key];
             const locked = readOnly ? undefined : lock([group.key]);
             const groupSchema = schemaAt(rootSchema, definitions, [group.key]);
@@ -365,8 +379,8 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
                 <Box sx={{ px: 1, py: 0.75 }}>
                   <ManifestTree
                     {...treeProps}
-                    value={value}
-                    base={base[group.key]}
+                    value={shown[group.key]}
+                    base={shownBase[group.key]}
                     rootPath={[group.key]}
                     schema={groupSchema}
                     accent={accentFor(group.key)}
@@ -419,8 +433,15 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
         <ReviewApplyDialog
           sel={sel}
           yamlBody={yamlBody}
-          left={draft.baseText}
-          right={yamlBody}
+          left={diffSides?.left ?? draft.baseText}
+          right={diffSides?.right ?? yamlBody}
+          notice={
+            secretRedacted ? (
+              <Alert severity="info" sx={{ borderRadius: 0, flexShrink: 0 }}>
+                Unrevealed Secret values are shown as {REDACTED} in this diff; the apply uses the real values.
+              </Alert>
+            ) : undefined
+          }
           onClose={() => setReview(false)}
           onApplied={(updated) => {
             setReview(false);

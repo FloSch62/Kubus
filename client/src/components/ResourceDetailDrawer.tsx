@@ -37,7 +37,8 @@ import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { ManifestView } from './detail/ManifestView.js';
-import { dumpManifest, parseYamlMapping } from './detail/manifest-tree.js';
+import { dumpManifest, parseYamlMapping, rebaseEdits } from './detail/manifest-tree.js';
+import { maskSecretValues } from './detail/data-editor.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { CopyValueButton } from './CellCopy.js';
@@ -137,6 +138,15 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   // The last state stays on screen for post-mortem, but the drawer must say
   // the object is gone instead of freezing on e.g. "Terminating" forever.
   const objGone = !!obj && isResourceGone(error);
+  // Secret manifests are edited from the revealed object so an apply never
+  // writes the redaction placeholders back; the tree and the YAML view mask
+  // the values until the reveal switch is on. Revealed reads stay on the poll
+  // (the watch stream carries redacted objects).
+  const { data: revealedSecret, refetch: refetchRevealed } = useResource(isSecret && tab === 'manifest' && sel ? { ...sel, reveal: true } : undefined, {
+    liveMs: view === 'tree' ? 5000 : undefined,
+  });
+  const manifestObj = isSecret ? revealedSecret : obj;
+  const secretMasked = isSecret && !reveal;
   const { data: backingCrd } = useResource(backingCrdSelection);
   const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   const apply = useApplyResource();
@@ -145,15 +155,21 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   // Overview, so hover/validation are ready the moment the YAML view opens.
   useYamlSchema(sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined);
 
-  const liveBase = useMemo(() => (obj ? withoutManagedFields(obj) : undefined), [obj]);
+  const liveBase = useMemo(() => (manifestObj ? withoutManagedFields(manifestObj) : undefined), [manifestObj]);
   const showYaml = tab === 'manifest' && view === 'yaml';
   // Only serialize for the YAML view — dumping a large object mid-open would
-  // stall the drawer's slide-in animation.
-  const yamlText = useMemo(() => (liveBase && showYaml ? dumpManifest(liveBase) : ''), [liveBase, showYaml]);
+  // stall the drawer's slide-in animation. An unrevealed Secret shows masked
+  // text, read-only, so nothing can be typed over placeholders.
+  const yamlText = useMemo(() => (liveBase && showYaml ? dumpManifest(secretMasked ? maskAll(liveBase) : liveBase) : ''), [liveBase, showYaml, secretMasked]);
   // The editor measures dirtiness against the draft's base, and starts from
   // the carried-over text when the draft came from the tree.
-  const yamlValue = draft ? draft.baseText : yamlText;
-  const yamlDraftText = draft?.mode === 'yaml' ? draft.text : undefined;
+  const yamlValue = draft ? (secretMasked ? dumpManifest(maskAll(draft.base)) : draft.baseText) : yamlText;
+  const yamlDraftText = useMemo(() => {
+    if (draft?.mode !== 'yaml') return undefined;
+    if (!secretMasked) return draft.text;
+    const parsed = parseYamlMapping(draft.text);
+    return parsed.ok ? dumpManifest(maskAll(parsed.value as KubeObject)) : draft.text;
+  }, [draft, secretMasked]);
 
   // Tree ⇄ YAML share one draft: entering the tree parses the YAML
   // (unparsable text stays in the editor until fixed), entering the editor
@@ -216,16 +232,25 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
       await apply.mutateAsync({ ...sel, yamlBody: text });
       setDraft(undefined);
     } catch (err) {
-      // 409 → refresh, and rebase the draft so Reset and the dirty check
-      // measure against the server's current state.
+      // 409 → refresh, then replay the edits onto the server's current state
+      // (picking up its resourceVersion) so the next apply can succeed.
       if ((err as { status?: number }).status === 409) {
-        const latest = (await refetch())?.data;
+        const latest = (await (isSecret ? refetchRevealed() : refetch()))?.data;
         const current = useDetailStore.getState().draft;
+        let outcome = 'the resource changed on the server; the editor has been refreshed, re-apply your edits.';
         if (latest && current?.selKey === selKey) {
           const base = withoutManagedFields(latest);
-          setDraft({ ...current, base, baseText: dumpManifest(base), obj: base });
+          const baseText = dumpManifest(base);
+          const parsed = current.mode === 'yaml' ? parseYamlMapping(current.text) : undefined;
+          if (parsed?.ok) {
+            const { value, skipped } = rebaseEdits(current.base, parsed.value, base);
+            setDraft({ ...current, base, baseText, obj: value, text: dumpManifest(value) });
+            outcome = `the resource changed on the server; your edits were replayed onto the latest version${skipped.length ? ` (${skipped.length} to list items that no longer exist were dropped)` : ''} — dry-run and apply again.`;
+          } else {
+            setDraft({ ...current, base, baseText, obj: base, text: current.mode === 'yaml' ? current.text : baseText });
+          }
         }
-        throw new Error(`${(err as Error).message} — the resource changed on the server; the view has been refreshed, re-apply your edits.`);
+        throw new Error(`${(err as Error).message} — ${outcome}`);
       }
       throw err;
     }
@@ -363,13 +388,13 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             </Alert>
           )}
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {tab === 'manifest' && obj && view === 'tree' && (
+            {tab === 'manifest' && manifestObj && view === 'tree' && (
               <ManifestView
                 sel={sel}
-                live={obj}
+                live={manifestObj}
                 draft={draft?.mode === 'tree' ? draft : undefined}
                 readOnly={objGone}
-                secretRedacted={isSecret && !reveal}
+                secretRedacted={secretMasked}
                 toolbarStart={viewToggle}
                 toolbar={revealToggle}
                 onDraftChange={(next, base) =>
@@ -416,18 +441,24 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
               <YamlEditor
                 value={yamlValue}
                 draft={yamlDraftText}
+                readOnly={secretMasked}
                 onChange={(text) => {
-                  if (!liveBase) return;
+                  if (!liveBase || secretMasked) return;
                   setDraft({ selKey, base: draft?.base ?? liveBase, baseText: draft?.baseText ?? yamlText, obj: draft?.obj ?? liveBase, text, mode: 'yaml' });
                 }}
                 applyLabel="Replace"
-                onApply={handleApply}
-                onDryRun={sel ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
+                onApply={secretMasked ? undefined : handleApply}
+                onDryRun={sel && !secretMasked ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
                 schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
                 toolbar={
                   <>
                     {viewToggle}
                     {revealToggle}
+                    {secretMasked && (
+                      <Typography variant="caption" color="text.secondary">
+                        Read-only until revealed
+                      </Typography>
+                    )}
                   </>
                 }
               />
@@ -457,6 +488,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
 
 export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
   return <ResourceDetailDrawer {...props} inline />;
+}
+
+/** Every Secret value replaced by the redaction placeholder, for display while not revealed. */
+function maskAll(obj: KubeObject): KubeObject {
+  return maskSecretValues(obj, () => false);
 }
 
 /** Tree / YAML switch at the start of the Manifest toolbar. */

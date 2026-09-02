@@ -220,8 +220,16 @@ describe('ManifestView', () => {
   }, 15_000);
 
   it('links references the cluster serves and opens them in the drawer', () => {
-    renderView(deployment());
+    queries.apiResources = [
+      { group: '', version: 'v1', kind: 'Node', plural: 'nodes', namespaced: false, verbs: ['get'] },
+      { group: 'demo.kubus.io', version: 'v1alpha1', kind: 'Widget', plural: 'widgets', namespaced: true, verbs: ['get'], custom: true },
+      { group: 'demo.kubus.io', version: 'v1', kind: 'Widget', plural: 'widgets', namespaced: true, verbs: ['get'], custom: true },
+    ];
+    renderView(deployment({ spec: { ...(deployment().spec as object), widgetRef: { apiVersion: 'demo.kubus.io/v1', kind: 'Widget', name: 'w' } } }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    // A declared apiVersion picks that served version, not the first discovered one.
+    fireEvent.click(screen.getByRole('button', { name: 'Open Widget' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'Widget', name: 'w', group: 'demo.kubus.io', version: 'v1', plural: 'widgets', custom: true });
     fireEvent.click(within(row('nodeName')).getByRole('button', { name: 'node-1' }));
     expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'Node', name: 'node-1', plural: 'nodes', namespace: undefined });
     // Secrets are builtin kinds, resolved without discovery; namespaced refs inherit the object's namespace.
@@ -288,6 +296,31 @@ describe('ManifestView', () => {
     fireEvent.keyDown(first, { key: 'Enter' });
     expect(screen.getByRole('textbox', { name: 'Value' })).toBeInTheDocument();
   }, 15_000);
+
+  it('masks unrevealed Secret values in the tree, the filter and the diff, but applies the real ones', () => {
+    const secret = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: { name: 'creds', namespace: 'team-a', uid: 'uid-creds', resourceVersion: '1' },
+      type: 'Opaque',
+      data: { password: 'cGFzc3dvcmQ=' },
+    } as KubeObject;
+    const edited = { ...secret, metadata: { ...secret.metadata, annotations: { team: 'a' } } } as KubeObject;
+    renderView(secret, { draft: draftFor(secret, edited), secretRedacted: true });
+    expect(screen.queryByText('cGFzc3dvcmQ=')).not.toBeInTheDocument();
+    expect(within(row('password')).getByText('••••••••')).toBeInTheDocument();
+    expect(within(row('password')).getByLabelText(/Reveal the Secret/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter manifest' }), { target: { value: 'cGFzc3' } });
+    expect(screen.getByText('No fields match the filter.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('diff-right')).not.toHaveTextContent('cGFzc3dvcmQ=');
+    expect(within(dialog).getByTestId('diff-right')).toHaveTextContent('••••••••');
+    expect(within(dialog).getByText(/Unrevealed Secret values are shown as/)).toBeInTheDocument();
+    expect(queries.dryRunMutate).toHaveBeenCalledWith(expect.objectContaining({ yamlBody: expect.stringContaining('cGFzc3dvcmQ=') }));
+  });
 
   it('locks everything when read-only or when secret data is redacted', () => {
     renderView(deployment(), { readOnly: true });

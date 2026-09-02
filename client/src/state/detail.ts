@@ -128,9 +128,16 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     if (get().dirty) set({ pendingDiscard: action });
     else action();
   },
+  // Discarding answers the guard that was raised: for the Data tab's edits a
+  // manifest draft the dialog never mentioned survives, for a manifest/YAML
+  // draft the draft itself is dropped.
   confirmDiscard: () => {
     const action = get().pendingDiscard;
-    set({ dirty: false, draft: undefined, pendingDiscard: undefined });
+    set((s) =>
+      s.dirty === 'data'
+        ? { dirty: s.draft ? draftDirty(s.draft) : false, pendingDiscard: undefined }
+        : { dirty: false, draft: undefined, pendingDiscard: undefined },
+    );
     action?.();
   },
   cancelDiscard: () => set({ pendingDiscard: undefined }),

@@ -1,4 +1,4 @@
-import { dump as dumpYaml, load as loadYaml } from 'js-yaml';
+import { CORE_SCHEMA, dump as dumpYaml, load as loadYaml, mergeTag } from 'js-yaml';
 import type { JsonSchema, SchemaDefinitions } from './schema-walk.js';
 import { mergedProperties, mergedRequired, resolveSchema } from './schema-walk.js';
 
@@ -13,6 +13,13 @@ export type JsonPath = ReadonlyArray<PathSegment>;
 
 export const YAML_DUMP_OPTIONS = { noRefs: true, lineWidth: 140 } as const;
 
+/**
+ * Same schema as the server: YAML 1.2 core plus merge keys, so unquoted
+ * timestamps stay strings instead of turning into Date objects the tree
+ * would mistake for containers.
+ */
+const LOAD_SCHEMA = CORE_SCHEMA.withTags(mergeTag);
+
 export function dumpManifest(obj: unknown): string {
   return dumpYaml(obj, YAML_DUMP_OPTIONS);
 }
@@ -20,7 +27,7 @@ export function dumpManifest(obj: unknown): string {
 /** Parse YAML that must describe a single mapping (a manifest or a subtree). */
 export function parseYamlMapping(text: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   try {
-    const parsed = loadYaml(text);
+    const parsed = loadYaml(text, { schema: LOAD_SCHEMA });
     if (!isPlainObject(parsed)) return { ok: false, error: 'The document must be a YAML mapping.' };
     return { ok: true, value: parsed };
   } catch (err) {
@@ -31,7 +38,7 @@ export function parseYamlMapping(text: string): { ok: true; value: Record<string
 /** Parse YAML for any value (used when editing a subtree as text). */
 export function parseYamlValue(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
   try {
-    return { ok: true, value: loadYaml(text) };
+    return { ok: true, value: loadYaml(text, { schema: LOAD_SCHEMA }) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -202,18 +209,56 @@ function walkDiff(base: unknown, draft: unknown, path: PathSegment[], out: Map<s
   out.set(pointerOf(path), { kind: 'changed', path });
 }
 
+export interface RebaseResult<T> {
+  value: T;
+  /** Edits whose keyed list item no longer exists in the latest object. */
+  skipped: Change[];
+}
+
 /**
  * Replay a draft's edits onto a newer snapshot of the object (after a 409):
  * every changed or added row is set to the draft's value, every removed row
  * is deleted. Rows the server changed underneath are overwritten by the
- * draft, which the review diff then shows.
+ * draft, which the review diff then shows. List items are followed by their
+ * natural key (a container by name), so a list the server reordered or
+ * grew still receives the edit on the right item; an edit to an item that
+ * vanished is reported rather than applied to whatever took its slot.
  */
-export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): T {
+export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): RebaseResult<T> {
   let next = latest;
+  const skipped: Change[] = [];
   for (const change of diffChanges(base, draft).rows.values()) {
-    next = change.kind === 'removed' ? deleteAt(next, change.path) : setAt(next, change.path, getAt(draft, change.path));
+    const path = resolveByIdentity(base, next, change.path);
+    if (!path) {
+      skipped.push(change);
+      continue;
+    }
+    next = change.kind === 'removed' ? deleteAt(next, path) : setAt(next, path, getAt(draft, change.path));
   }
-  return next;
+  return { value: next, skipped };
+}
+
+/** Translate a base path into the latest object; keyed list items are found by label, positional ones by index. */
+function resolveByIdentity(base: unknown, latest: unknown, path: PathSegment[]): PathSegment[] | undefined {
+  const out: PathSegment[] = [];
+  for (let i = 0; i < path.length; i += 1) {
+    const segment = path[i]!;
+    if (typeof segment === 'number') {
+      const baseList = getAt(base, path.slice(0, i));
+      const latestList = getAt(latest, out);
+      if (Array.isArray(baseList) && Array.isArray(latestList) && segment < baseList.length) {
+        const label = itemLabel(baseList[segment], segment);
+        if (label !== String(segment)) {
+          const found = latestList.findIndex((item, index) => itemLabel(item, index) === label);
+          if (found === -1) return undefined;
+          out.push(found);
+          continue;
+        }
+      }
+    }
+    out.push(segment);
+  }
+  return out;
 }
 
 // ---- Labels and summaries ----

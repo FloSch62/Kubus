@@ -98,10 +98,32 @@ describe('change tracking', () => {
     const draft = setAt(setAt(deployment, ['spec', 'replicas'], 5), ['metadata', 'annotations', 'note'], 'x');
     const latest = setAt(setAt(deployment, ['metadata', 'resourceVersion'], '2'), ['spec', 'paused'], true);
     const rebased = rebaseEdits(deployment, draft, latest);
-    expect(rebased.spec).toMatchObject({ replicas: 5, paused: true });
-    expect(rebased.metadata).toMatchObject({ resourceVersion: '2', annotations: { note: 'x' } });
+    expect(rebased.skipped).toEqual([]);
+    expect(rebased.value.spec).toMatchObject({ replicas: 5, paused: true });
+    expect(rebased.value.metadata).toMatchObject({ resourceVersion: '2', annotations: { note: 'x' } });
     const dropped = rebaseEdits(deployment, deleteAt(deployment, ['metadata', 'labels']), latest);
-    expect(dropped.metadata).not.toHaveProperty('labels');
+    expect(dropped.value.metadata).not.toHaveProperty('labels');
+  });
+
+  it('follows list items by their natural key when replaying, and reports vanished ones', () => {
+    const containersPath = ['spec', 'template', 'spec', 'containers'];
+    const draft = setAt(deployment, [...containersPath, 1, 'image'], 'busybox:2');
+    // The server prepended a container and dropped nothing: the edit must land on "sidecar", now at index 2.
+    const grown = insertAt(deployment, containersPath, 0, { name: 'init-proxy', image: 'proxy' });
+    const rebased = rebaseEdits(deployment, draft, grown);
+    expect(rebased.skipped).toEqual([]);
+    expect(rebased.value.spec.template.spec.containers.map((c) => `${c.name}=${c.image}`)).toEqual(['init-proxy=proxy', 'nginx=nginx:1.27', 'sidecar=busybox:2']);
+
+    // The edited container is gone: the edit is reported, not applied to whatever took its slot.
+    const shrunk = deleteAt(deployment, [...containersPath, 1]);
+    const vanished = rebaseEdits(deployment, draft, shrunk);
+    expect(vanished.value.spec.template.spec.containers).toEqual([{ name: 'nginx', image: 'nginx:1.27' }]);
+    expect(vanished.skipped.map((c) => c.path)).toEqual([[...containersPath, 1, 'image']]);
+
+    // Positional lists (no natural key) stay positional.
+    const args = { spec: { args: ['a', 'b', 'c'] } };
+    const edited = setAt(args, ['spec', 'args', 1], 'B');
+    expect(rebaseEdits(args, edited, { spec: { args: ['x', 'y', 'z'] } }).value.spec.args).toEqual(['x', 'B', 'z']);
   });
 });
 
@@ -237,6 +259,9 @@ describe('schema-typed editing', () => {
     expect(parseScalarInput('a: [', 'yaml')).toMatchObject({ ok: false });
     expect(parseScalarInput('plain', 'string')).toEqual({ ok: true, value: 'plain' });
     expect(parseYamlMapping('kind: X')).toEqual({ ok: true, value: { kind: 'X' } });
+    // Kubernetes timestamps stay strings (server-compatible schema), merge keys still work.
+    expect(parseYamlMapping('t: 2026-07-22T07:18:28Z')).toEqual({ ok: true, value: { t: '2026-07-22T07:18:28Z' } });
+    expect(parseYamlMapping('base: &b\n  a: 1\nx:\n  <<: *b\n  c: 2')).toEqual({ ok: true, value: { base: { a: 1 }, x: { a: 1, c: 2 } } });
     expect(parseYamlMapping('- a')).toMatchObject({ ok: false, error: /mapping/ });
     expect(parseYamlMapping(':: [')).toMatchObject({ ok: false });
   });

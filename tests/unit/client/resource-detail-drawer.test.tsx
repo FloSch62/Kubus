@@ -55,6 +55,7 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
   YamlEditor: ({
     value,
     draft,
+    readOnly,
     applyLabel,
     onApply,
     onDryRun,
@@ -63,6 +64,7 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
   }: {
     value: string;
     draft?: string;
+    readOnly?: boolean;
     applyLabel?: string;
     onApply?: (value: string) => Promise<unknown>;
     onDryRun?: (value: string) => Promise<unknown>;
@@ -71,6 +73,7 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
   }) => (
     <div data-testid="yaml-editor">
       {toolbar}
+      <span>{readOnly ? 'read-only editor' : 'editable editor'}</span>
       <textarea aria-label="YAML input" value={value} readOnly />
       <textarea aria-label="YAML draft" value={draft ?? ''} readOnly />
       <span>{applyLabel}</span>
@@ -116,10 +119,11 @@ vi.mock('../../../client/src/components/detail/ManifestView.js', () => ({
 }));
 
 vi.mock('../../../client/src/components/ConfirmDialog.js', () => ({
-  ConfirmDialog: ({ open, title, onConfirm, onClose }: { open: boolean; title: string; onConfirm: () => void; onClose: () => void }) =>
+  ConfirmDialog: ({ open, title, message, onConfirm, onClose }: { open: boolean; title: string; message: string; onConfirm: () => void; onClose: () => void }) =>
     open ? (
       <dialog open aria-label={title}>
         {title}
+        <p>{message}</p>
         <button onClick={onConfirm}>Confirm discard mock</button>
         <button onClick={onClose}>Cancel discard mock</button>
       </dialog>
@@ -277,7 +281,7 @@ describe('ResourceDetailDrawer', () => {
 
     queries.applyMode = 'conflict';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('view has been refreshed') })));
+    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('has been refreshed') })));
     expect(queries.refetch).toHaveBeenCalled();
     queries.applyMode = 'error';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
@@ -368,13 +372,18 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.queryByText(/The YAML does not parse/)).not.toBeInTheDocument();
     expect(screen.getByText('Manifest draft {"hostname":"edited"}')).toBeInTheDocument();
 
-    // Applying the YAML text (a 409 first) rebases the draft on the refreshed object.
+    // Applying the YAML text (a 409 first) replays the edits onto the refreshed object, keeping them.
     fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
-    queries.refetch.mockResolvedValue({ data: objectFor(sel, { spec: { hostname: 'server' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } }) });
+    queries.refetch.mockResolvedValue({ data: objectFor(sel, { spec: { hostname: 'server', nodeName: 'n1' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } }) });
     queries.applyMode = 'conflict';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('view has been refreshed') })));
+    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('replayed onto the latest version') })));
     await waitFor(() => expect(useDetailStore.getState().draft?.base.metadata.resourceVersion).toBe('2'));
+    const rebased = useDetailStore.getState().draft!;
+    expect(rebased.text).toContain('hostname: edited');
+    expect(rebased.text).toContain('nodeName: n1');
+    expect(rebased.text).toContain("resourceVersion: '2'");
+    expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('hostname: edited');
     queries.applyMode = 'success';
     fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
     await waitFor(() => expect(useDetailStore.getState().draft).toBeUndefined());
@@ -419,6 +428,22 @@ describe('ResourceDetailDrawer', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('keeps a manifest draft when only the Data edits are discarded', () => {
+    const sel = selection('ConfigMap');
+    queries.current = objectFor(sel, { data: { key: 'value' } });
+    render(<ResourceDetailDrawer sel={sel} onClose={vi.fn()} inline />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stage manifest edit' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Data' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Make data dirty' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
+    expect(screen.getByRole('dialog', { name: 'Discard changes?' })).toHaveTextContent('The Data tab has key edits');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm discard mock' }));
+    expect(screen.getByText('Manifest draft {"replicas":3}')).toBeInTheDocument();
+    expect(useDetailStore.getState().dirty).toBe('manifest');
+  });
+
   it('reveals Secret YAML and resets the per-selection view state', () => {
     const secretSel = selection('Secret');
     queries.current = objectFor(secretSel, { data: { password: btoa('secret') } });
@@ -429,8 +454,15 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByLabelText('Full screen'));
     expect(screen.getByLabelText('Restore drawer')).toBeInTheDocument();
     showYaml();
-    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    // The manifest is built from the revealed object, but stays masked and read-only until revealed.
     expect(queries.resourceCalls.some(({ selection: call }) => call?.reveal === true)).toBe(true);
+    expect(screen.getByText('read-only editor')).toBeInTheDocument();
+    expect(screen.getByText('Read-only until revealed')).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('••••••••');
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).not.toContain(btoa('secret'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Reveal secret data' }));
+    expect(screen.getByText('editable editor')).toBeInTheDocument();
+    expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain(btoa('secret'));
 
     const next = selection('Secret', { name: 'other-secret' });
     queries.current = objectFor(next, { data: {} });

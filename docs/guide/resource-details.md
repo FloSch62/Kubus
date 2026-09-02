@@ -104,7 +104,9 @@ Editing works in place:
 
 Some rows are locked with a padlock: the status block belongs to the controller, identity
 fields (name, namespace, UID, resource version) belong to the API server, and a Secret's
-data stays locked until you reveal it.
+data stays masked and locked until you reveal it. The YAML view of an unrevealed Secret is
+read-only for the same reason, and the review diff masks the values while the apply uses
+the real ones.
 
 Tree and YAML share one draft. Edit a value in the tree, switch to YAML and the text
 already contains it; edit the text, switch back and the tree shows the change. If the
