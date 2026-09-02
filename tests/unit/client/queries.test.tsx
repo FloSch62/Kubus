@@ -23,6 +23,7 @@ const harness = vi.hoisted(() => {
     cache,
     queryClient,
     broadcastHandlers: new Set<(message: unknown) => void>(),
+    openHandlers: new Set<(reconnect: boolean) => void>(),
     subscriptions: [] as Array<{
       params: unknown;
       handlers: {
@@ -51,6 +52,10 @@ vi.mock('../../../client/src/api/ws/watch-client.js', () => ({
     onBroadcast: (handler: (message: unknown) => void) => {
       harness.broadcastHandlers.add(handler);
       return () => harness.broadcastHandlers.delete(handler);
+    },
+    onOpen: (handler: (reconnect: boolean) => void) => {
+      harness.openHandlers.add(handler);
+      return () => harness.openHandlers.delete(handler);
     },
     subscribe: (
       params: unknown,
@@ -119,6 +124,7 @@ beforeEach(() => {
   harness.queryResults.clear();
   harness.cache.clear();
   harness.broadcastHandlers.clear();
+  harness.openHandlers.clear();
   harness.subscriptions.length = 0;
   harness.paneActive = true;
   harness.queryClient.invalidateQueries.mockClear();
@@ -187,7 +193,9 @@ describe('query hook contracts', () => {
       helmRelease: queries.useHelmRelease('dev/x', 'team a', 'release/a'),
       helmHistory: queries.useHelmHistory('dev/x', 'team a', 'release/a'),
       helmOperations: queries.useHelmOperations(),
-      helmEvents: queries.useHelmOperationEvents(),
+      helmEvents: queries.useHelmLiveEvents(),
+      helmWatch: queries.useHelmWatchStatus(),
+      helmResources: queries.useHelmReleaseResources('dev/x', 'team a', 'release/a', { active: true }),
       helmRevision: queries.useHelmRevision('dev/x', 'team a', 'release/a', 2),
       appInfo: queries.useAppInfo(),
       helmRepos: queries.useHelmRepos(),
@@ -374,7 +382,7 @@ describe('query hook contracts', () => {
     harness.cache.set(JSON.stringify(['helm-operations']), [running]);
     const { unmount } = renderHook(() => {
       queries.useContextsInvalidation();
-      queries.useHelmOperationEvents();
+      queries.useHelmLiveEvents();
       queries.usePortForwards();
     });
 
@@ -398,7 +406,65 @@ describe('query hook contracts', () => {
     expect(harness.cache.get(JSON.stringify(['portforwards']))).toEqual([{ id: 'pf-1' }]);
     expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['contexts'] });
     expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['api-resources', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
     unmount();
+  });
+
+  it('refreshes release queries from record-change, watch-status and reconnect broadcasts', () => {
+    const running = {
+      id: 'op-2',
+      ctx: 'dev',
+      namespace: 'team-a',
+      releaseName: 'demo',
+      kind: 'install',
+      status: 'running',
+      phase: 'applying',
+      revision: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const { unmount } = renderHook(() => queries.useHelmLiveEvents());
+
+    // A watch turning live has no memory of what changed before: resync that cluster once.
+    emitBroadcast({ op: 'helm-watch-status', ctx: 'dev', status: { state: 'live' } });
+    expect(harness.cache.get(JSON.stringify(['helm-watch-status']))).toEqual({ dev: { state: 'live' } });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-resources', 'dev'] });
+    harness.queryClient.invalidateQueries.mockClear();
+    emitBroadcast({ op: 'helm-watch-status', ctx: 'dev', status: { state: 'live', message: 'configmaps records cannot be watched' } });
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
+
+    emitBroadcast({ op: 'helm-records-changed', ctx: 'dev', changes: [{ namespace: 'team-a', name: 'demo', revision: 2, status: 'deployed', type: 'MODIFIED' }] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-release', 'dev', 'team-a', 'demo'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-history', 'dev', 'team-a', 'demo'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-resources', 'dev', 'team-a', 'demo'] });
+
+    // With the record watch live, an operation ending only toasts: the record
+    // write behind it already refreshed the release queries.
+    harness.queryClient.invalidateQueries.mockClear();
+    harness.cache.set(JSON.stringify(['helm-operations']), [running]);
+    emitBroadcast({ op: 'helm-operation', operation: { ...running, status: 'succeeded', phase: 'completed', revision: 1 } });
+    expect(harness.showToast).toHaveBeenCalledWith('success', expect.stringContaining('install completed'));
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalled();
+
+    // A rebuilt context session drops that cluster's caches.
+    emitBroadcast({ op: 'context-reset', ctx: 'dev' });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-watch-status'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-releases', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-release', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['helm-history', 'dev'] });
+    expect(harness.queryClient.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['helm-releases', 'prod'] });
+
+    // Every socket open resyncs (the first can trail the initial fetches), keeping in-flight fetches.
+    harness.queryClient.invalidateQueries.mockClear();
+    for (const handler of harness.openHandlers) handler(false);
+    for (const root of ['helm-watch-status', 'helm-operations', 'helm-releases', 'helm-release', 'helm-history', 'helm-resources']) {
+      expect(harness.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: [root] }, { cancelRefetch: false });
+    }
+
+    unmount();
+    expect(harness.openHandlers.size).toBe(0);
+    expect(harness.broadcastHandlers.size).toBe(0);
   });
 });
 

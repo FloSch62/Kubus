@@ -15,8 +15,14 @@ export interface ContextWatchIssue {
 export type ContextWatchIssues = ReadonlyMap<string, ContextWatchIssue>;
 
 export type BroadcastHandler = (
-  msg: Extract<WatchServerMessage, { op: 'drain-progress' | 'helm-operation' | 'pf-update' | 'contexts-changed' | 'discovery-update' }>,
+  msg: Extract<
+    WatchServerMessage,
+    { op: 'drain-progress' | 'helm-operation' | 'helm-records-changed' | 'helm-watch-status' | 'pf-update' | 'contexts-changed' | 'discovery-update' | 'context-reset' }
+  >,
 ) => void;
+
+/** Called on every socket open; `reconnect` is false for the first connection of the page's life. */
+export type OpenHandler = (reconnect: boolean) => void;
 
 type SubParams = Omit<WatchSubMessage, 'op' | 'id'>;
 
@@ -56,6 +62,8 @@ class WatchClient {
   private subs = new Map<string, WireSub>(); // by wire id
   private byKey = new Map<string, WireSub>();
   private broadcastHandlers = new Set<BroadcastHandler>();
+  private openHandlers = new Set<OpenHandler>();
+  private everConnected = false;
   private contextStatusHandlers = new Set<(issues: ContextWatchIssues) => void>();
   private counter = 0;
   private reconnectDelay = 1000;
@@ -130,6 +138,16 @@ class WatchClient {
     return () => this.broadcastHandlers.delete(handler);
   }
 
+  /**
+   * Broadcasts have no replay: whatever the server sent while the socket was
+   * down is gone. Consumers that derive cache freshness from broadcasts
+   * resync their HTTP queries here.
+   */
+  onOpen(handler: OpenHandler): () => void {
+    this.openHandlers.add(handler);
+    return () => this.openHandlers.delete(handler);
+  }
+
   private sendSub(sub: WireSub): void {
     this.ws?.send(JSON.stringify({ op: 'sub', id: sub.id, ...sub.params }));
   }
@@ -147,6 +165,9 @@ class WatchClient {
       this.connecting = false;
       this.reconnectDelay = 1000;
       for (const sub of this.subs.values()) this.sendSub(sub);
+      const reconnect = this.everConnected;
+      this.everConnected = true;
+      for (const handler of this.openHandlers) handler(reconnect);
     };
 
     ws.onmessage = (ev) => {
@@ -182,6 +203,8 @@ class WatchClient {
         }
         case 'drain-progress':
         case 'helm-operation':
+        case 'helm-records-changed':
+        case 'helm-watch-status':
         case 'pf-update':
         case 'contexts-changed':
         case 'discovery-update': {
@@ -192,7 +215,8 @@ class WatchClient {
           // The server-side session for this context was torn down or rebuilt:
           // resubscribe so lists attach to the new session instead of silently
           // going stale on the disposed one. The cache is kept so rows stay
-          // visible until the fresh snapshot replaces them.
+          // visible until the fresh snapshot replaces them. Broadcast consumers
+          // that cache HTTP data per context (Helm) resync on it too.
           for (const sub of this.subs.values()) {
             if (sub.params.ctx !== msg.ctx) continue;
             sub.pending = [];
@@ -201,6 +225,7 @@ class WatchClient {
               this.sendSub(sub);
             }
           }
+          for (const handler of this.broadcastHandlers) handler(msg);
           break;
         }
       }

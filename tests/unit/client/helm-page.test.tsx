@@ -14,11 +14,15 @@ interface ReleaseRow {
 const fixtures = vi.hoisted(() => ({
   releases: [] as ReleaseRow[],
   operations: [] as HelmOperation[],
+  errors: {} as Record<string, Error>,
+  updates: [] as Array<{ id: string; chart: string; currentVersion: string; available: boolean; latestVersion?: string; reason?: string }>,
+  watchStatus: {} as Record<string, { state: string; message?: string }>,
   uninstall: {
     isPending: false,
     mutate: vi.fn(),
   },
   refetchUpdates: vi.fn(),
+  refetchReleases: vi.fn(),
 }));
 
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
@@ -26,9 +30,12 @@ const effects = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock('../../../client/src/api/queries.js', () => ({
   useAppInfo: () => ({ data: { helmEngine: true } }),
   useHelmOperations: () => ({ data: fixtures.operations, error: null, isLoading: false, isFetching: false, refetch: vi.fn() }),
-  useHelmReleases: () => ({ data: fixtures.releases, isLoading: false }),
+  useHelmReleases: () => ({ rows: fixtures.releases, errors: fixtures.errors, isLoading: false, isFetching: false, dataUpdatedAt: 0, refetch: fixtures.refetchReleases }),
   useHelmUninstall: () => fixtures.uninstall,
-  useHelmUpdates: () => ({ data: [], isFetching: false, refetch: fixtures.refetchUpdates }),
+  useHelmUpdates: () => ({ data: fixtures.updates, isFetching: false, refetch: fixtures.refetchUpdates }),
+  useHelmWatchStatus: () => ({ data: fixtures.watchStatus }),
+  helmWatchLive: (status: Record<string, { state: string }> | undefined, contexts: string[]) =>
+    contexts.length > 0 && contexts.every((ctx) => status?.[ctx]?.state === 'live'),
 }));
 
 vi.mock('../../../client/src/components/CellCopy.js', () => ({
@@ -75,7 +82,12 @@ function operation(status: HelmOperation['status']): HelmOperation {
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{location.pathname}</output>;
+  return (
+    <output data-testid="location">
+      {location.pathname}
+      {location.search}
+    </output>
+  );
 }
 
 function renderPage() {
@@ -103,6 +115,10 @@ function releaseRow() {
 beforeEach(() => {
   fixtures.releases = [release()];
   fixtures.operations = [];
+  fixtures.errors = {};
+  fixtures.updates = [];
+  fixtures.watchStatus = { dev: { state: 'live' } };
+  fixtures.refetchReleases.mockReset();
   fixtures.uninstall.isPending = false;
   fixtures.uninstall.mutate.mockReset();
   fixtures.uninstall.mutate.mockImplementation((_variables, options) =>
@@ -181,5 +197,56 @@ describe('HelmPage release context menu', () => {
     fireEvent.keyDown(cell, { key: 'F10', shiftKey: true });
 
     expect(screen.getByRole('menuitem', { name: 'Open release' })).toBeInTheDocument();
+  });
+
+  it('hands an upgrade request to the release page', () => {
+    renderPage();
+
+    fireEvent.contextMenu(releaseRow(), { clientX: 24, clientY: 36 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Upgrade…' }));
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/helm/dev/team-a/web?action=upgrade');
+  });
+});
+
+describe('HelmPage live list', () => {
+  it('shows the live signal per cluster, surfaces cluster errors and filters releases', async () => {
+    const failed = release('db');
+    failed.release.status = 'failed';
+    fixtures.releases = [release(), failed];
+    fixtures.errors = { prod: new Error('connection refused') };
+    fixtures.watchStatus = { dev: { state: 'live' }, prod: { state: 'unavailable', message: 'secrets is forbidden' } };
+    useClustersStore.setState({ selected: ['dev', 'prod'], namespaces: [], contextSettings: {} });
+    renderPage();
+
+    expect(screen.getByLabelText('Helm updates: Live 1/2')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Releases could not be loaded from prod: connection refused');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(fixtures.refetchReleases).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh releases' }));
+    expect(fixtures.refetchReleases).toHaveBeenCalledTimes(2);
+
+    expect(screen.getByRole('button', { name: /Needs attention · 1/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention/ }));
+    expect(screen.queryByText('web')).not.toBeInTheDocument();
+    expect(screen.getByText('db')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^All/ }));
+    expect(screen.getByText('web')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/Filter releases/), { target: { value: 'WEB' } });
+    await waitFor(() => expect(screen.queryByText('db')).not.toBeInTheDocument());
+    expect(screen.getByText('web')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Filter releases/), { target: { value: 'nothing-here' } });
+    await waitFor(() => expect(screen.getByText('No matches, 2 releases hidden by the current filters')).toBeInTheDocument());
+  });
+
+  it('offers an install when the selected clusters have no releases', () => {
+    fixtures.releases = [];
+    renderPage();
+
+    expect(screen.getByText('No Helm releases in the selected clusters')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install a chart' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Helm updates: Live')).toBeInTheDocument();
   });
 });

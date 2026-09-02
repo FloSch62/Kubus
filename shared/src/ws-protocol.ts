@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { HelmOperation, KubeObject, PortForwardInfo } from './api-types.js';
+import type { HelmOperation, HelmReleaseChange, HelmWatchStatus, KubeObject, PortForwardInfo } from './api-types.js';
 export { EXEC_SESSION_CLOSE_REASON } from './api-types.js';
 
 /** Messages the client sends on /ws/watch. */
@@ -34,6 +34,9 @@ export type WatchServerMessage =
   | { op: 'status'; id: string; state: WatchStatusState; message?: string }
   | { op: 'drain-progress'; drainId: string; evicted: number; total: number; current?: string; done?: boolean; error?: string }
   | { op: 'helm-operation'; operation: HelmOperation }
+  /** Release records changed on a cluster (any writer: Kubus, the helm CLI, a GitOps controller). */
+  | { op: 'helm-records-changed'; ctx: string; changes: HelmReleaseChange[] }
+  | { op: 'helm-watch-status'; ctx: string; status: HelmWatchStatus }
   | { op: 'pf-update'; forwards: PortForwardInfo[] }
   | { op: 'contexts-changed' }
   | { op: 'discovery-update'; ctx: string }
