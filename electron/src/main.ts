@@ -13,6 +13,7 @@ import {
   screen,
   shell,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron';
 import fixPath from 'fix-path';
 import { startServer, type RunningServer } from '@kubus/server';
@@ -199,11 +200,56 @@ function saveClientState(state: Record<string, string>): void {
   clientStateCache = state;
 }
 
+type EditRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'pasteAndMatchStyle' | 'delete' | 'selectAll';
+
+/**
+ * An Edit item that keeps its native role but falls back to the key window's
+ * web contents. Electron only runs a role's web-contents method on the web
+ * contents it reports as focused, and on macOS that lookup can come back
+ * empty while the page still shows a selection (the renderer view is not the
+ * window's first responder). The stock editMenu role then dropped Cmd+C
+ * silently — and macOS has no other copy path, unlike Linux/Windows where the
+ * renderer handles Ctrl+C itself and never goes through the menu.
+ */
+function editItem(role: EditRole, method: (wc: WebContents) => void): MenuItemConstructorOptions {
+  return {
+    role,
+    click: () => {
+      const win = BrowserWindow.getFocusedWindow() ?? primaryWindow;
+      if (win && !win.isDestroyed()) method(win.webContents);
+    },
+  };
+}
+
+function buildEditMenu(): MenuItemConstructorOptions {
+  const platformItems: MenuItemConstructorOptions[] = isMac
+    ? [
+        editItem('pasteAndMatchStyle', (wc) => wc.pasteAndMatchStyle()),
+        editItem('delete', (wc) => wc.delete()),
+        editItem('selectAll', (wc) => wc.selectAll()),
+        { type: 'separator' },
+        { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] },
+      ]
+    : [editItem('delete', (wc) => wc.delete()), { type: 'separator' }, editItem('selectAll', (wc) => wc.selectAll())];
+  return {
+    label: 'Edit',
+    submenu: [
+      editItem('undo', (wc) => wc.undo()),
+      editItem('redo', (wc) => wc.redo()),
+      { type: 'separator' },
+      editItem('cut', (wc) => wc.cut()),
+      editItem('copy', (wc) => wc.copy()),
+      editItem('paste', (wc) => wc.paste()),
+      ...platformItems,
+    ],
+  };
+}
+
 function buildMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: 'appMenu' as const }] : []),
     { role: 'fileMenu' },
-    { role: 'editMenu' },
+    buildEditMenu(),
     { role: 'viewMenu' },
     { role: 'windowMenu' },
   ];
