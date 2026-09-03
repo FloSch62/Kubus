@@ -14,6 +14,14 @@ const electron = vi.hoisted(() => {
     readonly id = ++state.nextWebContentsId;
     readonly handlers = new Map<string, Handler>();
     readonly send = vi.fn();
+    readonly undo = vi.fn();
+    readonly redo = vi.fn();
+    readonly cut = vi.fn();
+    readonly copy = vi.fn();
+    readonly paste = vi.fn();
+    readonly pasteAndMatchStyle = vi.fn();
+    readonly delete = vi.fn();
+    readonly selectAll = vi.fn();
     readonly on = vi.fn((name: string, handler: Handler) => {
       this.handlers.set(name, handler);
       return this;
@@ -26,6 +34,7 @@ const electron = vi.hoisted(() => {
 
   class MockBrowserWindow {
     static readonly instances: MockBrowserWindow[] = [];
+    static readonly getFocusedWindow = vi.fn((): MockBrowserWindow | undefined => undefined);
 
     readonly handlers = new Map<string, Handler>();
     readonly webContents = new MockWebContents();
@@ -131,8 +140,34 @@ vi.mock('electron', () => ({
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
 vi.mock('@kubus/server', () => ({ appendAppLog: electron.appendAppLog, startServer: electron.startServer }));
 
+type EditRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'pasteAndMatchStyle' | 'delete' | 'selectAll';
+interface MenuTemplateItem {
+  label?: string;
+  role?: string;
+  type?: string;
+  click?: () => void;
+  submenu?: MenuTemplateItem[];
+}
+
 let userDataPath: string;
 let previousHelmEngine: string | undefined;
+
+function editMenuItems(): MenuTemplateItem[] {
+  const template = (electron.menu.buildFromTemplate.mock.calls[0] as unknown[] | undefined)?.[0] as MenuTemplateItem[] | undefined;
+  const edit = template?.find((item) => item.label === 'Edit');
+  expect(edit?.submenu, 'Edit menu should be built').toBeDefined();
+  return edit!.submenu!;
+}
+
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+}
 
 function registered(map: Map<string, Handler>, name: string): Handler {
   const callback = map.get(name);
@@ -160,6 +195,7 @@ beforeEach(() => {
   electron.ipcListeners.clear();
   electron.ipcHandlers.clear();
   electron.BrowserWindow.instances.length = 0;
+  electron.BrowserWindow.getFocusedWindow.mockReturnValue(undefined);
   electron.app.isPackaged = false;
   electron.app.requestSingleInstanceLock.mockReturnValue(true);
   electron.app.whenReady.mockResolvedValue(undefined);
@@ -555,5 +591,56 @@ describe('Electron main process', () => {
       expect.stringContaining(logPath),
     );
     expect(electron.BrowserWindow.instances).toHaveLength(0);
+  });
+
+  it('routes Edit menu commands to the focused window, falling back to the primary window', async () => {
+    const win = await loadMain();
+    const items = editMenuItems();
+    const roles = items.map((item) => item.role ?? item.type ?? item.label);
+    if (process.platform === 'darwin') {
+      expect(roles).toEqual(['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'selectAll', 'separator', 'Speech']);
+    } else {
+      expect(roles).toEqual(['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'delete', 'separator', 'selectAll']);
+    }
+    // Every command keeps its native role and carries the fallback.
+    const commands = items.filter((item) => item.role);
+    expect(commands.every((item) => typeof item.click === 'function')).toBe(true);
+
+    // Electron only calls click when it found no focused web contents; the
+    // key window then receives the command, never the primary one.
+    const other = new electron.BrowserWindow({});
+    electron.BrowserWindow.getFocusedWindow.mockReturnValue(other);
+    for (const item of commands) {
+      item.click!();
+      expect(other.webContents[item.role as EditRole], item.role).toHaveBeenCalledOnce();
+      expect(win.webContents[item.role as EditRole], item.role).not.toHaveBeenCalled();
+    }
+
+    // No key window at all: the primary window is the last resort.
+    electron.BrowserWindow.getFocusedWindow.mockReturnValue(undefined);
+    const copy = commands.find((item) => item.role === 'copy')!;
+    copy.click!();
+    expect(win.webContents.copy).toHaveBeenCalledOnce();
+
+    // A destroyed window is left alone.
+    win.isDestroyed.mockReturnValue(true);
+    copy.click!();
+    expect(win.webContents.copy).toHaveBeenCalledOnce();
+  });
+
+  it('builds the macOS Edit menu with its extra commands and the Speech submenu', async () => {
+    await withPlatform('darwin', async () => {
+      const win = await loadMain();
+      expect(win.setMenuBarVisibility).not.toHaveBeenCalled();
+      const items = editMenuItems();
+      expect(items.map((item) => item.role ?? item.type ?? item.label)).toEqual([
+        'undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'selectAll', 'separator', 'Speech',
+      ]);
+      expect(items.find((item) => item.label === 'Speech')?.submenu).toEqual([{ role: 'startSpeaking' }, { role: 'stopSpeaking' }]);
+      for (const item of items.filter((entry) => entry.role)) {
+        item.click!();
+        expect(win.webContents[item.role as EditRole], item.role).toHaveBeenCalledOnce();
+      }
+    });
   });
 });
