@@ -205,7 +205,12 @@ function saveClientState(state: Record<string, string>): void {
 interface EditCommand {
   label: string;
   accelerator?: string;
-  /** Mirrors the predefined role: shown, but not registered as a window-wide shortcut. */
+  /**
+   * Windows/Linux only, mirroring the predefined role: the chord is shown but
+   * not registered as a window-wide shortcut, so the renderer keeps handling
+   * it natively. macOS ignores the flag and always binds the accelerator as
+   * the menu item's key equivalent, which is how Cmd+C reaches `click`.
+   */
   registerAccelerator?: boolean;
   run: (target: WebContents) => void;
 }
