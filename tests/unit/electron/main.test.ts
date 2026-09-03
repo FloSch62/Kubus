@@ -14,6 +14,15 @@ const electron = vi.hoisted(() => {
     readonly id = ++state.nextWebContentsId;
     readonly handlers = new Map<string, Handler>();
     readonly send = vi.fn();
+    readonly undo = vi.fn();
+    readonly redo = vi.fn();
+    readonly cut = vi.fn();
+    readonly copy = vi.fn();
+    readonly paste = vi.fn();
+    readonly pasteAndMatchStyle = vi.fn();
+    readonly delete = vi.fn();
+    readonly selectAll = vi.fn();
+    readonly isDestroyed = vi.fn(() => false);
     readonly on = vi.fn((name: string, handler: Handler) => {
       this.handlers.set(name, handler);
       return this;
@@ -26,6 +35,7 @@ const electron = vi.hoisted(() => {
 
   class MockBrowserWindow {
     static readonly instances: MockBrowserWindow[] = [];
+    static readonly getFocusedWindow = vi.fn((): MockBrowserWindow | undefined => undefined);
 
     readonly handlers = new Map<string, Handler>();
     readonly webContents = new MockWebContents();
@@ -94,6 +104,7 @@ const electron = vi.hoisted(() => {
     setApplicationMenu: vi.fn(),
   };
   const shell = { openExternal: vi.fn(async () => undefined) };
+  const webContentsApi = { getFocusedWebContents: vi.fn((): MockWebContents | undefined => undefined) };
 
   return {
     app,
@@ -115,6 +126,8 @@ const electron = vi.hoisted(() => {
     shell,
     startServer,
     state,
+    webContentsApi,
+    MockWebContents,
   };
 });
 
@@ -127,12 +140,52 @@ vi.mock('electron', () => ({
   nativeTheme: electron.nativeTheme,
   screen: electron.screen,
   shell: electron.shell,
+  webContents: electron.webContentsApi,
 }));
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
 vi.mock('@kubus/server', () => ({ appendAppLog: electron.appendAppLog, startServer: electron.startServer }));
 
+type EditMethod = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'pasteAndMatchStyle' | 'delete' | 'selectAll';
+interface MenuTemplateItem {
+  label?: string;
+  role?: string;
+  type?: string;
+  accelerator?: string;
+  registerAccelerator?: boolean;
+  click?: () => void;
+  submenu?: MenuTemplateItem[];
+}
+
+const EDIT_METHODS: Record<string, EditMethod> = {
+  Undo: 'undo',
+  Redo: 'redo',
+  Cut: 'cut',
+  Copy: 'copy',
+  Paste: 'paste',
+  'Paste and Match Style': 'pasteAndMatchStyle',
+  Delete: 'delete',
+  'Select All': 'selectAll',
+};
+
 let userDataPath: string;
 let previousHelmEngine: string | undefined;
+
+function editMenuItems(): MenuTemplateItem[] {
+  const template = (electron.menu.buildFromTemplate.mock.calls[0] as unknown[] | undefined)?.[0] as MenuTemplateItem[] | undefined;
+  const edit = template?.find((item) => item.label === 'Edit');
+  expect(edit?.submenu, 'Edit menu should be built').toBeDefined();
+  return edit!.submenu!;
+}
+
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+}
 
 function registered(map: Map<string, Handler>, name: string): Handler {
   const callback = map.get(name);
@@ -160,6 +213,8 @@ beforeEach(() => {
   electron.ipcListeners.clear();
   electron.ipcHandlers.clear();
   electron.BrowserWindow.instances.length = 0;
+  electron.BrowserWindow.getFocusedWindow.mockReturnValue(undefined);
+  electron.webContentsApi.getFocusedWebContents.mockReturnValue(undefined);
   electron.app.isPackaged = false;
   electron.app.requestSingleInstanceLock.mockReturnValue(true);
   electron.app.whenReady.mockResolvedValue(undefined);
@@ -555,5 +610,70 @@ describe('Electron main process', () => {
       expect.stringContaining(logPath),
     );
     expect(electron.BrowserWindow.instances).toHaveLength(0);
+  });
+
+  it('routes Edit menu commands to the focused web contents, then the key window, then the primary window', async () => {
+    const win = await loadMain();
+    const items = editMenuItems();
+    const names = items.map((item) => item.label ?? item.type);
+    if (process.platform === 'darwin') {
+      expect(names).toEqual(['Undo', 'Redo', 'separator', 'Cut', 'Copy', 'Paste', 'Paste and Match Style', 'Delete', 'Select All', 'separator', 'Speech']);
+    } else {
+      expect(names).toEqual(['Undo', 'Redo', 'separator', 'Cut', 'Copy', 'Paste', 'Delete', 'separator', 'Select All']);
+    }
+    // Plain items, never predefined roles: a role's click is ignored and a
+    // role only acts on the web contents Electron reports as focused.
+    const commands = items.filter((item) => item.label && item.label !== 'Speech');
+    expect(commands.every((item) => item.role === undefined && typeof item.click === 'function')).toBe(true);
+    expect(commands.find((item) => item.label === 'Copy')).toMatchObject({ accelerator: 'CommandOrControl+C', registerAccelerator: false });
+    expect(commands.find((item) => item.label === 'Redo')?.accelerator).toBe(process.platform === 'win32' ? 'Control+Y' : 'Shift+CommandOrControl+Z');
+    expect(commands.find((item) => item.label === 'Delete')).not.toHaveProperty('accelerator');
+
+    // The focused web contents wins, exactly like the predefined roles.
+    const focused = new electron.MockWebContents();
+    electron.webContentsApi.getFocusedWebContents.mockReturnValue(focused);
+    const other = new electron.BrowserWindow({});
+    electron.BrowserWindow.getFocusedWindow.mockReturnValue(other);
+    for (const item of commands) {
+      item.click!();
+      expect(focused[EDIT_METHODS[item.label!]!], item.label).toHaveBeenCalledOnce();
+      expect(other.webContents[EDIT_METHODS[item.label!]!], item.label).not.toHaveBeenCalled();
+    }
+
+    // Without a focused web contents the key window receives the command.
+    electron.webContentsApi.getFocusedWebContents.mockReturnValue(undefined);
+    for (const item of commands) {
+      item.click!();
+      expect(other.webContents[EDIT_METHODS[item.label!]!], item.label).toHaveBeenCalledOnce();
+      expect(win.webContents[EDIT_METHODS[item.label!]!], item.label).not.toHaveBeenCalled();
+    }
+
+    // No key window at all: the primary window is the last resort.
+    electron.BrowserWindow.getFocusedWindow.mockReturnValue(undefined);
+    const copy = commands.find((item) => item.label === 'Copy')!;
+    copy.click!();
+    expect(win.webContents.copy).toHaveBeenCalledOnce();
+
+    // Destroyed web contents are left alone.
+    win.webContents.isDestroyed.mockReturnValue(true);
+    copy.click!();
+    expect(win.webContents.copy).toHaveBeenCalledOnce();
+  });
+
+  it('builds the macOS Edit menu with its extra commands and the Speech submenu', async () => {
+    await withPlatform('darwin', async () => {
+      const win = await loadMain();
+      expect(win.setMenuBarVisibility).not.toHaveBeenCalled();
+      const items = editMenuItems();
+      expect(items.map((item) => item.label ?? item.type)).toEqual([
+        'Undo', 'Redo', 'separator', 'Cut', 'Copy', 'Paste', 'Paste and Match Style', 'Delete', 'Select All', 'separator', 'Speech',
+      ]);
+      expect(items.find((item) => item.label === 'Paste and Match Style')?.accelerator).toBe('Cmd+Option+Shift+V');
+      expect(items.find((item) => item.label === 'Speech')?.submenu).toEqual([{ role: 'startSpeaking' }, { role: 'stopSpeaking' }]);
+      for (const item of items.filter((entry) => entry.label && entry.label !== 'Speech')) {
+        item.click!();
+        expect(win.webContents[EDIT_METHODS[item.label!]!], item.label).toHaveBeenCalledOnce();
+      }
+    });
   });
 });

@@ -12,7 +12,9 @@ import {
   nativeTheme,
   screen,
   shell,
+  webContents,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron';
 import fixPath from 'fix-path';
 import { startServer, type RunningServer } from '@kubus/server';
@@ -33,6 +35,7 @@ mainLog('info', `Kubus ${app.getVersion()} starting on ${process.platform}/${pro
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isMac = process.platform === 'darwin';
+const isWindows = process.platform === 'win32';
 const isLinux = process.platform === 'linux';
 
 // Must match the client TopBar height: its toolbar doubles as the titlebar.
@@ -199,11 +202,87 @@ function saveClientState(state: Record<string, string>): void {
   clientStateCache = state;
 }
 
+interface EditCommand {
+  label: string;
+  accelerator?: string;
+  /**
+   * Windows/Linux only, mirroring the predefined role: the chord is shown but
+   * not registered as a window-wide shortcut, so the renderer keeps handling
+   * it natively. macOS ignores the flag and always binds the accelerator as
+   * the menu item's key equivalent, which is how Cmd+C reaches `click`.
+   */
+  registerAccelerator?: boolean;
+  run: (target: WebContents) => void;
+}
+
+/**
+ * The Edit commands, mirroring Electron's predefined roles item for item.
+ * They are plain items rather than roles because a role only ever acts on
+ * the web contents Electron reports as focused, and its click handler is
+ * documented as ignored. On macOS that lookup can come back empty while the
+ * page still shows a selection (the renderer view is not the window's first
+ * responder), so the stock editMenu dropped Cmd+C silently — and macOS has
+ * no other copy path, unlike Linux/Windows where the renderer handles Ctrl+C
+ * itself and never goes through the menu. These fall back to the key window.
+ */
+const EDIT_COMMANDS = {
+  undo: { label: 'Undo', accelerator: 'CommandOrControl+Z', run: (target) => target.undo() },
+  redo: { label: 'Redo', accelerator: isWindows ? 'Control+Y' : 'Shift+CommandOrControl+Z', run: (target) => target.redo() },
+  cut: { label: 'Cut', accelerator: 'CommandOrControl+X', registerAccelerator: false, run: (target) => target.cut() },
+  copy: { label: 'Copy', accelerator: 'CommandOrControl+C', registerAccelerator: false, run: (target) => target.copy() },
+  paste: { label: 'Paste', accelerator: 'CommandOrControl+V', registerAccelerator: false, run: (target) => target.paste() },
+  pasteAndMatchStyle: {
+    label: 'Paste and Match Style',
+    accelerator: isMac ? 'Cmd+Option+Shift+V' : 'Shift+CommandOrControl+V',
+    registerAccelerator: false,
+    run: (target) => target.pasteAndMatchStyle(),
+  },
+  delete: { label: 'Delete', run: (target) => target.delete() },
+  selectAll: { label: 'Select All', accelerator: 'CommandOrControl+A', run: (target) => target.selectAll() },
+} satisfies Record<string, EditCommand>;
+
+function editItem(command: EditCommand): MenuItemConstructorOptions {
+  const { label, accelerator, registerAccelerator, run } = command;
+  return {
+    label,
+    ...(accelerator ? { accelerator } : {}),
+    ...(registerAccelerator === undefined ? {} : { registerAccelerator }),
+    click: () => {
+      const target = webContents.getFocusedWebContents() ?? (BrowserWindow.getFocusedWindow() ?? primaryWindow)?.webContents;
+      if (target && !target.isDestroyed()) run(target);
+    },
+  };
+}
+
+function buildEditMenu(): MenuItemConstructorOptions {
+  const platformItems: MenuItemConstructorOptions[] = isMac
+    ? [
+        editItem(EDIT_COMMANDS.pasteAndMatchStyle),
+        editItem(EDIT_COMMANDS.delete),
+        editItem(EDIT_COMMANDS.selectAll),
+        { type: 'separator' },
+        { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] },
+      ]
+    : [editItem(EDIT_COMMANDS.delete), { type: 'separator' }, editItem(EDIT_COMMANDS.selectAll)];
+  return {
+    label: 'Edit',
+    submenu: [
+      editItem(EDIT_COMMANDS.undo),
+      editItem(EDIT_COMMANDS.redo),
+      { type: 'separator' },
+      editItem(EDIT_COMMANDS.cut),
+      editItem(EDIT_COMMANDS.copy),
+      editItem(EDIT_COMMANDS.paste),
+      ...platformItems,
+    ],
+  };
+}
+
 function buildMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: 'appMenu' as const }] : []),
     { role: 'fileMenu' },
-    { role: 'editMenu' },
+    buildEditMenu(),
     { role: 'viewMenu' },
     { role: 'windowMenu' },
   ];
