@@ -45,8 +45,16 @@ function validWindowContext(value: unknown): boolean {
     Array.isArray(context.namespaces) &&
     context.namespaces.length <= 1000 &&
     context.namespaces.every((item) => boundedString(item, 1000)) &&
+    validNamespacesByContext(context.namespacesByContext) &&
     typeof context.navCollapsed === 'boolean'
   );
+}
+
+function validNamespacesByContext(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= 1000 && entries.every(([ctx, list]) => boundedString(ctx, 1000) && Array.isArray(list) && list.length <= 1000 && list.every((item) => boundedString(item, 1000)));
 }
 
 function validDockTab(value: unknown): boolean {

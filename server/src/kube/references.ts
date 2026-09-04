@@ -1,6 +1,6 @@
 import type { KubeObject, ReferencesResponse, ResourceRef, UsedByEntry } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
-import { installedCrds } from './overview.js';
+import { installedCrds, optionalItems } from './overview.js';
 import { resourcePath } from './raw-client.js';
 import {
   canonicalKind,
@@ -85,6 +85,7 @@ const BUILTIN_KINDS: KindSpec[] = [
 
 const MAX_GETS = 40;
 const MAX_SELECTED = 100;
+const SELECTOR_BUDGET_MS = 8_000;
 const MAX_VALUE_LENGTH = 120;
 const METADATA_HINT_RE = /^metadata\.(labels|annotations)\./;
 
@@ -125,7 +126,7 @@ export function kindsForHint(hint: RelationHint, kinds: KindSpec[], source: { gr
   };
   if (hint.referenceKind) {
     const wanted = canonicalKind(hint.referenceKind);
-    const named = kinds.filter((spec) => canonicalKind(spec.kind) === wanted);
+    const named = kinds.filter((spec) => canonicalKind(spec.kind) === wanted && (hint.referenceGroup === undefined || spec.group === hint.referenceGroup));
     return { kinds: named.length ? bestTier(named) : [], certain: true };
   }
   if (description) {
@@ -183,12 +184,45 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
 
   // Existence: live caches first, a bounded number of GETs for the rest.
   let gets = 0;
+  const labeledItems = (items: KubeObject[]): Labeled[] => items.map((item) => ({ name: item.metadata.name, namespace: item.metadata.namespace, uid: item.metadata.uid, labels: item.metadata.labels }));
   const cachedLabeled = (spec: KindSpec): Labeled[] | undefined => {
     if (spec.custom) {
       return search.isLive(spec.group, spec.plural) ? search.entriesForKind(spec.group, spec.plural) : undefined;
     }
     const watcher = handle.watchers.peek(spec.group, spec.version, spec.plural);
-    return watcher?.currentState() === 'live' ? watcher.items().map((item) => ({ name: item.metadata.name, namespace: item.metadata.namespace, uid: item.metadata.uid, labels: item.metadata.labels })) : undefined;
+    return watcher?.currentState() === 'live' ? labeledItems(watcher.items()) : undefined;
+  };
+  // Selectors need every object of a kind. Without a live cache, custom kinds
+  // come from the reference index (built once, kept warm) and builtins from
+  // their watcher; a kind still loading past the budget is reported as such.
+  const partial = new Set<string>();
+  const deadline = Date.now() + SELECTOR_BUDGET_MS;
+  const labeledPool = async (spec: KindSpec): Promise<Labeled[] | undefined> => {
+    const cached = cachedLabeled(spec);
+    if (cached) return cached;
+    if (spec.custom) {
+      const lookup = await handle.referenceIndex.lookup(spec, { deadline });
+      if (lookup.unavailable) {
+        unavailable.push(spec.kind);
+        return undefined;
+      }
+      if (!lookup.ready) {
+        partial.add(spec.kind);
+        return undefined;
+      }
+      return lookup.entries;
+    }
+    const acquired = handle.watchers.acquire(spec.group, spec.version, spec.plural);
+    try {
+      const result = await optionalItems(acquired.watcher);
+      if (result.unavailable) {
+        unavailable.push(spec.kind);
+        return undefined;
+      }
+      return labeledItems(result.items);
+    } finally {
+      acquired.release();
+    }
   };
   const exists = async (spec: KindSpec, namespace: string | undefined, name: string): Promise<{ found: boolean; uid?: string; verified: boolean }> => {
     if (spec.custom && search.isLive(spec.group, spec.plural)) {
@@ -256,7 +290,7 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   for (const { path, selector } of selectorHints) {
     const description = schema && path.startsWith('spec') ? schemaFieldDescription(schema, path) : undefined;
     for (const spec of kindsForHint({ path, value: '' }, kinds, source, description).kinds) {
-      const pool = cachedLabeled(spec);
+      const pool = await labeledPool(spec);
       if (!pool) continue;
       const matches = pool
         .filter((item) => (!spec.namespaced || item.namespace === source.namespace) && selectorMatches(selector, item.labels))
@@ -266,5 +300,5 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
     }
   }
 
-  return { items: [...rows.values()], unavailable: [...new Set(unavailable)] };
+  return { items: [...rows.values()], unavailable: [...new Set(unavailable)], ...(partial.size ? { partial: [...partial] } : {}) };
 }

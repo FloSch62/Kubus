@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, UsedByEntry } from '@kubus/shared';
 import { matchesMiniFilter } from '../../../client/src/components/MiniFilterInput';
@@ -19,7 +19,19 @@ import { useDetailStore } from '../../../client/src/state/detail';
 import { useDockStore } from '../../../client/src/state/dock';
 import { useUiPrefsStore } from '../../../client/src/state/prefs';
 import { useTabAttentionStore } from '../../../client/src/state/tab-attention';
+import { TabHealthWatchers } from '../../../client/src/layout/TabHealthWatcher';
 import { kubectlGetCommand } from '../../../client/src/kubectl-command';
+
+const watch = vi.hoisted(() => ({ handlers: [] as Array<{ onSnapshot: (items: unknown[]) => void; onEvents: (events: unknown[]) => void }> }));
+vi.mock('../../../client/src/api/ws/watch-client.js', () => ({
+  watchClient: {
+    subscribe: (_params: unknown, handlers: { onSnapshot: (items: unknown[]) => void; onEvents: (events: unknown[]) => void }) => {
+      watch.handlers.push(handlers);
+      return () => undefined;
+    },
+    onBroadcast: () => () => undefined,
+  },
+}));
 
 const queries = vi.hoisted(() => ({
   usedBy: undefined as { items: UsedByEntry[]; unavailable: string[]; partial?: string[]; truncated: number } | undefined,
@@ -38,6 +50,8 @@ function entry(kind: string, name: string, relation: string, detail?: string, na
 }
 
 beforeEach(() => {
+  watch.handlers.length = 0;
+  useTabAttentionStore.setState({ attention: {} });
   queries.usedBy = undefined;
   queries.references = undefined;
   queries.error = undefined;
@@ -45,6 +59,49 @@ beforeEach(() => {
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false, terminalFocusRequest: undefined, terminalReconnectRequests: {} });
   useClustersStore.setState({ selected: [], namespaces: [], namespacesByContext: {} });
   useUiPrefsStore.setState({ listState: {} });
+});
+
+describe('TabHealthWatchers', () => {
+  const pod = (phase: string, ready: boolean): KubeObject =>
+    ({
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: { name: 'web-1', namespace: 'apps', uid: 'p1' },
+      spec: { containers: [{ name: 'app' }] },
+      status: { phase, containerStatuses: [{ name: 'app', ready, restartCount: 0, state: ready ? { running: { startedAt: '2026-09-04T00:00:00Z' } } : { terminated: { reason: 'Error' } } }] },
+    }) as KubeObject;
+  const tab = { id: 't1', path: '/r/core/v1/pods?sel=kind-a|apps|web-1' };
+
+  it('judges a background change against the health last seen in front, even without an event in between', () => {
+    const { rerender } = render(<TabHealthWatchers tabs={[tab]} activeId="t1" />);
+    const handlers = watch.handlers.at(-1)!;
+    act(() => handlers.onSnapshot([pod('Running', true)]));
+    expect(useTabAttentionStore.getState().attention.t1).toBeUndefined();
+
+    // The user switches away; the object stays quiet until it fails.
+    rerender(<TabHealthWatchers tabs={[tab]} activeId="other" />);
+    act(() => handlers.onEvents([{ type: 'MODIFIED', object: pod('Failed', false) }]));
+    expect(useTabAttentionStore.getState().attention.t1?.reason).toBe('Pod web-1 became unhealthy while you were away');
+
+    // Coming back clears the mark. The user then watches it recover, leaves,
+    // and the deletion of a pod last seen healthy is worth a mark again.
+    rerender(<TabHealthWatchers tabs={[tab]} activeId="t1" />);
+    expect(useTabAttentionStore.getState().attention.t1).toBeUndefined();
+    act(() => handlers.onEvents([{ type: 'MODIFIED', object: pod('Running', true) }]));
+    rerender(<TabHealthWatchers tabs={[tab]} activeId="other" />);
+    act(() => handlers.onEvents([{ type: 'DELETED', object: pod('Running', true) }]));
+    expect(useTabAttentionStore.getState().attention.t1?.reason).toBe('Pod web-1 was deleted while you were away');
+  });
+
+  it('takes the first sighting as the starting point for a tab that was never in front', () => {
+    render(<TabHealthWatchers tabs={[tab]} activeId="other" />);
+    const handlers = watch.handlers.at(-1)!;
+    act(() => handlers.onSnapshot([pod('Failed', false)]));
+    expect(useTabAttentionStore.getState().attention.t1).toBeUndefined();
+    act(() => handlers.onEvents([{ type: 'MODIFIED', object: pod('Running', true) }]));
+    act(() => handlers.onEvents([{ type: 'MODIFIED', object: pod('Failed', false) }]));
+    expect(useTabAttentionStore.getState().attention.t1?.reason).toBe('Pod web-1 became unhealthy while you were away');
+  });
 });
 
 describe('pdbCoverage', () => {

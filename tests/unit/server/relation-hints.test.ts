@@ -46,6 +46,10 @@ describe('relation hints', () => {
       relationPathScore({ path: 'spec.nodeProfile', value: 'x' }, { kind: 'TopoNode', plural: 'toponodes' }),
     );
     expect(relationPathScore({ path: 'spec.targetRef.name', value: 'x', referenceKind: 'TopoNode' }, { kind: 'TopoNode', plural: 'toponodes' })).toBeGreaterThanOrEqual(100);
+    // An explicit group on the reference rules out a same-named kind elsewhere; the core group is spelled ''.
+    expect(relationPathScore({ path: 'spec.ref.name', value: 'x', referenceKind: 'Widget', referenceGroup: 'other.example' }, { kind: 'Widget', plural: 'widgets', group: 'acme.example' })).toBe(0);
+    expect(relationPathScore({ path: 'spec.ref.name', value: 'x', referenceKind: 'Widget', referenceGroup: 'acme.example' }, { kind: 'Widget', plural: 'widgets', group: 'acme.example' })).toBeGreaterThanOrEqual(100);
+    expect(relationPathScore({ path: 'spec.ref.name', value: 'x', referenceKind: 'Secret', referenceGroup: '' }, { kind: 'Secret', plural: 'secrets', group: '' })).toBeGreaterThanOrEqual(100);
     expect(relationPathScore({ path: 'spec.nodeRef.name', value: 'x', referenceKind: 'Node' }, { kind: 'TopoNode', plural: 'toponodes' })).toBe(0);
     // Generic leaves never count on their own, but a `name` leaf defers to its parent.
     expect(relationPathScore({ path: 'spec.node.kind', value: 'x' }, { kind: 'TopoNode', plural: 'toponodes' })).toBe(0);
@@ -72,7 +76,7 @@ describe('relation hints', () => {
         metadata: { name: 'link', uid: 'u' },
         spec: {
           description: 'uplink',
-          links: [{ local: { node: 'l001', interfaceResource: 'l001-e1', speed: '100G' }, remote: { node: 's001', kind: 'TopoNode', namespace: 'eda' } }],
+          links: [{ local: { node: 'l001', interfaceResource: 'l001-e1', speed: '100G' }, remote: { node: 's001', kind: 'TopoNode', namespace: 'eda', apiVersion: 'core.example.com/v1' } }],
           nodeType: 'SIMPLE',
           nodeSelectors: ['role=leaf'],
           podSelector: { matchLabels: { app: 'x' } },
@@ -85,9 +89,9 @@ describe('relation hints', () => {
     expect(digest.hints).toEqual([
       { path: 'spec.links[0].local.node', value: 'l001' },
       { path: 'spec.links[0].local.interfaceResource', value: 'l001-e1' },
-      { path: 'spec.links[0].remote.node', value: 's001', referenceKind: 'TopoNode', referenceNamespace: 'eda' },
+      { path: 'spec.links[0].remote.node', value: 's001', referenceKind: 'TopoNode', referenceNamespace: 'eda', referenceGroup: 'core.example.com' },
       // The `kind` leaf itself is dropped: `TopoNode` is not a name.
-      { path: 'spec.links[0].remote.namespace', value: 'eda', referenceKind: 'TopoNode', referenceNamespace: 'eda' },
+      { path: 'spec.links[0].remote.namespace', value: 'eda', referenceKind: 'TopoNode', referenceNamespace: 'eda', referenceGroup: 'core.example.com' },
       { path: 'spec.secretRef.name', value: 'db' },
       { path: 'status.members[0].node', value: 'l001' },
     ]);

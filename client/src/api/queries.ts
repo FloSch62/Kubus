@@ -680,6 +680,7 @@ export function useUsedBy(sel: { ctx: string; group: string; version: string; pl
 
 /** Everything one object points at, resolved to objects that exist. */
 export function useReferences(sel: { ctx: string; group: string; version: string; plural: string; kind: string; name: string; namespace?: string } | undefined) {
+  const base = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['references', sel],
     queryFn: () => {
@@ -689,7 +690,8 @@ export function useReferences(sel: { ctx: string; group: string; version: string
     },
     enabled: !!sel,
     retry: false,
-    refetchInterval: useRefetchInterval(30_000),
+    // Selector rows for a kind still loading arrive within seconds; poll for them briskly.
+    refetchInterval: base === false ? false : (query) => (query.state.data?.partial?.length ? 3_000 : base),
     placeholderData: keepPreviousData,
   });
 }

@@ -15,6 +15,8 @@ export interface RelationHint {
   selector?: Record<string, string>;
   referenceKind?: string;
   referenceNamespace?: string;
+  /** API group named by a sibling `group` or `apiVersion` field (`''` for the core group); absent when unspecified. */
+  referenceGroup?: string;
 }
 
 /** Plain map selector (Services, EDA node selectors): every pair must match; an empty map selects nothing. */
@@ -87,12 +89,22 @@ const URL_VALUE_RE = /^https?:\/\//i;
 interface RelationContext {
   referenceKind?: string;
   referenceNamespace?: string;
+  referenceGroup?: string;
 }
 
 function trimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+/** The API group a reference structure names: its `group`, or the group half of its `apiVersion` (`''` for core). */
+function siblingGroup(record: Record<string, unknown>): string | undefined {
+  if (typeof record.group === 'string') return record.group.trim();
+  const apiVersion = trimmedString(record.apiVersion);
+  if (!apiVersion) return undefined;
+  const slash = apiVersion.indexOf('/');
+  return slash === -1 ? '' : apiVersion.slice(0, slash);
 }
 
 /** Every short string leaf under a value, with its dotted path and the sibling kind/namespace context. */
@@ -107,9 +119,10 @@ export function collectRelationHints(value: unknown, prefix = '', context: Relat
   }
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    const siblingContext = {
+    const siblingContext: RelationContext = {
       referenceKind: trimmedString(record.kind),
       referenceNamespace: trimmedString(record.namespace),
+      referenceGroup: siblingGroup(record),
     };
     return Object.entries(record).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext));
   }
@@ -204,6 +217,7 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
     const kept: RelationHint = { path: hint.path, value: hint.value };
     if (hint.referenceKind) kept.referenceKind = hint.referenceKind;
     if (hint.referenceNamespace) kept.referenceNamespace = hint.referenceNamespace;
+    if (hint.referenceGroup !== undefined) kept.referenceGroup = hint.referenceGroup;
     hints.push(kept);
   }
   for (const selector of collectMapSelectors(body)) {
@@ -273,12 +287,15 @@ export function canonicalKind(kind: string): string {
  * `kind` field says so outright. Generic leaves (name, kind, namespace)
  * never count on their own.
  */
-export function relationPathScore(hint: RelationHint, target: { kind: string; plural: string }): number {
+export function relationPathScore(hint: RelationHint, target: { kind: string; plural: string; group?: string }): number {
   const path = referencePath(hint.path);
   if (path === undefined) return 0;
   const pathScore = kindPathCoverage(path, target) + (tokens(path).includes(canonicalKind(target.kind)) ? 3 : 0);
   if (!hint.referenceKind) return pathScore;
-  return canonicalKind(hint.referenceKind) === canonicalKind(target.kind) ? 100 + pathScore : 0;
+  if (canonicalKind(hint.referenceKind) !== canonicalKind(target.kind)) return 0;
+  // An explicit group settles which of several same-named kinds is meant.
+  if (hint.referenceGroup !== undefined && target.group !== undefined && hint.referenceGroup !== target.group) return 0;
+  return 100 + pathScore;
 }
 
 /**
@@ -306,7 +323,7 @@ export function kindPathCoverage(path: string, target: { kind: string; plural: s
   return new Set(tokens(path).filter((term) => targetTerms.has(term))).size;
 }
 
-export function bestTypedHint(hints: RelationHint[], target: { kind: string; plural: string }): RelationHint | undefined {
+export function bestTypedHint(hints: RelationHint[], target: { kind: string; plural: string; group?: string }): RelationHint | undefined {
   return hints
     .flatMap((hint) => {
       const score = relationPathScore(hint, target);

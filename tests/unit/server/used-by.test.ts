@@ -392,6 +392,9 @@ describe('digestRelations', () => {
     // Another namespace is out of scope unless the reference names the namespace or the kind is cluster-scoped.
     expect(digestRelations(digestEntry(cr('TopoLink', 'far', 'other', { links: [{ local: { node: 'l001' } }] })), target, rivals)).toEqual([]);
     expect(digestRelations(digestEntry(cr('TopoLink', 'typed', 'other', { peer: { kind: 'TopoNode', name: 'l001', namespace: 'eda' } })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.peer.name' }]);
+    // A typed reference into another API group is not about this TopoNode, however the names line up.
+    expect(digestRelations(digestEntry(cr('TopoLink', 'foreign', 'eda', { peer: { apiVersion: 'other.example/v1', kind: 'TopoNode', name: 'l001' } })), target, rivals)).toEqual([]);
+    expect(digestRelations(digestEntry(cr('TopoLink', 'ours', 'eda', { peer: { group: EDA, kind: 'TopoNode', name: 'l001' } })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.peer.name' }]);
     expect(digestRelations(digestEntry(cr('Report', 'daily', undefined, { node: 'l001' })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.node' }]);
     const labeled = digestEntry(cr('VLAN', 'v', 'svc', { bridgeDomain: 'bd' }, { 'services.example.com/virtualnetwork': 'vn-a' }));
     const vn = { kind: 'VirtualNetwork', name: 'vn-a', namespace: 'svc', group: 'services.example.com', plural: 'virtualnetworks' };

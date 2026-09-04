@@ -569,6 +569,8 @@ interface CrdShape {
 interface KindTarget {
   kind: string;
   plural: string;
+  /** API group; a typed hint naming another group cannot mean this kind. */
+  group?: string;
 }
 
 /** The operator family of an API group: `core.eda.nokia.com` and `interfaces.eda.nokia.com` both belong to `eda.nokia.com`. */
@@ -651,7 +653,7 @@ function scopeAllows(namespace: string | undefined, target: UsedByTarget, explic
 /** Every inferred way one digested object points at the target. */
 export function digestRelations(entry: DigestEntry, target: UsedByTarget, rivals: KindTarget[], opts: { labels?: boolean } = {}): Relation[] {
   if (target.uid && entry.uid === target.uid) return [];
-  const kindTarget: KindTarget = { kind: target.kind, plural: target.plural ?? '' };
+  const kindTarget: KindTarget = { kind: target.kind, plural: target.plural ?? '', group: target.group };
   const relations: Relation[] = [];
   const seen = new Set<string>();
   const add = (relation: string, detail: string) => {
@@ -738,7 +740,7 @@ async function scanCustomKinds(handle: ClusterHandle, target: UsedByTarget, excl
     return names?.kind && names.plural ? [{ kind: names.kind, plural: names.plural }] : [];
   });
   handle.referenceIndex.setVocabulary([...crdKinds.map((k) => k.kind), ...BUILTIN_REFERENCE_KINDS]);
-  const kindTarget: KindTarget = { kind: target.kind, plural: target.plural ?? '' };
+  const kindTarget: KindTarget = { kind: target.kind, plural: target.plural ?? '', group: target.group };
   const rows = new Map<string, UsedByEntry>();
 
   // Labels: every indexed kind at once, from metadata the search index already holds.

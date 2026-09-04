@@ -13,7 +13,10 @@ export const EXEC_SESSION_CLOSE_REASON = 'kubus terminal closed';
 /** Per-window working context copied once when a secondary window is created. */
 export interface AppWindowContext {
   selected: string[];
+  /** Effective namespace filter (the union across the selected clusters), kept for older windows. */
   namespaces: string[];
+  /** The namespace filter of each selected cluster; takes precedence over `namespaces` when present. */
+  namespacesByContext?: Record<string, string[]>;
   navCollapsed: boolean;
 }
 
@@ -636,6 +639,8 @@ export interface ReferencesResponse {
   items: UsedByEntry[];
   /** Kinds that could not be consulted (RBAC-denied or not installed). */
   unavailable: string[];
+  /** Kinds whose objects were still loading when the answer was sent; selector rows for them arrive on a later refresh. */
+  partial?: string[];
 }
 
 export interface UsedByResponse {

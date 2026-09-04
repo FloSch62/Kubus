@@ -39,17 +39,21 @@ export function tabSelection(path: string, discovered?: ResourceKindInfo[]): Wat
 function TabWatcher({ tab, active, sel }: { tab: PageTab; active: boolean; sel: WatchedSelection }) {
   const mark = useTabAttentionStore((s) => s.mark);
   const clear = useTabAttentionStore((s) => s.clear);
-  // Health when the tab was last in front — the baseline a change is judged against.
+  // The health last observed, whether or not the tab was in front, and the
+  // baseline a change is judged against: what the user saw when the tab was
+  // last in front. Events only arrive on change, so the baseline is carried
+  // over from the last observation when the tab leaves the front rather than
+  // waited for, or the very next event (the object turning unhealthy) would
+  // be mistaken for the starting point.
+  const lastHealth = useRef<boolean | undefined>(undefined);
   const baseline = useRef<boolean | undefined>(undefined);
   const activeRef = useRef(active);
   activeRef.current = active;
   const key = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace ?? ''}|${sel.name}`;
 
   useEffect(() => {
-    if (active) {
-      clear(tab.id);
-      baseline.current = undefined;
-    }
+    if (active) clear(tab.id);
+    else baseline.current = lastHealth.current;
   }, [active, tab.id, clear]);
 
   useEffect(() => {
@@ -57,8 +61,9 @@ function TabWatcher({ tab, active, sel }: { tab: PageTab; active: boolean; sel: 
     const observe = (obj: KubeObject | undefined, deleted = false) => {
       const healthy = deleted ? false : obj ? isResourceHealthy(sel.kind, obj) : undefined;
       if (healthy === undefined) return;
+      lastHealth.current = healthy;
       if (activeRef.current || baseline.current === undefined) {
-        // In front, or first sighting after (re)activation: this is what the user saw.
+        // In front, or never seen while in front (a tab restored in the background): this is the starting point.
         baseline.current = healthy;
         return;
       }

@@ -35,8 +35,9 @@ interface Fixture {
   gettable?: Record<string, KubeObject>;
 }
 
-function handleWith(fixture: Fixture, opts: { indexLive?: boolean } = {}) {
+function handleWith(fixture: Fixture, opts: { indexLive?: boolean; pending?: string[] } = {}) {
   const gets: string[] = [];
+  const lookups: string[] = [];
   const kindInfo = (plural: string) => {
     const spec = CRDS.find((c) => (c.spec as { names: { plural: string } }).names.plural === plural)!.spec as { group: string; scope: string; names: { kind: string; plural: string } };
     return { group: spec.group, version: 'v1', plural, kind: spec.names.kind, namespaced: spec.scope === 'Namespaced', verbs: ['list'], custom: true };
@@ -68,9 +69,16 @@ function handleWith(fixture: Fixture, opts: { indexLive?: boolean } = {}) {
       lookup: (_group: string, plural: string, namespace: string | undefined, name: string) => entries(plural).find((e) => e.name === name && (e.namespace ?? undefined) === namespace),
       liveEntries: () => Object.keys(fixture.custom).flatMap(entries),
     },
-    referenceIndex: { setVocabulary: () => undefined },
+    referenceIndex: {
+      setVocabulary: () => undefined,
+      lookup: async (spec: { plural: string }) => {
+        lookups.push(spec.plural);
+        if (opts.pending?.includes(spec.plural)) return { entries: [], ready: false, unavailable: false };
+        return { entries: entries(spec.plural).map((e) => ({ ...e, digest: { hints: [], selectors: [] } })), ready: true, unavailable: false };
+      },
+    },
   } as unknown as ClusterHandle;
-  return { handle, gets };
+  return { handle, gets, lookups };
 }
 
 function cr(kind: string, plural: string, name: string, namespace: string | undefined, spec: Record<string, unknown>, extra: Record<string, unknown> = {}): KubeObject & { plural: string } {
@@ -93,6 +101,8 @@ describe('kindsForHint', () => {
     expect(kindsForHint({ path: 'spec.links[0].local.node', value: 'x' }, kinds, source, 'Reference to a TopoNode.')).toMatchObject({ certain: true });
     expect(names(kindsForHint({ path: 'spec.links[0].local.node', value: 'x' }, kinds, source, 'Reference to a TopoNode.'))).toEqual(['TopoNode']);
     expect(kindsForHint({ path: 'spec.peer.name', value: 'x', referenceKind: 'TargetNode' }, kinds, source)).toMatchObject({ certain: true });
+    // An explicit group picks the same-named kind of that group, even outside the source's own.
+    expect(kindsForHint({ path: 'spec.profile.name', value: 'x', referenceKind: 'NodeProfile', referenceGroup: 'c9s.run' }, kinds, source).kinds.map((k) => k.group)).toEqual(['c9s.run']);
     expect(names(kindsForHint({ path: 'spec.peer.name', value: 'x', referenceKind: 'TargetNode' }, kinds, source))).toEqual(['TargetNode']);
     // A description that merely mentions the kind is not a reference; the field name then decides, uncertainly.
     expect(kindsForHint({ path: 'spec.platform', value: 'x' }, kinds, source, 'Platform of the TopoNode.')).toEqual({ kinds: [], certain: false });
@@ -170,5 +180,28 @@ describe('computeReferences', () => {
       'TopoNode/l002: selects [spec.leafs.leafNodeSelectors]',
     ]);
     expect(gets).toEqual(['/apis/fabrics.example.com/v1/namespaces/eda/fabrics/fab1', '/api/v1/namespaces/eda/configmaps/settings']);
+  });
+
+  it('resolves selectors through the reference index when the search index is cold, and reports kinds still loading', async () => {
+    const focus = cr('Fabric', 'fabrics', 'fab1', 'eda', { leafs: { leafNodeSelectors: ['role=leaf'] }, spines: { spineNodeSelectors: ['role=spine'] } });
+    const fixture = {
+      focus,
+      custom: {
+        toponodes: [
+          { name: 'l001', namespace: 'eda', uid: 'tn-1', labels: { role: 'leaf' } },
+          { name: 's001', namespace: 'eda', uid: 'tn-3', labels: { role: 'spine' } },
+        ],
+      },
+    };
+    const cold = handleWith(fixture);
+    const result = await computeReferences(cold.handle, { group: 'fabrics.example.com', version: 'v1', plural: 'fabrics', kind: 'Fabric', name: 'fab1', namespace: 'eda' });
+    expect(result.items.map((i) => `${i.ref.kind}/${i.ref.name}: ${i.relation}`)).toEqual(['TopoNode/l001: selects', 'TopoNode/s001: selects']);
+    expect(result.partial).toBeUndefined();
+    expect(cold.lookups).toContain('toponodes');
+
+    const loading = handleWith(fixture, { pending: ['toponodes'] });
+    const early = await computeReferences(loading.handle, { group: 'fabrics.example.com', version: 'v1', plural: 'fabrics', kind: 'Fabric', name: 'fab1', namespace: 'eda' });
+    expect(early.items).toEqual([]);
+    expect(early.partial).toEqual(['TopoNode']);
   });
 });
