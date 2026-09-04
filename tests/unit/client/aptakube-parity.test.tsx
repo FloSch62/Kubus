@@ -9,7 +9,7 @@ import { quotaRows } from '../../../client/src/components/detail/ResourceQuotaDe
 import { limitResources } from '../../../client/src/components/detail/LimitRangeDetail';
 import { quotaLinksFor, quotaNamesIn } from '../../../client/src/components/detail/quota-link';
 import { labelSelectorMatches, labelSelectorToString } from '../../../client/src/components/detail/selectors';
-import { UsedBySection, usedBySummary } from '../../../client/src/components/detail/UsedBySection';
+import { ReferencesSection, UsedBySection, usedBySummary } from '../../../client/src/components/detail/UsedBySection';
 import { makeSignalsLookup } from '../../../client/src/components/columns';
 import { tabSelection } from '../../../client/src/layout/TabHealthWatcher';
 import { currentShellTarget, openLocalShell } from '../../../client/src/local-shell';
@@ -21,12 +21,14 @@ import { useTabAttentionStore } from '../../../client/src/state/tab-attention';
 import { kubectlGetCommand } from '../../../client/src/kubectl-command';
 
 const queries = vi.hoisted(() => ({
-  usedBy: undefined as { items: UsedByEntry[]; unavailable: string[]; truncated: number } | undefined,
+  usedBy: undefined as { items: UsedByEntry[]; unavailable: string[]; partial?: string[]; truncated: number } | undefined,
+  references: undefined as { items: UsedByEntry[]; unavailable: string[] } | undefined,
   error: undefined as Error | undefined,
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useUsedBy: () => ({ data: queries.usedBy, isLoading: !queries.usedBy && !queries.error, isError: !!queries.error, error: queries.error }),
+  useReferences: () => ({ data: queries.references, isLoading: !queries.references && !queries.error, isError: !!queries.error, error: queries.error }),
 }));
 
 function entry(kind: string, name: string, relation: string, detail?: string, namespace = 'apps'): UsedByEntry {
@@ -35,6 +37,7 @@ function entry(kind: string, name: string, relation: string, detail?: string, na
 
 beforeEach(() => {
   queries.usedBy = undefined;
+  queries.references = undefined;
   queries.error = undefined;
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false, terminalFocusRequest: undefined, terminalReconnectRequests: {} });
@@ -75,6 +78,20 @@ describe('UsedBySection', () => {
     queries.error = new Error('forbidden');
     render(<UsedBySection target={target} />);
     expect(screen.getByText(/Could not resolve references: forbidden/)).toBeInTheDocument();
+  });
+
+  it('shows kinds still being indexed and, for forward references, dangling targets without a link', () => {
+    queries.usedBy = { items: [entry('TopoLink', 'a', 'references', 'spec.links.local.node')], unavailable: [], partial: ['Interface', 'TopoLink', 'Fabric', 'Router'], truncated: 0 };
+    render(<UsedBySection target={target} />);
+    expect(screen.getByText('Still reading Interfaces, TopoLinks, Fabrics and 1 more kinds…')).toBeInTheDocument();
+
+    queries.references = { items: [entry('TopoNode', 'l001', 'references', 'spec.links.local.node'), { ...entry('TopoNode', 'ghost', 'references', 'spec.links.remote.node'), missing: true }], unavailable: [] };
+    render(<ReferencesSection target={{ ...target, kind: 'TopoLink' }} />);
+    expect(screen.getByRole('button', { name: 'l001' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'ghost' })).not.toBeInTheDocument();
+    expect(screen.getByText('ghost')).toBeInTheDocument();
+    expect(screen.getByText('not found')).toBeInTheDocument();
+    expect(screen.getAllByText('2 TopoNodes')).not.toHaveLength(0);
   });
 
   it('restricts to the requested kinds', () => {

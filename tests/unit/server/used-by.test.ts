@@ -1,7 +1,9 @@
 import type { KubeObject } from '@kubus/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClusterHandle } from '../../../server/src/kube/cluster-manager';
-import { collectMapSelectors, computeUsedBy, customCandidates, groupFamily, labelSelectorMatches, podSpecRelations, selectableLabels } from '../../../server/src/kube/used-by';
+import type { DigestEntry, DigestLookup, IndexedKindSpec } from '../../../server/src/kube/reference-index';
+import { createPathFilter, digestObject, kindVocabulary } from '../../../server/src/kube/relation-hints';
+import { BUILTIN_REFERENCE_KINDS, computeUsedBy, customCandidates, digestRelations, groupFamily, labelSelectorMatches, podSpecRelations, selectableLabels } from '../../../server/src/kube/used-by';
 
 function obj(kind: string, name: string, namespace: string | undefined, spec: Record<string, unknown> = {}, extra: Record<string, unknown> = {}): KubeObject {
   return { apiVersion: 'v1', kind, metadata: { name, namespace, uid: `${kind}-${name}` }, spec, ...extra } as KubeObject;
@@ -48,6 +50,9 @@ function handleWith(lists: Record<string, KubeObject[]>, opts: { unavailable?: s
         release: () => released.push(`${group}/${version}/${plural}`),
       }),
     },
+    // No custom kinds installed: the indexes have nothing to say.
+    searchIndex: { warm: () => undefined, customKindsLive: () => false, isLive: () => false, entriesForKind: () => [], liveEntries: () => [] },
+    referenceIndex: { setVocabulary: () => undefined, lookup: async () => ({ entries: [], ready: true, unavailable: false }) },
     released,
   } as unknown as ClusterHandle;
 }
@@ -208,7 +213,7 @@ describe('computeUsedBy', () => {
 
   it('returns nothing for kinds without reverse links and only consults the CRD catalog', async () => {
     const handle = handleWith({});
-    expect(await computeUsedBy(handle, { kind: 'Namespace', name: 'apps' })).toEqual({ items: [], unavailable: [], truncated: 0 });
+    expect(await computeUsedBy(handle, { kind: 'Namespace', name: 'apps' })).toEqual({ items: [], unavailable: [], truncated: 0, partial: undefined, scanMs: undefined });
     expect((handle as unknown as { released: string[] }).released).toEqual(['apiextensions.k8s.io/v1/customresourcedefinitions']);
     const acquire = vi.fn();
     const bare = { contextName: 'kind-a', discovery: { getResources: async () => [] }, watchers: { acquire } } as unknown as ClusterHandle;
@@ -275,37 +280,56 @@ function cr(kind: string, name: string, namespace: string | undefined, spec: Rec
   return { metadata: { name, namespace, uid: `${kind}-${name}`, labels }, spec } as KubeObject;
 }
 
-/** A handle with warm caches for some plurals and paged LISTs (via raw.json) for the rest. */
-function customHandle(live: Record<string, KubeObject[]>, listed: Record<string, KubeObject[]>, opts: { forbidden?: string[] } = {}) {
-  const requests: string[] = [];
+const VOCABULARY = kindVocabulary([...CRDS.map((crd) => (crd.spec as { names: { kind: string } }).names.kind), ...BUILTIN_REFERENCE_KINDS]);
+
+function digestEntry(obj: KubeObject): DigestEntry {
+  return { name: obj.metadata.name, namespace: obj.metadata.namespace, uid: obj.metadata.uid, labels: obj.metadata.labels, digest: digestObject(obj, createPathFilter(VOCABULARY)) };
+}
+
+/**
+ * A handle whose reference index answers from canned objects per plural
+ * (digested the way the real index digests them) and whose search index is
+ * either live with the same objects' metadata or absent.
+ */
+function customHandle(objects: Record<string, KubeObject[]>, opts: { indexLive?: boolean; pending?: string[]; forbidden?: string[]; indexedPlurals?: string[] } = {}) {
+  const lookups: string[] = [];
+  const kindInfo = (plural: string) => {
+    const crd = CRDS.find((c) => (c.spec as { names: { plural: string } }).names.plural === plural)!;
+    const spec = crd.spec as { group: string; scope: string; names: { kind: string; plural: string } };
+    return { group: spec.group, version: 'v1', plural, kind: spec.names.kind, namespaced: spec.scope === 'Namespaced', verbs: ['list'], custom: true };
+  };
+  const indexed = opts.indexedPlurals ?? Object.keys(objects);
   const handle = {
     contextName: 'eda',
     discovery: { getResources: async () => [] },
     watchers: {
       acquire: (_g: string, _v: string, plural: string) => ({
-        watcher: { ready: async () => undefined, items: () => (plural === 'customresourcedefinitions' ? CRDS : (live[plural] ?? [])), currentState: () => 'live' },
+        watcher: { ready: async () => undefined, items: () => (plural === 'customresourcedefinitions' ? CRDS : []), currentState: () => 'live' },
         release: () => undefined,
       }),
-      peek: (_g: string, _v: string, plural: string) => (live[plural] ? { currentState: () => 'live', items: () => live[plural] } : undefined),
+      peek: () => undefined,
     },
-    raw: {
-      json: async (path: string) => {
-        requests.push(path);
-        const url = new URL(path, 'http://k8s');
-        const plural = url.pathname.split('/').at(-1)!;
-        if (opts.forbidden?.includes(plural)) throw Object.assign(new Error('forbidden'), { code: 403 });
-        const limit = Number(url.searchParams.get('limit'));
-        const start = Number(url.searchParams.get('continue') ?? 0);
-        const all = listed[plural] ?? [];
-        const items = all.slice(start, start + limit);
-        return { items, metadata: { continue: start + limit < all.length ? String(start + limit) : '' } };
+    searchIndex: {
+      warm: () => undefined,
+      customKindsLive: () => !!opts.indexLive,
+      isLive: (_group: string, plural: string) => !!opts.indexLive && indexed.includes(plural),
+      entriesForKind: (_group: string, plural: string) => (indexed.includes(plural) ? (objects[plural] ?? []).map((o) => ({ kind: kindInfo(plural), name: o.metadata.name, namespace: o.metadata.namespace, uid: o.metadata.uid, labels: o.metadata.labels })) : []),
+      liveEntries: () => indexed.flatMap((plural) => (objects[plural] ?? []).map((o) => ({ kind: kindInfo(plural), name: o.metadata.name, namespace: o.metadata.namespace, uid: o.metadata.uid, labels: o.metadata.labels }))),
+    },
+    referenceIndex: {
+      setVocabulary: () => undefined,
+      lookup: async (spec: IndexedKindSpec): Promise<DigestLookup> => {
+        lookups.push(spec.plural);
+        if (opts.forbidden?.includes(spec.plural)) return { entries: [], ready: true, unavailable: true };
+        if (opts.pending?.includes(spec.plural)) return { entries: [], ready: false, unavailable: false };
+        return { entries: (objects[spec.plural] ?? []).map(digestEntry), ready: true, unavailable: false };
       },
     },
   } as unknown as ClusterHandle;
-  return { handle, requests };
+  return { handle, lookups };
 }
 
-describe('customCandidates / collectMapSelectors', () => {
+describe('customCandidates', () => {
   it('ranks kinds by how their schema names the target kind, drops head-word matches from unrelated groups, keeps the whole own group', () => {
     const forNode = customCandidates(CRDS, { kind: 'TopoNode', name: 'l001', group: EDA, plural: 'toponodes' });
     // Own group with a `node` spec field, then the example.com family, then the rest of the group; the storage driver's nodeID is not about TopoNodes.
@@ -315,52 +339,65 @@ describe('customCandidates / collectMapSelectors', () => {
     const audit = withStatus.at(-1)!;
     (audit.spec as { versions: Array<{ schema: { openAPIV3Schema: unknown } }> }).versions[1]!.schema.openAPIV3Schema = object({ spec: object({ note: string }), status: object({ node: string }) });
     expect(customCandidates(withStatus, { kind: 'TopoNode', name: 'l001', group: EDA, plural: 'toponodes' }).map((c) => c.kind)).toEqual(['Fabric', 'Interface', 'TopoLink', 'TopoNode', 'Report', 'Audit', 'NodeProfile']);
+    // With labels answered by the search index, the label-only rest of the group is not scanned.
+    expect(customCandidates(CRDS, { kind: 'TopoNode', name: 'l001', group: EDA, plural: 'toponodes' }, [], { labelsFromIndex: true }).map((c) => c.kind)).toEqual(['Fabric', 'Interface', 'TopoLink', 'TopoNode', 'Report']);
     expect(customCandidates(CRDS, { kind: 'NodeProfile', name: 'p', group: EDA, plural: 'nodeprofiles' }).map((c) => c.kind)).toEqual(['TopoNode', 'Fabric', 'Interface', 'NodeProfile', 'TopoLink']);
     // A builtin Secret is spelled out by the storage driver's secretName.
     expect(customCandidates(CRDS, { kind: 'Secret', name: 's', group: '', plural: 'secrets' }).map((c) => c.kind)).toEqual(['Volume']);
     expect(groupFamily('interfaces.eda.nokia.com')).toBe('eda.nokia.com');
     expect(groupFamily('longhorn.io')).toBe('longhorn.io');
-    expect(forNode.find((c) => c.kind === 'Report')).toMatchObject({ version: 'v1', namespaced: false });
     const forVn = customCandidates(CRDS, { kind: 'VirtualNetwork', name: 'vn-a', group: 'services.example.com', plural: 'virtualnetworks' });
     expect(forVn.map((c) => c.kind)).toEqual(['VirtualNetwork', 'VLAN']);
     // Kinds the builtin matchers already cover are not scanned twice.
     expect(customCandidates(CRDS, { kind: 'TopoNode', name: 'l001', group: EDA, plural: 'toponodes' }, [{ group: EDA, version: 'v1', plural: 'fabrics', kind: 'Fabric', namespaced: true }]).map((c) => c.kind)).not.toContain('Fabric');
   });
+});
 
-  it('finds map-shaped selectors and leaves lists and scalars alone', () => {
-    expect(collectMapSelectors({ spec: { podSelector: { matchLabels: { app: 'web' } }, selector: { tier: 'db' }, nodeSelector: ['role=leaf'], deep: [{ endpointSelector: { matchLabels: {} } }] } })).toEqual([
-      { path: 'spec.podSelector.matchLabels', selector: { app: 'web' } },
-      { path: 'spec.selector', selector: { tier: 'db' } },
-    ]);
+describe('digestRelations', () => {
+  const rivals = CRDS.map((c) => (c.spec as { names: { kind: string; plural: string } }).names);
+  const target = { kind: 'TopoNode', name: 'l001', namespace: 'eda', group: EDA, plural: 'toponodes', uid: 'TopoNode-l001', labels: { role: 'leaf' } };
+
+  it('matches names in kind-naming fields, selectors against labels and labels keyed after the kind, within scope', () => {
+    expect(digestRelations(digestEntry(cr('TopoLink', 'a', 'eda', { links: [{ local: { node: 'l001' } }] })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.links.local.node' }]);
+    // A field that names another kind better (nodeProfile → NodeProfile) is not a TopoNode reference.
+    expect(digestRelations(digestEntry(cr('TopoNode', 'b', 'eda', { nodeProfile: 'l001' })), target, rivals)).toEqual([]);
+    // The object itself never lists itself.
+    expect(digestRelations(digestEntry(cr('TopoNode', 'l001', 'eda', { mirrorNode: 'l001' })), target, rivals)).toEqual([]);
+    expect(digestRelations(digestEntry(cr('Fabric', 'f', 'eda', { leafs: { leafNodeSelectors: ['role=leaf'] } })), target, rivals)).toEqual([{ relation: 'selects', detail: 'spec.leafs.leafNodeSelectors' }]);
+    expect(digestRelations(digestEntry(cr('Fabric', 'f', 'eda', { leafs: { leafNodeSelectors: ['role=spine'] } })), target, rivals)).toEqual([]);
+    // Another namespace is out of scope unless the reference names the namespace or the kind is cluster-scoped.
+    expect(digestRelations(digestEntry(cr('TopoLink', 'far', 'other', { links: [{ local: { node: 'l001' } }] })), target, rivals)).toEqual([]);
+    expect(digestRelations(digestEntry(cr('TopoLink', 'typed', 'other', { peer: { kind: 'TopoNode', name: 'l001', namespace: 'eda' } })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.peer.name' }]);
+    expect(digestRelations(digestEntry(cr('Report', 'daily', undefined, { node: 'l001' })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.node' }]);
+    const labeled = digestEntry(cr('VLAN', 'v', 'svc', { bridgeDomain: 'bd' }, { 'services.example.com/virtualnetwork': 'vn-a' }));
+    const vn = { kind: 'VirtualNetwork', name: 'vn-a', namespace: 'svc', group: 'services.example.com', plural: 'virtualnetworks' };
+    expect(digestRelations(labeled, vn, rivals)).toEqual([{ relation: 'labeled', detail: 'services.example.com/virtualnetwork' }]);
+    expect(digestRelations(labeled, vn, rivals, { labels: false })).toEqual([]);
   });
 });
 
 describe('computeUsedBy for custom kinds', () => {
   const target = { kind: 'TopoNode', name: 'l001', namespace: 'eda', group: EDA, plural: 'toponodes', uid: 'TopoNode-l001', labels: { role: 'leaf' } };
+  const objects = {
+    fabrics: [cr('Fabric', 'fab1', 'eda', { leafs: { leafNodeSelectors: ['role=leaf'] } }), cr('Fabric', 'spines', 'eda', { leafs: { leafNodeSelectors: ['role=spine'] } })],
+    topolinks: [
+      cr('TopoLink', 'l001-l002', 'eda', { links: [{ local: { node: 'l001', interfaceResource: 'l001-e1' } }] }),
+      cr('TopoLink', 'l002-l003', 'eda', { links: [{ local: { node: 'l002' } }] }),
+      cr('TopoLink', 'far', 'other', { links: [{ local: { node: 'l001' } }] }),
+    ],
+    toponodes: [cr('TopoNode', 'l001', 'eda', { mirrorNode: 'l001' }, { role: 'leaf' }), cr('TopoNode', 'l002', 'eda', { nodeProfile: 'l001' }), cr('TopoNode', 'l003', 'eda', { mirrorNode: 'l001' })],
+    interfaces: [cr('Interface', 'l001-e1', 'eda', { members: [{ node: 'l001', interface: 'ethernet-1/1' }] })],
+    nodeprofiles: [cr('NodeProfile', 'p', 'eda', { yang: 'x' }, { 'core.example.com/toponode': 'l001' })],
+    reports: [cr('Report', 'daily', undefined, { node: 'l001', nodeCount: '5' })],
+  };
 
-  it('lists name references, label selectors and inline selectors, paging kinds without a warm cache', async () => {
-    const { handle, requests } = customHandle(
-      { fabrics: [cr('Fabric', 'fab1', 'eda', { leafs: { leafNodeSelectors: ['role=leaf'] } }), cr('Fabric', 'spines', 'eda', { leafs: { leafNodeSelectors: ['role=spine'] } })] },
-      {
-        topolinks: [
-          cr('TopoLink', 'l001-l002', 'eda', { links: [{ local: { node: 'l001', interfaceResource: 'l001-e1' } }] }),
-          cr('TopoLink', 'l002-l003', 'eda', { links: [{ local: { node: 'l002' } }] }),
-          cr('TopoLink', 'far', 'other', { links: [{ local: { node: 'l001' } }] }),
-        ],
-        toponodes: [
-          cr('TopoNode', 'l001', 'eda', { mirrorNode: 'l001' }, { role: 'leaf' }),
-          cr('TopoNode', 'l002', 'eda', { nodeProfile: 'l001' }),
-          cr('TopoNode', 'l003', 'eda', { mirrorNode: 'l001' }),
-        ],
-        interfaces: [cr('Interface', 'l001-e1', 'eda', { members: [{ node: 'l001', interface: 'ethernet-1/1' }] })],
-        nodeprofiles: [],
-        reports: [cr('Report', 'daily', undefined, { node: 'l001', nodeCount: '5' })],
-      },
-    );
-    const result = await computeUsedBy(handle, target, { pageSize: 2 });
+  it('lists name references, selectors and labels from the digests when no search index is live', async () => {
+    const { handle, lookups } = customHandle(objects);
+    const result = await computeUsedBy(handle, target);
     expect(result.items.map((i) => `${i.ref.kind}/${i.ref.namespace ?? '-'}/${i.ref.name}: ${i.relation} [${i.detail}]`)).toEqual([
       'Fabric/eda/fab1: selects [spec.leafs.leafNodeSelectors]',
       'Interface/eda/l001-e1: references [spec.members.node]',
+      'NodeProfile/eda/p: labeled [core.example.com/toponode]',
       'Report/-/daily: references [spec.node]',
       'TopoLink/eda/l001-l002: references [spec.links.local.node]',
       'TopoNode/eda/l003: references [spec.mirrorNode]',
@@ -368,46 +405,36 @@ describe('computeUsedBy for custom kinds', () => {
     expect(result.items[0]?.ref).toMatchObject({ ctx: 'eda', group: EDA, version: 'v1', plural: 'fabrics', namespace: 'eda' });
     expect(result.unavailable).toEqual([]);
     expect(result.partial).toBeUndefined();
-    // Warm caches are not re-listed; cold namespaced kinds page through the target namespace only.
-    expect(requests.filter((r) => r.includes('/fabrics'))).toEqual([]);
-    expect(requests.filter((r) => r.includes('/topolinks'))).toEqual([
-      '/apis/core.example.com/v1/namespaces/eda/topolinks?limit=2',
-      '/apis/core.example.com/v1/namespaces/eda/topolinks?limit=2&continue=2',
+    expect(result.scanMs).toBeGreaterThanOrEqual(0);
+    // Every candidate kind was consulted, the label-only rest of the group included.
+    expect(lookups.sort()).toEqual(['fabrics', 'interfaces', 'nodeprofiles', 'reports', 'topolinks', 'toponodes']);
+  });
+
+  it('takes labels from a live search index, skips kinds it knows are empty in scope and merges both answers per object', async () => {
+    const { handle, lookups } = customHandle({ ...objects, topolinks: [...objects.topolinks, cr('TopoLink', 'both', 'eda', { links: [{ local: { node: 'l001' } }] }, { 'core.example.com/toponode': 'l001' })] }, { indexLive: true });
+    const result = await computeUsedBy(handle, target);
+    expect(result.items.map((i) => `${i.ref.kind}/${i.ref.name}: ${i.relation} [${i.detail}]`)).toEqual([
+      'Fabric/fab1: selects [spec.leafs.leafNodeSelectors]',
+      'Interface/l001-e1: references [spec.members.node]',
+      'NodeProfile/p: labeled [core.example.com/toponode]',
+      'Report/daily: references [spec.node]',
+      'TopoLink/both: labeled · references [core.example.com/toponode, spec.links.local.node]',
+      'TopoLink/l001-l002: references [spec.links.local.node]',
+      'TopoNode/l003: references [spec.mirrorNode]',
     ]);
-    expect(requests.filter((r) => r.includes('/reports'))).toEqual(['/apis/other.example.com/v1/reports?limit=2']);
+    // NodeProfile has no schema mention and its labels came from the index, so its digests were never built.
+    expect(lookups.sort()).toEqual(['fabrics', 'interfaces', 'reports', 'topolinks', 'toponodes']);
+    // A kind with nothing in the target's namespace is not consulted either.
+    const { handle: sparse, lookups: sparseLookups } = customHandle({ ...objects, interfaces: [cr('Interface', 'elsewhere', 'other', { members: [{ node: 'l001' }] })] }, { indexLive: true });
+    await computeUsedBy(sparse, target);
+    expect(sparseLookups).not.toContain('interfaces');
   });
 
-  it('labels and annotations keyed after the kind count as references', async () => {
-    const { handle } = customHandle(
-      {},
-      {
-        vlans: [
-          cr('VLAN', 'vlan-10', 'svc', { bridgeDomain: 'bd-a' }, { 'services.example.com/virtualnetwork': 'vn-a' }),
-          cr('VLAN', 'vlan-20', 'svc', { bridgeDomain: 'bd-b' }, { 'services.example.com/virtualnetwork': 'vn-b' }),
-        ],
-        virtualnetworks: [cr('VirtualNetwork', 'vn-a', 'svc', { vlans: [{ name: 'vlan-10' }] })],
-      },
-    );
-    const result = await computeUsedBy(handle, { kind: 'VirtualNetwork', name: 'vn-a', namespace: 'svc', group: 'services.example.com', plural: 'virtualnetworks', uid: 'VirtualNetwork-vn-a' });
-    expect(result.items.map((i) => `${i.ref.kind}/${i.ref.name}: ${i.relation} [${i.detail}]`)).toEqual(['VLAN/vlan-10: labeled [services.example.com/virtualnetwork]']);
-  });
-
-  it('reports kinds it could not read and kinds it stopped scanning early', async () => {
-    const { handle, requests } = customHandle(
-      {},
-      {
-        topolinks: Array.from({ length: 5 }, (_, i) => cr('TopoLink', `link-${i}`, 'eda', { links: [{ local: { node: 'l001' } }] })),
-        toponodes: [],
-        interfaces: [],
-        nodeprofiles: [],
-        reports: [],
-      },
-      { forbidden: ['interfaces'] },
-    );
-    const result = await computeUsedBy(handle, target, { pageSize: 2, scanLimit: 2 });
+  it('reports kinds it could not read and kinds whose index is still being built', async () => {
+    const { handle } = customHandle(objects, { forbidden: ['interfaces'], pending: ['topolinks'] });
+    const result = await computeUsedBy(handle, target, { timeBudgetMs: 50 });
     expect(result.unavailable).toEqual(['Interface']);
     expect(result.partial).toEqual(['TopoLink']);
-    expect(result.items).toHaveLength(2);
-    expect(requests.filter((r) => r.includes('/topolinks'))).toHaveLength(1);
+    expect(result.items.map((i) => i.ref.kind)).not.toContain('TopoLink');
   });
 });

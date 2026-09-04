@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { hintPath, kindHeadTerms, kindPathCoverage, pathNamesKind, relationPathScore, schemaKindMention, schemaMentionsKind, tokens } from '../../../server/src/kube/relation-hints';
+import {
+  collectMapSelectors,
+  createPathFilter,
+  descriptionNamesKind,
+  digestObject,
+  hintPath,
+  kindHeadTerms,
+  kindPathCoverage,
+  kindVocabulary,
+  looksLikeName,
+  pathNamesKind,
+  referencePath,
+  relationPathScore,
+  schemaFieldDescription,
+  schemaKindMention,
+  schemaMentionsKind,
+  textNamesKind,
+  tokens,
+} from '../../../server/src/kube/relation-hints';
 
 describe('relation hints', () => {
   it('tokenizes camel case, dotted paths and label keys, singularized and without filler words', () => {
@@ -29,8 +47,90 @@ describe('relation hints', () => {
     );
     expect(relationPathScore({ path: 'spec.targetRef.name', value: 'x', referenceKind: 'TopoNode' }, { kind: 'TopoNode', plural: 'toponodes' })).toBeGreaterThanOrEqual(100);
     expect(relationPathScore({ path: 'spec.nodeRef.name', value: 'x', referenceKind: 'Node' }, { kind: 'TopoNode', plural: 'toponodes' })).toBe(0);
-    // Generic leaves never count on their own.
+    // Generic leaves never count on their own, but a `name` leaf defers to its parent.
     expect(relationPathScore({ path: 'spec.node.kind', value: 'x' }, { kind: 'TopoNode', plural: 'toponodes' })).toBe(0);
+    expect(relationPathScore({ path: 'spec.secretRef.name', value: 'x' }, { kind: 'Secret', plural: 'secrets' })).toBeGreaterThan(0);
+    expect(relationPathScore({ path: 'metadata.name', value: 'x' }, { kind: 'Secret', plural: 'secrets' })).toBe(0);
+    expect(referencePath('spec.links[0].local.node')).toBe('spec.links[0].local.node');
+    expect(referencePath('spec.configMapRef.name')).toBe('spec.configMapRef');
+    expect(referencePath('name')).toBeUndefined();
+    expect(referencePath('spec.node.namespace')).toBeUndefined();
+    expect(pathNamesKind('spec.configMapRef.name', 'ConfigMap')).toBe(true);
+  });
+
+  it('finds map-shaped selectors and leaves lists and scalars alone', () => {
+    expect(collectMapSelectors({ spec: { podSelector: { matchLabels: { app: 'web' } }, selector: { tier: 'db' }, nodeSelector: ['role=leaf'], deep: [{ endpointSelector: { matchLabels: {} } }] } })).toEqual([
+      { path: 'spec.podSelector.matchLabels', selector: { app: 'web' } },
+      { path: 'spec.selector', selector: { tier: 'db' } },
+    ]);
+  });
+
+  it('digests an object down to the fields that can name a known kind, plus selectors', () => {
+    const namesKind = createPathFilter(kindVocabulary(['TopoNode', 'Interface', 'Secret']));
+    const digest = digestObject(
+      {
+        metadata: { name: 'link', uid: 'u' },
+        spec: {
+          description: 'uplink',
+          links: [{ local: { node: 'l001', interfaceResource: 'l001-e1', speed: '100G' }, remote: { node: 's001', kind: 'TopoNode', namespace: 'eda' } }],
+          nodeType: 'SIMPLE',
+          nodeSelectors: ['role=leaf'],
+          podSelector: { matchLabels: { app: 'x' } },
+          secretRef: { name: 'db' },
+        },
+        status: { health: 'up', members: [{ node: 'l001' }] },
+      },
+      namesKind,
+    );
+    expect(digest.hints).toEqual([
+      { path: 'spec.links[0].local.node', value: 'l001' },
+      { path: 'spec.links[0].local.interfaceResource', value: 'l001-e1' },
+      { path: 'spec.links[0].remote.node', value: 's001', referenceKind: 'TopoNode', referenceNamespace: 'eda' },
+      // The `kind` leaf itself is dropped: `TopoNode` is not a name.
+      { path: 'spec.links[0].remote.namespace', value: 'eda', referenceKind: 'TopoNode', referenceNamespace: 'eda' },
+      { path: 'spec.secretRef.name', value: 'db' },
+      { path: 'status.members[0].node', value: 'l001' },
+    ]);
+    expect(digest.selectors).toEqual([{ path: 'spec.nodeSelectors[0]', selector: { role: 'leaf' } }]);
+    // Values that cannot be object names (enums, versions with spaces) never make it into a digest.
+    expect(digest.hints.some((h) => h.value === 'SIMPLE')).toBe(false);
+    expect(looksLikeName('demo-bd-a')).toBe(true);
+    expect(looksLikeName('srlinux-ghcr-25.7.1')).toBe(true);
+    expect(looksLikeName('SIMPLE')).toBe(false);
+    expect(looksLikeName('7220 IXR-H2')).toBe(false);
+    expect(looksLikeName('-bad')).toBe(false);
+    // The memo answers the same path shape without re-tokenizing.
+    expect(namesKind('spec.links[7].local.node')).toBe(true);
+    expect(namesKind('spec.description')).toBe(false);
+  });
+
+  it('reads a field description out of a CRD schema and recognizes kinds named in prose', () => {
+    const object = (properties: Record<string, unknown>, description?: string) => ({ type: 'object', properties, ...(description ? { description } : {}) });
+    const schema = object({
+      spec: object({
+        links: { type: 'array', description: 'Links of this topology.', items: object({ local: object({ node: { type: 'string', description: 'Reference to a TopoNode.' } }) }) },
+        leafNodeSelectors: { type: 'array', description: 'Label selector used to select Toponodes.', items: { type: 'string' } },
+      }),
+    });
+    expect(schemaFieldDescription(schema, 'spec.links[0].local.node')).toBe('Reference to a TopoNode.');
+    expect(schemaFieldDescription(schema, 'spec.leafNodeSelectors[2]')).toBe('Label selector used to select Toponodes.');
+    expect(schemaFieldDescription(schema, 'spec.links[0].remote.node')).toBe('Links of this topology.');
+    expect(schemaFieldDescription(undefined, 'spec.x')).toBeUndefined();
+    expect(textNamesKind('Reference to a TopoNode.', 'TopoNode')).toBe(true);
+    expect(textNamesKind('Label selector used to select Toponodes.', 'TopoNode')).toBe(true);
+    expect(textNamesKind('Reference to an Interface object.', 'Interface')).toBe(true);
+    expect(textNamesKind('Interfaces to configure.', 'Interface')).toBe(true);
+    // Short single words are everyday nouns, not kind names, and single-word kinds must be written as kinds.
+    expect(textNamesKind('Node name.', 'Node')).toBe(false);
+    expect(textNamesKind('The interface speed.', 'TopoNode')).toBe(false);
+    expect(textNamesKind('The interface speed.', 'Interface')).toBe(false);
+    expect(textNamesKind('Protocol to use for the service.', 'Service')).toBe(false);
+    // A description is a reference only when it says so.
+    expect(descriptionNamesKind('Reference to a TopoNode.', 'TopoNode')).toBe(true);
+    expect(descriptionNamesKind('Label selector used to select Toponodes.', 'TopoNode')).toBe(true);
+    expect(descriptionNamesKind('Name of the NodeProfile to use.', 'NodeProfile')).toBe(true);
+    expect(descriptionNamesKind('Platform of the TopoNode.', 'TopoNode')).toBe(false);
+    expect(descriptionNamesKind('Description of the Interface.', 'Interface')).toBe(false);
   });
 
   it('counts how many words of a path a kind covers, so a one-word kind never outranks the kind it heads', () => {

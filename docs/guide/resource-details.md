@@ -74,13 +74,18 @@ overview also answers the other question, *who depends on this*:
   secret, granted by a binding).
   A Secret that says "mounted by 3 Deployments and a CronJob" before you edit it is the
   point.
-- **Used by** on custom resources works the same way without any hand-written
-  matcher. Kubus reads the CRD schemas installed in the cluster, picks the kinds
-  whose fields are named after the object's kind (plus every kind of the same API
-  group), and lists the objects that name it, select it by label, or carry its name
-  in a label. A network operator's node shows the links, interfaces and fabrics built
-  on it; a parent object shows the children the operator tagged with its name. Kinds
-  too large to read within the request budget say so under the list.
+- **References** and **Used by** on custom resources work without any hand-written
+  matcher. References lists everything the object points at: each field whose name,
+  or whose description in the CRD schema, names an installed kind is resolved to that
+  object, selectors are resolved against labels, and a reference to something that
+  does not exist is shown as not found. Used by is the other direction: the objects
+  that name this one, select it by label, or carry its name in a label. A network
+  operator's node shows the links, interfaces and fabrics built on it; a parent object
+  shows the children the operator tagged with its name.
+- The first Used by lookup of a kind reads it once and keeps a live digest of the
+  fields that can name other objects, so every later lookup, for any object, answers
+  from memory within a fraction of a second. Kinds still being read when the answer
+  is sent say so under the list and fill in on the next refresh.
 - **Routed by** on a Service lists the Ingresses and Gateway API routes that send
   traffic to it, with their hosts and paths.
 - **Selected by** on a Pod or Deployment lists the Services, autoscalers,

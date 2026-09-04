@@ -29,6 +29,7 @@ export interface IndexedResourceSearchEntry {
   namespace?: string;
   uid?: string;
   labelsText?: string;
+  labels?: Record<string, string>;
 }
 
 interface Metadata {
@@ -264,6 +265,54 @@ export class ResourceSearchIndex {
     return this.refreshCustomEntries(kinds, signature);
   }
 
+  /**
+   * Whether custom kinds are kept current by live watches. Reference lookups
+   * use the index for names and labels when this holds and read the objects
+   * themselves otherwise.
+   */
+  customKindsLive(): boolean {
+    return this.started && this.multiplexed && !this.disposed;
+  }
+
+  /** Whether one kind has been listed and is being watched, so its entries are complete. */
+  isLive(group: string, plural: string): boolean {
+    const state = this.stateFor(group, plural);
+    return !!state && state.running && !state.unavailable && !!state.rv;
+  }
+
+  /** Current entries of one kind; empty when the kind is not indexed. */
+  entriesForKind(group: string, plural: string): IndexedResourceSearchEntry[] {
+    const state = this.stateFor(group, plural);
+    if (!state) return [];
+    const out: IndexedResourceSearchEntry[] = [];
+    for (const id of state.entryIds) {
+      const entry = this.entriesById.get(id);
+      if (entry) out.push(entry);
+    }
+    return out;
+  }
+
+  /** One object by name, from the live index. */
+  lookup(group: string, plural: string, namespace: string | undefined, name: string): IndexedResourceSearchEntry | undefined {
+    const state = this.stateFor(group, plural);
+    if (!state) return undefined;
+    const id = this.idByNameKey.get(`${state.key}|${namespace ?? ''}|${name}`);
+    return id ? this.entriesById.get(id) : undefined;
+  }
+
+  /** Everything indexed so far, without waiting for a reconcile in flight. */
+  liveEntries(): IndexedResourceSearchEntry[] {
+    this.entriesSnapshot ??= [...this.entriesById.values()];
+    return this.entriesSnapshot;
+  }
+
+  private stateFor(group: string, plural: string): IndexedKindState | undefined {
+    for (const state of this.kinds.values()) {
+      if (state.kind.group === group && state.kind.plural === plural) return state;
+    }
+    return undefined;
+  }
+
   /** CRD discovery changed; force the next search to rebuild its custom snapshot. */
   invalidateCustomEntries(): void {
     this.customCache = undefined;
@@ -463,6 +512,7 @@ export class ResourceSearchIndex {
             namespace: metadata.namespace,
             uid: metadata.uid,
             labelsText: labelsText(metadata.labels),
+            labels: metadata.labels,
           });
         }
       } catch (err) {
@@ -509,6 +559,7 @@ export class ResourceSearchIndex {
       namespace: metadata.namespace,
       uid: metadata.uid,
       labelsText: labelsText(metadata.labels),
+      labels: metadata.labels,
     });
     this.idByNameKey.set(byName, id);
     state.entryIds.add(id);

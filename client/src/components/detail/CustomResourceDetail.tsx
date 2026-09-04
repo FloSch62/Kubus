@@ -9,7 +9,7 @@ import { statusLikeName } from '../../kube-display.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
 import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
-import { UsedBySection } from './UsedBySection.js';
+import { ReferencesSection, UsedBySection } from './UsedBySection.js';
 import { crdVersions } from './CrdDetail.js';
 
 interface StatusRow {
@@ -83,10 +83,10 @@ export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObje
       )}
       <ConditionsTable obj={obj} />
       {names && (
-        <UsedBySection
-          target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }}
-          emptyText={`Nothing references this ${obj.kind ?? names.kind}.`}
-        />
+        <>
+          <ReferencesSection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
+          <UsedBySection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
+        </>
       )}
       <MetadataSection obj={obj} ctx={ctx} />
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />

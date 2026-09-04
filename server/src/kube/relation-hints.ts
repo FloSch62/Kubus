@@ -129,6 +129,130 @@ export function hintPath(path: string): string {
   return path.replace(ARRAY_INDEX_RE, '');
 }
 
+const SELECTOR_KEY_RE = /(selector|matchLabels)$/i;
+
+/** Map-shaped selectors (`podSelector.matchLabels`, `spec.selector`) anywhere under a value. */
+export function collectMapSelectors(value: unknown, prefix = ''): Array<{ path: string; selector: Record<string, string> }> {
+  if (Array.isArray(value)) return value.flatMap((item, i) => collectMapSelectors(item, `${prefix}[${i}]`));
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  const out: Array<{ path: string; selector: Record<string, string> }> = [];
+  for (const [key, item] of Object.entries(record)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (SELECTOR_KEY_RE.test(key) && item && typeof item === 'object' && !Array.isArray(item)) {
+      const entries = Object.entries(item as Record<string, unknown>);
+      if (entries.length && entries.every(([, v]) => typeof v === 'string')) {
+        out.push({ path, selector: Object.fromEntries(entries) as Record<string, string> });
+        continue;
+      }
+    }
+    out.push(...collectMapSelectors(item, path));
+  }
+  return out;
+}
+
+/** What one object says about other objects: the fields that can name a kind, and its selectors. */
+export interface ReferenceDigest {
+  hints: RelationHint[];
+  selectors: Array<{ path: string; selector: Record<string, string> }>;
+}
+
+/**
+ * A memoized "does this field path name one of these kinds" test. Paths
+ * repeat across every object of a kind, so the tokenization runs once per
+ * distinct path instead of once per leaf of every object.
+ */
+export function createPathFilter(terms: Set<string>): (path: string) => boolean {
+  const memo = new Map<string, boolean>();
+  return (path) => {
+    const key = path.replace(ARRAY_INDEX_RE, '');
+    let hit = memo.get(key);
+    if (hit === undefined) {
+      hit = tokens(key).some((term) => terms.has(term));
+      memo.set(key, hit);
+    }
+    return hit;
+  };
+}
+
+/** The head words and full names of every kind, the vocabulary a path filter checks against. */
+export function kindVocabulary(kinds: Iterable<string>): Set<string> {
+  const terms = new Set<string>();
+  for (const kind of kinds) for (const term of kindHeadTerms(kind)) terms.add(term);
+  return terms;
+}
+
+const OBJECT_NAME_RE = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
+
+/** Whether a value can be an object name at all (a DNS subdomain): `SIMPLE`, `7220 IXR-H2` and `Null` cannot. */
+export function looksLikeName(value: string): boolean {
+  return OBJECT_NAME_RE.test(value);
+}
+
+/** Reduce an object to the hints that can name a known kind plus its selectors; everything else is dropped. */
+export function digestObject(obj: KubeObject, namesKind: (path: string) => boolean): ReferenceDigest {
+  const body = { spec: obj.spec, status: obj.status };
+  const hints: RelationHint[] = [];
+  const selectors: ReferenceDigest['selectors'] = [];
+  for (const hint of collectRelationHints(body)) {
+    if (hint.selector) {
+      if (namesKind(hint.path)) selectors.push({ path: hint.path, selector: hint.selector });
+      continue;
+    }
+    if (!looksLikeName(hint.value)) continue;
+    if (!hint.referenceKind && !namesKind(hint.path)) continue;
+    const kept: RelationHint = { path: hint.path, value: hint.value };
+    if (hint.referenceKind) kept.referenceKind = hint.referenceKind;
+    if (hint.referenceNamespace) kept.referenceNamespace = hint.referenceNamespace;
+    hints.push(kept);
+  }
+  for (const selector of collectMapSelectors(body)) {
+    if (namesKind(selector.path)) selectors.push(selector);
+  }
+  return { hints, selectors };
+}
+
+/**
+ * The description a CRD schema gives the field at a dotted path (array
+ * indices ignored). The description of the deepest property on the way is
+ * returned, so an array's description covers its items.
+ */
+export function schemaFieldDescription(schema: unknown, path: string): string | undefined {
+  let node = schema as { properties?: Record<string, unknown>; items?: unknown; description?: unknown } | undefined;
+  let description: string | undefined;
+  for (const segment of path.replace(ARRAY_INDEX_RE, '.[]').split('.').filter(Boolean)) {
+    if (!node || typeof node !== 'object') return description;
+    node = (segment === '[]' ? node.items : node.properties?.[segment]) as typeof node;
+    if (segment !== '[]' && typeof node?.description === 'string') description = node.description;
+  }
+  return description;
+}
+
+const NON_ALPHANUMERIC_ALL_RE = /[^a-z0-9]+/g;
+
+/**
+ * Whether prose names a kind: a multi-word kind anywhere in the text
+ * ("select Toponodes"), a single-word kind only as a whole word written the
+ * way the kind is ("Interface object", not "the interface speed") and only
+ * when it is long enough not to be an everyday noun ("Interface", not "Node").
+ */
+export function textNamesKind(text: string, kind: string): boolean {
+  if (tokens(kind).length > 1) return text.toLowerCase().replace(NON_ALPHANUMERIC_ALL_RE, '').includes(canonicalKind(kind));
+  if (kind.length < 6) return false;
+  return new RegExp(`\\b${kind}s?\\b`).test(text);
+}
+
+const REFERENCE_CUE_RE = /\b(refer(?:ence|ences|enced|s|ring)?|names? of|to use|used for|select(?:s|ed|or|ors)?|associated|object)\b/i;
+
+/**
+ * Whether a field description says the field points at a kind, as opposed
+ * to merely mentioning it: "Reference to a TopoNode" and "Label selector
+ * used to select Toponodes" do, "The version of the TopoNode" does not.
+ */
+export function descriptionNamesKind(description: string, kind: string): boolean {
+  return REFERENCE_CUE_RE.test(description) && textNamesKind(description, kind);
+}
+
 export function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
   return [
     ...Object.entries(obj.metadata.labels ?? {}).map(([key, value]) => ({ path: `metadata.labels.${key}`, value })),
@@ -150,11 +274,25 @@ export function canonicalKind(kind: string): string {
  * never count on their own.
  */
 export function relationPathScore(hint: RelationHint, target: { kind: string; plural: string }): number {
-  const leaf = hint.path.replace(ARRAY_INDEX_RE, '').split('.').at(-1)?.toLowerCase();
-  if (leaf && REFERENCE_CONTEXT_FIELDS.has(leaf)) return 0;
-  const pathScore = kindPathCoverage(hint.path, target) + (tokens(hint.path).includes(canonicalKind(target.kind)) ? 3 : 0);
+  const path = referencePath(hint.path);
+  if (path === undefined) return 0;
+  const pathScore = kindPathCoverage(path, target) + (tokens(path).includes(canonicalKind(target.kind)) ? 3 : 0);
   if (!hint.referenceKind) return pathScore;
   return canonicalKind(hint.referenceKind) === canonicalKind(target.kind) ? 100 + pathScore : 0;
+}
+
+/**
+ * The part of a field path that can name a kind: a trailing `name` leaf
+ * defers to its parent (`secretRef.name` names a Secret), while other
+ * context leaves (`kind`, `namespace`, `apiVersion`) name nothing themselves.
+ */
+export function referencePath(path: string): string | undefined {
+  const parts = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean);
+  const leaf = parts.at(-1)?.toLowerCase();
+  if (!leaf) return undefined;
+  if (leaf === 'name') return parts.length > 1 ? parts.slice(0, -1).join('.') : undefined;
+  if (REFERENCE_CONTEXT_FIELDS.has(leaf)) return undefined;
+  return path;
 }
 
 /**
@@ -193,10 +331,21 @@ export function kindHeadTerms(kind: string): Set<string> {
   return terms;
 }
 
-/** Whether a field path names the kind by its head word or full name. */
+/**
+ * The part of a path that decides which kind a field points at: its last
+ * segment when that segment names any kind at all (`interfaceResource` under
+ * `spec.links[]` is an Interface, not a TopoLink), the whole path otherwise.
+ */
+export function referenceScope(path: string, namesAnyKind: (segment: string) => boolean): string {
+  const full = referencePath(path) ?? path;
+  const leaf = full.split('.').at(-1) ?? full;
+  return namesAnyKind(leaf) ? leaf : full;
+}
+
+/** Whether a field path names the kind by its head word or full name (a trailing `name` leaf defers to its parent). */
 export function pathNamesKind(path: string, kind: string): boolean {
   const heads = kindHeadTerms(kind);
-  return tokens(path).some((term) => heads.has(term));
+  return tokens(referencePath(path) ?? '').some((term) => heads.has(term));
 }
 
 export interface SchemaMention {

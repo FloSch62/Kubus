@@ -627,13 +627,22 @@ export interface UsedByEntry {
   relation: string;
   /** Where the reference sits (container name, volume name, host/path, rule index). */
   detail?: string;
+  /** The referenced object does not exist: a dangling reference. */
+  missing?: boolean;
+}
+
+/** Everything one object points at, in the order its fields mention them. */
+export interface ReferencesResponse {
+  items: UsedByEntry[];
+  /** Kinds that could not be consulted (RBAC-denied or not installed). */
+  unavailable: string[];
 }
 
 export interface UsedByResponse {
   items: UsedByEntry[];
   /** Referencing kinds that could not be read (RBAC-denied or not installed). */
   unavailable: string[];
-  /** Kinds too large to scan completely; the listed entries cover only part of them. */
+  /** Kinds still being indexed for the first time; the answer completes on a later refresh. */
   partial?: string[];
   /** Wall-clock cost of the custom-kind scan, so clients poll heavy answers less often. */
   scanMs?: number;
