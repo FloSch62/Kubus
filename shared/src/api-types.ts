@@ -38,6 +38,15 @@ export type AppWindowDockTab =
       color?: string;
     }
   | {
+      kind: 'local-shell';
+      title: string;
+      ctx: string;
+      namespace?: string;
+      follow?: boolean;
+      pinned?: boolean;
+      color?: string;
+    }
+  | {
       kind: 'logs';
       title: string;
       ctx: string;
@@ -607,6 +616,50 @@ export interface TlsCertInfo {
 
 export interface SecretTlsResponse {
   certificates: TlsCertInfo[];
+}
+
+// ---- Reverse references ("Used by") ----
+
+/** One object that references the detail's object, with how it does so. */
+export interface UsedByEntry {
+  ref: ResourceRef;
+  /** Short relation word: "mounts", "env", "image pull secret", "routes to", "selects"… */
+  relation: string;
+  /** Where the reference sits (container name, volume name, host/path, rule index). */
+  detail?: string;
+}
+
+export interface UsedByResponse {
+  items: UsedByEntry[];
+  /** Referencing kinds that could not be read (RBAC-denied or not installed). */
+  unavailable: string[];
+  /** Entries dropped past the cap; the listed ones are the most useful subset. */
+  truncated: number;
+}
+
+// ---- Attention signals (warning markers on rows and tabs) ----
+
+/** Recent warning events and restarts for one object, from the cluster's event and pod caches. */
+export interface ObjectSignal {
+  /** Warning events in the window, deduped by reason. */
+  warnings: Array<{ reason: string; message: string; count: number; lastTimestamp?: string }>;
+  /** Pods only: container restarts in the window. */
+  restarts?: Array<{ container: string; restarts: number; reason?: string; finishedAt?: string }>;
+}
+
+export interface ClusterSignals {
+  /** Window the signals cover, in milliseconds. */
+  windowMs: number;
+  /** Keyed by `kind|namespace|name` (namespace empty for cluster-scoped kinds). */
+  objects: Record<string, ObjectSignal>;
+}
+
+// ---- Local terminal ----
+
+/** Text frames the local-shell client sends besides the exec control set. */
+export interface LocalShellContextRequest {
+  ctx: string;
+  namespace?: string;
 }
 
 // ---- Logs ----

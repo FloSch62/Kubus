@@ -21,6 +21,8 @@ import { useUiStore } from '../state/ui.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { toggleNavRail } from '../shortcuts.js';
 import { ShortcutHelpDialog } from '../components/ShortcutHelpDialog.js';
+import { openLocalShell } from '../local-shell.js';
+import LaptopOutlinedIcon from '@mui/icons-material/LaptopOutlined';
 import { ClusterSwitcher } from './ClusterSwitcher.js';
 import { NamespaceFilter } from './NamespaceFilter.js';
 
@@ -37,6 +39,7 @@ export const TopBar = memo(function TopBar() {
   const dockOpen = useDockStore((s) => s.open);
   const dockTabCount = useDockStore((s) => s.tabs.length);
   const setDockOpen = useDockStore((s) => s.setOpen);
+  const hasCluster = useClustersStore((s) => s.selected.length > 0);
   // Dialog open state lives in the ui store: the global shortcuts and the
   // command palette drive the same dialogs.
   const searchOpen = useUiStore((s) => s.searchOpen);
@@ -105,6 +108,13 @@ export const TopBar = memo(function TopBar() {
               <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          {hasCluster && (
+            <Tooltip title={`Open a terminal on this cluster (${HOTKEY_MOD_LABEL}\`)`}>
+              <IconButton size="small" aria-label="Open terminal" onClick={() => openLocalShell()}>
+                <LaptopOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
           {dockTabCount > 0 && (
             <Tooltip title={dockOpen ? `Hide dock (${HOTKEY_MOD_LABEL}J)` : `Show dock — ${dockTabCount} tabs (${HOTKEY_MOD_LABEL}J)`}>
               <IconButton size="small" aria-label={dockOpen ? 'Hide dock' : 'Show dock'} onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>

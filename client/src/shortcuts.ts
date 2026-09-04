@@ -6,8 +6,10 @@ import { NAV_OVERLAY_MEDIA_QUERY, useNavUiStore } from './state/nav-ui.js';
 import { useUiPrefsStore } from './state/prefs.js';
 import { useUiStore } from './state/ui.js';
 import { useTabsStore } from './state/tabs.js';
-import { useDockStore, type DockTab } from './state/dock.js';
+import { isShellTab, useDockStore, type DockTab } from './state/dock.js';
 import { useDetailStore } from './state/detail.js';
+import { openLocalShell } from './local-shell.js';
+import { registerAppNavigate } from './app-navigate.js';
 
 /** How long a pending `g` waits for its second key (the which-key panel shows meanwhile). */
 export const GO_TIMEOUT_MS = 3000;
@@ -57,7 +59,7 @@ export interface ShortcutRowDef {
 const MOD = MOD_KEY_LABEL;
 
 function isTerminalTab(tab: DockTab | undefined): boolean {
-  return tab?.kind === 'terminal' || tab?.kind === 'node-shell';
+  return isShellTab(tab);
 }
 
 /** Single source of truth for the cheatsheet — every binding below is wired here or next to its owner. */
@@ -70,6 +72,7 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
       { combos: [[MOD, 'B']], description: 'Toggle the navigation rail' },
       { combos: [[MOD, 'J']], description: 'Focus / hide the terminal · toggle the logs dock' },
       { combos: [['Alt', 'J']], description: 'Focus the terminal' },
+      { combos: [[MOD, '`']], description: 'Open a terminal on the current cluster (or focus the open one)' },
       { combos: [[MOD, ',']], description: 'Open settings' },
       { combos: [[MOD, '1–9']], description: 'Open pinned favorite 1–9' },
       { combos: [['Esc']], description: 'Close dialogs & menus · close the details panel · restore a maximized dock' },
@@ -165,6 +168,11 @@ export function GlobalShortcuts() {
   const navigate = useNavigate();
   const navRef = useRef(navigate);
   navRef.current = navigate;
+  // Helpers outside the router (store actions, dock windows) navigate through this.
+  useEffect(() => {
+    registerAppNavigate(navigate);
+    return () => registerAppNavigate(undefined);
+  }, [navigate]);
 
   useEffect(() => {
     // Where focus should return when Cmd/Ctrl+J hides the terminal. Kept
@@ -292,6 +300,17 @@ export function GlobalShortcuts() {
         if (e.key === ',' && !isTextEntryTarget(e.target)) {
           e.preventDefault();
           useUiStore.getState().setSettingsOpen(true);
+          return;
+        }
+        // Backquote: the terminal chord editors use. Physical key so it works
+        // on layouts where the character sits elsewhere.
+        if (e.code === 'Backquote' && !isEditorOrTerminalTarget(e.target)) {
+          e.preventDefault();
+          if (e.repeat) return;
+          const dock = useDockStore.getState();
+          const existing = dock.tabs.find((tab) => tab.kind === 'local-shell');
+          if (existing) dock.requestTerminalFocus(existing.id);
+          else openLocalShell();
         }
         return;
       }
@@ -405,8 +424,9 @@ export function GlobalShortcuts() {
           // Drop the ?sel deep link so the tab doesn't reopen the selection.
           const { pathname, search } = window.location;
           const params = new URLSearchParams(search);
-          if (params.has('sel')) {
+          if (params.has('sel') || params.has('dt')) {
             params.delete('sel');
+            params.delete('dt');
             void navRef.current({ pathname, search: params.toString() }, { replace: true });
           }
           // Hand focus to the visible list's grid so arrow keys keep working.

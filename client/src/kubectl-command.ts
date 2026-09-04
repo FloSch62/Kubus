@@ -22,6 +22,8 @@ export interface KubectlCommandOptions {
   /** Effective non-default kubeconfig files, in kubectl merge order. */
   kubeconfigPaths?: string[];
   shell?: 'posix' | 'windows';
+  /** Leave out --context (for a shell whose kubeconfig already selects it). */
+  omitContext?: boolean;
 }
 
 /** Build a paste-ready command that preserves Kubus' exact cluster and resource scope. */
@@ -38,5 +40,6 @@ export function kubectlGetCommand(target: KubectlGetTarget, options: KubectlComm
         ? `set "KUBECONFIG=${paths.join(';')}" && `
         : `KUBECONFIG=${posixShellArgument(paths.join(':'))} `
       : '';
-  return `${prefix}kubectl get ${resource}${namespace} --context ${shellArgument(target.ctx)}${kubeconfig}`;
+  const context = options.omitContext ? '' : ` --context ${shellArgument(target.ctx)}`;
+  return `${prefix}kubectl get ${resource}${namespace}${context}${kubeconfig}`;
 }

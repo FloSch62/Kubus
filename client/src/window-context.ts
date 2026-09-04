@@ -16,6 +16,6 @@ export function currentAppWindowContext(): AppWindowContext {
 export function applyAppWindowContext(context: AppWindowContext): void {
   const clusters = useClustersStore.getState();
   clusters.setSelected([...context.selected]);
-  clusters.setNamespaces([...context.namespaces]);
+  clusters.setNamespaces([...context.namespaces], [...context.selected]);
   useUiPrefsStore.getState().set({ navCollapsed: context.navCollapsed });
 }

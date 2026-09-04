@@ -176,6 +176,23 @@ add('logs', async () => {
   await page.context().close();
 });
 
+add('terminal', async () => {
+  const page = await newPage(['kind-kubus-a'], ['kubus-e2e']);
+  await nav(page, 'Pods');
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Open terminal' }).click();
+  await page.locator('.xterm').first().waitFor({ timeout: 15000 });
+  await page.waitForTimeout(2500);
+  await page.keyboard.type('kubectl get pods', { delay: 40 });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(2500);
+  // The dock toggle appears next to the terminal button once a tab exists; park the pointer so no tooltip is captured.
+  await page.mouse.move(700, 600);
+  await page.waitForTimeout(300);
+  await shot(page, 'terminal');
+  await page.context().close();
+});
+
 add('shell', async () => {
   const page = await newPage(['kind-kubus-a'], ['demo']);
   await page.keyboard.press('Control+k');

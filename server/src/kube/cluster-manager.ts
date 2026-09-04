@@ -30,6 +30,7 @@ import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfi
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
 import { HttpProblem } from '../util/errors.js';
 import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
+import type { ExportedKubeconfig } from '../local-shell/kubeconfig.js';
 import { isValidSshDestination } from '../ssh/tunnel-manager.js';
 
 const BACKGROUND_HEALTH_INTERVAL_MS = 60_000;
@@ -366,6 +367,20 @@ export class ClusterManager extends EventEmitter {
         authWarning: authWarningForUser(user),
       };
     });
+  }
+
+  /**
+   * The kubeconfig entries behind a context, in kubeconfig JSON shape — for
+   * the terminal's per-session file. A connected session's config is used
+   * when there is one so a Kubus-managed SSH tunnel (rewritten proxy-url)
+   * carries over; otherwise the merged files as loaded.
+   */
+  exportKubeconfig(contextName: string): ExportedKubeconfig {
+    const source = this.handles.get(contextName)?.kc ?? this.kc;
+    if (!source.getContexts().some((c) => c.name === contextName)) {
+      throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
+    }
+    return JSON.parse(source.exportConfig()) as ExportedKubeconfig;
   }
 
   /** Decoded CA certificate PEM for a context's cluster, or null if none. */

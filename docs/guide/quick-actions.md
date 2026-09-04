@@ -23,6 +23,13 @@ Actions only appear where they make sense. You'll never see *Cordon* on a Config
 | **Trigger now…** | CronJob | Creates a Job immediately, off-schedule. The generated Job YAML is shown first for review and one-off edits. |
 | **Suspend / Resume** | CronJob | Pause or resume scheduling. |
 
+### Into the terminal
+
+**Run kubectl get in terminal** opens the [local terminal](terminal.md) on the object's
+cluster and namespace and runs the `kubectl get` for that object, so the CLI picks up
+exactly where the GUI left off. **Copy kubectl get command** puts the same command,
+with `--context` and `--kubeconfig` filled in, on the clipboard instead.
+
 ### Scaling
 
 The **Scale** dialog shows the current replica count and lets you set a new one. If a

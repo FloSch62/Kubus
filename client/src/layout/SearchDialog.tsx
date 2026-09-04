@@ -27,6 +27,7 @@ import { useDockStore } from '../state/dock.js';
 import { useTabsStore } from '../state/tabs.js';
 import { useUiStore } from '../state/ui.js';
 import { toggleNavRail } from '../shortcuts.js';
+import { openLocalShell } from '../local-shell.js';
 import { showToast } from '../state/toast.js';
 import { actionsForRef, usePaletteRunner, type PaletteAction } from '../actions/resource-actions.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
@@ -48,6 +49,7 @@ interface CommandDeps {
   toggleNav: () => void;
   openSettings: () => void;
   openShortcuts: () => void;
+  openTerminal: () => void;
   newTab: () => void;
   reopenTab: () => void;
 }
@@ -62,6 +64,7 @@ interface StaticCommand {
 const STATIC_COMMANDS: StaticCommand[] = [
   { id: 'cmd:theme', title: 'Toggle dark / light mode', run: (d) => d.toggleTheme() },
   { id: 'cmd:dock', title: 'Toggle terminal dock', run: (d) => d.toggleDock() },
+  { id: 'cmd:terminal', title: 'Open terminal here', subtitle: 'A local shell with KUBECONFIG pointed at the current cluster and namespace', run: (d) => d.openTerminal() },
   { id: 'cmd:nav', title: 'Toggle navigation rail', run: (d) => d.toggleNav() },
   { id: 'cmd:newtab', title: 'New tab', run: (d) => d.newTab() },
   { id: 'cmd:reopen', title: 'Reopen closed tab', run: (d) => d.reopenTab() },
@@ -179,6 +182,9 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
         toggleNav: toggleNavRail,
         openSettings: () => useUiStore.getState().setSettingsOpen(true),
         openShortcuts: () => useUiStore.getState().setShortcutsOpen(true),
+        openTerminal: () => {
+          if (!openLocalShell()) showToast('warning', 'Select a cluster first');
+        },
         newTab: () => {
           useTabsStore.getState().openTab('/');
           void navigate('/');

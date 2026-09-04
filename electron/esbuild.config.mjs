@@ -11,7 +11,8 @@ await build({
   target: 'node22',
   sourcemap: true,
   // bufferutil/utf-8-validate are optional ws natives we don't install.
-  external: ['electron', 'bufferutil', 'utf-8-validate'],
+  // node-pty is an optional native module the server probes at runtime.
+  external: ['electron', 'bufferutil', 'utf-8-validate', 'node-pty'],
   define: { 'process.env.NODE_ENV': '"production"' },
   banner: {
     // CJS deps converted into the ESM bundle still call require() at runtime.

@@ -81,13 +81,17 @@ describe('cross-window state boundaries', () => {
       navCollapsed: false,
     });
 
+    // Namespaces are remembered per cluster: the destination cluster has no
+    // selection of its own yet, so the filter opens up to all namespaces.
     useClustersStore.getState().setSelected(['destination']);
     useUiPrefsStore.getState().set({ navCollapsed: true });
     expect(currentAppWindowContext()).toEqual({
       selected: ['destination'],
-      namespaces: ['production'],
+      namespaces: [],
       navCollapsed: true,
     });
+    useClustersStore.getState().setSelected(['source']);
+    expect(currentAppWindowContext().namespaces).toEqual(['production']);
   });
 
   it('does not persist window-local fields in app-wide store payloads', () => {

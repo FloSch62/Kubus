@@ -74,6 +74,7 @@ Defaults for the [log viewer](logs.md) and [terminals](shell.md):
 | Setting | Options | Default |
 | --- | --- | --- |
 | Default shell | Auto (`bash`→`sh`) / `sh` / `bash` / custom path | Auto |
+| Local terminal shell | Auto (your login shell) / custom path | Auto |
 
 ## Debug containers { #debug-containers }
 

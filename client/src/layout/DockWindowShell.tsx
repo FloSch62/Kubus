@@ -3,7 +3,7 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { BottomDock } from './BottomDock.js';
-import { useDockStore } from '../state/dock.js';
+import { useDockStore, isShellTab } from '../state/dock.js';
 import { closeCurrentAppWindow } from '../window-management.js';
 
 /** Focused secondary renderer: one compact tab strip and its terminal/log content. */
@@ -29,7 +29,7 @@ export const DockWindowShell = memo(function DockWindowShell() {
   useEffect(() => {
     if (!activeId) return;
     const tab = useDockStore.getState().tabs.find((candidate) => candidate.id === activeId);
-    if (tab?.kind === 'terminal' || tab?.kind === 'node-shell') {
+    if (isShellTab(tab)) {
       useDockStore.getState().requestTerminalFocus(activeId);
     }
   }, [activeId]);

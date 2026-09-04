@@ -81,6 +81,7 @@ The whole app in three moves:
 -   :material-lightning-bolt: **[Quick actions](quick-actions.md)** covers scale, restart, roll back, cordon and drain.
 -   :material-script-text: **[Logs](logs.md)** explains the aggregated, colour-coded, filterable log view.
 -   :material-console: **[Shell, debug & node shell](shell.md)** opens terminals into containers and nodes.
+-   :material-console-line: **[Terminal](terminal.md)** is your own shell, with `kubectl` already pointed at the cluster in view.
 -   :material-lan-connect: **[Port forwarding](port-forwarding.md)** lets you reach any pod or service.
 -   :material-file-tree: **[Copying files](copying-files.md)** covers upload and download, like `kubectl cp`.
 -   :material-ship-wheel: **[Helm releases](helm.md)** covers values, history, rollback and uninstall.

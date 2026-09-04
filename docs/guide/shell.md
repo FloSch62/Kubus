@@ -82,6 +82,7 @@ root namespace, giving you a root shell on the machine.
 
 <div class="grid cards" markdown>
 
+-   :material-console-line: **[Terminal](terminal.md)** is a shell on your own machine, with `kubectl` pointed at the cluster in view.
 -   :material-file-tree: **[Copying files](copying-files.md)** moves files in and out of containers.
 -   :material-script-text: **[Logs](logs.md)** are the lighter-weight first look.
 

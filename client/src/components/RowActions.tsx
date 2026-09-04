@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { alpha } from '@mui/material/styles';
 import Alert from '@mui/material/Alert';
@@ -17,6 +17,7 @@ import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
 import LinearProgress from '@mui/material/LinearProgress';
+import Link from '@mui/material/Link';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
@@ -53,6 +54,7 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import LaptopOutlinedIcon from '@mui/icons-material/LaptopOutlined';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -85,6 +87,8 @@ import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
+import { labelSelectorMatches, type LabelSelector } from './detail/selectors.js';
+import { openLocalShell } from '../local-shell.js';
 import { IS_WINDOWS } from '../platform.js';
 
 export interface RowActionTarget {
@@ -745,6 +749,19 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
           </ListItemIcon>
           <ListItemText>Copy kubectl get command</ListItemText>
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            // The terminal's own kubeconfig already selects this cluster, so
+            // the command needs neither --context nor --kubeconfig.
+            openLocalShell({ ctx, namespace, command: kubectlGetCommand({ ctx, group: target.group, plural: target.plural, name, namespace }, { shell: IS_WINDOWS ? 'windows' : 'posix', omitContext: true }) });
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <LaptopOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Run kubectl get in terminal</ListItemText>
+        </MenuItem>
         <Divider />
         <MenuItem
           onClick={() => {
@@ -1284,12 +1301,68 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
   );
 }
 
+interface PdbShape {
+  spec?: { selector?: LabelSelector; minAvailable?: number | string; maxUnavailable?: number | string };
+  status?: { disruptionsAllowed?: number; currentHealthy?: number; desiredHealthy?: number; expectedPods?: number };
+}
+
+export interface DrainBudgetHint {
+  namespace: string;
+  name: string;
+  /** Pods on the node the budget covers. */
+  pods: number;
+  disruptionsAllowed: number;
+  currentHealthy?: number;
+  desiredHealthy?: number;
+}
+
+/**
+ * Budgets that cover pods on the node, worst first — the ones at zero
+ * allowed disruptions are exactly where a drain will hang. Daemon and
+ * mirror pods are skipped like the drain itself skips them.
+ */
+export function drainBudgetHints(pods: KubeObject[], budgets: KubeObject[]): DrainBudgetHint[] {
+  const evictable = pods.filter((pod) => {
+    const owners = pod.metadata.ownerReferences ?? [];
+    if (owners.some((o) => o.kind === 'DaemonSet')) return false;
+    if (pod.metadata.annotations?.['kubernetes.io/config.mirror']) return false;
+    const phase = (pod.status as { phase?: string } | undefined)?.phase;
+    return phase !== 'Succeeded' && phase !== 'Failed';
+  });
+  const hints: DrainBudgetHint[] = [];
+  for (const budget of budgets) {
+    const shape = budget as PdbShape;
+    const covered = evictable.filter((pod) => pod.metadata.namespace === budget.metadata.namespace && labelSelectorMatches(shape.spec?.selector, pod.metadata.labels)).length;
+    if (!covered) continue;
+    hints.push({
+      namespace: budget.metadata.namespace ?? '',
+      name: budget.metadata.name,
+      pods: covered,
+      disruptionsAllowed: shape.status?.disruptionsAllowed ?? 0,
+      currentHealthy: shape.status?.currentHealthy,
+      desiredHealthy: shape.status?.desiredHealthy,
+    });
+  }
+  return hints.sort((a, b) => a.disruptionsAllowed - b.disruptionsAllowed || b.pods - a.pods || a.name.localeCompare(b.name));
+}
+
 function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: () => void }) {
   const drain = useDrain();
   const [drainId, setDrainId] = useState<string>();
   const [progress, setProgress] = useState<{ evicted: number; total: number; current?: string; done?: boolean; error?: string }>();
   const isProtected = useIsProtected(target.ctx);
   const [typed, setTyped] = useState('');
+  const navigate = useNavigate();
+  // Which PodDisruptionBudgets a drain would run into: the pods on this node
+  // against every budget in the cluster.
+  const nodePods = useResourceList({ ctx: target.ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${target.obj.metadata.name}` });
+  const budgets = useResourceList({ ctx: target.ctx, group: 'policy', version: 'v1', plural: 'poddisruptionbudgets' });
+  const hints = useMemo(() => drainBudgetHints(nodePods.data?.items ?? [], budgets.data?.items ?? []), [nodePods.data, budgets.data]);
+  const blocking = hints.filter((h) => h.disruptionsAllowed === 0);
+  const openBudget = (hint: DrainBudgetHint) => {
+    onClose();
+    void navigate(kindListPath({ group: 'policy', version: 'v1', plural: 'poddisruptionbudgets' }, { sel: { ctx: target.ctx, namespace: hint.namespace, name: hint.name } }));
+  };
 
   useEffect(() => {
     if (!drainId) return;
@@ -1312,6 +1385,30 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
             <Typography variant="body2">
               This cordons <b>{name}</b> and evicts all non-DaemonSet pods. Pods managed by controllers will be rescheduled elsewhere.
             </Typography>
+            {blocking.length > 0 && (
+              <Alert severity="warning" sx={{ mt: 1.5 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {blocking.length === 1 ? 'A PodDisruptionBudget allows no disruptions right now' : `${blocking.length} PodDisruptionBudgets allow no disruptions right now`}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  Evicting the pods they cover will wait on the budget (Kubus retries for about two minutes per pod). Fix or relax these first, or expect the drain to stall.
+                </Typography>
+                {blocking.map((hint) => (
+                  <Typography key={`${hint.namespace}/${hint.name}`} variant="body2">
+                    <Link component="button" underline="hover" onClick={() => openBudget(hint)} sx={{ fontWeight: 600, verticalAlign: 'baseline' }}>
+                      {hint.namespace}/{hint.name}
+                    </Link>
+                    {' '}covers {hint.pods} pod{hint.pods === 1 ? '' : 's'} here
+                    {hint.currentHealthy !== undefined && hint.desiredHealthy !== undefined ? ` · ${hint.currentHealthy} healthy of ${hint.desiredHealthy} required` : ''}
+                  </Typography>
+                ))}
+              </Alert>
+            )}
+            {blocking.length === 0 && hints.length > 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                {hints.length === 1 ? '1 PodDisruptionBudget covers' : `${hints.length} PodDisruptionBudgets cover`} pods on this node; all currently allow evictions.
+              </Typography>
+            )}
             {isProtected && (
               <>
                 <Typography variant="body2" sx={{ mt: 2, mb: 1 }}>

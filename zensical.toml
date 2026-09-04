@@ -40,6 +40,7 @@ nav = [
     { "Quick actions" = "guide/quick-actions.md" },
     { "Logs" = "guide/logs.md" },
     { "Shell, debug & node shell" = "guide/shell.md" },
+    { "Terminal" = "guide/terminal.md" },
     { "Port forwarding" = "guide/port-forwarding.md" },
     { "Copying files" = "guide/copying-files.md" },
     { "Metrics & health" = "guide/metrics.md" },

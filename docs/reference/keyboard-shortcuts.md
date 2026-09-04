@@ -12,6 +12,7 @@ is the hub, and almost everything is reachable through it.
 | Shortcut | Action |
 | --- | --- |
 | ++ctrl+k++ / ++cmd+k++ | Open the command palette |
+| ++ctrl+grave++ / ++cmd+grave++ | Open a terminal on the current cluster, or focus the open one |
 
 ## Resource tables
 
@@ -54,6 +55,7 @@ Type `>` in the palette to run:
 | --- |
 | Toggle dark / light mode |
 | Toggle terminal dock |
+| Open terminal here |
 | Go to Overview |
 | Go to Events |
 | Go to Topology |

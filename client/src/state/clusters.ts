@@ -23,8 +23,18 @@ export type PickerLayout = 'list' | 'grid';
 interface ClustersState {
   /** Context names the user has connected (multi-select). */
   selected: string[];
-  /** Namespace filter — empty means all namespaces. */
+  /**
+   * Effective namespace filter — the union of every selected cluster's own
+   * selection; empty means all namespaces. Derived: never set directly.
+   */
   namespaces: string[];
+  /**
+   * Namespace selection remembered per cluster. Switching from the dev
+   * cluster (on `team-a`) to prod (on `payments`) brings each cluster's own
+   * namespaces back; with several selected, the filter shows the union and
+   * edits apply to every selected cluster.
+   */
+  namespacesByContext: Record<string, string[]>;
   themeMode: 'light' | 'dark' | 'os';
   /** Per-context UI settings keyed by context name. */
   contextSettings: Record<string, ContextSettings>;
@@ -38,7 +48,8 @@ interface ClustersState {
   pickerLayout: PickerLayout;
   setSelected: (selected: string[]) => void;
   toggleContext: (name: string) => void;
-  setNamespaces: (namespaces: string[]) => void;
+  /** Set the namespace filter for the given clusters (default: every selected one). */
+  setNamespaces: (namespaces: string[], contexts?: string[]) => void;
   // Cycles light → dark → os → light
   toggleTheme: () => void;
   // setTheme directly sets the theme mode to any valid value ('light', 'dark', 'os')
@@ -53,6 +64,20 @@ interface ClustersState {
 interface WindowClusterContext {
   selected: string[];
   namespaces: string[];
+  namespacesByContext?: Record<string, string[]>;
+}
+
+/** The effective filter: the union of the selected clusters' namespaces, in first-seen order. */
+export function namespacesForContexts(byContext: Record<string, string[]>, selected: string[]): string[] {
+  const out: string[] = [];
+  for (const ctx of selected) {
+    for (const ns of byContext[ctx] ?? []) if (!out.includes(ns)) out.push(ns);
+  }
+  return out;
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
 const sessionStateStorage: StateStorage = {
@@ -74,9 +99,15 @@ function syncStorageValue(storage: StateStorage, name: string): string | null {
 function parseWindowClusterContext(raw: string | null): WindowClusterContext | undefined {
   try {
     const value = JSON.parse(raw ?? 'null') as Partial<WindowClusterContext> | null;
-    if (!value || !Array.isArray(value.selected) || !Array.isArray(value.namespaces)) return undefined;
-    if (!value.selected.every((item) => typeof item === 'string') || !value.namespaces.every((item) => typeof item === 'string')) return undefined;
-    return { selected: value.selected, namespaces: value.namespaces };
+    if (!value || !isStringList(value.selected) || !isStringList(value.namespaces)) return undefined;
+    const byContext: Record<string, string[]> = {};
+    if (value.namespacesByContext && typeof value.namespacesByContext === 'object') {
+      for (const [ctx, list] of Object.entries(value.namespacesByContext)) if (isStringList(list)) byContext[ctx] = list;
+    } else {
+      // Older state stored one flat list: it applied to every selected cluster.
+      for (const ctx of value.selected) byContext[ctx] = value.namespaces;
+    }
+    return { selected: value.selected, namespaces: namespacesForContexts(byContext, value.selected), namespacesByContext: byContext };
   } catch {
     return undefined;
   }
@@ -98,23 +129,33 @@ function legacyMainClusterContext(): WindowClusterContext | undefined {
 const initialWindowClusterContext =
   parseWindowClusterContext(syncStorageValue(clusterWindowStorage, clusterWindowKey)) ??
   legacyMainClusterContext() ??
-  { selected: [], namespaces: [] };
+  { selected: [], namespaces: [], namespacesByContext: {} };
 
 export const useClustersStore = create<ClustersState>()(
   persist(
     (set) => ({
       selected: initialWindowClusterContext.selected,
       namespaces: initialWindowClusterContext.namespaces,
+      namespacesByContext: initialWindowClusterContext.namespacesByContext ?? {},
       themeMode: 'os',
       contextSettings: {},
       contextOrder: [],
       pickerLayout: 'list',
-      setSelected: (selected) => set({ selected }),
+      setSelected: (selected) => set((s) => ({ selected, namespaces: namespacesForContexts(s.namespacesByContext, selected) })),
       toggleContext: (name) =>
-        set((s) => ({
-          selected: s.selected.includes(name) ? s.selected.filter((n) => n !== name) : [...s.selected, name],
-        })),
-      setNamespaces: (namespaces) => set({ namespaces }),
+        set((s) => {
+          const selected = s.selected.includes(name) ? s.selected.filter((n) => n !== name) : [...s.selected, name];
+          return { selected, namespaces: namespacesForContexts(s.namespacesByContext, selected) };
+        }),
+      setNamespaces: (namespaces, contexts) =>
+        set((s) => {
+          const byContext = { ...s.namespacesByContext };
+          for (const ctx of contexts ?? s.selected) {
+            if (namespaces.length) byContext[ctx] = [...namespaces];
+            else delete byContext[ctx];
+          }
+          return { namespacesByContext: byContext, namespaces: namespacesForContexts(byContext, s.selected) };
+        }),
       //Ternary operator to cycle through three values: 'light' → 'dark' → 'os' → 'light'…
       toggleTheme: () => set((s) => ({ themeMode: s.themeMode === 'light' ? 'dark' : s.themeMode === 'dark' ? 'os' : 'light' })),
       setTheme: (mode) => set({ themeMode: mode }),
@@ -128,8 +169,13 @@ export const useClustersStore = create<ClustersState>()(
         set((s) => {
           const contextSettings = { ...s.contextSettings };
           delete contextSettings[name];
+          const namespacesByContext = { ...s.namespacesByContext };
+          delete namespacesByContext[name];
+          const selected = s.selected.filter((n) => n !== name);
           return {
-            selected: s.selected.filter((n) => n !== name),
+            selected,
+            namespacesByContext,
+            namespaces: namespacesForContexts(namespacesByContext, selected),
             contextSettings,
             contextOrder: s.contextOrder.filter((n) => n !== name),
           };
@@ -152,6 +198,7 @@ export const useClustersStore = create<ClustersState>()(
         ...(persisted as Partial<ClustersState>),
         selected: current.selected,
         namespaces: current.namespaces,
+        namespacesByContext: current.namespacesByContext,
       }),
     },
   ),
@@ -159,21 +206,23 @@ export const useClustersStore = create<ClustersState>()(
 
 let lastSelected = useClustersStore.getState().selected;
 let lastNamespaces = useClustersStore.getState().namespaces;
+let lastByContext = useClustersStore.getState().namespacesByContext;
 
-function persistWindowClusterContext(selected: string[], namespaces: string[]): void {
+function persistWindowClusterContext(selected: string[], namespaces: string[], namespacesByContext: Record<string, string[]>): void {
   try {
-    clusterWindowStorage.setItem(clusterWindowKey, JSON.stringify({ selected, namespaces } satisfies WindowClusterContext));
+    clusterWindowStorage.setItem(clusterWindowKey, JSON.stringify({ selected, namespaces, namespacesByContext } satisfies WindowClusterContext));
   } catch {
     /* a blocked/full session store must not break cluster switching */
   }
 }
 
-persistWindowClusterContext(lastSelected, lastNamespaces);
+persistWindowClusterContext(lastSelected, lastNamespaces, lastByContext);
 useClustersStore.subscribe((state) => {
-  if (state.selected === lastSelected && state.namespaces === lastNamespaces) return;
+  if (state.selected === lastSelected && state.namespaces === lastNamespaces && state.namespacesByContext === lastByContext) return;
   lastSelected = state.selected;
   lastNamespaces = state.namespaces;
-  persistWindowClusterContext(lastSelected, lastNamespaces);
+  lastByContext = state.namespacesByContext;
+  persistWindowClusterContext(lastSelected, lastNamespaces, lastByContext);
 });
 
 export function useIsProtected(ctx: string): boolean {
