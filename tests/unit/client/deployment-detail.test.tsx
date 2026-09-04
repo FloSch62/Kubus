@@ -14,6 +14,7 @@ const queries = vi.hoisted(() => ({
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useUsedBy: () => ({ data: { items: [], unavailable: [], truncated: 0 }, isLoading: false, isError: false }),
   DETAIL_LIST_LIVE_MS: 5000,
   useResourceList: (selection: { plural?: string } | undefined) => ({
     data: !selection ? undefined : { items: selection.plural === 'replicasets' ? queries.replicaSets : queries.pods },

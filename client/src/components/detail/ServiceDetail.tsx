@@ -23,6 +23,7 @@ import { StatusChip } from '../StatusChip.js';
 import { DETAIL_LIST_LIVE_MS, useResourceList } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
 import { statusTextColor } from '../../theme.js';
+import { UsedBySection } from './UsedBySection.js';
 
 interface ServicePort {
   name?: string;
@@ -66,6 +67,8 @@ interface EndpointSliceShape {
     zone?: string;
   }>;
 }
+
+const ROUTE_KINDS = ['Ingress', 'HTTPRoute', 'GRPCRoute', 'TLSRoute', 'TCPRoute', 'UDPRoute'];
 
 interface EndpointRow {
   address: string;
@@ -292,6 +295,13 @@ export function ServiceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           )}
         </Section>
       )}
+      <UsedBySection
+        target={{ ctx, group: '', version: 'v1', plural: 'services', kind: 'Service', name, namespace }}
+        title="Routed by"
+        kinds={ROUTE_KINDS}
+        emptyText="No Ingress or Gateway API route sends traffic to this Service."
+        defaultOpen={false}
+      />
       {labelSelector ? (
         <Section title="Matching pods" count={podsQuery.isLoading ? undefined : pods.length} flush description={<Box component="span" sx={{ fontFamily: 'monospace' }}>{labelSelector}</Box>}>
           <PodMiniList ctx={ctx} pods={pods} loading={podsQuery.isLoading} emptyText="No pods match the selector." hideNamespace />

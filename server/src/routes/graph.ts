@@ -36,6 +36,30 @@ interface Item {
   obj: KubeObject;
 }
 
+const GATEWAY_GROUP = 'gateway.networking.k8s.io';
+const GATEWAY_KINDS: Array<{ kind: string; layer: GraphNode['layer'] }> = [
+  { kind: 'Gateway', layer: 'entry' },
+  { kind: 'HTTPRoute', layer: 'route' },
+  { kind: 'GRPCRoute', layer: 'route' },
+  { kind: 'TLSRoute', layer: 'route' },
+  { kind: 'TCPRoute', layer: 'route' },
+  { kind: 'UDPRoute', layer: 'route' },
+];
+
+/**
+ * Gateway API kinds are core Kubernetes networking but ship as CRDs, so they
+ * join the graph only on clusters that serve them (no warnings elsewhere).
+ */
+async function gatewayKindSpecs(handle: ClusterHandle): Promise<KindSpec[]> {
+  const resources = await handle.discovery.getResources().catch(() => [] as ResourceKindInfo[]);
+  const out: KindSpec[] = [];
+  for (const { kind, layer } of GATEWAY_KINDS) {
+    const served = dedupeResourceKinds(resources.filter((r) => r.group === GATEWAY_GROUP && r.kind === kind && r.verbs.includes('list')))[0];
+    if (served) out.push({ group: served.group, version: served.version, plural: served.plural, kind, namespaced: served.namespaced, layer });
+  }
+  return out;
+}
+
 interface RelationHint {
   path: string;
   value: string;
@@ -581,8 +605,10 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const namespaces = query.namespace ? new Set(query.namespace.split(',').map((n) => n.trim()).filter(Boolean)) : undefined;
   const warnings: string[] = [];
   const focusSpec = focusKindSpec(query);
-  const listedItemsPromise = Promise.all(KINDS.map((spec) => listKind(handle, spec, namespaces, warnings)));
-  const focusItems = focusSpec && !KINDS.some((spec) => sameGvr(spec, focusSpec)) ? await getFocusedItem(handle, focusSpec, query, warnings) : [];
+  const gatewayKinds = await gatewayKindSpecs(handle);
+  const staticKinds = [...KINDS, ...gatewayKinds];
+  const listedItemsPromise = Promise.all(staticKinds.map((spec) => listKind(handle, spec, namespaces, warnings)));
+  const focusItems = focusSpec && !staticKinds.some((spec) => sameGvr(spec, focusSpec)) ? await getFocusedItem(handle, focusSpec, query, warnings) : [];
   const dynamicItems = focusItems[0] ? await listFocusedRelatedItems(handle, focusItems[0], namespaces, warnings) : [];
   const listedItems = (await listedItemsPromise).flat();
   const items = [...listedItems, ...focusItems, ...dynamicItems];
@@ -610,6 +636,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const services: Item[] = [];
   const ingresses: Item[] = [];
   const pvcs: Item[] = [];
+  const routes: Item[] = [];
   for (const item of items) {
     const id = nodeId(handle.contextName, item.spec, item.obj);
     nodeItems.set(id, item);
@@ -620,6 +647,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     else if (item.spec.kind === 'Service') services.push(item);
     else if (item.spec.kind === 'Ingress') ingresses.push(item);
     else if (item.spec.kind === 'PersistentVolumeClaim') pvcs.push(item);
+    else if (item.spec.group === GATEWAY_GROUP && item.spec.kind.endsWith('Route')) routes.push(item);
   }
 
   const edges: GraphEdge[] = [];
@@ -666,6 +694,34 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
       if (!addEdge(edges, ingId, target, 'routes')) {
         setNodeStatus(nodes, ingId, 'warning', `missing Service/${name}`);
         warnings.push(`Ingress ${ing.obj.metadata.namespace}/${ing.obj.metadata.name} points to missing Service ${name}.`);
+      }
+    }
+  }
+
+  // Gateway API: a Gateway accepts routes (parentRefs) and a route forwards
+  // to Services (backendRefs); both may cross namespaces explicitly.
+  for (const route of routes) {
+    const routeId = nodeId(handle.contextName, route.spec, route.obj);
+    const routeNamespace = route.obj.metadata.namespace ?? '';
+    const spec = route.obj.spec as {
+      parentRefs?: Array<{ kind?: string; name?: string; namespace?: string }>;
+      rules?: Array<{ backendRefs?: Array<{ kind?: string; name?: string; namespace?: string }> }>;
+    } | undefined;
+    for (const parent of spec?.parentRefs ?? []) {
+      if ((parent.kind ?? 'Gateway') !== 'Gateway' || !parent.name) continue;
+      addEdge(edges, byKindNsName.get(`Gateway|${parent.namespace ?? routeNamespace}|${parent.name}`), routeId, 'routes');
+    }
+    const backends = new Set<string>();
+    for (const rule of spec?.rules ?? []) {
+      for (const backend of rule.backendRefs ?? []) {
+        if ((backend.kind ?? 'Service') === 'Service' && backend.name) backends.add(`${backend.namespace ?? routeNamespace}|${backend.name}`);
+      }
+    }
+    for (const backend of backends) {
+      if (!addEdge(edges, routeId, byKindNsName.get(`Service|${backend}`), 'routes')) {
+        const [, name] = backend.split('|');
+        setNodeStatus(nodes, routeId, 'warning', `missing Service/${name}`);
+        warnings.push(`${route.spec.kind} ${routeNamespace}/${route.obj.metadata.name} points to missing Service ${name}.`);
       }
     }
   }

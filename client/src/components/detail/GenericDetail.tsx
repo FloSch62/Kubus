@@ -5,11 +5,13 @@ import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import type { KubeObject } from '@kubus/shared';
+import { gvkForKind, type KubeObject } from '@kubus/shared';
+import { openNamespaceOverview } from '../../namespace-link.js';
+import { UsedBySection } from './UsedBySection.js';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { ClampedText } from './ClampedText.js';
-import { Fact, Facts } from './Facts.js';
+import { Fact, FactLink, Facts } from './Facts.js';
 import { DetailStack, Section } from './Section.js';
 
 export function KeyValueChips({ title, entries }: { title: string; entries: Record<string, string> | undefined }) {
@@ -36,11 +38,20 @@ export function KeyValueSection({ title, entries, defaultOpen = true }: { title:
   );
 }
 
-/** Href for values that are plain web links; anything else (other schemes, garbage) stays inert. */
-function safeHref(value: string): string | undefined {
-  if (!/^https?:\/\//i.test(value)) return undefined;
+// Annotation keys whose values are links by convention even without a
+// scheme (`homepage: grafana.example.com`); anything else needs http(s)://.
+const URL_KEY_RE = /(^|[/._-])(url|urls|link|links|homepage|website|docs?|documentation|dashboard|runbook|runbook_url|wiki|repo|repository|source)$/i;
+const BARE_HOST_RE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/\S*)?$/i;
+
+/**
+ * Href for values that are web links: an explicit http(s) URL anywhere, or a
+ * bare host under a link-shaped key. Other schemes and garbage stay inert.
+ */
+export function safeHref(value: string, key?: string): string | undefined {
+  const candidate = /^https?:\/\//i.test(value) ? value : key && URL_KEY_RE.test(key) && BARE_HOST_RE.test(value.trim()) ? `https://${value.trim()}` : undefined;
+  if (!candidate) return undefined;
   try {
-    const url = new URL(value);
+    const url = new URL(candidate);
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
   } catch {
     return undefined;
@@ -51,7 +62,7 @@ function ChipList({ items }: { items: Array<[string, string]> }) {
   return (
     <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
       {items.map(([k, v]) => {
-        const href = safeHref(v);
+        const href = safeHref(v, k);
         return href ? (
           <Chip
             key={k}
@@ -138,9 +149,15 @@ export function MetadataSection({ obj, ctx, defaultOpen = true }: { obj: KubeObj
     <Section title="Metadata" defaultOpen={defaultOpen}>
       <Facts>
         <Fact label="Name">{obj.metadata.name}</Fact>
-        <Fact label="Namespace">{obj.metadata.namespace}</Fact>
+        <Fact label="Namespace">
+          {obj.metadata.namespace && (
+            <FactLink title={`Open the ${obj.metadata.namespace} namespace overview`} onClick={() => openNamespaceOverview(ctx, obj.metadata.namespace!)}>
+              {obj.metadata.namespace}
+            </FactLink>
+          )}
+        </Fact>
         <Fact label="Cluster">{ctx}</Fact>
-        <Fact label="Kind">{`${obj.kind ?? ''} (${obj.apiVersion ?? ''})`}</Fact>
+        <Fact label="Kind">{[obj.kind, obj.apiVersion ? `(${obj.apiVersion})` : undefined].filter(Boolean).join(' ')}</Fact>
         <Fact label="Created">
           <AgeCell timestamp={obj.metadata.creationTimestamp} /> ago
         </Fact>
@@ -152,9 +169,24 @@ export function MetadataSection({ obj, ctx, defaultOpen = true }: { obj: KubeObj
   );
 }
 
-export function GenericDetail({ obj, ctx, hideConditions, children }: { obj: KubeObject; ctx: string; hideConditions?: boolean; children?: ReactNode }) {
+/** Kinds without a dedicated overview whose referrers are worth listing up top. */
+const REVERSE_LINK_KINDS = new Set(['ServiceAccount', 'PersistentVolumeClaim', 'PersistentVolume', 'StorageClass', 'PriorityClass', 'IngressClass', 'RuntimeClass', 'Gateway']);
+
+function apiGroupVersion(apiVersion: string | undefined): { group: string; version: string } {
+  if (!apiVersion) return { group: '', version: '' };
+  const slash = apiVersion.indexOf('/');
+  return slash === -1 ? { group: '', version: apiVersion } : { group: apiVersion.slice(0, slash), version: apiVersion.slice(slash + 1) };
+}
+
+export function GenericDetail({ obj, ctx, hideConditions, lead, children }: { obj: KubeObject; ctx: string; hideConditions?: boolean; lead?: ReactNode; children?: ReactNode }) {
+  const kind = obj.kind ?? '';
+  const { group, version } = apiGroupVersion(obj.apiVersion);
   return (
     <DetailStack>
+      {lead}
+      {REVERSE_LINK_KINDS.has(kind) && (
+        <UsedBySection target={{ ctx, group, version, plural: gvkForKind(kind)?.plural ?? '', kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
+      )}
       <MetadataSection obj={obj} ctx={ctx} />
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />

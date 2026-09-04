@@ -80,6 +80,8 @@ import type {
   SetSshHostRequest,
   SshInfoResponse,
   TestConnectionResponse,
+  UsedByResponse,
+  ClusterSignals,
 } from '@kubus/shared';
 import { groupToPath } from '@kubus/shared';
 import { apiFetch } from './http.js';
@@ -640,6 +642,54 @@ export function useResourceEvents(sel: { ctx: string; name: string; kind?: strin
 }
 
 // ---- Detail views ----
+
+/** Everything in the cluster that references the object (reverse links). */
+export function useUsedBy(sel: { ctx: string; group: string; version: string; plural: string; kind: string; name: string; namespace?: string } | undefined) {
+  return useQuery({
+    queryKey: ['used-by', sel],
+    queryFn: () => {
+      const params = new URLSearchParams({ group: sel!.group, version: sel!.version, plural: sel!.plural, kind: sel!.kind, name: sel!.name });
+      if (sel!.namespace) params.set('namespace', sel!.namespace);
+      return apiFetch<UsedByResponse>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/detail/used-by?${params}`);
+    },
+    enabled: !!sel,
+    retry: false,
+    refetchInterval: useRefetchInterval(15_000),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Per-object warning events and restarts for the selected clusters — the
+ * marker data behind list rows and page tabs. One cache entry per context so
+ * every list page and the tab strip share a single poll loop per cluster.
+ */
+export function useClusterSignals(contexts: string[]) {
+  const interval = useRefetchInterval(15_000);
+  const contextsKey = contexts.join('\n');
+  const queries = useMemo(
+    () =>
+      (contextsKey ? contextsKey.split('\n') : []).map((ctx) => ({
+        queryKey: ['cluster-signals', ctx] as const,
+        queryFn: () => apiFetch<ClusterSignals>(`/api/contexts/${encodeURIComponent(ctx)}/overview/signals`).catch(() => ({ windowMs: 0, objects: {} }) as ClusterSignals),
+        refetchInterval: interval,
+      })),
+    [contextsKey, interval],
+  );
+  const combine = useCallback(
+    (results: Array<{ data?: ClusterSignals }>) => {
+      const ctxs = contextsKey ? contextsKey.split('\n') : [];
+      if (!ctxs.length) return { data: undefined as Map<string, ClusterSignals> | undefined };
+      const data = new Map<string, ClusterSignals>();
+      results.forEach((result, i) => {
+        if (result.data) data.set(ctxs[i]!, result.data);
+      });
+      return { data };
+    },
+    [contextsKey],
+  );
+  return useQueries({ queries, combine });
+}
 
 export function usePodEnv(sel: { ctx: string; namespace: string; name: string; reveal?: boolean } | undefined) {
   return useQuery({

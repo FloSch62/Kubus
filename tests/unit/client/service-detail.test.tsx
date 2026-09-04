@@ -13,6 +13,7 @@ const queries = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useUsedBy: () => ({ data: { items: [], unavailable: [], truncated: 0 }, isLoading: false, isError: false }),
   DETAIL_LIST_LIVE_MS: 5000,
   useResourceList: (selection: { plural?: string } | undefined, options?: Record<string, unknown>) => {
     if (selection) {

@@ -31,6 +31,7 @@ const effects = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useUsedBy: () => ({ data: { items: [], unavailable: [], truncated: 0 }, isLoading: false, isError: false }),
   useResource: (selection: Record<string, unknown> | undefined, options?: Record<string, unknown>) => {
     queries.resourceCalls.push({ selection, options });
     const data = !selection
@@ -298,7 +299,11 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.keyDown(screen.getByText('pod-a'), { key: 'ArrowLeft', altKey: true });
     expect(onBack).toHaveBeenCalledOnce();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Events' }));
+    // The tab carries its warning count as a badge, so its accessible name
+    // reads "Events 1" while the fixture holds one Warning event.
+    const eventsTab = screen.getByRole('tab', { name: /^Events/ });
+    expect(eventsTab).toHaveAccessibleName('Events 1');
+    fireEvent.click(eventsTab);
     expect(screen.getByText(/FailedMount ×3/)).toBeInTheDocument();
     expect(screen.getByText('volume missing')).toBeInTheDocument();
     expect(screen.getByText('Started')).toBeInTheDocument();

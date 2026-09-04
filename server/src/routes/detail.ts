@@ -1,12 +1,13 @@
 import { X509Certificate } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, SecretTlsResponse, TlsCertInfo } from '@kubus/shared';
+import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, SecretTlsResponse, TlsCertInfo, UsedByResponse } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { podContainers } from '../kube/actions.js';
 import { getRolloutHistory } from '../kube/rollout.js';
 import { resolvePodEnv } from '../kube/pod-env.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { resolveTargetPods } from '../kube/target-pods.js';
+import { USED_BY_KINDS, computeUsedBy, selectableLabels } from '../kube/used-by.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 
 const CERT_BLOCK_RE = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
@@ -29,6 +30,33 @@ function publicKeyAlgorithm(cert: X509Certificate): string | undefined {
 }
 
 export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): void {
+  // Everything that points at one object, from the cached lists. Pods and
+  // workloads pass their labels along (or the route reads them off the object)
+  // so selector-based references (Services, PDBs, NetworkPolicies) resolve too.
+  app.get<{ Params: { ctx: string }; Querystring: { group?: string; version?: string; plural?: string; kind?: string; namespace?: string; name?: string } }>(
+    '/api/contexts/:ctx/detail/used-by',
+    async (req, reply) => {
+      try {
+        const { kind, name, namespace } = req.query;
+        if (!kind || !name) throw new HttpProblem(422, 'kind and name are required');
+        const handle = ctx.clusters.get(req.params.ctx);
+        if (!USED_BY_KINDS.has(kind)) {
+          const empty: UsedByResponse = { items: [], unavailable: [], truncated: 0 };
+          return empty;
+        }
+        let labels: Record<string, string> | undefined;
+        if (req.query.version && req.query.plural && (kind === 'Pod' || kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet' || kind === 'ReplicaSet' || kind === 'Job' || kind === 'CronJob')) {
+          const obj = await handle.raw.json<KubeObject>(resourcePath(req.query.group ?? '', req.query.version, req.query.plural, { namespace: namespace || undefined, name }));
+          labels = selectableLabels(kind, obj);
+        }
+        return await computeUsedBy(handle, { kind, name, namespace: namespace || undefined, labels });
+      } catch (err) {
+        sendError(reply, err);
+        return reply;
+      }
+    },
+  );
+
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string; name?: string; reveal?: string } }>(
     '/api/contexts/:ctx/detail/pod-env',
     async (req, reply) => {

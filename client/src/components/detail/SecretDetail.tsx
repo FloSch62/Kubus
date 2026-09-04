@@ -10,6 +10,7 @@ import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
 import { useSecretTls } from '../../api/queries.js';
 import { statusTextColor } from '../../theme.js';
+import { UsedBySection } from './UsedBySection.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -57,6 +58,7 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         </Facts>
       </Box>
       <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
+        <UsedBySection target={{ ctx, group: '', version: 'v1', plural: 'secrets', kind: 'Secret', name: obj.metadata.name, namespace: obj.metadata.namespace }} emptyText="Nothing mounts, reads or pulls with this Secret." />
         {keys.length > 0 && (
           <Section title="Data keys" count={keys.length}>
             <DataKeyRows rows={keys.map((k) => ({ key: k }))} />

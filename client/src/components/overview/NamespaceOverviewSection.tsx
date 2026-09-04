@@ -2,6 +2,7 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import LinearProgress from '@mui/material/LinearProgress';
+import Link from '@mui/material/Link';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -74,7 +75,7 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
 
           {certificates && <CertExpiryCard ctx={ctx} certificates={certificates} hideNamespace={single} />}
 
-          {data.quotas.length > 0 && <QuotasCard quotas={data.quotas} />}
+          {data.quotas.length > 0 && <QuotasCard ctx={ctx} namespaces={namespaces} quotas={data.quotas} />}
 
           <PodUsagePanels ctx={ctx} namespaces={namespaces} />
 
@@ -161,15 +162,23 @@ function InventoryTiles({ entries, onOpen }: { entries: NamespaceInventoryEntry[
   );
 }
 
-function QuotasCard({ quotas }: { quotas: NamespaceQuotaStatus[] }) {
+function QuotasCard({ ctx, namespaces, quotas }: { ctx: string; namespaces: string[]; quotas: NamespaceQuotaStatus[] }) {
+  const navigate = useNavigate();
+  // Multi-namespace scopes prefix the quota name with its namespace.
+  const open = (q: NamespaceQuotaStatus) => {
+    const slash = q.name.indexOf('/');
+    const namespace = slash === -1 ? namespaces[0] : q.name.slice(0, slash);
+    const name = slash === -1 ? q.name : q.name.slice(slash + 1);
+    void navigate(kindListPath({ group: '', version: 'v1', plural: 'resourcequotas' }, { sel: { ctx, namespace, name } }));
+  };
   return (
     <ProblemCard title="Resource quotas">
       <Stack spacing={1.5}>
         {quotas.map((q) => (
           <Box key={q.name}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            <Link component="button" variant="body2" underline="hover" onClick={() => open(q)} sx={{ fontWeight: 600, mb: 0.5, display: 'block', textAlign: 'left' }}>
               {q.name}
-            </Typography>
+            </Link>
             <Stack spacing={0.5}>
               {q.resources.map((r) => (
                 <Box key={r.resource} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

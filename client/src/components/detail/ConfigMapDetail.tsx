@@ -11,6 +11,7 @@ import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
 import { b64ByteLength } from './data-editor.js';
 import { statusTextColor } from '../../theme.js';
+import { UsedBySection } from './UsedBySection.js';
 
 function stringEntries(obj: KubeObject, field: 'data' | 'binaryData'): Array<[string, string]> {
   const map = obj[field] as Record<string, unknown> | undefined;
@@ -55,6 +56,9 @@ export function ConfigMapDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
             )}
           </Fact>
         </Facts>
+      </Box>
+      <Box sx={{ px: 2, pt: 2 }}>
+        <UsedBySection target={{ ctx, group: '', version: 'v1', plural: 'configmaps', kind: 'ConfigMap', name: obj.metadata.name, namespace: obj.metadata.namespace }} emptyText="No pod or workload mounts or reads this ConfigMap." />
       </Box>
       {total > 0 && (
         <Box sx={{ px: 2, pt: 2 }}>

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { layout } from '../theme.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { layout, statusTextColor } from '../theme.js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
@@ -36,6 +36,12 @@ import { SecretDetail } from './detail/SecretDetail.js';
 import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
+import { NetworkPolicyDetail } from './detail/NetworkPolicyDetail.js';
+import { PodDisruptionBudgetDetail } from './detail/PodDisruptionBudgetDetail.js';
+import { ResourceQuotaDetail } from './detail/ResourceQuotaDetail.js';
+import { LimitRangeDetail } from './detail/LimitRangeDetail.js';
+import { CountPill } from './detail/Section.js';
+import { openNamespaceOverview } from '../namespace-link.js';
 import { ManifestView } from './detail/ManifestView.js';
 import { dumpManifest, parseYamlMapping, rebaseEdits } from './detail/manifest-tree.js';
 import { maskSecretValues } from './detail/data-editor.js';
@@ -67,10 +73,17 @@ interface Props {
   onClose: () => void;
   onBack?: () => void;
   inline?: boolean;
+  /** Tab to open with (a restored page tab brings back the sub-tab it was on). */
+  initialTab?: string;
+  /** Fired when the user switches tabs, so the owner can remember it. */
+  onTabChange?: (tab: string) => void;
 }
 
-export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: Props) {
-  const [tab, setTab] = useState('overview');
+/** Tabs that exist for every kind; kind-specific ones are validated against the object. */
+const ALWAYS_TABS = new Set(['overview', 'manifest', 'map', 'events']);
+
+export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, initialTab, onTabChange }: Props) {
+  const [tab, setTab] = useState(initialTab ?? 'overview');
   const [tabError, setTabError] = useState<string>();
   const [reveal, setReveal] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
@@ -108,8 +121,10 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
 
   // Reset per-resource view state when the selection changes.
   const selKey = sel ? `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace ?? ''}|${sel.name}` : '';
+  const initialTabRef = useRef(initialTab);
+  initialTabRef.current = initialTab;
   useEffect(() => {
-    setTab('overview');
+    setTab(initialTabRef.current ?? 'overview');
     setTabError(undefined);
     setReveal(false);
   }, [selKey]);
@@ -149,7 +164,11 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const manifestObj = isSecret ? revealedSecret : obj;
   const secretMasked = isSecret && !reveal;
   const { data: backingCrd } = useResource(backingCrdSelection);
-  const { data: events } = useResourceEvents(tab === 'events' && sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
+  // Events are fetched for the whole drawer lifetime (served from the
+  // server's event cache), so the Events tab can carry its warning count
+  // before anyone clicks it.
+  const { data: events } = useResourceEvents(sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
+  const warningCount = useMemo(() => (events?.items ?? []).filter((e) => (e as { type?: string }).type === 'Warning').length, [events]);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
   // Warm the schema (fetch + yaml-worker registration) while the drawer is on
@@ -196,6 +215,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const switchTab = (next: string) => {
     setTabError(undefined);
     setTab(next);
+    onTabChange?.(next);
   };
   const viewToggle = <ManifestViewToggle view={view} onChange={switchView} />;
 
@@ -204,6 +224,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
   const hasMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node';
   const hasRolloutHistory = behaviorKind === 'Deployment' || behaviorKind === 'StatefulSet' || behaviorKind === 'DaemonSet';
   const showMap = !isCrd;
+  // A remembered sub-tab may not exist for this kind (Metrics on a ConfigMap).
+  const tabAvailable =
+    ALWAYS_TABS.has(tab) ||
+    (tab === 'data' && hasDataTab) ||
+    (tab === 'schema' && versions.length > 0) ||
+    (tab === 'metrics' && hasMetrics) ||
+    (tab === 'history' && hasRolloutHistory);
+  useEffect(() => {
+    if (!tabAvailable && (tab !== 'schema' || schemaSource)) setTab('overview');
+  }, [tabAvailable, tab, schemaSource]);
   const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
     top: `${drawerTopOffset}px`,
@@ -339,7 +369,17 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
                   <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, fontSize: 15.5, lineHeight: 1.3, minWidth: 0 }}>
                     {sel.namespace && (
                       <Typography component="span" variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500, fontSize: 'inherit' }}>
-                        {sel.namespace}{' / '}
+                        <Link
+                          component="button"
+                          underline="hover"
+                          color="inherit"
+                          title={`Open the ${sel.namespace} namespace overview`}
+                          onClick={() => guardLeave(() => openNamespaceOverview(sel.ctx, sel.namespace!))}
+                          sx={{ font: 'inherit', verticalAlign: 'baseline', '&:hover': { color: 'primary.main' } }}
+                        >
+                          {sel.namespace}
+                        </Link>
+                        {' / '}
                       </Typography>
                     )}
                     {sel.name}
@@ -392,7 +432,22 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false }: P
             {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
             {versions.length > 0 && <Tab value="schema" label="Schema" sx={{ minHeight: 36 }} />}
             {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
-            <Tab value="events" label="Events" sx={{ minHeight: 36 }} />
+            <Tab
+              value="events"
+              label={
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                  Events
+                  {warningCount > 0 && (
+                    <CountPill
+                      value={warningCount}
+                      sx={{ bgcolor: (t) => `${t.palette.warning.main}26`, color: statusTextColor('warning') }}
+                    />
+                  )}
+                </Box>
+              }
+              title={warningCount > 0 ? `${warningCount} warning event${warningCount === 1 ? '' : 's'}` : undefined}
+              sx={{ minHeight: 36 }}
+            />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
             {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
           </Tabs>
@@ -572,6 +627,14 @@ function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | unde
       return <SecretDetail obj={obj} ctx={ctx} />;
     case 'CustomResourceDefinition':
       return <CrdDetail obj={obj} ctx={ctx} />;
+    case 'NetworkPolicy':
+      return <NetworkPolicyDetail obj={obj} ctx={ctx} />;
+    case 'PodDisruptionBudget':
+      return <PodDisruptionBudgetDetail obj={obj} ctx={ctx} />;
+    case 'ResourceQuota':
+      return <ResourceQuotaDetail obj={obj} ctx={ctx} />;
+    case 'LimitRange':
+      return <LimitRangeDetail obj={obj} ctx={ctx} />;
     default:
       // cert-manager Certificates get an expiry/renewal headline the printer
       // columns don't surface.
