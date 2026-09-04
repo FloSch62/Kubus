@@ -25,6 +25,13 @@ export interface UsedByTarget {
   namespace?: string;
 }
 
+/** Kinds too large to read completely within the request budget. */
+function partialNote(kinds: string[]): string {
+  const names = kinds.map(pluralLabel);
+  const listed = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more kinds` : names.join(', ');
+  return `Only part of ${listed} was scanned; more may exist.`;
+}
+
 /** "3 Deployments · 1 CronJob · 8 Pods" — kinds in display order with counts. */
 export function usedBySummary(items: UsedByEntry[]): string {
   const counts = new Map<string, number>();
@@ -61,6 +68,7 @@ export function UsedBySection({
   }, [query.data, kinds]);
   const shown = useMemo(() => items.filter((item) => matchesMiniFilter(filter, [item.ref.kind, item.ref.name, item.ref.namespace ?? '', item.relation, item.detail ?? ''])), [items, filter]);
   const unavailable = (query.data?.unavailable ?? []).filter((kind) => !kinds || kinds.includes(kind));
+  const partial = (query.data?.partial ?? []).filter((kind) => !kinds || kinds.includes(kind));
   const truncated = query.data?.truncated ?? 0;
   const loading = !query.data && query.isLoading;
   const multiNamespace = items.some((item) => item.ref.namespace && item.ref.namespace !== target.namespace);
@@ -99,6 +107,7 @@ export function UsedBySection({
         <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
           {emptyText ?? `Nothing references this ${target.kind}.`}
           {unavailable.length > 0 && ` ${unavailable.map(pluralLabel).join(', ')} could not be read.`}
+          {partial.length > 0 && ` ${partialNote(partial)}`}
         </Typography>
       ) : (
         <>
@@ -152,10 +161,11 @@ export function UsedBySection({
               No matches.
             </Typography>
           )}
-          {(truncated > 0 || unavailable.length > 0) && (
+          {(truncated > 0 || unavailable.length > 0 || partial.length > 0) && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 2, py: 1 }}>
               {truncated > 0 && `${truncated} more not shown. `}
-              {unavailable.length > 0 && `${unavailable.map(pluralLabel).join(', ')} could not be read.`}
+              {unavailable.length > 0 && `${unavailable.map(pluralLabel).join(', ')} could not be read. `}
+              {partial.length > 0 && partialNote(partial)}
             </Typography>
           )}
         </>

@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode, GraphNodeStatus, KubeObject, RelationshipGra
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
+import { bestTypedHint, collectMetadataRelationHints, collectRelationHints, hintLabel, selectorMatches, tokens, type RelationHint } from '../kube/relation-hints.js';
 import { sendError } from '../util/errors.js';
 
 interface KindSpec {
@@ -58,14 +59,6 @@ async function gatewayKindSpecs(handle: ClusterHandle): Promise<KindSpec[]> {
     if (served) out.push({ group: served.group, version: served.version, plural: served.plural, kind, namespaced: served.namespaced, layer });
   }
   return out;
-}
-
-interface RelationHint {
-  path: string;
-  value: string;
-  selector?: Record<string, string>;
-  referenceKind?: string;
-  referenceNamespace?: string;
 }
 
 interface FocusQuery {
@@ -160,109 +153,6 @@ function sublabel(kind: string, obj: KubeObject): string | undefined {
   if (kind === 'Node') return (obj.status?.nodeInfo as { kubeletVersion?: string } | undefined)?.kubeletVersion;
   if (obj.metadata.namespace) return obj.metadata.namespace;
   return undefined;
-}
-
-function selectorMatches(selector: Record<string, string> | undefined, labels: Record<string, string> | undefined): boolean {
-  const entries = Object.entries(selector ?? {});
-  return entries.length > 0 && entries.every(([k, v]) => labels?.[k] === v);
-}
-
-const IGNORED_RELATION_TERMS = new Set([
-  'api',
-  'change',
-  'enabled',
-  'generation',
-  'health',
-  'kind',
-  'last',
-  'metadata',
-  'mode',
-  'name',
-  'namespace',
-  'operating',
-  'operational',
-  'protocol',
-  'reason',
-  'resource',
-  'score',
-  'spec',
-  'state',
-  'status',
-  'system',
-  'time',
-  'type',
-  'version',
-]);
-
-const CAMEL_BOUNDARY_RE = /([a-z0-9])([A-Z])/g;
-const ACRONYM_BOUNDARY_RE = /([A-Z]+)([A-Z][a-z])/g;
-const NON_ALPHANUMERIC_RE = /[^a-z0-9]+/;
-
-function tokens(input: string): string[] {
-  const spaced = input
-    .replace(CAMEL_BOUNDARY_RE, '$1 $2')
-    .replace(ACRONYM_BOUNDARY_RE, '$1 $2');
-  return spaced
-    .toLowerCase()
-    .split(NON_ALPHANUMERIC_RE)
-    .filter(Boolean)
-    .map((token) => (token.endsWith('ies') ? `${token.slice(0, -3)}y` : token.endsWith('s') && token.length > 3 ? token.slice(0, -1) : token))
-    .filter((token) => !IGNORED_RELATION_TERMS.has(token));
-}
-
-function parseEqualitySelector(value: string): Record<string, string> | undefined {
-  const out: Record<string, string> = {};
-  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
-  if (!parts.length) return undefined;
-  for (const part of parts) {
-    const eq = part.indexOf('=');
-    if (eq <= 0 || part.includes('!=')) return undefined;
-    const key = part.slice(0, eq).trim();
-    const val = part.slice(eq + 1).trim();
-    if (!key || !val) return undefined;
-    out[key] = val;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-const URL_VALUE_RE = /^https?:\/\//i;
-
-interface RelationContext {
-  referenceKind?: string;
-  referenceNamespace?: string;
-}
-
-function trimmedString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function collectRelationHints(value: unknown, prefix = '', context: RelationContext = {}): RelationHint[] {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed || trimmed.length > 120 || URL_VALUE_RE.test(trimmed)) return [];
-    return [{ path: prefix, value: trimmed, selector: parseEqualitySelector(trimmed), ...context }];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item, i) => collectRelationHints(item, `${prefix}[${i}]`, context));
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const siblingContext = {
-      referenceKind: trimmedString(record.kind),
-      referenceNamespace: trimmedString(record.namespace),
-    };
-    return Object.entries(record).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext));
-  }
-  return [];
-}
-
-const ARRAY_INDEX_RE = /\[\d+\]/g;
-
-function hintLabel(path: string): string {
-  const parts = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean);
-  return parts.slice(-2).join('.') || 'ref';
 }
 
 async function listKind(handle: ClusterHandle, spec: KindSpec, namespaces: Set<string> | undefined, warnings: string[]): Promise<Item[]> {
@@ -395,37 +285,6 @@ async function listFocusedRelatedItems(handle: ClusterHandle, focus: Item, names
   const resources = await handle.discovery.getResources();
   const candidates = pickDynamicCandidateSpecs(resources.filter((kind) => kind.custom), focus.spec, focus.obj);
   return (await Promise.all(candidates.map((spec) => listKind(handle, spec, namespaces, warnings)))).flat();
-}
-
-function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
-  return [
-    ...Object.entries(obj.metadata.labels ?? {}).map(([key, value]) => ({ path: `metadata.labels.${key}`, value })),
-    ...Object.entries(obj.metadata.annotations ?? {}).map(([key, value]) => ({ path: `metadata.annotations.${key}`, value })),
-  ];
-}
-
-const REFERENCE_CONTEXT_FIELDS = new Set(['apiversion', 'group', 'kind', 'namespace', 'version']);
-
-function canonicalKind(kind: string): string {
-  return kind.toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-function relationPathScore(hint: RelationHint, target: KindSpec): number {
-  const leaf = hint.path.replace(ARRAY_INDEX_RE, '').split('.').at(-1)?.toLowerCase();
-  if (leaf && REFERENCE_CONTEXT_FIELDS.has(leaf)) return 0;
-  const targetTerms = new Set(tokens(`${target.kind} ${target.plural}`));
-  const pathScore = new Set(tokens(hint.path).filter((term) => targetTerms.has(term))).size;
-  if (!hint.referenceKind) return pathScore;
-  return canonicalKind(hint.referenceKind) === canonicalKind(target.kind) ? 100 + pathScore : 0;
-}
-
-function bestTypedHint(hints: RelationHint[], target: KindSpec): RelationHint | undefined {
-  return hints
-    .flatMap((hint) => {
-      const score = relationPathScore(hint, target);
-      return score > 0 ? [{ hint, score }] : [];
-    })
-    .sort((a, b) => b.score - a.score || a.hint.path.length - b.hint.path.length || a.hint.path.localeCompare(b.hint.path))[0]?.hint;
 }
 
 function referenceScopeMatches(source: Item, target: Item, hint?: RelationHint): boolean {

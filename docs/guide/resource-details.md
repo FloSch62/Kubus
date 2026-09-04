@@ -68,11 +68,19 @@ Forward links have always been there: a pod's node, a referenced Secret, an owne
 overview also answers the other question, *who depends on this*:
 
 - **Used by** on ConfigMaps, Secrets, ServiceAccounts, PersistentVolumeClaims and
-  Volumes, StorageClasses, PriorityClasses and IngressClasses lists every workload, pod,
-  Ingress, route or binding that references the object, and how (mounted as a volume,
-  read into an environment variable, used as an image pull secret, bound by a Role).
+  Volumes, StorageClasses, PriorityClasses, IngressClasses, Roles and ClusterRoles lists
+  every workload, pod, Ingress, route or binding that references the object, and how
+  (mounted as a volume, read into an environment variable, used as an image pull
+  secret, granted by a binding).
   A Secret that says "mounted by 3 Deployments and a CronJob" before you edit it is the
   point.
+- **Used by** on custom resources works the same way without any hand-written
+  matcher. Kubus reads the CRD schemas installed in the cluster, picks the kinds
+  whose fields are named after the object's kind (plus every kind of the same API
+  group), and lists the objects that name it, select it by label, or carry its name
+  in a label. A network operator's node shows the links, interfaces and fabrics built
+  on it; a parent object shows the children the operator tagged with its name. Kinds
+  too large to read within the request budget say so under the list.
 - **Routed by** on a Service lists the Ingresses and Gateway API routes that send
   traffic to it, with their hosts and paths.
 - **Selected by** on a Pod or Deployment lists the Services, autoscalers,

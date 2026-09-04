@@ -633,6 +633,10 @@ export interface UsedByResponse {
   items: UsedByEntry[];
   /** Referencing kinds that could not be read (RBAC-denied or not installed). */
   unavailable: string[];
+  /** Kinds too large to scan completely; the listed entries cover only part of them. */
+  partial?: string[];
+  /** Wall-clock cost of the custom-kind scan, so clients poll heavy answers less often. */
+  scanMs?: number;
   /** Entries dropped past the cap; the listed ones are the most useful subset. */
   truncated: number;
 }

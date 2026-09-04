@@ -645,6 +645,7 @@ export function useResourceEvents(sel: { ctx: string; name: string; kind?: strin
 
 /** Everything in the cluster that references the object (reverse links). */
 export function useUsedBy(sel: { ctx: string; group: string; version: string; plural: string; kind: string; name: string; namespace?: string } | undefined) {
+  const base = useRefetchInterval(30_000);
   return useQuery({
     queryKey: ['used-by', sel],
     queryFn: () => {
@@ -654,7 +655,9 @@ export function useUsedBy(sel: { ctx: string; group: string; version: string; pl
     },
     enabled: !!sel,
     retry: false,
-    refetchInterval: useRefetchInterval(15_000),
+    // Cached builtin answers refresh on the normal cadence; an answer that had
+    // to page through large custom kinds polls no more than a tenth of the time.
+    refetchInterval: base === false ? false : (query) => Math.max(base, (query.state.data?.scanMs ?? 0) * 10),
     placeholderData: keepPreviousData,
   });
 }

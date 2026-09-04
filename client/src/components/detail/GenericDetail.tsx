@@ -170,7 +170,7 @@ export function MetadataSection({ obj, ctx, defaultOpen = true }: { obj: KubeObj
 }
 
 /** Kinds without a dedicated overview whose referrers are worth listing up top. */
-const REVERSE_LINK_KINDS = new Set(['ServiceAccount', 'PersistentVolumeClaim', 'PersistentVolume', 'StorageClass', 'PriorityClass', 'IngressClass', 'RuntimeClass', 'Gateway']);
+const REVERSE_LINK_KINDS = new Set(['ServiceAccount', 'PersistentVolumeClaim', 'PersistentVolume', 'StorageClass', 'PriorityClass', 'IngressClass', 'RuntimeClass', 'Gateway', 'Role', 'ClusterRole']);
 
 function apiGroupVersion(apiVersion: string | undefined): { group: string; version: string } {
   if (!apiVersion) return { group: '', version: '' };

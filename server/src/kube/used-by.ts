@@ -1,6 +1,8 @@
 import type { KubeObject, ResourceKindInfo, ResourceRef, UsedByEntry, UsedByResponse } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
-import { optionalItems } from './overview.js';
+import { installedCrds, optionalItems } from './overview.js';
+import { resourcePath } from './raw-client.js';
+import { collectMetadataRelationHints, collectRelationHints, hintPath, kindPathCoverage, pathNamesKind, relationPathScore, schemaKindMention, selectorMatches, type RelationHint } from './relation-hints.js';
 
 /**
  * Reverse references: everything in the cluster that points at one object.
@@ -17,6 +19,23 @@ export interface UsedByTarget {
   namespace?: string;
   /** Labels of the target (pods, workload templates) — matched against selectors. */
   labels?: Record<string, string>;
+  /** API group of the target; tells a custom `Node` from the core one. */
+  group?: string;
+  /** Plural of the target; sharpens field-path matching for custom kinds. */
+  plural?: string;
+  /** Uid of the target so a self-referencing kind never lists the object itself. */
+  uid?: string;
+}
+
+export interface UsedByOptions {
+  /** Skip the custom-kind scan (tests, or callers that only want the builtin answer). */
+  custom?: boolean;
+  /** Page size for LIST calls against custom kinds without a warm cache. */
+  pageSize?: number;
+  /** Objects per custom kind after which the scan stops and reports the kind as partial. */
+  scanLimit?: number;
+  /** Wall-clock budget for the custom scan; kinds not reached in time count as partial. */
+  timeBudgetMs?: number;
 }
 
 interface KindSpec {
@@ -292,6 +311,15 @@ function routeRelations(route: KubeObject, target: UsedByTarget): Relation[] {
   return out;
 }
 
+function roleRefRelations(binding: KubeObject, target: UsedByTarget): Relation[] {
+  const ref = (binding as { roleRef?: { kind?: string; name?: string } }).roleRef;
+  if (ref?.kind !== target.kind || ref.name !== target.name) return [];
+  if (target.kind === 'Role' && binding.metadata.namespace !== target.namespace) return [];
+  const subjects = (binding as { subjects?: Array<{ kind?: string; name?: string }> }).subjects ?? [];
+  const detail = subjects.length ? subjects.slice(0, 3).map((s) => `${s.kind ?? 'Subject'} ${s.name ?? '?'}`).join(', ') + (subjects.length > 3 ? ` +${subjects.length - 3}` : '') : undefined;
+  return [{ relation: 'grants', detail }];
+}
+
 function bindingRelations(binding: KubeObject, target: UsedByTarget): Relation[] {
   const subjects = ((binding as { subjects?: Array<{ kind?: string; name?: string; namespace?: string }> }).subjects ?? []);
   const roleRef = (binding as { roleRef?: { kind?: string; name?: string } }).roleRef;
@@ -410,6 +438,10 @@ async function sourcesFor(handle: ClusterHandle, target: UsedByTarget): Promise<
       return [{ spec: PVCS, match: pvcRelations }];
     case 'IngressClass':
       return [{ spec: INGRESSES, match: ingressRelations }];
+    case 'Role':
+      return [{ spec: ROLE_BINDINGS, match: roleRefRelations }];
+    case 'ClusterRole':
+      return [{ spec: ROLE_BINDINGS, match: roleRefRelations }, { spec: CLUSTER_ROLE_BINDINGS, match: roleRefRelations }];
     case 'Pod':
       return [{ spec: SERVICES, match: serviceRelations }, { spec: PDBS, match: pdbRelations }, { spec: NETWORK_POLICIES, match: networkPolicyRelations }];
     default:
@@ -439,6 +471,8 @@ export const USED_BY_KINDS = new Set([
   'Gateway',
   'StorageClass',
   'IngressClass',
+  'Role',
+  'ClusterRole',
   'Pod',
   ...WORKLOAD_KINDS,
 ]);
@@ -463,11 +497,262 @@ function inScope(spec: KindSpec, obj: KubeObject, target: UsedByTarget): boolean
   return obj.metadata.namespace === target.namespace;
 }
 
-export async function computeUsedBy(handle: ClusterHandle, target: UsedByTarget): Promise<UsedByResponse> {
+/*
+ * Custom kinds. A CRD gives no matcher to hard-code, so the reverse scan is
+ * inferred: a custom object references the target when one of its spec or
+ * status fields is named after the target's kind and holds the target's name
+ * (`spec.members[].node` on a TopoLink → TopoNode `leaf1`), when such a
+ * field holds a label selector that matches the target's labels
+ * (`leafNodeSelectors: ["role=leaf"]`), or when a label keyed after the kind
+ * carries the name (`services.example.com/virtualnetwork: vn-a`). Only kinds
+ * whose CRD schema mentions the target kind are read at all, and reads come
+ * from a warm watcher cache when there is one and paged LISTs otherwise,
+ * scoped to the target's namespace, so a 16k-object kind stays affordable.
+ */
+
+const CUSTOM_CANDIDATE_LIMIT = 128;
+const CUSTOM_PAGE_SIZE = 1000;
+const CUSTOM_SCAN_LIMIT = 20_000;
+const CUSTOM_CONCURRENCY = 8;
+const CUSTOM_TIME_BUDGET_MS = 12_000;
+const CUSTOM_LIST_DEADLINE_MS = 20_000;
+
+interface CrdShape {
+  group?: string;
+  scope?: string;
+  names?: { kind?: string; plural?: string };
+  versions?: Array<{ name?: string; served?: boolean; storage?: boolean; schema?: { openAPIV3Schema?: unknown } }>;
+}
+
+interface KindTarget {
+  kind: string;
+  plural: string;
+}
+
+/** The operator family of an API group: `core.eda.nokia.com` and `interfaces.eda.nokia.com` both belong to `eda.nokia.com`. */
+export function groupFamily(group: string): string {
+  const labels = group.split('.');
+  return labels.length >= 3 ? labels.slice(1).join('.') : group;
+}
+
+/**
+ * Installed custom kinds worth scanning, most promising first:
+ *
+ * 1. kinds whose schema spells out the target kind, in a field name or its
+ *    description, own group ahead of others;
+ * 2. kinds of the target's group or operator family with a spec field named
+ *    after the kind's head word (`node` on a TopoLink, for a TopoNode), then
+ *    those where such a field only appears under status;
+ * 3. the rest of the target's own group, because operators tag children with
+ *    parent labels the schema never mentions.
+ *
+ * A head-word match from an unrelated group is dropped: a storage driver's
+ * `nodeID` is about cluster nodes, not TopoNodes. The cap keeps a 300-CRD
+ * cluster from turning one drawer into a hundred LISTs; the time budget trims
+ * from the bottom of this order.
+ */
+export function customCandidates(crds: KubeObject[], target: UsedByTarget, exclude: KindSpec[] = []): KindSpec[] {
+  const out: Array<KindSpec & { rank: number }> = [];
+  const family = target.group ? groupFamily(target.group) : undefined;
+  for (const crd of crds) {
+    const spec = crd.spec as CrdShape | undefined;
+    const versions = spec?.versions ?? [];
+    const version = versions.find((v) => v.storage && v.served) ?? versions.find((v) => v.served);
+    if (!spec?.group || !spec.names?.plural || !spec.names.kind || !version?.name) continue;
+    if (exclude.some((e) => e.group === spec.group && e.plural === spec.names?.plural)) continue;
+    const sameGroup = spec.group === target.group;
+    const sameFamily = sameGroup || (family !== undefined && groupFamily(spec.group) === family);
+    const mention = schemaKindMention(version.schema?.openAPIV3Schema, target.kind);
+    let rank: number;
+    if (mention?.strength === 'strong') rank = sameGroup ? 0 : 1;
+    else if (mention && sameFamily) rank = (mention.inSpec ? 2 : 4) + (sameGroup ? 0 : 1);
+    else if (sameGroup) rank = 6;
+    else continue;
+    out.push({ group: spec.group, version: version.name, plural: spec.names.plural, kind: spec.names.kind, namespaced: spec.scope === 'Namespaced', rank });
+  }
+  return out
+    .sort((a, b) => a.rank - b.rank || a.kind.localeCompare(b.kind))
+    .slice(0, CUSTOM_CANDIDATE_LIMIT)
+    .map(({ rank: _rank, ...spec }) => spec);
+}
+
+/**
+ * Whether a field names the target kind at least as well as any other
+ * installed kind: `spec.nodeProfile` covers two words of NodeProfile and one
+ * of TopoNode, so a TopoNode with that name is not what the field points at.
+ * Ties stand (a `node` field may mean a TopoNode as well as a longhorn
+ * Node). A sibling `kind` field settles it outright.
+ */
+function pathPrefersKind(hint: RelationHint, target: KindTarget, rivals: KindTarget[]): boolean {
+  if (relationPathScore(hint, target) <= 0) return false;
+  if (hint.referenceKind) return true;
+  if (!pathNamesKind(hint.path, target.kind)) return false;
+  const coverage = kindPathCoverage(hint.path, target);
+  return !rivals.some((rival) => rival.kind !== target.kind && kindPathCoverage(hint.path, rival) > coverage);
+}
+
+const SELECTOR_KEY_RE = /(selector|matchLabels)$/i;
+
+/** Map-shaped selectors (`podSelector.matchLabels`, `spec.selector`) anywhere under a value. */
+export function collectMapSelectors(value: unknown, prefix = ''): Array<{ path: string; selector: Record<string, string> }> {
+  if (Array.isArray(value)) return value.flatMap((item, i) => collectMapSelectors(item, `${prefix}[${i}]`));
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  const out: Array<{ path: string; selector: Record<string, string> }> = [];
+  for (const [key, item] of Object.entries(record)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (SELECTOR_KEY_RE.test(key) && item && typeof item === 'object' && !Array.isArray(item)) {
+      const entries = Object.entries(item as Record<string, unknown>);
+      if (entries.length && entries.every(([, v]) => typeof v === 'string')) {
+        out.push({ path, selector: Object.fromEntries(entries) as Record<string, string> });
+        continue;
+      }
+    }
+    out.push(...collectMapSelectors(item, path));
+  }
+  return out;
+}
+
+const METADATA_HINT_RE = /^metadata\.(labels|annotations)\./;
+
+/** Every inferred way one custom object points at the target. */
+export function customRelations(obj: KubeObject, target: UsedByTarget, rivals: KindTarget[]): Relation[] {
+  if (target.uid && obj.metadata.uid === target.uid) return [];
+  const kindTarget: KindTarget = { kind: target.kind, plural: target.plural ?? '' };
+  const relations: Relation[] = [];
+  const seen = new Set<string>();
+  const add = (relation: string, detail: string) => {
+    const key = `${relation}:${detail}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    relations.push({ relation, detail });
+  };
+  const body = { spec: obj.spec, status: obj.status };
+  for (const hint of collectRelationHints(body)) {
+    if (hint.value === target.name) {
+      if (hint.referenceNamespace && target.namespace && hint.referenceNamespace !== target.namespace) continue;
+      if (pathPrefersKind(hint, kindTarget, rivals)) add('references', hintPath(hint.path));
+    } else if (hint.selector && target.labels && selectorMatches(hint.selector, target.labels) && pathNamesKind(hint.path, target.kind)) {
+      add('selects', hintPath(hint.path));
+    }
+  }
+  if (target.labels) {
+    for (const { path, selector } of collectMapSelectors(body)) {
+      if (selectorMatches(selector, target.labels) && pathNamesKind(path, target.kind)) add('selects', hintPath(path));
+    }
+  }
+  for (const hint of collectMetadataRelationHints(obj)) {
+    if (hint.value !== target.name) continue;
+    const key = hint.path.replace(METADATA_HINT_RE, '');
+    if (!pathPrefersKind({ path: key, value: hint.value }, kindTarget, rivals)) continue;
+    add(hint.path.startsWith('metadata.labels.') ? 'labeled' : 'annotated', key);
+  }
+  return relations;
+}
+
+interface CustomScan {
+  items: UsedByEntry[];
+  unavailable: string[];
+  partial: string[];
+  /** Time spent reading custom kinds; zero when nothing had to be listed. */
+  scanMs: number;
+}
+
+async function mapLimit<T, R>(inputs: T[], limit: number, fn: (input: T) => Promise<R>): Promise<R[]> {
+  const results = Array.from({ length: inputs.length }) as R[];
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, inputs.length) }, async () => {
+    while (next < inputs.length) {
+      const i = next++;
+      results[i] = await fn(inputs[i]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** Walk every object of one custom kind in the target's scope, from the cache when warm, paged otherwise. */
+async function scanCustomKind(
+  handle: ClusterHandle,
+  spec: KindSpec,
+  target: UsedByTarget,
+  opts: Required<Pick<UsedByOptions, 'pageSize' | 'scanLimit'>> & { deadline: number },
+  visit: (obj: KubeObject) => void,
+): Promise<{ partial: boolean }> {
+  const namespace = spec.namespaced ? target.namespace : undefined;
+  const cached = handle.watchers.peek(spec.group, spec.version, spec.plural) ?? (namespace ? handle.watchers.peek(spec.group, spec.version, spec.plural, namespace) : undefined);
+  if (cached?.currentState() === 'live') {
+    for (const obj of cached.items()) if (!namespace || obj.metadata.namespace === namespace) visit(obj);
+    return { partial: false };
+  }
+  let scanned = 0;
+  let cont: string | undefined;
+  do {
+    if (Date.now() > opts.deadline) return { partial: true };
+    const query = new URLSearchParams({ limit: String(opts.pageSize) });
+    if (cont) query.set('continue', cont);
+    const page = await handle.raw.json<{ items?: KubeObject[]; metadata?: { continue?: string } }>(
+      resourcePath(spec.group, spec.version, spec.plural, { namespace, query }),
+      { deadlineMs: CUSTOM_LIST_DEADLINE_MS },
+    );
+    for (const obj of page.items ?? []) visit(obj);
+    scanned += page.items?.length ?? 0;
+    cont = page.metadata?.continue || undefined;
+    if (cont && scanned >= opts.scanLimit) return { partial: true };
+  } while (cont);
+  return { partial: false };
+}
+
+async function scanCustomKinds(handle: ClusterHandle, target: UsedByTarget, exclude: KindSpec[], opts: UsedByOptions): Promise<CustomScan> {
+  const empty: CustomScan = { items: [], unavailable: [], partial: [], scanMs: 0 };
+  const started = Date.now();
+  let crds: KubeObject[];
+  try {
+    crds = await installedCrds(handle);
+  } catch {
+    return empty;
+  }
+  const candidates = customCandidates(crds, target, exclude);
+  if (!candidates.length) return empty;
+  const rivals: KindTarget[] = crds.flatMap((crd) => {
+    const names = (crd.spec as CrdShape | undefined)?.names;
+    return names?.kind && names.plural ? [{ kind: names.kind, plural: names.plural }] : [];
+  });
+  const scanOpts = { pageSize: opts.pageSize ?? CUSTOM_PAGE_SIZE, scanLimit: opts.scanLimit ?? CUSTOM_SCAN_LIMIT, deadline: Date.now() + (opts.timeBudgetMs ?? CUSTOM_TIME_BUDGET_MS) };
+  const scans = await mapLimit(candidates, CUSTOM_CONCURRENCY, async (spec) => {
+    const items: UsedByEntry[] = [];
+    try {
+      const { partial } = await scanCustomKind(handle, spec, target, scanOpts, (obj) => {
+        if (!inScope(spec, obj, target)) return;
+        const relations = customRelations(obj, target, rivals);
+        if (!relations.length) return;
+        items.push({
+          ref: refFor(handle.contextName, spec, obj),
+          relation: [...new Set(relations.map((r) => r.relation))].join(' · '),
+          detail: [...new Set(relations.map((r) => r.detail).filter((d): d is string => !!d))].join(', ') || undefined,
+        });
+      });
+      return { spec, items, partial, unavailable: false };
+    } catch {
+      return { spec, items, partial: false, unavailable: true };
+    }
+  });
+  return {
+    items: scans.flatMap((scan) => scan.items),
+    unavailable: scans.filter((scan) => scan.unavailable).map((scan) => scan.spec.kind),
+    partial: scans.filter((scan) => scan.partial).map((scan) => scan.spec.kind),
+    scanMs: Date.now() - started,
+  };
+}
+
+export async function computeUsedBy(handle: ClusterHandle, target: UsedByTarget, opts: UsedByOptions = {}): Promise<UsedByResponse> {
   const sources = await sourcesFor(handle, target);
   const acquired = sources.map((source) => ({ source, handle: handle.watchers.acquire(source.spec.group, source.spec.version, source.spec.plural) }));
   try {
-    const results = await Promise.all(acquired.map((a) => optionalItems(a.handle.watcher)));
+    const [results, custom] = await Promise.all([
+      Promise.all(acquired.map((a) => optionalItems(a.handle.watcher))),
+      opts.custom === false ? Promise.resolve<CustomScan>({ items: [], unavailable: [], partial: [], scanMs: 0 }) : scanCustomKinds(handle, target, sources.map((s) => s.spec), opts),
+    ]);
     const items: UsedByEntry[] = [];
     const unavailable: string[] = [];
     results.forEach((result, i) => {
@@ -487,14 +772,23 @@ export async function computeUsedBy(handle: ClusterHandle, target: UsedByTarget)
         items.push({ ref: refFor(handle.contextName, spec, obj), relation: words, detail: details.length ? details.join(', ') : undefined });
       }
     });
+    items.push(...custom.items);
+    unavailable.push(...custom.unavailable);
     items.sort(
       (a, b) =>
         (KIND_RANK[a.ref.kind] ?? 50) - (KIND_RANK[b.ref.kind] ?? 50) ||
+        a.ref.kind.localeCompare(b.ref.kind) ||
         (a.ref.namespace ?? '').localeCompare(b.ref.namespace ?? '') ||
         a.ref.name.localeCompare(b.ref.name),
     );
     const truncated = Math.max(0, items.length - MAX_ITEMS);
-    return { items: items.slice(0, MAX_ITEMS), unavailable, truncated };
+    return {
+      items: items.slice(0, MAX_ITEMS),
+      unavailable,
+      partial: custom.partial.length ? custom.partial : undefined,
+      scanMs: custom.scanMs > 0 ? custom.scanMs : undefined,
+      truncated,
+    };
   } finally {
     for (const a of acquired) a.handle.release();
   }
