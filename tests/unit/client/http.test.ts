@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiFetch, authToken, initAuthToken, wsUrl } from '../../../client/src/api/http';
+import { SESSION_AUTH_CHALLENGE } from '@kubus/shared';
+import { ApiError, apiFetch, apiFetchRaw, authToken, initAuthToken, wsUrl } from '../../../client/src/api/http';
 import { useBackendStore } from '../../../client/src/state/backend';
 
 function resetUrl(path = '/'): void {
@@ -9,7 +10,7 @@ function resetUrl(path = '/'): void {
 beforeEach(() => {
   sessionStorage.clear();
   resetUrl();
-  useBackendStore.setState({ unreachable: false, authInvalid: false });
+  useBackendStore.setState({ unreachable: false, authInvalid: false, authInvalidDismissed: false });
 });
 
 afterEach(() => {
@@ -97,13 +98,48 @@ describe('apiFetch', () => {
     expect(useBackendStore.getState().unreachable).toBe(false);
   });
 
-  it('reports an invalid session on 401 and throws with the server message', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ message: 'token expired' }, 401)));
+  function sessionRejection(): Response {
+    return new Response(JSON.stringify({ message: 'unauthorized' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json', 'www-authenticate': SESSION_AUTH_CHALLENGE },
+    });
+  }
+
+  it('reports an invalid session on a 401 carrying the server challenge', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionRejection()));
 
     const err = await apiFetch('/api/x').catch((e: unknown) => e);
-    expect(err).toMatchObject({ status: 401, message: 'token expired' });
+    expect(err).toMatchObject({ status: 401, message: 'unauthorized', sessionRejected: true });
     expect(useBackendStore.getState().authInvalid).toBe(true);
     expect(useBackendStore.getState().unreachable).toBe(false);
+  });
+
+  it('treats a 401 relayed from the cluster as a per-call error, not a dead session', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ message: 'Unauthorized', k8sStatus: { code: 401 } }, 401)),
+    );
+
+    const err = await apiFetch('/api/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 401, message: 'Unauthorized', sessionRejected: false });
+    expect(useBackendStore.getState().authInvalid).toBe(false);
+  });
+
+  it('clears the invalid-session flag and its dismissal once the server accepts a request', async () => {
+    useBackendStore.setState({ authInvalid: true, authInvalidDismissed: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ message: 'nope' }, 403)));
+
+    await apiFetch('/api/x').catch(() => {});
+    expect(useBackendStore.getState()).toMatchObject({ authInvalid: false, authInvalidDismissed: false });
+  });
+
+  it('flags session rejections on raw fetches too', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionRejection()));
+
+    const err = await apiFetchRaw('/api/x').catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 401, sessionRejected: true });
+    expect(useBackendStore.getState().authInvalid).toBe(true);
   });
 
   it('throws ApiError with the body message and attaches the body on non-401 errors', async () => {
