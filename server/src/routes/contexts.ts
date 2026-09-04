@@ -170,6 +170,20 @@ export function registerContextRoutes(app: FastifyInstance, ctx: AppContext): vo
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       const { involvedName, involvedKind, namespace } = req.query;
+      // The overview keeps a cluster-wide events watcher warm; answer from
+      // its cache when it is live so the drawer's Events tab and its badge
+      // cost nothing per poll. Field-selector semantics are mirrored exactly.
+      const cached = handle.watchers.peek('', 'v1', 'events');
+      if (cached?.currentState() === 'live') {
+        const items = cached.items().filter((e) => {
+          const involved = (e as { involvedObject?: { name?: string; kind?: string } }).involvedObject;
+          if (namespace && e.metadata.namespace !== namespace) return false;
+          if (involvedName && involved?.name !== involvedName) return false;
+          if (involvedKind && involved?.kind !== involvedKind) return false;
+          return true;
+        });
+        return { items };
+      }
       const selectors: string[] = [];
       if (involvedName) selectors.push(`involvedObject.name=${involvedName}`);
       if (involvedKind) selectors.push(`involvedObject.kind=${involvedKind}`);

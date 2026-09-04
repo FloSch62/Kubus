@@ -128,7 +128,7 @@ function createHarness() {
       entries: vi.fn(async () => entries),
       customEntries: vi.fn(async () => customEntries),
     },
-    watchers: { acquire: vi.fn(() => ({ watcher: namespaceWatcher, release: namespaceRelease })) },
+    watchers: { acquire: vi.fn(() => ({ watcher: namespaceWatcher, release: namespaceRelease })), peek: vi.fn(() => undefined) },
   } as unknown as ClusterHandle;
 
   const contexts = [{ name: 'kind-a', cluster: 'cluster-a', user: 'user-a', current: true, health: 'connected', active: true }];

@@ -5,6 +5,7 @@ import { apiServerCertNotAfter, collectCertificates } from '../kube/cert-expiry.
 import { computeNamespaceOverview } from '../kube/namespace-overview.js';
 import { computeOperatorRollups } from '../kube/operator-rollups.js';
 import { computeOverview, installedCrds } from '../kube/overview.js';
+import { computeClusterSignals } from '../kube/signals.js';
 import { computePodResources } from '../kube/pod-resources.js';
 import { installMetricsServer, metricsServerStatus, uninstallMetricsServer } from '../kube/metrics-server.js';
 import { computeMetricsSummary } from '../kube/metrics-summary.js';
@@ -145,6 +146,17 @@ export function registerMetricsRoutes(app: FastifyInstance, ctx: AppContext): vo
     try {
       const handle = ctx.clusters.get(req.params.ctx);
       return await computeOverview(handle);
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  // Per-object warning events and restarts — the marker data for list rows and tabs.
+  app.get<{ Params: { ctx: string } }>('/api/contexts/:ctx/overview/signals', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      return await computeClusterSignals(handle);
     } catch (err) {
       sendError(reply, err);
       return reply;
