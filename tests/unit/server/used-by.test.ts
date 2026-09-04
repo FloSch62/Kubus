@@ -166,6 +166,24 @@ describe('computeUsedBy', () => {
     expect(result.items[1]?.ref).toMatchObject({ group: 'gateway.networking.k8s.io', version: 'v1', plural: 'httproutes', namespace: 'gateways' });
   });
 
+  it('ignores Gateway API references that name another API group', async () => {
+    const route = (name: string, spec: Record<string, unknown>) => ({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name, namespace: 'apps', uid: name }, spec }) as KubeObject;
+    const handle = handleWith(
+      {
+        ingresses: [],
+        httproutes: [
+          route('core', { parentRefs: [{ name: 'edge' }], rules: [{ backendRefs: [{ name: 'web' }] }] }),
+          route('imported', { parentRefs: [{ group: 'example.com', kind: 'Gateway', name: 'edge' }], rules: [{ backendRefs: [{ group: 'multicluster.x-k8s.io', kind: 'Service', name: 'web' }] }] }),
+        ],
+      },
+      { resources: [{ group: 'gateway.networking.k8s.io', version: 'v1', plural: 'httproutes', kind: 'HTTPRoute', namespaced: true, verbs: ['list'] }] },
+    );
+    const service = await computeUsedBy(handle, { kind: 'Service', name: 'web', namespace: 'apps' }, { custom: false });
+    expect(service.items.map((i) => i.ref.name)).toEqual(['core']);
+    const gateway = await computeUsedBy(handle, { kind: 'Gateway', name: 'edge', namespace: 'apps' }, { custom: false });
+    expect(gateway.items.map((i) => i.ref.name)).toEqual(['core']);
+  });
+
   it('matches selectors for pods: Services, budgets and policies (an empty policy selector means every pod)', async () => {
     const handle = handleWith({
       services: [obj('Service', 'web', 'apps', { selector: { app: 'web' } }), obj('Service', 'none', 'apps', { selector: {} })],

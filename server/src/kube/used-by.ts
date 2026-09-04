@@ -284,6 +284,16 @@ interface RouteShape {
   }>;
 }
 
+/** A backendRef means the core Service only with the core group (empty or unset). */
+function isCoreServiceRef(ref: { group?: string; kind?: string }): boolean {
+  return (ref.kind ?? 'Service') === 'Service' && !ref.group;
+}
+
+/** A parentRef means a Gateway API Gateway only with that API group (the default). */
+function isGatewayRef(ref: { group?: string; kind?: string }): boolean {
+  return (ref.kind ?? 'Gateway') === 'Gateway' && (ref.group ?? GATEWAY_GROUP) === GATEWAY_GROUP;
+}
+
 function routeRelations(route: KubeObject, target: UsedByTarget): Relation[] {
   const spec = (route.spec ?? {}) as RouteShape;
   const routeNamespace = route.metadata.namespace;
@@ -291,8 +301,7 @@ function routeRelations(route: KubeObject, target: UsedByTarget): Relation[] {
   if (target.kind === 'Service') {
     for (const rule of spec.rules ?? []) {
       for (const backend of rule.backendRefs ?? []) {
-        const kind = backend.kind ?? 'Service';
-        if (kind !== 'Service' || backend.name !== target.name) continue;
+        if (!isCoreServiceRef(backend) || backend.name !== target.name) continue;
         if ((backend.namespace ?? routeNamespace) !== target.namespace) continue;
         const paths = (rule.matches ?? []).map((m) => m.path?.value).filter((p): p is string => !!p);
         const hosts = (spec.hostnames ?? []).join(', ');
@@ -302,8 +311,7 @@ function routeRelations(route: KubeObject, target: UsedByTarget): Relation[] {
     }
   } else if (target.kind === 'Gateway') {
     for (const parent of spec.parentRefs ?? []) {
-      const kind = parent.kind ?? 'Gateway';
-      if (kind !== 'Gateway' || parent.name !== target.name) continue;
+      if (!isGatewayRef(parent) || parent.name !== target.name) continue;
       if ((parent.namespace ?? routeNamespace) !== target.namespace) continue;
       out.push({ relation: 'attached to', detail: parent.sectionName ? `listener ${parent.sectionName}` : undefined });
     }

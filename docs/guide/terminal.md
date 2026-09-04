@@ -29,8 +29,11 @@ The shell is your login shell (`$SHELL`, PowerShell on Windows). Change it under
 
 Each terminal session gets its own small kubeconfig file, holding exactly one context
 with the namespace Kubus is filtered to, and `KUBECONFIG` points the shell at it. The
-strip above the terminal shows which context and namespace that is. `KUBUS_CONTEXT` and
-`KUBUS_NAMESPACE` are set as well, in case your prompt wants them.
+strip above the terminal shows which context and namespace that is. The file is the one
+source of truth: Kubus rewrites it whenever the terminal is pointed elsewhere, and every
+`kubectl` run reads it fresh, so a prompt that wants the current target should ask
+`kubectl config current-context` rather than cache it. `KUBUS_TERMINAL=1` is set so
+shell startup files can tell a Kubus terminal from any other.
 
 Clusters that Kubus reaches through an [SSH jump host](clusters.md#reaching-clusters-behind-a-proxy-or-bastion)
 work the same way: the session kubeconfig carries the tunnel's proxy setting, so

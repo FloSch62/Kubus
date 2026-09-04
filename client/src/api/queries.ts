@@ -525,8 +525,22 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
   return `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(group)}/${version}/${plural}/${encodeURIComponent(name)}${q ? `?${q}` : ''}`;
 }
 
+/**
+ * Objects off the watch stream come from the server's list cache, which
+ * carries no `kind` (and no `apiVersion` when the API server omits it from
+ * list items). Views that write the object back need both, so the mirror
+ * restores them from the selection before the object reaches the query.
+ */
+export function withIdentity(obj: KubeObject, sel: { group: string; version: string; kind?: string }): KubeObject {
+  if (obj.apiVersion && obj.kind) return obj;
+  const apiVersion = obj.apiVersion ?? (sel.group ? `${sel.group}/${sel.version}` : sel.version);
+  const kind = obj.kind ?? sel.kind;
+  // Identity first, as the API server orders it, so a YAML dump reads naturally.
+  return kind ? { apiVersion, kind, ...obj } : { apiVersion, ...obj };
+}
+
 export function useResource(
-  sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
+  sel: { ctx: string; group: string; version: string; plural: string; kind?: string; name: string; namespace?: string; reveal?: boolean } | undefined,
   opts?: { liveMs?: number; watch?: boolean },
 ) {
   const interval = useRefetchInterval(opts?.liveMs ?? 0);
@@ -553,7 +567,7 @@ export function useResource(
       {
         onSnapshot: (items) => {
           const obj = items.find(matches);
-          if (obj) qc.setQueryData(queryKey, obj);
+          if (obj) qc.setQueryData(queryKey, withIdentity(obj, watched));
           // Absent from a full snapshot (deleted while the watch was down):
           // re-fetch so the 404 marks the query gone, keeping the data.
           else if (qc.getQueryData(queryKey)) void qc.invalidateQueries({ queryKey });
@@ -564,7 +578,7 @@ export function useResource(
             // DELETED keeps the terminal object on screen for post-mortem;
             // the follow-up fetch's 404 tells views the resource is gone
             // (an error a later setQueryData clears if the name comes back).
-            qc.setQueryData(queryKey, ev.object);
+            qc.setQueryData(queryKey, withIdentity(ev.object, watched));
             if (ev.type === 'DELETED') void qc.invalidateQueries({ queryKey });
           }
         },

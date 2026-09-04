@@ -10,6 +10,7 @@ import { limitResources } from '../../../client/src/components/detail/LimitRange
 import { quotaLinksFor, quotaNamesIn } from '../../../client/src/components/detail/quota-link';
 import { labelSelectorMatches, labelSelectorToString } from '../../../client/src/components/detail/selectors';
 import { ReferencesSection, UsedBySection, usedBySummary } from '../../../client/src/components/detail/UsedBySection';
+import { withIdentity } from '../../../client/src/api/queries';
 import { makeSignalsLookup } from '../../../client/src/components/columns';
 import { tabSelection } from '../../../client/src/layout/TabHealthWatcher';
 import { currentShellTarget, openLocalShell } from '../../../client/src/local-shell';
@@ -26,7 +27,8 @@ const queries = vi.hoisted(() => ({
   error: undefined as Error | undefined,
 }));
 
-vi.mock('../../../client/src/api/queries.js', () => ({
+vi.mock('../../../client/src/api/queries.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../client/src/api/queries.js')>()),
   useUsedBy: () => ({ data: queries.usedBy, isLoading: !queries.usedBy && !queries.error, isError: !!queries.error, error: queries.error }),
   useReferences: () => ({ data: queries.references, isLoading: !queries.references && !queries.error, isError: !!queries.error, error: queries.error }),
 }));
@@ -43,6 +45,20 @@ beforeEach(() => {
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false, terminalFocusRequest: undefined, terminalReconnectRequests: {} });
   useClustersStore.setState({ selected: [], namespaces: [], namespacesByContext: {} });
   useUiPrefsStore.setState({ listState: {} });
+});
+
+describe('withIdentity', () => {
+  it('restores apiVersion and kind on objects mirrored off the watch stream, identity first', () => {
+    const listed = { metadata: { name: 'web', namespace: 'apps', uid: 'u' }, spec: { replicas: 2 } } as KubeObject;
+    const restored = withIdentity(listed, { group: 'apps', version: 'v1', kind: 'Deployment' });
+    expect(Object.keys(restored)).toEqual(['apiVersion', 'kind', 'metadata', 'spec']);
+    expect(restored).toMatchObject({ apiVersion: 'apps/v1', kind: 'Deployment' });
+    expect(withIdentity({ ...listed, apiVersion: 'v1' }, { group: '', version: 'v1', kind: 'ConfigMap' })).toMatchObject({ apiVersion: 'v1', kind: 'ConfigMap' });
+    // A complete object passes through untouched; without a kind to restore, only the apiVersion is filled.
+    const full = { apiVersion: 'v1', kind: 'Pod', ...listed };
+    expect(withIdentity(full, { group: '', version: 'v1' })).toBe(full);
+    expect(withIdentity(listed, { group: '', version: 'v1' })).toEqual({ apiVersion: 'v1', ...listed });
+  });
 });
 
 describe('UsedBySection', () => {
@@ -249,10 +265,12 @@ describe('local shell tabs', () => {
     useClustersStore.getState().setSelected(['dev']);
     const first = openLocalShell({ ctx: 'prod' });
     expect(useDockStore.getState().tabs.find((t) => t.id === first)).toMatchObject({ ctx: 'prod', follow: false, namespace: undefined });
-    const again = openLocalShell({ ctx: 'prod', namespace: 'payments', command: 'kubectl get pods' });
+    const again = openLocalShell({ ctx: 'prod', namespace: 'payments', command: 'kubectl get pods --namespace payments' });
     expect(again).toBe(first);
     expect(useDockStore.getState().tabs).toHaveLength(1);
-    expect(useDockStore.getState().tabs[0]).toMatchObject({ pendingCommand: 'kubectl get pods', namespace: 'payments', title: 'prod · payments' });
+    // The reused tab keeps the namespace its shell was told about; the command names its own.
+    expect(useDockStore.getState().tabs[0]).toMatchObject({ pendingCommand: 'kubectl get pods --namespace payments', title: 'prod' });
+    expect((useDockStore.getState().tabs[0] as { namespace?: string }).namespace).toBeUndefined();
     useDockStore.getState().setLocalShell(first!, { pendingCommand: undefined, follow: true });
     expect(useDockStore.getState().tabs[0]).not.toHaveProperty('pendingCommand');
     expect(useDockStore.getState().tabs[0]).toMatchObject({ follow: true });

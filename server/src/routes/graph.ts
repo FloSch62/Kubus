@@ -563,17 +563,19 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     const routeId = nodeId(handle.contextName, route.spec, route.obj);
     const routeNamespace = route.obj.metadata.namespace ?? '';
     const spec = route.obj.spec as {
-      parentRefs?: Array<{ kind?: string; name?: string; namespace?: string }>;
-      rules?: Array<{ backendRefs?: Array<{ kind?: string; name?: string; namespace?: string }> }>;
+      parentRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }>;
+      rules?: Array<{ backendRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }> }>;
     } | undefined;
+    // A parentRef is a Gateway only in the Gateway API group, a backendRef a
+    // core Service only with the core group; other groups are other kinds.
     for (const parent of spec?.parentRefs ?? []) {
-      if ((parent.kind ?? 'Gateway') !== 'Gateway' || !parent.name) continue;
+      if ((parent.kind ?? 'Gateway') !== 'Gateway' || (parent.group ?? GATEWAY_GROUP) !== GATEWAY_GROUP || !parent.name) continue;
       addEdge(edges, byKindNsName.get(`Gateway|${parent.namespace ?? routeNamespace}|${parent.name}`), routeId, 'routes');
     }
     const backends = new Set<string>();
     for (const rule of spec?.rules ?? []) {
       for (const backend of rule.backendRefs ?? []) {
-        if ((backend.kind ?? 'Service') === 'Service' && backend.name) backends.add(`${backend.namespace ?? routeNamespace}|${backend.name}`);
+        if ((backend.kind ?? 'Service') === 'Service' && !backend.group && backend.name) backends.add(`${backend.namespace ?? routeNamespace}|${backend.name}`);
       }
     }
     for (const backend of backends) {

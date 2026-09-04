@@ -8,7 +8,12 @@ export interface OpenLocalShellOptions {
   namespace?: string;
   /** Typed into the shell and run once it is ready. */
   command?: string;
-  /** Reuse a tab already pointed at this cluster instead of opening another (default for commands). */
+  /**
+   * Reuse a tab already pointed at this cluster instead of opening another
+   * (default for commands). A reused tab keeps the namespace it is on, since a
+   * queued command names its own namespace and the tab's kubeconfig must stay
+   * what the shell was told it is.
+   */
   reuse?: boolean;
 }
 
@@ -33,7 +38,7 @@ export function openLocalShell(opts: OpenLocalShellOptions = {}): string | undef
   const reuse = opts.reuse ?? !!opts.command;
   const existing = reuse ? dock.tabs.find((tab): tab is LocalShellTab => tab.kind === 'local-shell' && tab.ctx === ctx) : undefined;
   if (existing) {
-    dock.setLocalShell(existing.id, { namespace, pendingCommand: opts.command });
+    dock.setLocalShell(existing.id, { pendingCommand: opts.command });
     dock.requestTerminalFocus(existing.id);
     return existing.id;
   }

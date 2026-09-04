@@ -6,7 +6,8 @@ import type { AppContext } from '../app.js';
 import { defaultShellCwd, spawnShell, type ShellProcess } from '../local-shell/pty.js';
 import { removeSessionKubeconfig, singleContextKubeconfig, sweepStaleSessionKubeconfigs, writeSessionKubeconfig } from '../local-shell/kubeconfig.js';
 
-const SHELL_PATH_RE = /^[A-Za-z0-9_./\\:+-]+$/;
+/** An executable path: spaces are fine (`C:\Program Files\PowerShell\7\pwsh.exe` is spawned directly, never through a command shell). */
+const SHELL_PATH_RE = /^[A-Za-z0-9_./\\:+ -]+$/;
 
 /**
  * A shell on the machine Kubus runs on, pointed at the cluster and namespace
@@ -75,11 +76,12 @@ export function registerLocalShellSocket(app: FastifyInstance, ctx: AppContext):
         proc = await spawnShell({
           shell,
           cwd: defaultShellCwd(),
+          // The kubeconfig is the one source of truth: it is rewritten on every
+          // context switch and read afresh by each kubectl run, whereas a
+          // variable copied into the child's environment would go stale.
           env: {
             ...process.env,
             KUBECONFIG: kubeconfigPath,
-            KUBUS_CONTEXT: current.ctx,
-            KUBUS_NAMESPACE: current.namespace ?? '',
             KUBUS_TERMINAL: '1',
           },
           cols,

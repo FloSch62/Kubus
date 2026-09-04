@@ -59,7 +59,8 @@ describe('session kubeconfig files', () => {
   it('writes an owner-only YAML file and rewrites it in place on context switches', () => {
     const path = writeSessionKubeconfig(sessionId, singleContextKubeconfig(full, 'dev', 'team-a'));
     expect(path).toBe(sessionKubeconfigPath(sessionId));
-    expect(fs.statSync(path).mode & 0o777).toBe(0o600);
+    // NTFS has no POSIX mode bits; the owner-only mode is a POSIX guarantee.
+    if (process.platform !== 'win32') expect(fs.statSync(path).mode & 0o777).toBe(0o600);
     expect((loadYaml(fs.readFileSync(path, 'utf8')) as { 'current-context': string })['current-context']).toBe('dev');
 
     writeSessionKubeconfig(sessionId, singleContextKubeconfig(full, 'prod', undefined));

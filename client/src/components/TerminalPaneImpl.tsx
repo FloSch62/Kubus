@@ -255,7 +255,7 @@ export default function TerminalPaneImpl({
           } else if (ctl.op === 'session') {
             useDockStore.getState().setTerminalSession(tab.id, ctl.terminalId);
             const current = useDockStore.getState().tabs.find((candidate) => candidate.id === tab.id);
-            if (current && (current.kind === 'terminal' || current.kind === 'node-shell') && current.transferId) {
+            if (current && (current.kind === 'terminal' || current.kind === 'node-shell' || current.kind === 'local-shell') && current.transferId) {
               completeTabTransfer(current.transferId);
               useDockStore.getState().clearTransfer(tab.id);
             }
@@ -279,7 +279,7 @@ export default function TerminalPaneImpl({
     };
     ws.onclose = () => {
       const current = useDockStore.getState().tabs.find((candidate) => candidate.id === tab.id);
-      if (current && (current.kind === 'terminal' || current.kind === 'node-shell') && current.transferId) {
+      if (current && (current.kind === 'terminal' || current.kind === 'node-shell' || current.kind === 'local-shell') && current.transferId) {
         cancelTabTransfer(current.transferId);
         useDockStore.getState().clearTransfer(tab.id);
       }
