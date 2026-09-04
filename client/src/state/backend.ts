@@ -5,11 +5,17 @@ interface BackendState {
   unreachable: boolean;
   /** The server answered 401 — the session token is no longer valid. */
   authInvalid: boolean;
+  /**
+   * The user closed the invalid-session banner. Cleared as soon as the server
+   * accepts the token again, so a later rejection surfaces the banner anew.
+   */
+  authInvalidDismissed: boolean;
 }
 
 export const useBackendStore = create<BackendState>()(() => ({
   unreachable: false,
   authInvalid: false,
+  authInvalidDismissed: false,
 }));
 
 export function reportBackendDown(): void {
@@ -22,4 +28,14 @@ export function reportBackendUp(): void {
 
 export function reportAuthInvalid(): void {
   if (!useBackendStore.getState().authInvalid) useBackendStore.setState({ authInvalid: true });
+}
+
+/** Any response the server did not reject as a session failure proves the token still works. */
+export function reportAuthValid(): void {
+  const { authInvalid, authInvalidDismissed } = useBackendStore.getState();
+  if (authInvalid || authInvalidDismissed) useBackendStore.setState({ authInvalid: false, authInvalidDismissed: false });
+}
+
+export function dismissAuthInvalid(): void {
+  if (!useBackendStore.getState().authInvalidDismissed) useBackendStore.setState({ authInvalidDismissed: true });
 }

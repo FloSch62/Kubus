@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { SESSION_AUTH_CHALLENGE } from '@kubus/shared';
 import { buildApp } from '../../../server/src/app.js';
 import { resolveConfig } from '../../../server/src/config.js';
 import { clearAppLog } from '../../../server/src/logging/log-buffer.js';
@@ -103,5 +104,22 @@ describe('log routes', () => {
 
     const unauthorized = await app.inject({ method: 'GET', url: '/api/logs' });
     expect(unauthorized.statusCode).toBe(401);
+  });
+});
+
+describe('session auth guard', () => {
+  it('marks its own 401 with the session challenge so the client can tell it from a cluster 401', async () => {
+    const missing = await app.inject({ method: 'GET', url: '/api/logs' });
+    expect(missing.statusCode).toBe(401);
+    expect(missing.headers['www-authenticate']).toBe(SESSION_AUTH_CHALLENGE);
+    expect(missing.json()).toEqual({ message: 'unauthorized' });
+
+    const wrong = await app.inject({ method: 'GET', url: '/api/logs', headers: { authorization: 'Bearer nope' } });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.headers['www-authenticate']).toBe(SESSION_AUTH_CHALLENGE);
+
+    const accepted = await app.inject({ method: 'GET', url: '/api/logs', headers: auth });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.headers['www-authenticate']).toBeUndefined();
   });
 });

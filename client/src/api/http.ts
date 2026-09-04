@@ -1,5 +1,5 @@
-import type { ApiErrorBody } from '@kubus/shared';
-import { reportAuthInvalid, reportBackendDown, reportBackendUp } from '../state/backend.js';
+import { SESSION_AUTH_CHALLENGE, type ApiErrorBody } from '@kubus/shared';
+import { reportAuthInvalid, reportAuthValid, reportBackendDown, reportBackendUp } from '../state/backend.js';
 
 let token = '';
 
@@ -20,6 +20,13 @@ export function authToken(): string {
 }
 
 export class ApiError extends Error {
+  /**
+   * The Kubus server rejected the session token. The global status banner
+   * owns that state; a cluster's own 401 relayed by a route stays a per-call
+   * error and leaves this false.
+   */
+  sessionRejected = false;
+
   constructor(
     public status: number,
     message: string,
@@ -27,6 +34,17 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Only the server's own auth guard sends the challenge; relayed cluster 401s do not. */
+function isSessionRejection(res: Response): boolean {
+  return res.status === 401 && res.headers.get('www-authenticate') === SESSION_AUTH_CHALLENGE;
+}
+
+function responseError(res: Response, message: string, body?: ApiError['body']): ApiError {
+  const err = new ApiError(res.status, message, body);
+  err.sessionRejected = isSessionRejection(res);
+  return err;
 }
 
 function authHeaders(init?: HeadersInit): Headers {
@@ -37,8 +55,10 @@ function authHeaders(init?: HeadersInit): Headers {
 
 /**
  * Fetch that feeds the global backend-status store: connection failures and
- * 401s are cross-cutting states (server gone / token stale), not per-call
- * errors, so every call site reports them here instead of handling them.
+ * session rejections are cross-cutting states (server gone / token stale),
+ * not per-call errors, so every call site reports them here instead of
+ * handling them. Every other response, including an error, proves the token
+ * was accepted and clears a stale session flag.
  */
 async function statusFetch(path: string, init?: RequestInit): Promise<Response> {
   let res: Response;
@@ -53,7 +73,8 @@ async function statusFetch(path: string, init?: RequestInit): Promise<Response> 
     throw new ApiError(0, 'Cannot reach the Kubus backend');
   }
   reportBackendUp();
-  if (res.status === 401) reportAuthInvalid();
+  if (isSessionRejection(res)) reportAuthInvalid();
+  else reportAuthValid();
   return res;
 }
 
@@ -68,7 +89,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   if (!res.ok) {
     const err = body as ApiErrorBody | undefined;
-    throw new ApiError(res.status, err?.message ?? `${res.status} ${res.statusText}`, body as ApiError['body']);
+    throw responseError(res, err?.message ?? `${res.status} ${res.statusText}`, body as ApiError['body']);
   }
   return body as T;
 }
@@ -84,7 +105,7 @@ export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Res
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, message);
+    throw responseError(res, message);
   }
   return res;
 }

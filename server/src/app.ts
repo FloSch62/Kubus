@@ -5,6 +5,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import pino from 'pino';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
+import { SESSION_AUTH_CHALLENGE } from '@kubus/shared';
 import type { ServerConfig } from './config.js';
 import { ClusterManager } from './kube/cluster-manager.js';
 import { PortForwardManager } from './kube/portforward-manager.js';
@@ -122,7 +123,10 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
     const header = req.headers.authorization;
     const ok = header === `Bearer ${config.token}`;
     if (!ok) {
-      await reply.code(401).send({ message: 'unauthorized' });
+      // The challenge header marks this as a session rejection so the client
+      // does not mistake a cluster's own 401 (relayed by resource routes) for
+      // a dead Kubus session.
+      await reply.code(401).header('www-authenticate', SESSION_AUTH_CHALLENGE).send({ message: 'unauthorized' });
     }
   });
 

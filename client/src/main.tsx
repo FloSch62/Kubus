@@ -44,12 +44,13 @@ if (launch && sessionStorage.getItem(launchAppliedKey) !== launch.windowId) {
 const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     // Safety net so a failed action is never silent: mutations that handle
-    // their own errors keep doing so. Unreachable-backend and stale-token
-    // failures are excluded — the global status banner owns those.
+    // their own errors keep doing so. Unreachable-backend and stale-session
+    // failures are excluded — the global status banner owns those. A 401 the
+    // cluster itself returned is a real per-call failure and still toasts.
     onError: (error, _variables, _context, mutation) => {
       if (mutation.options.onError) return;
       if (isMutationErrorHandledLocally(mutation.meta)) return;
-      if (error instanceof ApiError && (error.status === 0 || error.status === 401)) return;
+      if (error instanceof ApiError && (error.status === 0 || error.sessionRejected)) return;
       showErrorToast(error);
     },
   }),

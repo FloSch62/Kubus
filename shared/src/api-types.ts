@@ -432,6 +432,14 @@ export interface ApiErrorBody {
   details?: unknown;
 }
 
+/**
+ * `WWW-Authenticate` challenge the Kubus server attaches when it rejects the
+ * session bearer token itself. A 401 relayed from a cluster through a
+ * passthrough route never carries it, which is how the client tells a dead
+ * session apart from expired cluster credentials.
+ */
+export const SESSION_AUTH_CHALLENGE = 'Bearer realm="kubus", error="invalid_token"';
+
 // ---- Actions ----
 
 export interface ScaleRequest {
