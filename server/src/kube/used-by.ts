@@ -58,6 +58,7 @@ const PVS = CORE('persistentvolumes', 'PersistentVolume', false);
 const DEPLOYMENTS: KindSpec = { group: 'apps', version: 'v1', plural: 'deployments', kind: 'Deployment', namespaced: true };
 const STATEFULSETS: KindSpec = { group: 'apps', version: 'v1', plural: 'statefulsets', kind: 'StatefulSet', namespaced: true };
 const DAEMONSETS: KindSpec = { group: 'apps', version: 'v1', plural: 'daemonsets', kind: 'DaemonSet', namespaced: true };
+const REPLICASETS: KindSpec = { group: 'apps', version: 'v1', plural: 'replicasets', kind: 'ReplicaSet', namespaced: true };
 const JOBS: KindSpec = { group: 'batch', version: 'v1', plural: 'jobs', kind: 'Job', namespaced: true };
 const CRONJOBS: KindSpec = { group: 'batch', version: 'v1', plural: 'cronjobs', kind: 'CronJob', namespaced: true };
 const INGRESSES: KindSpec = { group: 'networking.k8s.io', version: 'v1', plural: 'ingresses', kind: 'Ingress', namespaced: true };
@@ -150,6 +151,11 @@ function podSpecOf(kind: string, obj: KubeObject): PodSpecShape | undefined {
     return ((spec.jobTemplate as { spec?: { template?: { spec?: PodSpecShape } } } | undefined)?.spec?.template?.spec);
   }
   return (spec.template as { spec?: PodSpecShape } | undefined)?.spec;
+}
+
+/** Whether another object owns and drives this one (a ReplicaSet under a Deployment, a Job under a CronJob). */
+function isControlled(obj: KubeObject): boolean {
+  return (obj.metadata.ownerReferences ?? []).some((owner) => owner.controller);
 }
 
 /** Labels a selector is matched against: the pod's own, or a workload's pod template labels. */
@@ -418,6 +424,9 @@ type Matcher = (obj: KubeObject, target: UsedByTarget) => Relation[];
 /** Which cached lists to scan for a target kind, and how each candidate relates. */
 async function sourcesFor(handle: ClusterHandle, target: UsedByTarget): Promise<Array<{ spec: KindSpec; match: Matcher }>> {
   const podSources = [PODS, ...POD_TEMPLATE_KINDS].map((spec) => ({ spec, match: (obj: KubeObject, t: UsedByTarget) => podSpecRelations(podSpecOf(spec.kind, obj), t) }));
+  // ReplicaSets count only when nothing controls them: one under a Deployment
+  // repeats what the Deployment row says, once per revision it keeps.
+  podSources.push({ spec: REPLICASETS, match: (obj, t) => (isControlled(obj) ? [] : podSpecRelations(podSpecOf('ReplicaSet', obj), t)) });
   switch (target.kind) {
     case 'ConfigMap':
       return podSources;
@@ -705,7 +714,7 @@ function entryRef(ctx: string, spec: KindSpec, entry: { name: string; namespace?
 
 /** Rows keyed by object, so a kind answered twice (labels from one cache, names from another) still yields one line. */
 function mergeRows(rows: Map<string, UsedByEntry>, ref: ResourceRef, relations: Relation[]): void {
-  const id = `${ref.kind}|${ref.namespace ?? ''}|${ref.name}`;
+  const id = `${ref.group}|${ref.kind}|${ref.namespace ?? ''}|${ref.name}`;
   const existing = rows.get(id);
   const words = [...new Set([...(existing?.relation.split(' · ') ?? []), ...relations.map((r) => r.relation)])];
   const details = [...new Set([...(existing?.detail?.split(', ') ?? []), ...relations.map((r) => r.detail).filter((d): d is string => !!d)])];

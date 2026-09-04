@@ -656,8 +656,13 @@ export interface UsedByResponse {
 export interface ObjectSignal {
   /** Warning events in the window, deduped by reason. */
   warnings: Array<{ reason: string; message: string; count: number; lastTimestamp?: string }>;
-  /** Pods only: container restarts in the window. */
-  restarts?: Array<{ container: string; restarts: number; reason?: string; finishedAt?: string }>;
+  /**
+   * Pods only: containers that restarted inside the window. `restarts` counts
+   * the restarts known to fall in the window (a container's status only dates
+   * its last termination, so this is one per container), `total` its
+   * lifetime restart counter.
+   */
+  restarts?: Array<{ container: string; restarts: number; total?: number; reason?: string; finishedAt?: string }>;
 }
 
 export interface ClusterSignals {

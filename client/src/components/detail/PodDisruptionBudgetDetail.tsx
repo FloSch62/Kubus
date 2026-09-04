@@ -42,6 +42,17 @@ export function pdbBlocksEvictions(status: PdbStatus | undefined): boolean {
 }
 
 /**
+ * What the budget covers. In policy/v1 an empty selector (`{}`) selects every
+ * pod in the namespace, while a missing selector selects nothing; the two
+ * look alike once rendered as text, so they are told apart here.
+ */
+export function pdbCoverage(spec: PdbSpec): { selectorText: string; selectsAll: boolean; covers: boolean } {
+  const selectorText = labelSelectorToString(spec.selector);
+  const selectsAll = spec.selector !== undefined && spec.selector !== null && !selectorText;
+  return { selectorText, selectsAll, covers: selectsAll || !!selectorText };
+}
+
+/**
  * A PodDisruptionBudget in the terms a drain cares about: how many pods may
  * go right now, against how many are healthy and how many the budget wants,
  * with the pods it covers listed underneath.
@@ -50,8 +61,8 @@ export function PodDisruptionBudgetDetail({ obj, ctx }: { obj: KubeObject; ctx: 
   const spec = (obj.spec ?? {}) as PdbSpec;
   const status = obj.status as PdbStatus | undefined;
   const namespace = obj.metadata.namespace;
-  const selectorText = labelSelectorToString(spec.selector);
-  const podsQuery = useResourceList(namespace && selectorText ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector: selectorText } : undefined, {
+  const { selectorText, selectsAll, covers } = pdbCoverage(spec);
+  const podsQuery = useResourceList(namespace && covers ? { ctx, group: '', version: 'v1', plural: 'pods', namespace, labelSelector: selectorText || undefined } : undefined, {
     liveMs: DETAIL_LIST_LIVE_MS,
   });
   const pods = podsQuery.data?.items ?? [];
@@ -98,8 +109,19 @@ export function PodDisruptionBudgetDetail({ obj, ctx }: { obj: KubeObject; ctx: 
       {stale && (
         <ProblemBanner severity="warning" title="Status is behind the spec" items={[{ title: 'The controller has not reconciled the latest change yet', message: 'The numbers above describe the previous generation of this budget.' }]} />
       )}
-      <Section title="Covered pods" count={podsQuery.isLoading ? undefined : pods.length} flush description={selectorText ? <Box component="span" sx={{ fontFamily: 'monospace' }}>{selectorText}</Box> : 'no selector'}>
-        <PodMiniList ctx={ctx} pods={pods} loading={podsQuery.isLoading} emptyText={selectorText ? 'No pods match the selector.' : 'This budget has no selector, so it covers nothing.'} hideNamespace />
+      <Section
+        title="Covered pods"
+        count={podsQuery.isLoading ? undefined : pods.length}
+        flush
+        description={selectorText ? <Box component="span" sx={{ fontFamily: 'monospace' }}>{selectorText}</Box> : selectsAll ? 'every pod in the namespace' : 'no selector'}
+      >
+        <PodMiniList
+          ctx={ctx}
+          pods={pods}
+          loading={podsQuery.isLoading}
+          emptyText={selectorText ? 'No pods match the selector.' : selectsAll ? 'The namespace has no pods.' : 'This budget has no selector, so it covers nothing.'}
+          hideNamespace
+        />
       </Section>
       <Section title="Details">
         <Facts>
@@ -109,8 +131,8 @@ export function PodDisruptionBudgetDetail({ obj, ctx }: { obj: KubeObject; ctx: 
           <Fact label="Max unavailable" hint="Pods that may be down at once; an integer or a percentage.">
             {spec.maxUnavailable !== undefined ? String(spec.maxUnavailable) : undefined}
           </Fact>
-          <Fact label="Selector" mono>
-            {selectorText}
+          <Fact label="Selector" mono hint={selectsAll ? 'An empty selector covers every pod in the namespace.' : undefined}>
+            {selectorText || (selectsAll ? '{}' : undefined)}
           </Fact>
           <Fact label="Unhealthy pods" hint="AlwaysAllow lets unhealthy pods be evicted even when the budget is exhausted; IfHealthyBudget (default) only when the budget is met.">
             {spec.unhealthyPodEvictionPolicy}

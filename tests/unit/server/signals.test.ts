@@ -47,7 +47,7 @@ describe('aggregateSignals', () => {
     const signals = aggregateSignals([], [pod], NOW);
     expect(signals.objects[signalKey('Pod', 'apps', 'api-0')]).toEqual({
       warnings: [],
-      restarts: [{ container: 'api', restarts: 4, reason: 'OOMKilled', finishedAt: minutesAgo(10) }],
+      restarts: [{ container: 'api', restarts: 1, total: 4, reason: 'OOMKilled', finishedAt: minutesAgo(10) }],
     });
   });
 

@@ -71,7 +71,9 @@ export function aggregateSignals(events: KubeObject[], pods: KubeObject[], now: 
       const t = Date.parse(finishedAt);
       if (Number.isNaN(t) || now - t >= windowMs) continue;
       const signal = signalFor(signalKey('Pod', pod.metadata.namespace, pod.metadata.name));
-      (signal.restarts ??= []).push({ container: c.name, restarts: c.restartCount ?? 0, reason: c.lastState?.terminated?.reason, finishedAt });
+      // restartCount is the container's lifetime counter; only the last
+      // termination is dated, so exactly one restart is known to be recent.
+      (signal.restarts ??= []).push({ container: c.name, restarts: 1, total: c.restartCount ?? 0, reason: c.lastState?.terminated?.reason, finishedAt });
     }
   }
 

@@ -706,7 +706,7 @@ function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
   const warningTotal = signal.warnings.reduce((sum, w) => sum + w.count, 0);
   const lines = [
     ...signal.warnings.slice(0, 4).map((w) => `${w.reason}${w.count > 1 ? ` ×${w.count}` : ''}: ${w.message.length > 140 ? `${w.message.slice(0, 140)}…` : w.message}`),
-    ...(signal.restarts ?? []).slice(0, 3).map((r) => `${r.container} restarted ×${r.restarts}${r.reason ? ` (${r.reason})` : ''}`),
+    ...(signal.restarts ?? []).slice(0, 3).map((r) => `${r.container} restarted${r.reason ? ` (${r.reason})` : ''}${r.total && r.total > r.restarts ? `, ${r.total} times in its lifetime` : ''}`),
   ];
   const title = (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>

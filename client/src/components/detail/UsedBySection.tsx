@@ -139,7 +139,7 @@ function RelationSection({
             <TableBody>
               {shown.map((item) => (
                 <TableRow
-                  key={`${item.ref.kind}/${item.ref.namespace ?? ''}/${item.ref.name}`}
+                  key={`${item.ref.group}/${item.ref.kind}/${item.ref.namespace ?? ''}/${item.ref.name}`}
                   hover={!item.missing}
                   sx={{ cursor: item.missing ? 'default' : 'pointer' }}
                   onClick={item.missing ? undefined : () => open(item)}

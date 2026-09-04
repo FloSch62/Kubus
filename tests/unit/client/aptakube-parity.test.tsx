@@ -4,7 +4,7 @@ import type { KubeObject, UsedByEntry } from '@kubus/shared';
 import { matchesMiniFilter } from '../../../client/src/components/MiniFilterInput';
 import { safeHref } from '../../../client/src/components/detail/GenericDetail';
 import { describePeer, describePorts, effectivePolicyTypes, selectsAll } from '../../../client/src/components/detail/NetworkPolicyDetail';
-import { pdbBlocksEvictions, pdbRule } from '../../../client/src/components/detail/PodDisruptionBudgetDetail';
+import { pdbBlocksEvictions, pdbCoverage, pdbRule } from '../../../client/src/components/detail/PodDisruptionBudgetDetail';
 import { quotaRows } from '../../../client/src/components/detail/ResourceQuotaDetail';
 import { limitResources } from '../../../client/src/components/detail/LimitRangeDetail';
 import { quotaLinksFor, quotaNamesIn } from '../../../client/src/components/detail/quota-link';
@@ -45,6 +45,14 @@ beforeEach(() => {
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false, terminalFocusRequest: undefined, terminalReconnectRequests: {} });
   useClustersStore.setState({ selected: [], namespaces: [], namespacesByContext: {} });
   useUiPrefsStore.setState({ listState: {} });
+});
+
+describe('pdbCoverage', () => {
+  it('tells an empty selector (every pod) from a missing one (nothing)', () => {
+    expect(pdbCoverage({ selector: { matchLabels: { app: 'web' } } })).toEqual({ selectorText: 'app=web', selectsAll: false, covers: true });
+    expect(pdbCoverage({ selector: {} })).toEqual({ selectorText: '', selectsAll: true, covers: true });
+    expect(pdbCoverage({})).toEqual({ selectorText: '', selectsAll: false, covers: false });
+  });
 });
 
 describe('withIdentity', () => {

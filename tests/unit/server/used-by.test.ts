@@ -115,6 +115,11 @@ describe('computeUsedBy', () => {
     const handle = handleWith({
       pods: [obj('Pod', 'web-1', 'apps', podSpec()), obj('Pod', 'other', 'elsewhere', podSpec())],
       deployments: [obj('Deployment', 'web', 'apps', { template: { spec: podSpec() } })],
+      replicasets: [
+        obj('ReplicaSet', 'legacy', 'apps', { template: { spec: podSpec() } }),
+        // A Deployment's own ReplicaSets repeat the Deployment row and stay out.
+        obj('ReplicaSet', 'web-abc12', 'apps', { template: { spec: podSpec() } }, { metadata: { name: 'web-abc12', namespace: 'apps', uid: 'rs-owned', ownerReferences: [{ kind: 'Deployment', name: 'web', uid: 'Deployment-web', controller: true }] } }),
+      ],
       cronjobs: [obj('CronJob', 'nightly', 'apps', { jobTemplate: { spec: { template: { spec: podSpec() } } } })],
       statefulsets: [],
       daemonsets: [],
@@ -126,12 +131,13 @@ describe('computeUsedBy', () => {
     expect(result.items.map((i) => `${i.ref.kind}/${i.ref.name}: ${i.relation} [${i.detail}]`)).toEqual([
       'Deployment/web: mounts · env [volume cfg, app: MODE]',
       'CronJob/nightly: mounts · env [volume cfg, app: MODE]',
+      'ReplicaSet/legacy: mounts · env [volume cfg, app: MODE]',
       'Pod/web-1: mounts · env [volume cfg, app: MODE]',
     ]);
     expect(result.items[0]?.ref).toMatchObject({ ctx: 'kind-a', group: 'apps', version: 'v1', plural: 'deployments', namespace: 'apps' });
     // Every acquired watcher is released again, the CRD catalog included.
     const released = (handle as unknown as { released: string[] }).released;
-    expect(released).toHaveLength(7);
+    expect(released).toHaveLength(8);
     expect(released).toContain('apiextensions.k8s.io/v1/customresourcedefinitions');
   });
 

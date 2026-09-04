@@ -170,7 +170,8 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   const rows = new Map<string, UsedByEntry>();
   const addRow = (spec: KindSpec, target: Labeled, relation: string, detail: string, missing = false) => {
     const ref = refFor(handle.contextName, spec, target);
-    const id = `${ref.kind}|${ref.namespace ?? ''}|${ref.name}`;
+    // Kinds may repeat across API groups, so the group is part of the identity.
+    const id = `${ref.group}|${ref.kind}|${ref.namespace ?? ''}|${ref.name}`;
     const existing = rows.get(id);
     if (existing) {
       if (!existing.detail?.split(', ').includes(detail)) existing.detail = existing.detail ? `${existing.detail}, ${detail}` : detail;
