@@ -50,6 +50,12 @@ This is where Kubus earns its keep. When two or more clusters are selected:
 The **namespace filter** next to the cluster switcher narrows every list to the
 namespaces you choose. Leave it empty to see all namespaces.
 
+The selection is remembered **per cluster**: pick `team-a` on the dev cluster, switch to
+prod and set `payments`, and each cluster brings its own namespaces back when you return
+to it. With several clusters selected the filter shows the union; a chip that applies to
+only some of them is drawn outlined, and its tooltip names the clusters. Editing the
+filter applies to every selected cluster.
+
 The filter applies across all selected clusters, which is handy when the same namespace
 (say, `ingress-nginx`) exists in several of them. Clusters that don't have a matching
 namespace contribute nothing to the list.

@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, ty
 import { layout, statusTextColor } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
@@ -19,6 +20,7 @@ import { useUiPrefsStore } from '../state/prefs.js';
 import { useQuickSearchShortcut } from './quick-search.js';
 import { countLabel } from './format.js';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
+import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
 
 interface Props {
   rows: ClusterRow[];
@@ -33,6 +35,8 @@ interface Props {
   labelSelector?: string;
   onFilterChange?: (value: string) => void;
   onLabelSelectorChange?: (value: string) => void;
+  /** Drop the text filter and label selector in one step (the empty state's Clear button). */
+  onClearFilters?: () => void;
   onRowClick?: (row: ClusterRow) => void;
   /** Keyboard activation (Enter on a cell); lets pages move focus along. */
   onRowActivate?: (row: ClusterRow) => void;
@@ -51,6 +55,8 @@ interface Props {
   tableId?: string;
   /** Row emphasized as the resource currently shown in an adjacent detail view. */
   activeRowId?: string;
+  /** Remember the scroll position under this key and restore it when the table mounts again. */
+  scrollKey?: string;
 }
 
 const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
@@ -87,6 +93,7 @@ export function ResourceTable({
   labelSelector,
   onFilterChange,
   onLabelSelectorChange,
+  onClearFilters,
   onRowClick,
   onRowActivate,
   onRowContextMenu,
@@ -97,6 +104,7 @@ export function ResourceTable({
   hiddenFields,
   tableId,
   activeRowId,
+  scrollKey,
 }: Props) {
   const tableRef = useRef<HTMLDivElement>(null);
   const [localFilter, setLocalFilter] = useState('');
@@ -109,11 +117,13 @@ export function ResourceTable({
   const commitTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // External commits (saved view click, back/forward, clear) reset the input.
+  // External commits (saved view click, back/forward, clear, a remembered
+  // filter restored on navigation) reset the input — unless the user is
+  // mid-keystroke with a commit pending, whose value wins once it lands.
   useEffect(() => {
     if (committedFilter !== committedRef.current) {
       committedRef.current = committedFilter;
-      setInputValue(committedFilter);
+      if (commitTimer.current === undefined) setInputValue(committedFilter);
     }
   }, [committedFilter]);
   useEffect(() => () => clearTimeout(commitTimer.current), []);
@@ -232,6 +242,39 @@ export function ResourceTable({
     };
   }, []);
 
+  // Scroll memory: the position is saved as the user scrolls (throttled to
+  // the settle timer above) and put back once rows exist, so reopening a
+  // kind from the nav lands where it was left. Panes that stay mounted keep
+  // their own scroll anyway; this covers the fresh mount.
+  const scrollRestoredRef = useRef(false);
+  const setListState = useUiPrefsStore((s) => s.setListState);
+  useEffect(() => {
+    scrollRestoredRef.current = false;
+  }, [scrollKey]);
+  useEffect(() => {
+    if (!scrollKey || scrollRestoredRef.current || gridRows.length === 0) return;
+    const scroller = tableRef.current?.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
+    if (!scroller) return;
+    scrollRestoredRef.current = true;
+    const top = useUiPrefsStore.getState().listState[scrollKey]?.scrollTop;
+    if (top) requestAnimationFrame(() => scroller.scrollTo({ top }));
+  }, [scrollKey, gridRows.length]);
+  useEffect(() => {
+    if (!scrollKey) return;
+    const scroller = tableRef.current?.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
+    if (!scroller) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const handleScroll = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setListState(scrollKey, { scrollTop: Math.round(scroller.scrollTop) || undefined }), 300);
+    };
+    scroller.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      scroller.removeEventListener('scroll', handleScroll);
+    };
+  }, [scrollKey, setListState]);
+
   const rowsById = useMemo(() => new Map(filtered.map((row) => [row.obj.metadata.uid, row])), [filtered]);
   const rowsByIdRef = useRef(rowsById);
   rowsByIdRef.current = rowsById;
@@ -272,6 +315,7 @@ export function ResourceTable({
     setInputValue(value);
     clearTimeout(commitTimer.current);
     commitTimer.current = setTimeout(() => {
+      commitTimer.current = undefined;
       committedRef.current = value;
       if (onFilterChange) onFilterChange(value);
       else setLocalFilter(value);
@@ -286,6 +330,21 @@ export function ResourceTable({
   // no-matches message without a hidden count.
   const filteredOut = rows.length - filtered.length;
   const labelFiltered = labelTerms.length > 0;
+  const anyFilter = filteredOut > 0 || labelFiltered;
+  const clearFiltersRef = useRef<() => void>(() => {});
+  clearFiltersRef.current = () => {
+    setInputValue('');
+    clearTimeout(commitTimer.current);
+    commitTimer.current = undefined;
+    committedRef.current = '';
+    if (onClearFilters) {
+      onClearFilters();
+      return;
+    }
+    if (onFilterChange) onFilterChange('');
+    else setLocalFilter('');
+    onLabelSelectorChange?.('');
+  };
   const NoRowsOverlay = useCallback(
     () => (
       <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
@@ -301,9 +360,14 @@ export function ResourceTable({
                 ? `No ${kind} resources in the current scope`
                 : 'No resources in the current scope'}
         </Typography>
+        {anyFilter && (
+          <Button size="small" variant="outlined" startIcon={<FilterAltOffOutlinedIcon />} onClick={() => clearFiltersRef.current()} sx={{ pointerEvents: 'auto', mt: 0.5 }}>
+            Clear filters
+          </Button>
+        )}
       </Stack>
     ),
-    [filteredOut, labelFiltered, kind],
+    [filteredOut, labelFiltered, anyFilter, kind],
   );
   const slots = useMemo(() => ({ noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
   const getRowClassName = useCallback(

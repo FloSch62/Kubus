@@ -16,10 +16,15 @@ export const namespaceFilterSx = {
 export function NamespaceFilter() {
   const selected = useClustersStore((s) => s.selected);
   const namespaces = useClustersStore((s) => s.namespaces);
+  const byContext = useClustersStore((s) => s.namespacesByContext);
   const setNamespaces = useClustersStore((s) => s.setNamespaces);
   const { data: options } = useNamespaces(selected);
 
   if (selected.length === 0) return null;
+  // With several clusters the filter shows the union; a chip says which of
+  // them it applies to when the per-cluster selections differ.
+  const clustersFor = (ns: string) => selected.filter((ctx) => (byContext[ctx] ?? []).includes(ns));
+  const uneven = selected.length > 1 && namespaces.some((ns) => clustersFor(ns).length !== selected.length);
 
   return (
     <Autocomplete
@@ -39,7 +44,16 @@ export function NamespaceFilter() {
         </Box>
       )}
       renderValue={(value, getItemProps) =>
-        value.map((option, index) => <Chip {...getItemProps({ index })} key={option} label={option} size="small" />)
+        value.map((option, index) => (
+          <Chip
+            {...getItemProps({ index })}
+            key={option}
+            label={option}
+            size="small"
+            title={uneven ? `${option} — ${clustersFor(option).join(', ')}` : undefined}
+            variant={uneven && clustersFor(option).length !== selected.length ? 'outlined' : 'filled'}
+          />
+        ))
       }
       renderInput={(params) => <TextField {...params} placeholder={namespaces.length ? '' : 'All namespaces'} variant="outlined" />}
       // Electron/macOS computes native title-bar hit regions from the painted

@@ -36,6 +36,22 @@ ports. When several clusters are selected, a **Cluster** column is added automat
 - **Secret values are redacted** by default. Kubus never shows secret data in a list.
   [Reveal them deliberately](production-guard.md#secrets-are-redacted-by-default) in the
   details drawer.
+- **Warnings find you.** A small amber marker next to the name flags any object with
+  warning events or container restarts in the last hour; hover it for the reasons. Sort
+  by that column and the noisiest objects come first. The same signal puts a count on the
+  drawer's Events tab and a dot on a page tab whose object turned unhealthy while you
+  were looking elsewhere.
+
+## Kubus remembers where you were
+
+Nothing resets behind your back. Each kind remembers the filter, label selector and
+scroll position you left it with, and opening the kind again from the nav brings them
+back. Clearing the filter forgets it, and the empty state offers a **Clear filters**
+button when a filter hides everything. Saved views and deep links carry their own query
+and are never overridden.
+
+The [namespace filter](clusters.md#filtering-by-namespace) is remembered per cluster too,
+so switching to the prod cluster lands on the namespace you use there.
 
 ## Custom resources, first-class
 
