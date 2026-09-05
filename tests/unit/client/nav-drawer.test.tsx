@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavDrawer } from '../../../client/src/layout/NavDrawer';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useNavigationStore } from '../../../client/src/state/navigation';
@@ -70,7 +70,41 @@ function renderDrawer(initial = '/r/appstore.eda.nokia.com/v1beta2/widgets', pro
   return { ...view, onClose };
 }
 
+afterEach(() => { delete window.kubusDesktop; });
+
 describe('NavDrawer', () => {
+  it('keeps browser navigation URLs available', () => {
+    renderDrawer('/');
+    expect(screen.getAllByRole('link', { name: /Pods/ })[0]).toHaveAttribute('href', '/r/core/v1/pods');
+  });
+
+  it('avoids Windows hover URLs while preserving navigation, tabs, and saved views', () => {
+    window.kubusDesktop = { platform: 'win32' } as NonNullable<typeof window.kubusDesktop>;
+    renderDrawer('/');
+    const pods = screen.getAllByRole('link', { name: /Pods/ })[0]!;
+    expect(pods).not.toHaveAttribute('href');
+    expect(pods).toHaveAttribute('tabindex', '0');
+    fireEvent.click(pods, { ctrlKey: true });
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
+    expect(useTabsStore.getState().tabs.some((tab) => tab.path === '/r/core/v1/pods')).toBe(true);
+    fireEvent.keyDown(pods, { key: 'Enter' });
+    expect(screen.getByTestId('location')).toHaveTextContent('/r/core/v1/pods');
+    expect(pods).toHaveAttribute('aria-current', 'page');
+
+    const savedView = screen.getByRole('link', { name: 'Failing pods' });
+    expect(savedView).not.toHaveAttribute('href');
+    fireEvent.click(savedView);
+    expect(screen.getByTestId('location')).toHaveTextContent('/r/core/v1/pods?q=failed');
+    expect(useClustersStore.getState().namespaces).toEqual(['team-a']);
+
+    const events = screen.getAllByRole('link', { name: /Events/ })[0]!;
+    fireEvent(events, new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    expect(useTabsStore.getState().tabs.some((tab) => tab.path === '/events')).toBe(true);
+    expect(screen.getByTestId('location')).toHaveTextContent('/r/core/v1/pods?q=failed');
+    fireEvent.click(events, { ctrlKey: true, shiftKey: true });
+    expect(screen.getByTestId('location')).toHaveTextContent('/events');
+  });
+
   it('renders built-in, custom, favorite, and saved-view navigation', async () => {
     renderDrawer();
     expect(screen.getByText('Overview')).toBeInTheDocument();

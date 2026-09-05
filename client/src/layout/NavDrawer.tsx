@@ -35,7 +35,7 @@ import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import CheckIcon from '@mui/icons-material/Check';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
-import { NavLink, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { BUILTIN_NAV_GROUPS, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts, useContexts } from '../api/queries.js';
 import { favoriteContext, favoriteScopes, resolveFavorites } from '../favorite-scope.js';
@@ -47,6 +47,7 @@ import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
 import { TruncationTooltip } from '../components/truncation.js';
+import { NavigationLink } from './NavigationLink.js';
 
 const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
@@ -85,7 +86,7 @@ function hotkeyFavorites(favorites: FavoriteItem[]): FavoriteItem[] {
 /**
  * Browser-style modifiers on nav links: Ctrl/Cmd+click opens a background
  * page tab (+Shift focuses it), middle-click opens a background tab.
- * Plain clicks keep navigating the active tab via NavLink.
+ * Plain clicks keep navigating the active tab via NavigationLink.
  */
 function useOpenInNewTab(to: string, pendingSavedView?: SavedView['grid'], fromFavorite = false) {
   const openTab = useTabsStore((s) => s.openTab);
@@ -278,11 +279,12 @@ function NavEntry({
   return useMemo(() => {
     const button = (
       <ListItemButton
-        component={NavLink}
+        component={NavigationLink}
         to={to}
         state={inFavorites ? FAVORITE_NAVIGATION_STATE : undefined}
         dense
         selected={active}
+        aria-current={active ? 'page' : undefined}
         onMouseEnter={onIntent}
         onFocus={onIntent}
         {...newTabHandlers}
@@ -381,11 +383,12 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
       sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 } }}
     >
       <ListItemButton
-        component={NavLink}
+        component={NavigationLink}
         to={view.path}
         state={SAVED_VIEW_NAVIGATION_STATE}
         dense
         selected={active}
+        aria-current={active ? 'page' : undefined}
         onClick={(e) => {
           if (!e.ctrlKey && !e.metaKey) applyGridState();
           newTabHandlers.onClick(e);
