@@ -1,0 +1,72 @@
+name: Build artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: helm-engine/go.mod
+          cache-dependency-path: helm-engine/go.sum
+      - name: Cache Electron binaries
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm build:helm-engine
+      - name: Package
+        run: pnpm --filter @kubus/electron exec electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)
+              test -n "$(find electron/release -maxdepth 1 -name '*.AppImage' -print -quit)"
+              test -n "$(find electron/release -maxdepth 1 -name '*.deb' -print -quit)"
+              ;;
+            macOS)
+              test -n "$(find electron/release -maxdepth 1 -name '*.dmg' -print -quit)"
+              ;;
+            Windows)
+              test -n "$(find electron/release -maxdepth 1 -name '*.exe' -print -quit)"
+              ;;
+          esac
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubus-${{ matrix.os }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            electron/release/*.exe
+            electron/release/*.dmg
+            electron/release/*.AppImage
+            electron/release/*.deb

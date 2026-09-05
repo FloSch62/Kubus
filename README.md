@@ -32,6 +32,14 @@ pnpm start
 For development setup, release steps, architecture, security details, and test
 clusters, use the docs.
 
+## Build Artifacts
+
+Run the **Build artifacts** workflow from GitHub's **Actions** tab: select
+**Run workflow**, choose a branch, and start the run. It builds Linux
+(`.AppImage`, `.deb`), macOS (`.dmg`), and Windows (`.exe`) installers without
+running tests or publishing a release. Download the platform archives from
+the completed run's **Artifacts** section; they are retained for 14 days.
+
 ## Support
 
 <a href="https://www.buymeacoffee.com/FloSch62">
