@@ -73,6 +73,7 @@ export async function launchElectron(options: LaunchOptions = {}): Promise<Launc
       },
       timeout: 20_000,
     });
+    const child = app.process();
     const page = await app.firstWindow();
     let closed = false;
     return {
@@ -84,7 +85,7 @@ export async function launchElectron(options: LaunchOptions = {}): Promise<Launc
         if (closed) return;
         closed = true;
         try {
-          if (app && app.process().exitCode === null) await app.close();
+          if (app && child.exitCode === null && child.signalCode === null) await app.close();
         } finally {
           rmSync(stateDir, { recursive: true, force: true });
         }

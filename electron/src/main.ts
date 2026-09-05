@@ -42,6 +42,7 @@ const isLinux = process.platform === 'linux';
 const TITLEBAR_HEIGHT = 52;
 const UPDATE_MANIFEST_URL = 'https://kubus-app.dev/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 10_000;
+const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 let primaryWindow: BrowserWindow | undefined;
 let appUrl: string | undefined;
@@ -735,13 +736,34 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     flushClientState();
     if (!server) return;
+    event.preventDefault();
     if (!closing) {
-      closing = server.close().catch(() => undefined);
-      void closing.then(() => {
+      // Quit can arrive with a window still open (Cmd+Q), or after the last
+      // window disappears. Persist bounds before the fallback can bypass close.
+      if (primaryWindow && !primaryWindow.isDestroyed()) saveWindowState(primaryWindow);
+      mainLog('info', 'closing the embedded server');
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        flushClientState();
+        mainLog('warn', `server shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms; forcing application exit`);
+        // app.quit() would re-enter this handler and wait on the same stalled
+        // promise. Exit directly if cleanup cannot finish, e.g. after sleep.
+        app.exit(0);
+      }, SHUTDOWN_TIMEOUT_MS);
+      closing = (async () => {
+        try {
+          await server.close();
+          if (!timedOut) mainLog('info', 'embedded server closed');
+        } catch (err) {
+          mainLog('error', 'embedded server shutdown failed', err);
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (timedOut) return;
         server = undefined;
         app.quit();
-      });
+      })();
     }
-    event.preventDefault();
   });
 }
