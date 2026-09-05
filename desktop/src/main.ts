@@ -113,10 +113,13 @@ function createWindow(launch?: AppWindowLaunch): Window {
     rpc,
     renderer: 'native',
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
-    trafficLightOffset: { x: 16, y: 18 },
     frame,
     navigationRules: JSON.stringify(['^*', `${new URL(server.url).origin}/*`]),
   });
+  // Electrobun's trafficLightOffset adds to AppKit's default inset. Use an
+  // absolute position to center the 14pt buttons in the client's 52px header.
+  // The native setter preserves this position across resize/fullscreen changes.
+  if (isMac) win.setWindowButtonPosition(16, 19);
   windows.add(win);
   focused = win;
   if (isApplicationLaunch(launch)) { applications.add(win); primary ??= win; }
