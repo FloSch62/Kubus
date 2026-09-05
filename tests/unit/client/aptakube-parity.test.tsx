@@ -13,14 +13,12 @@ import { ReferencesSection, UsedBySection, usedBySummary } from '../../../client
 import { withIdentity } from '../../../client/src/api/queries';
 import { makeSignalsLookup } from '../../../client/src/components/columns';
 import { tabSelection } from '../../../client/src/layout/TabHealthWatcher';
-import { currentShellTarget, openLocalShell } from '../../../client/src/local-shell';
 import { namespacesForContexts, useClustersStore } from '../../../client/src/state/clusters';
 import { useDetailStore } from '../../../client/src/state/detail';
 import { useDockStore } from '../../../client/src/state/dock';
 import { useUiPrefsStore } from '../../../client/src/state/prefs';
 import { useTabAttentionStore } from '../../../client/src/state/tab-attention';
 import { TabHealthWatchers } from '../../../client/src/layout/TabHealthWatcher';
-import { kubectlGetCommand } from '../../../client/src/kubectl-command';
 
 const watch = vi.hoisted(() => ({ handlers: [] as Array<{ onSnapshot: (items: unknown[]) => void; onEvents: (events: unknown[]) => void }> }));
 vi.mock('../../../client/src/api/ws/watch-client.js', () => ({
@@ -314,39 +312,3 @@ describe('per-cluster namespaces', () => {
   });
 });
 
-describe('local shell tabs', () => {
-  it('opens a terminal on the current cluster and namespace, following the selection', () => {
-    useClustersStore.getState().setSelected(['dev']);
-    useClustersStore.getState().setNamespaces(['team-a']);
-    expect(currentShellTarget()).toEqual({ ctx: 'dev', namespace: 'team-a' });
-    const id = openLocalShell();
-    const tab = useDockStore.getState().tabs.find((t) => t.id === id);
-    expect(tab).toMatchObject({ kind: 'local-shell', ctx: 'dev', namespace: 'team-a', follow: true, title: 'dev · team-a' });
-    expect(useDockStore.getState().open).toBe(true);
-    expect(useDockStore.getState().terminalFocusRequest?.tabId).toBe(id);
-  });
-
-  it('reuses a tab pointed at the cluster when handing it a command, and pins explicit clusters', () => {
-    useClustersStore.getState().setSelected(['dev']);
-    const first = openLocalShell({ ctx: 'prod' });
-    expect(useDockStore.getState().tabs.find((t) => t.id === first)).toMatchObject({ ctx: 'prod', follow: false, namespace: undefined });
-    const again = openLocalShell({ ctx: 'prod', namespace: 'payments', command: 'kubectl get pods --namespace payments' });
-    expect(again).toBe(first);
-    expect(useDockStore.getState().tabs).toHaveLength(1);
-    // The reused tab keeps the namespace its shell was told about; the command names its own.
-    expect(useDockStore.getState().tabs[0]).toMatchObject({ pendingCommand: 'kubectl get pods --namespace payments', title: 'prod' });
-    expect((useDockStore.getState().tabs[0] as { namespace?: string }).namespace).toBeUndefined();
-    useDockStore.getState().setLocalShell(first!, { pendingCommand: undefined, follow: true });
-    expect(useDockStore.getState().tabs[0]).not.toHaveProperty('pendingCommand');
-    expect(useDockStore.getState().tabs[0]).toMatchObject({ follow: true });
-  });
-
-  it('returns nothing without a cluster', () => {
-    expect(openLocalShell()).toBeUndefined();
-    expect(useDockStore.getState().tabs).toHaveLength(0);
-  });
-
-  it('builds kubectl commands without --context for a shell that already has one', () => {
-    expect(kubectlGetCommand({ ctx: 'kind-a', group: 'apps', plural: 'deployments', name: 'web', namespace: 'apps' }, { omitContext: true })).toBe('kubectl get deployments.apps/web --namespace apps');
-  });
-});

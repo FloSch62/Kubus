@@ -22,7 +22,6 @@ The strip along the top is always available, whatever page you're on:
 | **Cluster switcher** | Select which kubeconfig contexts are active. [More →](clusters.md) |
 | **Namespace filter** | Restrict every list to one or more namespaces. [More →](clusters.md#filtering-by-namespace) |
 | **Search** (++ctrl+k++) | Open the [command palette](command-palette.md) to find and act on anything. |
-| **Terminal** (++ctrl+grave++) | Open a [local terminal](terminal.md) with `kubectl` already pointed at the selected cluster. |
 | **Theme toggle** | Flip between light and dark. |
 | **Settings** (:material-cog:) | Appearance, refresh rate, log and terminal preferences. [More →](settings.md) |
 
@@ -47,16 +46,15 @@ without leaving the page.
 
 ## :material-dock-bottom: Bottom dock
 
-Logs and terminals open in a **dock** along the bottom of the window. Each log stream,
-container shell or [local terminal](terminal.md) gets its own tab, so you can keep several
-open at once. You can:
+Logs and terminals open in a **dock** along the bottom of the window. Each log stream or
+shell gets its own tab, so you can keep several open at once. You can:
 
 - **resize** the dock by dragging its top edge,
 - **maximise** it to fill the window,
 - **toggle** it with the command *Toggle terminal dock* (++ctrl+k++ → `>`),
 - **close** the focused tab with ++ctrl+w++ / ++cmd+w++ (desktop app; with the dock empty this closes the window).
 
-[More on logs](logs.md) · [More on shells](shell.md) · [More on the terminal](terminal.md)
+[More on logs](logs.md) · [More on shells](shell.md)
 
 ## :material-page-layout-sidebar-right: Details drawer
 

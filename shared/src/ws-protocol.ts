@@ -59,14 +59,10 @@ export const execClientControlSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('prepare-transfer') }),
   /** Resume output when a prepared handoff is abandoned. */
   z.object({ op: z.literal('cancel-transfer') }),
-  /** Local shells only: point the session's kubeconfig at another context / namespace. */
-  z.object({ op: z.literal('context'), ctx: z.string().min(1), namespace: z.string().optional() }),
 ]);
 export type ExecClientControl = z.infer<typeof execClientControlSchema>;
 
 export type ExecServerControl =
   | { op: 'session'; terminalId: string }
   | { op: 'transfer-ready' }
-  /** Local shells: the kubeconfig the session points at (sent on start and after every context switch). */
-  | { op: 'context'; ctx: string; namespace?: string; kubeconfigPath: string; pty: boolean }
   | { op: 'exit'; code?: number; message?: string };

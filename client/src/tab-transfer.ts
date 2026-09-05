@@ -1,4 +1,4 @@
-import { useDockStore, type DockTab, isShellTab } from './state/dock.js';
+import { useDockStore, type DockTab } from './state/dock.js';
 import { useTabsStore, type PageTab } from './state/tabs.js';
 import { terminalHandle } from './terminal-registry.js';
 
@@ -130,7 +130,7 @@ export function registerTabTransferSource(transferId: string, surface: Transfera
     snapshot: () => {
       const tab = useDockStore.getState().tabs.find((candidate) => candidate.id === tabId);
       if (!tab) return undefined;
-      if (isShellTab(tab)) {
+      if (tab.kind === 'terminal' || tab.kind === 'node-shell') {
         return {
           surface: 'dock',
           tab: { ...tab, snapshot: terminalHandle(tabId)?.snapshot() },
@@ -196,7 +196,9 @@ export async function receiveTabTransfer(
     return adopted;
   }
 
-  const live = isShellTab(offered.tab) && !!offered.tab.terminalId;
+  const live =
+    (offered.tab.kind === 'terminal' || offered.tab.kind === 'node-shell') &&
+    !!offered.tab.terminalId;
   const incoming = live ? { ...offered.tab, transferId } : offered.tab;
   const adopted = useDockStore.getState().adoptTab(incoming, targetId, edge);
   if (!adopted) {

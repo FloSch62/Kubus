@@ -324,7 +324,7 @@ function RefreshSection() {
 const SHELL_PRESETS = ['auto', 'sh', 'bash'] as const;
 
 function LogsTerminalSection() {
-  const { defaultTailLines, defaultShell, copyOnSelect, rightClickAction, localShell } = useUiPrefsStore();
+  const { defaultTailLines, defaultShell, copyOnSelect, rightClickAction } = useUiPrefsStore();
   const setPrefs = useUiPrefsStore((s) => s.set);
   const { wrap, tsMode, highlight, setWrap, setTsMode, setHighlight } = useLogPrefsStore();
   const shellPreset = (SHELL_PRESETS as readonly string[]).includes(defaultShell) ? defaultShell : 'custom';
@@ -393,24 +393,6 @@ function LogsTerminalSection() {
           )}
           <Typography variant="caption" color="text.secondary">
             Applies to newly opened exec terminals
-          </Typography>
-          <FormControl size="small" sx={{ maxWidth: 240 }}>
-            <InputLabel id="settings-local-shell">Local terminal shell</InputLabel>
-            <Select
-              labelId="settings-local-shell"
-              label="Local terminal shell"
-              value={localShell === 'auto' ? 'auto' : 'custom'}
-              onChange={(e) => setPrefs({ localShell: e.target.value === 'auto' ? 'auto' : localShell === 'auto' ? '/bin/zsh' : localShell })}
-            >
-              <MenuItem value="auto">Auto (login shell)</MenuItem>
-              <MenuItem value="custom">Custom…</MenuItem>
-            </Select>
-          </FormControl>
-          {localShell !== 'auto' && (
-            <TextField size="small" label="Shell path" value={localShell} onChange={(e) => setPrefs({ localShell: e.target.value })} sx={{ maxWidth: 240 }} />
-          )}
-          <Typography variant="caption" color="text.secondary">
-            The Terminal tab runs this shell on your machine with KUBECONFIG pointed at the cluster in view. Auto uses $SHELL (PowerShell on Windows).
           </Typography>
           <FormControlLabel
             control={<Switch checked={copyOnSelect} onChange={(e) => setPrefs({ copyOnSelect: e.target.checked })} />}

@@ -23,7 +23,7 @@ import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutli
 import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import { useDockStore, isShellTab } from '../state/dock.js';
+import { useDockStore } from '../state/dock.js';
 import type { DockTab } from '../state/dock.js';
 import { useTabsStore, type PageTab } from '../state/tabs.js';
 import { openTabInNewWindow, moveTabToNewWindow, type TabSurface } from '../tab-window-actions.js';
@@ -58,7 +58,7 @@ export function TabActionsMenu({
   const index = tab ? tabs.indexOf(tab) : -1;
   const closeableOthers = tabs.some((candidate) => candidate.id !== menu?.id && !candidate.pinned);
   const closeableRight = index >= 0 && tabs.slice(index + 1).some((candidate) => !candidate.pinned);
-  const terminal = !!tab && 'kind' in tab && isShellTab(tab);
+  const terminal = tab && 'kind' in tab && (tab.kind === 'terminal' || tab.kind === 'node-shell');
 
   useEffect(() => {
     if (!renaming) return;

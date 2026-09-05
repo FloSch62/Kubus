@@ -32,7 +32,6 @@ import { broadcastWatchMessage, registerWatchSocket } from './ws/watch-socket.js
 import { registerLogsSocket } from './ws/logs-socket.js';
 import { registerExecSocket } from './ws/exec-socket.js';
 import { registerNodeShellSocket } from './ws/node-shell-socket.js';
-import { registerLocalShellSocket } from './ws/local-shell-socket.js';
 import { ExecSessionRegistry } from './ws/transferable-exec.js';
 import { HelmOperationManager } from './helm/operations.js';
 import { appLogPinoSink } from './logging/log-buffer.js';
@@ -152,7 +151,6 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerLogsSocket(app, ctx);
   registerExecSocket(app, ctx);
   registerNodeShellSocket(app, ctx);
-  registerLocalShellSocket(app, ctx);
 
   // Serve the built client in production (same-origin, no CORS needed).
   const clientDist = config.staticRoot ?? path.resolve(__dirname, '../../client/dist');

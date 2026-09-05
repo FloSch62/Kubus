@@ -54,7 +54,6 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import LaptopOutlinedIcon from '@mui/icons-material/LaptopOutlined';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -88,7 +87,6 @@ import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
 import { labelSelectorMatches, type LabelSelector } from './detail/selectors.js';
-import { openLocalShell } from '../local-shell.js';
 import { IS_WINDOWS } from '../platform.js';
 
 export interface RowActionTarget {
@@ -748,19 +746,6 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ContentCopyIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Copy kubectl get command</ListItemText>
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            // The terminal's own kubeconfig already selects this cluster, so
-            // the command needs neither --context nor --kubeconfig.
-            openLocalShell({ ctx, namespace, command: kubectlGetCommand({ ctx, group: target.group, plural: target.plural, name, namespace }, { shell: IS_WINDOWS ? 'windows' : 'posix', omitContext: true }) });
-            close();
-          }}
-        >
-          <ListItemIcon>
-            <LaptopOutlinedIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Run kubectl get in terminal</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem

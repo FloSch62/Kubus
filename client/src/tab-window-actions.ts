@@ -9,10 +9,6 @@ export type TabSurface = 'page' | 'dock';
 
 function dockLaunchTab(tab: DockTab): AppWindowDockTab {
   const { id: _id, ...copy } = tab;
-  if (copy.kind === 'local-shell') {
-    const { terminalId: _terminalId, transferId: _transferId, snapshot: _snapshot, pty: _pty, pendingCommand: _pending, ...launch } = copy;
-    return launch;
-  }
   if (copy.kind === 'terminal' || copy.kind === 'node-shell') {
     const { terminalId: _terminalId, transferId: _transferId, snapshot: _snapshot, ...launch } = copy;
     return launch;

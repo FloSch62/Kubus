@@ -34,41 +34,6 @@ export interface NodeShellTab {
   snapshot?: string;
 }
 
-/**
- * A shell on the machine Kubus runs on, with KUBECONFIG pointed at the
- * cluster and namespace the tab shows. `follow` keeps it on whatever the
- * cluster switcher and namespace filter select.
- */
-export interface LocalShellTab {
-  kind: 'local-shell';
-  id: string;
-  title: string;
-  ctx: string;
-  namespace?: string;
-  follow?: boolean;
-  /** Set once the server reports whether the shell got a real pseudo-terminal. */
-  pty?: boolean;
-  /** Typed into the shell (and run) as soon as it is ready — "run this kubectl command here". */
-  pendingCommand?: string;
-  pinned?: boolean;
-  color?: string;
-  terminalId?: string;
-  transferId?: string;
-  snapshot?: string;
-}
-
-export type ShellTab = TerminalTab | NodeShellTab | LocalShellTab;
-
-/** Tabs backed by an xterm session (pod exec, node shell, local shell). */
-export function isShellTab(tab: DockTab | undefined): tab is ShellTab {
-  return tab?.kind === 'terminal' || tab?.kind === 'node-shell' || tab?.kind === 'local-shell';
-}
-
-/** Dock tab title for a local shell: the context it points at, plus the namespace when one is set. */
-export function localShellTitle(ctx: string, namespace: string | undefined): string {
-  return `${ctx}${namespace ? ` · ${namespace}` : ''}`;
-}
-
 export interface LogsTab {
   kind: 'logs';
   id: string;
@@ -87,7 +52,7 @@ export interface LogsTab {
   color?: string;
 }
 
-export type DockTab = TerminalTab | NodeShellTab | LocalShellTab | LogsTab;
+export type DockTab = TerminalTab | NodeShellTab | LogsTab;
 
 interface DockState {
   tabs: DockTab[];
@@ -109,8 +74,6 @@ interface DockState {
   adoptTab: (tab: DockTab, targetId?: string, edge?: 'before' | 'after') => boolean;
   setTerminalSession: (id: string, terminalId?: string) => void;
   clearTransfer: (id: string) => void;
-  /** Update a local shell's context, namespace, follow mode or pending command; the title follows. */
-  setLocalShell: (id: string, patch: Partial<Pick<LocalShellTab, 'ctx' | 'namespace' | 'follow' | 'pty' | 'pendingCommand'>>) => void;
   setActive: (id: string) => void;
   setOpen: (open: boolean) => void;
   setHeight: (height: number) => void;
@@ -143,12 +106,11 @@ function insertionIndex(tabs: readonly DockTab[], tab: DockTab, requested: numbe
 function duplicateDockTab(tab: DockTab): DockTab {
   const copy = { ...tab, id: dockTabId() } as DockTab;
   delete copy.pinned;
-  if (isShellTab(copy)) {
+  if (copy.kind === 'terminal' || copy.kind === 'node-shell') {
     delete copy.terminalId;
     delete copy.transferId;
     delete copy.snapshot;
   }
-  if (copy.kind === 'local-shell') delete copy.pendingCommand;
   return copy as DockTab;
 }
 
@@ -165,7 +127,7 @@ const dockSessionKey = `kubus-dock:${windowScopeId()}`;
 function restoredDockState(): PersistedDockState | undefined {
   try {
     const parsed = JSON.parse(sessionStorage.getItem(dockSessionKey) ?? 'null') as Partial<PersistedDockState> | null;
-    if (!parsed || !Array.isArray(parsed.tabs) || !parsed.tabs.every((tab) => tab && ['terminal', 'node-shell', 'local-shell', 'logs'].includes(tab.kind))) {
+    if (!parsed || !Array.isArray(parsed.tabs) || !parsed.tabs.every((tab) => tab && ['terminal', 'node-shell', 'logs'].includes(tab.kind))) {
       return undefined;
     }
     const activeId = parsed.tabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : parsed.tabs[0]?.id;
@@ -295,25 +257,19 @@ export const useDockStore = create<DockState>((set) => ({
   },
   setTerminalSession: (id, terminalId) =>
     set((s) => ({
-      tabs: s.tabs.map((tab) => (tab.id === id && isShellTab(tab) ? { ...tab, terminalId } : tab)),
+      tabs: s.tabs.map((tab) =>
+        tab.id === id && (tab.kind === 'terminal' || tab.kind === 'node-shell')
+          ? { ...tab, terminalId }
+          : tab,
+      ),
     })),
   clearTransfer: (id) =>
     set((s) => ({
       tabs: s.tabs.map((tab) => {
-        if (tab.id !== id || !isShellTab(tab)) return tab;
+        if (tab.id !== id || (tab.kind !== 'terminal' && tab.kind !== 'node-shell')) return tab;
         const next = { ...tab };
         delete next.transferId;
         delete next.snapshot;
-        return next;
-      }),
-    })),
-  setLocalShell: (id, patch) =>
-    set((s) => ({
-      tabs: s.tabs.map((tab) => {
-        if (tab.id !== id || tab.kind !== 'local-shell') return tab;
-        const next: LocalShellTab = { ...tab, ...patch };
-        for (const key of ['namespace', 'pendingCommand'] as const) if (next[key] === undefined) delete next[key];
-        next.title = localShellTitle(next.ctx, next.namespace);
         return next;
       }),
     })),
@@ -324,7 +280,7 @@ export const useDockStore = create<DockState>((set) => ({
   requestTerminalFocus: (id) =>
     set((s) => {
       const tab = s.tabs.find((candidate) => candidate.id === id);
-      if (!isShellTab(tab)) return s;
+      if (tab?.kind !== 'terminal' && tab?.kind !== 'node-shell') return s;
       return {
         activeId: id,
         open: true,
@@ -337,7 +293,7 @@ export const useDockStore = create<DockState>((set) => ({
   requestTerminalReconnect: (id) =>
     set((s) => {
       const tab = s.tabs.find((candidate) => candidate.id === id);
-      if (!isShellTab(tab)) return s;
+      if (tab?.kind !== 'terminal' && tab?.kind !== 'node-shell') return s;
       return {
         terminalReconnectRequests: {
           ...s.terminalReconnectRequests,

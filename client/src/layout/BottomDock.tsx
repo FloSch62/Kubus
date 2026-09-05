@@ -9,10 +9,9 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import TerminalIcon from '@mui/icons-material/Terminal';
-import LaptopOutlinedIcon from '@mui/icons-material/LaptopOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
-import { clampDockHeight, isShellTab, useDockStore } from '../state/dock.js';
+import { clampDockHeight, useDockStore } from '../state/dock.js';
 import { TerminalPane } from '../components/TerminalPane.js';
 import { LogViewer } from '../components/LogViewer.js';
 import { TabActionsMenu, type TabMenuState } from '../components/TabActionsMenu.js';
@@ -226,7 +225,7 @@ export const BottomDock = memo(function BottomDock({
               }}
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  {tab.kind === 'local-shell' ? <LaptopOutlinedIcon sx={{ fontSize: 14 }} /> : isShellTab(tab) ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}
+                  {tab.kind === 'terminal' || tab.kind === 'node-shell' ? <TerminalIcon sx={{ fontSize: 14 }} /> : <SubjectIcon sx={{ fontSize: 14 }} />}
                   {tab.pinned ? <PushPinOutlinedIcon aria-label="Pinned" sx={{ fontSize: 13, transform: 'rotate(45deg)' }} /> : null}
                   {tab.color ? <Box aria-label="Tab flag" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: tab.color }} /> : null}
                   {tab.title}
@@ -266,7 +265,7 @@ export const BottomDock = memo(function BottomDock({
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {tabs.map((tab) => (
           <Box key={tab.id} sx={{ position: 'absolute', inset: 0, display: tab.id === activeId ? 'block' : 'none' }}>
-            {isShellTab(tab) ? (
+            {tab.kind === 'terminal' || tab.kind === 'node-shell' ? (
               <TerminalPane
                 tab={tab}
                 active={visible && tab.id === activeId}

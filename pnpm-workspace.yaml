@@ -22,7 +22,6 @@ overrides:
   undici@<6.28.0: ^6.28.0
 allowBuilds:
   esbuild: true
-  node-pty: true
   electron: true
   sharp: true
   core-js-pure: false

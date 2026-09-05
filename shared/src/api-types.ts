@@ -41,15 +41,6 @@ export type AppWindowDockTab =
       color?: string;
     }
   | {
-      kind: 'local-shell';
-      title: string;
-      ctx: string;
-      namespace?: string;
-      follow?: boolean;
-      pinned?: boolean;
-      color?: string;
-    }
-  | {
       kind: 'logs';
       title: string;
       ctx: string;
@@ -675,14 +666,6 @@ export interface ClusterSignals {
   windowMs: number;
   /** Keyed by `kind|namespace|name` (namespace empty for cluster-scoped kinds). */
   objects: Record<string, ObjectSignal>;
-}
-
-// ---- Local terminal ----
-
-/** Text frames the local-shell client sends besides the exec control set. */
-export interface LocalShellContextRequest {
-  ctx: string;
-  namespace?: string;
 }
 
 // ---- Logs ----

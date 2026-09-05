@@ -54,8 +54,6 @@ interface UiPrefsState {
    * your back. A cleared filter clears the memory.
    */
   listState: Record<string, ListMemory>;
-  /** Local shell: 'auto' uses the login shell ($SHELL / PowerShell); anything else is a shell path. */
-  localShell: string;
   set: (patch: Partial<Omit<UiPrefsState, 'set'>>) => void;
   setListState: (tableId: string, patch: Partial<ListMemory>) => void;
   setColumnWidth: (tableId: string, field: string, width: number) => void;
@@ -139,7 +137,6 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       sortModels: {},
       manifestView: 'tree',
       listState: {},
-      localShell: 'auto',
       set: (patch) => set(patch),
       setListState: (tableId, patch) =>
         set((state) => {
@@ -191,7 +188,6 @@ export const useUiPrefsStore = create<UiPrefsState>()(
         sortModels: state.sortModels,
         manifestView: state.manifestView,
         listState: state.listState,
-        localShell: state.localShell,
       }),
       merge: (persisted, current) => ({
         ...current,
