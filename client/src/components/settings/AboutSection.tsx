@@ -1,17 +1,15 @@
 import { Fragment, useEffect, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import CachedOutlinedIcon from '@mui/icons-material/CachedOutlined';
 import CoffeeOutlinedIcon from '@mui/icons-material/CoffeeOutlined';
-import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
-import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
-import { checkForUpdate, getAppInfo } from '../../api/app.js';
+import type { AppInfo } from '@kubus/shared';
+import { getAppInfo } from '../../api/app.js';
+
+import { DesktopUpdateControls } from '../DesktopUpdateControls.js';
 
 const LINKS = {
   docs: 'https://kubus-app.dev/',
@@ -107,60 +105,11 @@ export function AboutSection() {
         </Stack>
       </Box>
 
-      <Box>
-        <SectionTitle>Updates</SectionTitle>
-        <UpdateControls currentVersion={appInfo?.version} />
-      </Box>
-    </Stack>
-  );
-}
-
-function UpdateControls({ currentVersion }: { currentVersion?: string }) {
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<UpdateCheckResult | null>(null);
-
-  const checkForUpdates = () => {
-    setChecking(true);
-    setResult(null);
-    void checkForUpdate({ force: true })
-      .then(setResult)
-      .catch(() => setResult({ available: false, currentVersion: currentVersion ?? '', reason: 'network' }))
-      .finally(() => setChecking(false));
-  };
-
-  const updatesAvailable = result?.available === true;
-
-  return (
-    <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <Button
-          variant="contained"
-          startIcon={checking ? <CircularProgress color="inherit" size={16} /> : <CachedOutlinedIcon />}
-          disabled={checking}
-          onClick={checkForUpdates}
-        >
-          Check for updates
-        </Button>
-        {updatesAvailable && (
-          <Button startIcon={<DownloadOutlinedIcon />} href={result.releaseUrl} target="_blank" rel="noreferrer">
-            Download
-          </Button>
-        )}
-      </Stack>
-      {result?.available === false && result.latestVersion && (
-        <Alert severity="success" variant="outlined">
-          Kubus is up to date. Latest release: {result.latestVersion}.
-        </Alert>
-      )}
-      {result?.available === false && !result.latestVersion && (
-        <Alert severity="warning" variant="outlined">
-          {updateReasonLabel(result.reason)}
-        </Alert>
-      )}
-      {updatesAvailable && (
-        <Alert severity="info" variant="outlined">
-          Kubus {result.latestVersion} is available. You are running {result.currentVersion}.
-        </Alert>
+      {window.kubusDesktop && (
+        <Box>
+          <SectionTitle>Updates</SectionTitle>
+          <DesktopUpdateControls />
+        </Box>
       )}
     </Stack>
   );
@@ -204,23 +153,5 @@ function platformLabel(platform?: string): string {
       return 'Linux';
     default:
       return platform ?? '';
-  }
-}
-
-function updateReasonLabel(reason?: string): string {
-  switch (reason) {
-    case 'timeout':
-      return 'The update check timed out.';
-    case 'network':
-      return 'The update check could not reach GitHub.';
-    case 'no-release':
-      return 'No published release was found.';
-    case 'missing-version':
-    case 'missing-release-url':
-      return 'The latest release metadata is incomplete.';
-    default:
-      return reason?.startsWith('manifest-')
-        ? `The update manifest returned ${reason.replace('manifest-', '')}.`
-        : 'The update check could not be completed.';
   }
 }

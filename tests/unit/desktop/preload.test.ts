@@ -4,13 +4,12 @@ import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest
 const transport = vi.hoisted(() => ({
   handlers: {} as Record<string, (...args: any[]) => void>,
   request: {
-    bootstrap: vi.fn(async () => ({ platform: 'linux', state: { theme: 'dark' }, launch: undefined })),
+    bootstrap: vi.fn(async () => ({ platform: 'linux', state: { theme: 'dark' }, launch: undefined, update: { status: 'idle', currentVersion: '0.9.0' } })),
     getAppInfo: vi.fn(async () => ({ name: 'Kubus', version: '0.9.0', helmEngine: true })),
-    checkForUpdate: vi.fn(async () => ({ available: false, currentVersion: '0.9.0' })),
     getPendingRoute: vi.fn(async () => '/pods'),
     detachTab: vi.fn(async () => true),
   },
-  send: Object.fromEntries(['windowAction', 'stateChanged', 'openWindow', 'closeWindow', 'minimizeWindow', 'toggleMaximize', 'openExternal'].map((name) => [name, vi.fn()])),
+  send: Object.fromEntries(['checkForUpdate', 'downloadUpdate', 'applyUpdate', 'windowAction', 'stateChanged', 'openWindow', 'closeWindow', 'minimizeWindow', 'toggleMaximize', 'openExternal'].map((name) => [name, vi.fn()])),
 }));
 vi.mock('electrobun/view', () => ({ Electroview: class {
   static defineRPC({ handlers }: any) { transport.handlers = handlers.messages; return transport; }
@@ -53,7 +52,16 @@ it('forwards window actions and unsubscribes event handlers', async () => {
   expect(transport.send.minimizeWindow).toHaveBeenCalledOnce();
   expect(transport.send.toggleMaximize).toHaveBeenCalledOnce();
   expect(await bridge.getAppInfo()).toMatchObject({ name: 'Kubus' });
-  await bridge.checkForUpdate(); expect(transport.request.checkForUpdate).toHaveBeenCalledWith({});
+  bridge.checkForUpdate(); expect(transport.send.checkForUpdate).toHaveBeenCalledOnce();
+  bridge.downloadUpdate(); expect(transport.send.downloadUpdate).toHaveBeenCalledOnce();
+  bridge.applyUpdate(); expect(transport.send.applyUpdate).toHaveBeenCalledOnce();
+  const updateListener = vi.fn();
+  const stop = bridge.onUpdateStateChanged(updateListener);
+  transport.handlers.updateStateChanged!({ status: 'downloading', progress: 42, currentVersion: '0.9.0' });
+  expect(bridge.getUpdateState()).toMatchObject({ status: 'downloading', progress: 42 });
+  expect(updateListener).toHaveBeenCalledOnce();
+  stop(); transport.handlers.updateStateChanged!({ status: 'ready' });
+  expect(updateListener).toHaveBeenCalledOnce();
   expect(await bridge.getPendingRoute()).toBe('/pods');
   const launch = { kind: 'tab-transfer' as const, surface: 'page' as const, windowId: 'one', transferId: 'two', title: 'Pods' };
   bridge.openWindow(launch); expect(transport.send.openWindow).toHaveBeenCalledWith(launch);

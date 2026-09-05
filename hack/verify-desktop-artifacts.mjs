@@ -31,6 +31,7 @@ if (platform === 'linux') {
   for (const size of [16, 24, 32, 48, 64, 128, 256, 512]) {
     assert.ok(contents.includes(`./usr/share/icons/hicolor/${size}x${size}/apps/kubus.png`), `Missing ${size}px desktop icon`);
   }
+  assert.ok(contents.includes('./opt/kubus/Resources/app/package-manager'), 'Missing Debian update policy marker');
   assert.ok(contents.includes('./opt/kubus/bin/Resources/appIcon.png'), 'Missing native window icon');
   assert.ok(contents.includes('./usr/share/applications/io.github.flosch62.kubus.desktop'), 'Missing desktop entry');
   assert.ok(!/\/(?:libcef\.so|chrome-sandbox|chrome_elf\.dll|icudtl\.dat)(?:\s|$)/m.test(contents), 'Unexpected bundled Chromium runtime');

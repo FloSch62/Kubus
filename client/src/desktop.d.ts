@@ -1,4 +1,4 @@
-import type { AppInfo, AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
+import type { AppInfo, AppWindowLaunch, AppUpdateState } from '@kubus/shared';
 
 declare global {
   /** Bridge exposed by the Electrobun preload (absent in regular browsers). */
@@ -17,7 +17,11 @@ declare global {
       minimizeWindow(): void;
       toggleMaximize(): void;
       getAppInfo(): Promise<AppInfo | undefined>;
-      checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult>;
+      getUpdateState(): AppUpdateState;
+      onUpdateStateChanged(callback: () => void): () => void;
+      checkForUpdate(): void;
+      downloadUpdate(): void;
+      applyUpdate(): void;
       /** Open a secondary native application window. */
       openWindow(launch: AppWindowLaunch): void;
       /** Detach only if the native cursor is outside every Kubus window. */

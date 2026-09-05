@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkForUpdate, isApplicationLaunch, parseWindowLaunch, routeFromDeepLink } from '../../../desktop/src/policy.js';
-
-afterEach(() => vi.unstubAllGlobals());
+import { describe, expect, it } from 'vitest';
+import { isApplicationLaunch, parseWindowLaunch, routeFromDeepLink } from '../../../desktop/src/policy.js';
 
 describe('desktop navigation policy', () => {
   it('accepts in-app deep links and rejects protocol-relative links', () => {
@@ -23,38 +21,5 @@ describe('desktop navigation policy', () => {
     expect(isApplicationLaunch()).toBe(true);
     expect(isApplicationLaunch(page as never)).toBe(true);
     expect(isApplicationLaunch({ ...base, kind: 'dock' } as never)).toBe(false);
-  });
-});
-
-describe('update checks', () => {
-  const mockManifest = (body: unknown, status = 200) => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
-    vi.stubGlobal('fetch', fetcher);
-    return fetcher;
-  };
-  it('reports a new release only with a trusted GitHub release URL', async () => {
-    const fetcher = mockManifest({ version: 'v1.2.3', releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v1.2.3', releaseName: 'New', publishedAt: '2026-09-05' });
-    expect(await checkForUpdate('0.9.0', true)).toMatchObject({ available: true, latestVersion: '1.2.3', releaseName: 'New' });
-    expect(String(fetcher.mock.calls[0]![0])).toContain('?t=');
-    for (const releaseUrl of ['http://github.com/FloSch62/Kubus/releases/tag/v1', 'https://evil.test/', 'https://github.com/other/releases/', 'invalid', null]) {
-      mockManifest({ version: '1.0', releaseUrl });
-      expect(await checkForUpdate('0.9.0')).toMatchObject({ available: false, reason: 'missing-release-url' });
-    }
-  });
-  it.each(['0.8.9', '0.9.0', 'invalid'])('does not offer %s over 0.9.0', async (version) => {
-    mockManifest({ version });
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ available: false });
-  });
-  it('handles missing, invalid and failed manifests', async () => {
-    mockManifest({}, 404);
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ reason: 'no-release' });
-    mockManifest({}, 503);
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ reason: 'manifest-503' });
-    mockManifest({});
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ reason: 'missing-version' });
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ reason: 'network' });
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('timeout', 'AbortError')));
-    expect(await checkForUpdate('0.9.0')).toMatchObject({ reason: 'timeout' });
   });
 });

@@ -67,7 +67,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      actions: write
       contents: write
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || github.ref_name }}
@@ -80,21 +79,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mapfile -t artifacts < <(find release-assets -type f \( -name '*.tar.zst' -o -name '*.tar.gz' -o -name '*.dmg' -o -name '*.deb' -o -name '*.zip' -o -name '*.json' \) -print)
+          mapfile -t artifacts < <(find release-assets -type f \( -name '*.tar.zst' -o -name '*.tar.gz' -o -name '*.dmg' -o -name '*.deb' -o -name '*.zip' -o -name '*.json' -o -name '*.patch' \) -print)
           if [ "${#artifacts[@]}" -eq 0 ]; then
             echo "No release artifacts found" >&2
             exit 1
           fi
 
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --draft
           fi
 
-          gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
-      # The docs deploy writes site/latest.json from the latest GitHub release,
-      # which powers the in-app update check for all installed versions.
-      - name: Refresh Pages update manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: gh workflow run docs.yml --ref main
+          # Upload payloads before publishing manifests that point at them.
+          payloads=()
+          manifests=()
+          for artifact in "${artifacts[@]}"; do
+            if [[ "$artifact" == *-update.json ]]; then
+              manifests+=("$artifact")
+            else
+              payloads+=("$artifact")
+            fi
+          done
+          gh release upload "$RELEASE_TAG" "${payloads[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${manifests[@]}" --clobber
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi

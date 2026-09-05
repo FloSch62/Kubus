@@ -18,14 +18,33 @@ git push origin v0.1.0
 That's it. The release workflow then:
 
 1. Builds installers on each platform's runner.
-2. Creates the GitHub release for the tag if it doesn't exist yet.
-3. Attaches the Electrobun Windows `.zip`, macOS `.dmg`, Linux `.deb` and installer `.tar.gz`, and update artifacts to it.
-4. Triggers a docs deploy, which republishes `latest.json` on GitHub Pages from the latest release. This powers the in-app update check.
+2. Creates a draft GitHub release for the tag if it doesn't exist yet.
+3. Attaches the Electrobun Windows `.zip`, macOS `.dmg`, Linux `.deb` and installer `.tar.gz`, plus full update archives and optional `.patch` files. Uploads update manifests after their payloads, then publishes the release.
 
 !!! tip "Releasing from the GitHub UI"
 
     Creating a GitHub release with a **new** `v*` tag also pushes that tag, which triggers
     the same workflow. Either path works.
+
+## Desktop updates
+
+Installed Electrobun builds use the native updater with
+`https://github.com/FloSch62/Kubus/releases/latest/download` as their release host.
+Keep the generated filenames unchanged: `stable-<platform>-<arch>-update.json`
+selects the matching full archive. Builds generate a delta patch against the
+previous published release when possible; publish `.patch` files too. GitHub's
+latest release contains the newest patch, so older installations may need the
+full archive when an earlier patch is unavailable. Electrobun handles that fallback.
+
+Kubus checks at startup and every six hours. Users can also check in Settings →
+About, download the update, and choose **Restart and install** when ready. Progress
+and errors are shared across windows. Restart closes active terminals and port
+forwards, flushes preferences, and shuts down the embedded server before the
+native updater replaces and relaunches the app.
+
+Development builds disable updating. Debian packages remain managed by `dpkg`;
+install a newer `.deb` to update them. Older Kubus versions need one manual install
+of a release with this updater before they can update in place.
 
 ## Versioning
 

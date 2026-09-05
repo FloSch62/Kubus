@@ -34,6 +34,7 @@ try {
   for (const file of ['bin/launcher', 'bin/bun', 'bin/kubus-link', 'Resources/main.js', 'Resources/app/client/index.html']) {
     assert.ok(lstatSync(path.join(stage, 'opt/kubus', file)).isFile(), `Missing application payload: ${file}`);
   }
+  put('opt/kubus/Resources/app/package-manager', 'deb\n');
   put('usr/bin/kubus', '#!/bin/sh\nexec /opt/kubus/bin/kubus-link "$@"\n', 0o755);
   put('usr/share/applications/io.github.flosch62.kubus.desktop', `[Desktop Entry]
 Type=Application

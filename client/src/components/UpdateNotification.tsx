@@ -1,14 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
-import type { UpdateCheckResult } from '@kubus/shared';
-import { checkForUpdate as checkForAppUpdate } from '../api/app.js';
+import { DesktopUpdateAction, updateMessage, useDesktopUpdate } from './DesktopUpdateControls.js';
 
 const DISMISSED_UPDATE_KEY = 'kubus-dismissed-update-version';
-
-let updateCheck: Promise<UpdateCheckResult> | undefined;
 
 function readDismissedVersion(): string | null {
   try {
@@ -26,56 +23,25 @@ function dismissVersion(version: string): void {
   }
 }
 
-function checkForUpdate(): Promise<UpdateCheckResult> {
-  updateCheck ??= checkForAppUpdate();
-  return updateCheck;
+export function UpdateNotification() {
+  return window.kubusDesktop ? <DesktopUpdateNotification /> : null;
 }
 
-export function UpdateNotification() {
-  const [update, setUpdate] = useState<Extract<UpdateCheckResult, { available: true }> | null>(null);
-
-  useEffect(() => {
-    const check = checkForUpdate();
-
-    let cancelled = false;
-    void check
-      .then((result) => {
-        if (cancelled || !result.available) return;
-        if (readDismissedVersion() === result.latestVersion) return;
-        setUpdate(result);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const dismiss = () => {
-    if (update) dismissVersion(update.latestVersion);
-    setUpdate(null);
-  };
-
+function DesktopUpdateNotification() {
+  const update = useDesktopUpdate();
+  const [dismissed, setDismissed] = useState(readDismissedVersion);
+  const key = `${update.latestVersion}:${update.status}`;
+  const visible = ['available', 'downloading', 'ready', 'installing', 'error'].includes(update.status);
+  const dismiss = () => { dismissVersion(key); setDismissed(key); };
   return (
-    <Snackbar open={!!update} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-      <Alert
-        severity="info"
-        variant="filled"
-        onClose={dismiss}
-        action={
-          update ? (
-            <Stack direction="row" spacing={0.5}>
-              <Button color="inherit" size="small" href={update.releaseUrl} target="_blank" rel="noreferrer" onClick={dismiss}>
-                Download
-              </Button>
-              <Button color="inherit" size="small" onClick={dismiss}>
-                Later
-              </Button>
-            </Stack>
-          ) : undefined
-        }
-      >
-        Kubus {update?.latestVersion} is available. You are running {update?.currentVersion}.
+    <Snackbar open={visible && dismissed !== key} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+      <Alert severity={update.status === 'error' ? 'error' : 'info'} variant="filled" onClose={dismiss} action={
+        <Stack direction="row" spacing={0.5}>
+          <DesktopUpdateAction update={update} compact />
+          <Button color="inherit" size="small" onClick={dismiss}>Later</Button>
+        </Stack>
+      }>
+        {updateMessage(update)}
       </Alert>
     </Snackbar>
   );

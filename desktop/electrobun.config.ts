@@ -24,5 +24,5 @@ export default {
   },
   scripts: { postBuild: 'scripts/finalize.ts' },
   runtime: { exitOnLastWindowClosed: false },
-  release: { generatePatch: false },
+  release: { baseUrl: 'https://github.com/FloSch62/Kubus/releases/latest/download', generatePatch: true },
 } satisfies ElectrobunConfig;

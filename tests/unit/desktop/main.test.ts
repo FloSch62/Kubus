@@ -42,7 +42,7 @@ const native = vi.hoisted(() => {
     setPageZoom(value: number) { this.zoom = value; }
   }
   const quit = vi.fn();
-  return { events, requests, messages, Window, menu, close, quit, openExternal: vi.fn(), showMessageBox: vi.fn(async () => ({})), cursor: { x: 2000, y: 2000 }, legacyFile: undefined as string | undefined };
+  return { startServer: vi.fn(), updater: { onStatusChange: vi.fn(), getLocalInfo: vi.fn(async () => ({ version: '0.9.0', channel: 'stable', baseUrl: 'https://example.com' })), checkForUpdate: vi.fn(), downloadUpdate: vi.fn(), applyUpdate: vi.fn(), updateInfo: vi.fn(), clearStatusHistory: vi.fn(), getStatusHistory: vi.fn() }, packaged: false, events, requests, messages, Window, menu, close, quit, openExternal: vi.fn(), showMessageBox: vi.fn(async () => ({})), cursor: { x: 2000, y: 2000 }, legacyFile: undefined as string | undefined };
 });
 vi.mock('../../../desktop/src/paths.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../../desktop/src/paths.js')>(),
@@ -54,15 +54,16 @@ vi.mock('electrobun/main', () => ({
   BrowserWindow: native.Window,
   BrowserView: { defineRPC: ({ handlers }: any) => {
     native.requests.push(handlers.requests); native.messages.push(handlers.messages);
-    return { send: Object.fromEntries(['stateChanged', 'stateWriteFailed', 'closeTab', 'cycleTab', 'openRoute'].map((name) => [name, vi.fn()])) };
+    return { send: Object.fromEntries(['updateStateChanged', 'stateChanged', 'stateWriteFailed', 'closeTab', 'cycleTab', 'openRoute'].map((name) => [name, vi.fn()])) };
   } },
-  BuildConfig: { get: async () => ({ isPackaged: false }) },
+  Updater: native.updater,
+  BuildConfig: { get: async () => ({ isPackaged: native.packaged }) },
   Screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }], getCursorScreenPoint: () => native.cursor },
   Utils: { quit: native.quit, openExternal: native.openExternal, showMessageBox: native.showMessageBox },
 }));
 vi.mock('fix-path', () => ({ default: vi.fn() }));
 vi.mock('@kubus/server', () => ({
-  startServer: vi.fn(async () => ({ url: 'http://127.0.0.1:42111/?token=unit-secret', close: native.close })),
+  startServer: native.startServer,
   appendAppLog: vi.fn(),
 }));
 vi.mock('node:fs', async (importOriginal) => {
@@ -74,6 +75,13 @@ let signalHandlers: Map<string, Set<(...args: any[]) => void>>;
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks();
   native.Window.all.length = 0; native.requests.length = 0; native.messages.length = 0; native.events.clear();
+  native.startServer.mockResolvedValue({ port: 42111, token: 'unit-secret', url: 'http://127.0.0.1:42111/?token=unit-secret', close: native.close });
+  native.packaged = false;
+  native.updater.checkForUpdate.mockResolvedValue({ version: '1.0.0', updateAvailable: true, updateReady: false, error: '' });
+  native.updater.updateInfo.mockReturnValue({ version: '1.0.0', updateAvailable: true, updateReady: true, error: '' });
+  native.updater.getStatusHistory.mockReturnValue([]);
+  native.updater.applyUpdate.mockReset();
+  native.close.mockResolvedValue();
   native.cursor = { x: 2000, y: 2000 };
   native.legacyFile = undefined;
   dir = mkdtempSync(path.join(tmpdir(), 'kubus-main-'));
@@ -191,15 +199,53 @@ it('retains deep links during reload and handles native focus and popup requests
   native.events.get('reopen')!({ data: {} }); expect(win.activate).toHaveBeenCalled();
 });
 
-it('caches update checks until explicitly refreshed', async () => {
+it('disables updates in development builds', async () => {
   await boot();
-  const fetcher = vi.fn(async () => new Response(JSON.stringify({ version: '0.9.0' })));
-  vi.stubGlobal('fetch', fetcher);
-  await native.requests[0]!.checkForUpdate!({});
-  await native.requests[0]!.checkForUpdate!({});
-  expect(fetcher).toHaveBeenCalledOnce();
-  await native.requests[0]!.checkForUpdate!({ force: true });
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  native.messages[0]!.checkForUpdate!();
+  expect(native.requests[0]!.bootstrap!().update.status).toBe('disabled');
+  expect(native.updater.checkForUpdate).not.toHaveBeenCalled();
+});
+
+it('shares update state across windows and allows the native restart after server cleanup', async () => {
+  native.packaged = true;
+  const win = await boot();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('available'));
+  native.messages[0]!.openWindow!({ kind: 'page', windowId: 'second', title: 'Pods', tab: { path: '/pods' } });
+  const other = native.Window.all[1]!;
+  native.messages[1]!.downloadUpdate!();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('ready'));
+  expect(other.webview.rpc.send.updateStateChanged).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'ready' }));
+  expect(win.webview.rpc.send.updateStateChanged).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'ready' }));
+  native.messages[0]!.stateChanged!({ name: 'theme', value: 'dark' });
+  native.updater.applyUpdate.mockImplementation(async () => {
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(readFileSync(path.join(dir, 'client-state.json'), 'utf8')).toContain('dark');
+    const event = { data: {} };
+    native.events.get('before-quit')!(event);
+    expect(event).not.toHaveProperty('response');
+    native.updater.getStatusHistory.mockReturnValue([{ status: 'launching-new-version' }]);
+    native.quit();
+  });
+  native.messages[1]!.applyUpdate!();
+  await vi.waitFor(() => expect(native.updater.applyUpdate).toHaveBeenCalledOnce());
+  expect(native.requests[0]!.bootstrap!().update.status).toBe('installing');
+});
+
+it('restores the server after an update helper failure so installation can be retried', async () => {
+  native.packaged = true;
+  await boot();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('available'));
+  native.messages[0]!.downloadUpdate!();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('ready'));
+  native.updater.applyUpdate.mockImplementation(async () => {
+    native.updater.getStatusHistory.mockReturnValue([{ status: 'launching-new-version' }, { status: 'error' }]);
+    native.updater.updateInfo.mockReturnValue({ updateReady: true, error: 'Helper failed' });
+  });
+  native.messages[0]!.applyUpdate!();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update).toMatchObject({ status: 'error', retry: 'install' }));
+  expect(native.startServer).toHaveBeenCalledTimes(2);
+  expect(native.startServer).toHaveBeenLastCalledWith(expect.objectContaining({ port: 42111, token: 'unit-secret' }));
+  expect(native.quit).not.toHaveBeenCalled();
 });
 
 it('coalesces window geometry queries during a resize and flushes on close', async () => {

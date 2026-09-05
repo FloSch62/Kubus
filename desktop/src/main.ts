@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from 'electrobun/main';
+import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, BuildConfig, Screen, Updater, Utils } from 'electrobun/main';
 import fixPath from 'fix-path';
 import { startServer, type RunningServer } from '@kubus/server';
-import type { AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
+import type { AppWindowLaunch } from '@kubus/shared';
 import { version } from '../package.json';
 import type { DesktopRPC } from './rpc.js';
-import { checkForUpdate, isApplicationLaunch, parseWindowLaunch, routeFromDeepLink } from './policy.js';
+import { isApplicationLaunch, parseWindowLaunch, routeFromDeepLink } from './policy.js';
+import { AppUpdater } from './updater.js';
 import { ClientState, migrateClientState } from './state.js';
 import { legacyClientStatePath, userDataPath } from './paths.js';
 import { registerProtocol } from './protocol.js';
@@ -25,7 +26,8 @@ let primary: Window | undefined;
 let focused: Window | undefined;
 let server: RunningServer | undefined;
 let pendingRoute: string | undefined;
-let update: Promise<UpdateCheckResult> | undefined;
+let updater: AppUpdater;
+let updateTimer: ReturnType<typeof setInterval> | undefined;
 let closing: Promise<void> | undefined;
 let quitReady = false;
 let preload: string;
@@ -62,12 +64,8 @@ function createWindow(launch?: AppWindowLaunch): Window {
     maxRequestTime: 15_000,
     handlers: {
       requests: {
-        bootstrap: () => ({ platform: process.platform, state: state.snapshot(), launch }),
+        bootstrap: () => ({ platform: process.platform, state: state.snapshot(), launch, update: updater.state }),
         getAppInfo: () => ({ name: 'Kubus', version, helmEngine: existsSync(process.env.KUBUS_HELM_ENGINE!) }),
-        checkForUpdate: (options) => {
-          if (options?.force === true) update = checkForUpdate(version, true);
-          return update ??= checkForUpdate(version);
-        },
         getPendingRoute: () => {
           if (!applications.has(win)) return null;
           routeReady.add(win);
@@ -90,6 +88,9 @@ function createWindow(launch?: AppWindowLaunch): Window {
         },
       },
       messages: {
+        checkForUpdate: () => { if (!closing) void updater.check(); },
+        downloadUpdate: () => { if (!closing) void updater.download(); },
+        applyUpdate: () => { if (!closing) void updater.apply(); },
         stateChanged: ({ name, value }) => {
           if (typeof name !== 'string' || (value !== null && typeof value !== 'string')) return;
           state.change(name, value);
@@ -186,8 +187,38 @@ function performAction(action: string, win?: Window): void {
     }
 }
 
+/** Allow Electrobun's native update handoff only after our async cleanup. */
+async function installUpdate(): Promise<boolean> {
+  if (closing || !server) throw new Error('Kubus is already closing.');
+  const previous = server;
+  let handedOff = false;
+  closing = (async () => {
+    state.flush(false);
+    await previous.close();
+    state.flush(false);
+    quitReady = true;
+    Updater.clearStatusHistory();
+    await Updater.applyUpdate();
+    handedOff = Updater.getStatusHistory().at(-1)?.status === 'launching-new-version';
+    if (handedOff) instanceChannel.postMessage({ type: 'shutdown' });
+  })();
+  try {
+    await closing;
+    return handedOff;
+  } finally {
+    if (!handedOff) {
+      // A failed helper launch or quit veto must leave a usable app for retry.
+      quitReady = false;
+      try {
+        server = await startServer({ port: previous.port, token: previous.token, openBrowser: false, prettyLogs: false, staticRoot: path.join(resources, 'client') });
+      } finally { closing = undefined; }
+    }
+  }
+}
+
 function shutdown(): Promise<void> {
   return closing ??= (async () => {
+    clearInterval(updateTimer);
     state?.flush(false);
     const timer = setTimeout(() => {
       state?.flush(false);
@@ -248,12 +279,23 @@ async function start(): Promise<void> {
   preload = readFileSync(path.join(resources, 'preload.js'), 'utf8');
   server = await startServer({ port: 0, openBrowser: false, prettyLogs: false, staticRoot: path.join(resources, 'client') });
   mainLog('info', `server listening at ${new URL(server.url).origin}`);
-  if ((await BuildConfig.get()).isPackaged && !process.env.KUBUS_DESKTOP_DATA) {
+  const packaged = (await BuildConfig.get()).isPackaged;
+  if (packaged && !process.env.KUBUS_DESKTOP_DATA) {
     try { registerProtocol(path.resolve(process.platform === 'win32' ? 'kubus-link.exe' : 'kubus-link'), path.join(resources, 'icon.png')); }
     catch (error) { mainLog('warn', 'could not register kubus links', error); }
   }
+  updater = new AppUpdater(version, (update) => {
+    for (const win of windows) win.webview.rpc?.send.updateStateChanged(update);
+    if (update.status === 'error') mainLog('warn', 'application update failed', update.message);
+  }, installUpdate, !packaged ? 'Updates are available in installed release builds.'
+    : existsSync(path.join(resources, 'package-manager')) ? 'Update this installation using a new Debian package.' : undefined);
   buildMenu();
   createWindow();
+  void updater.check();
+  updateTimer = setInterval(() => {
+    if (!closing && (['idle', 'up-to-date', 'available'].includes(updater.state.status) || (updater.state.status === 'error' && updater.state.retry === 'check'))) void updater.check();
+  }, 6 * 60 * 60 * 1000);
+  updateTimer.unref();
   instanceChannel.postMessage({ type: 'ready' });
 }
 void start().catch(async (error: unknown) => {

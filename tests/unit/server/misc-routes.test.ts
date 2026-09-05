@@ -61,12 +61,6 @@ function resourceKind(overrides: Partial<ResourceKindInfo> = {}): ResourceKindIn
   };
 }
 
-interface MockFetchResponse {
-  ok: boolean;
-  status: number;
-  json(): Promise<unknown>;
-}
-
 function createHarness() {
   const namespaceRelease = vi.fn();
   const namespaceWatcher = {
@@ -629,83 +623,5 @@ describe('application and SSH routes', () => {
     expect(ssh.json()).toEqual(
       expect.objectContaining({ sshAvailable: true, sshVersion: 'OpenSSH_9.9', configExists: false, hosts: [] }),
     );
-  });
-
-  it.each([
-    [404, undefined, 'no-release'],
-    [503, undefined, 'manifest-503'],
-    [200, {}, 'missing-version'],
-    [200, { version: '0.1.0' }, undefined],
-    [200, { version: '99.0.0', releaseUrl: 'http://github.com/FloSch62/Kubus/releases/x' }, 'missing-release-url'],
-    [200, { version: '99.0.0', releaseUrl: 'https://example.com/FloSch62/Kubus/releases/x' }, 'missing-release-url'],
-    [200, { version: '99.0.0', releaseUrl: 'https://github.com/other/project/releases/x' }, 'missing-release-url'],
-  ])('handles update manifest response %#', async (status, body, reason) => {
-    const app = await buildApp(createHarness());
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: status >= 200 && status < 300, status, json: async () => body })),
-    );
-    const response = await app.inject({ method: 'GET', url: '/api/app/update-check?force=true' });
-    expect(response.statusCode).toBe(200);
-    if (reason) expect(response.json().reason).toBe(reason);
-    else expect(response.json().available).toBe(false);
-  });
-
-  it('accepts a newer trusted GitHub release and drops invalid optional metadata', async () => {
-    const app = await buildApp(createHarness());
-    const fetchMock = vi.fn(async (_input: unknown): Promise<MockFetchResponse> => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        version: 'v99.2.3',
-        releaseName: 'Kubus 99',
-        releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v99.2.3',
-        publishedAt: '2026-07-22T00:00:00Z',
-      }),
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    const response = await app.inject({ method: 'GET', url: '/api/app/update-check?force=true' });
-    expect(response.json()).toEqual({
-      available: true,
-      currentVersion: expect.any(String),
-      latestVersion: '99.2.3',
-      releaseName: 'Kubus 99',
-      releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v99.2.3',
-      publishedAt: '2026-07-22T00:00:00Z',
-    });
-    expect(String(fetchMock.mock.calls[0]![0])).toContain('?t=');
-
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        version: '100.0.0',
-        releaseName: 42,
-        releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v100',
-        publishedAt: null,
-      }),
-    });
-    const optional = await app.inject({ method: 'GET', url: '/api/app/update-check?force=true' });
-    expect(optional.json().releaseName).toBeUndefined();
-    expect(optional.json().publishedAt).toBeUndefined();
-  });
-
-  it('classifies update fetch failures as network or timeout and shares non-forced requests', async () => {
-    const app = await buildApp(createHarness());
-    const fetchMock = vi.fn(async (_input: unknown): Promise<MockFetchResponse> => Promise.reject(new Error('offline')));
-    vi.stubGlobal('fetch', fetchMock);
-    expect((await app.inject({ method: 'GET', url: '/api/app/update-check?force=true' })).json().reason).toBe('network');
-
-    const timeout = new Error('aborted');
-    timeout.name = 'AbortError';
-    fetchMock.mockRejectedValueOnce(timeout);
-    expect((await app.inject({ method: 'GET', url: '/api/app/update-check?force=true' })).json().reason).toBe('timeout');
-
-    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
-    await Promise.all([
-      app.inject({ method: 'GET', url: '/api/app/update-check?force=true' }),
-      app.inject({ method: 'GET', url: '/api/app/update-check' }),
-    ]);
-    expect(fetchMock).toHaveBeenCalled();
   });
 });

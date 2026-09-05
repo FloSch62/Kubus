@@ -1,8 +1,10 @@
 import { Electroview } from 'electrobun/view';
 import type { DesktopRPC, WindowAction } from './rpc.js';
-import type { AppWindowLaunch } from '@kubus/shared';
+import type { AppWindowLaunch, AppUpdateState } from '@kubus/shared';
 
 const state: Record<string, string> = Object.create(null);
+let updateState: AppUpdateState;
+const updateListeners = new Set<() => void>();
 const closeListeners = new Set<() => void>();
 const cycleListeners = new Set<(backwards: boolean) => void>();
 const routeListeners = new Set<(route: string) => void>();
@@ -15,6 +17,10 @@ const rpc = Electroview.defineRPC<DesktopRPC>({
   handlers: {
     requests: {},
     messages: {
+      updateStateChanged: (value) => {
+        updateState = value;
+        updateListeners.forEach((callback) => callback());
+      },
       stateChanged: ({ name, value }) => {
         if (value === null) delete state[name];
         else state[name] = value;
@@ -32,8 +38,9 @@ const rpc = Electroview.defineRPC<DesktopRPC>({
 new Electroview({ rpc });
 
 // Hydrate before importing the SPA: Zustand reads persisted state at module load.
-window.kubusDesktopReady = rpc.request.bootstrap().then(({ platform, state: snapshot, launch }) => {
+window.kubusDesktopReady = rpc.request.bootstrap().then(({ platform, state: snapshot, launch, update }) => {
   Object.assign(state, snapshot);
+  updateState ??= update;
   window.kubusDesktop = {
     platform,
     windowLaunch: launch,
@@ -49,7 +56,11 @@ window.kubusDesktopReady = rpc.request.bootstrap().then(({ platform, state: snap
       },
     },
     getAppInfo: () => rpc.request.getAppInfo(),
-    checkForUpdate: (options = {}) => rpc.request.checkForUpdate(options),
+    getUpdateState: () => updateState,
+    onUpdateStateChanged: (callback: () => void) => subscribe(updateListeners, callback),
+    checkForUpdate: () => rpc.send.checkForUpdate(),
+    downloadUpdate: () => rpc.send.downloadUpdate(),
+    applyUpdate: () => rpc.send.applyUpdate(),
     openWindow: (value: AppWindowLaunch) => rpc.send.openWindow(value),
     detachTab: (value: Extract<AppWindowLaunch, { kind: 'tab-transfer' }>) => rpc.request.detachTab(value),
     onCloseTab: (callback: () => void) => subscribe(closeListeners, callback),
