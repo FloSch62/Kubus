@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "start": "electrobun dev",
     "pack": "electrobun build",
-    "dist": "electrobun build --env=stable",
+    "dist": "node scripts/dist.mjs",
     "deb": "node scripts/package-deb.mjs"
   },
   "devDependencies": {

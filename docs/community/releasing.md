@@ -26,6 +26,29 @@ That's it. The release workflow then:
     Creating a GitHub release with a **new** `v*` tag also pushes that tag, which triggers
     the same workflow. Either path works.
 
+## macOS signatures
+
+`pnpm --filter @kubus/desktop dist` enables Electrobun's signing pipeline and
+defaults `ELECTROBUN_DEVELOPER_ID` to `-` on macOS (ad-hoc signing, no Apple
+certificate required). An explicitly supplied identity takes precedence.
+For direct canary builds, set the identity explicitly:
+
+```bash
+ELECTROBUN_DEVELOPER_ID=- pnpm --filter @kubus/desktop exec electrobun build --env=canary
+```
+
+Electrobun signs the runtime app after writing release metadata, then signs its
+self-extracting wrapper before creating the DMG. Signing in `postBuild` is too
+early: release metadata still changes afterward. Both bundles need complete
+resource seals; leaving only the launcher's linker signature causes macOS to
+report `code has no resources but signature indicates they must be present`.
+
+CI and release verification mount the finished DMG, verify its app signature,
+compare its embedded payload with the published update archive, then extract
+and verify the runtime app. Ad-hoc signatures provide integrity checks but do
+not establish an identified developer or replace Apple notarization. Browser
+downloads can still require explicit approval in macOS.
+
 ## Desktop updates
 
 Installed Electrobun builds use the native updater with

@@ -17,7 +17,9 @@ export default {
       '../server/assets/helm-engine.wasm.gz': 'helm-engine.wasm.gz',
       'dist/preload.js': 'preload.js',
     },
-    mac: { ...renderer, icons: 'assets/icon.iconset', codesign: false, notarize: false },
+    // Sign both the runtime bundle and release wrapper, including their resources.
+    // The dist script defaults to an ad-hoc identity; notarization needs Apple credentials.
+    mac: { ...renderer, icons: 'assets/icon.iconset', codesign: true, notarize: false },
     linux: { ...renderer, icon: 'assets/icon.png' },
     // Windows ICO generation accepts PNGs up to 256x256.
     win: { ...renderer, icon: 'assets/icon.iconset/icon_256x256.png' },

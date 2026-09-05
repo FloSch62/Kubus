@@ -76,6 +76,11 @@ jobs:
       # Type-aware linting also resolves workspace package declarations.
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Package and verify macOS signatures
+        if: runner.os == 'macOS'
+        run: |
+          pnpm --filter @kubus/desktop dist
+          node hack/verify-desktop-artifacts.mjs
       # Boot the app's server on each OS to catch runtime startup regressions
       # (won't listen, missing static assets, crash-on-boot) that packaging
       # alone misses. Headless, so it needs no display on any runner.

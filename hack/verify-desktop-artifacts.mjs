@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { verifyMacOSArtifacts } from './verify-macos-artifacts.mjs';
 
 const dir = path.resolve('desktop/artifacts');
 const files = readdirSync(dir);
@@ -23,6 +24,10 @@ assert.ok(typeof update.artifact?.file === 'string' && path.basename(update.arti
 assert.ok(statSync(path.join(dir, update.artifact.file)).size > 0, 'Missing or empty update bundle');
 assert.ok(!files.some((name) => /macos-(x64|universal)/.test(name)), 'Unsupported macOS architecture');
 console.log(`Verified ${platform}/${process.arch} installer and version ${version}`);
+
+if (platform === 'macos') {
+  verifyMacOSArtifacts(path.join(dir, installer), path.join(dir, update.artifact.file));
+}
 
 if (platform === 'linux') {
   const deb = path.join(dir, `kubus-${version}-linux-${process.arch}.deb`);

@@ -54,9 +54,10 @@ namespaces, so can Kubus (behind the guard, if protected).
 
 ## Code signing
 
-Desktop builds aren't code-signed or notarised yet, which is why the first launch needs an
-extra step on macOS and Windows. See [Desktop app](../install/desktop.md). If you'd rather
-not run unsigned binaries, [build from source](../install/from-source.md).
+macOS builds use ad-hoc signatures to seal the app and installer resources, but
+aren't Developer ID signed or notarised. Windows builds aren't code-signed yet.
+First launch can therefore require an extra step; see [Desktop app](../install/desktop.md).
+You can also [build from source](../install/from-source.md).
 
 ## See also
 

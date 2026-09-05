@@ -34,11 +34,12 @@ Grab the installer for your platform from the **[releases page](https://github.c
     1. Open the `.dmg` and drag **Kubus** into **Applications**.
     2. The builds aren't notarised yet, so the first launch needs one extra step:
 
-        - **Right-click** the app → **Open**, then confirm in the dialog, *or*
-        - clear the quarantine flag from a terminal:
+        - Open **System Settings → Privacy & Security**, choose **Open Anyway**
+          if offered after the failed launch, then confirm, *or*
+        - for a download you trust, clear its quarantine flag from a terminal:
 
         ```bash
-        xattr -d com.apple.quarantine /Applications/Kubus.app
+        xattr -r -d com.apple.quarantine /Applications/Kubus.app
         ```
 
     After the first launch you can open it normally from Spotlight or the Dock.
@@ -65,11 +66,12 @@ Grab the installer for your platform from the **[releases page](https://github.c
     so apt installs them automatically. Kubus uses the system webview; Chromium
     is not bundled.
 
-!!! note "Why isn't it signed?"
+!!! note "Why does macOS still warn?"
 
     Kubus is an open-source project without an Apple Developer or Windows code-signing
-    certificate yet. The steps above are the standard way to run unsigned apps. You can
-    always [build from source](from-source.md) if you'd rather not.
+    certificate yet. macOS builds use ad-hoc signatures to seal their resources;
+    these do not establish developer identity or provide Apple notarization.
+    You can also [build from source](from-source.md).
 
 ## Updating
 
