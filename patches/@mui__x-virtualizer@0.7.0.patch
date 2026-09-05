@@ -1,0 +1,80 @@
+diff --git a/features/virtualization/virtualization.js b/features/virtualization/virtualization.js
+index 5ab1e8597a434b89e91d0d505645a147db24e771..5973a98128080997969b7594e01b48692cbebff1 100644
+--- a/features/virtualization/virtualization.js
++++ b/features/virtualization/virtualization.js
+@@ -206,7 +206,7 @@ function useVirtualization(store, params, api) {
+       cancelAnimationFrame(deferredStickyFrame.current);
+     }
+   }, []);
+-  const scrollCache = (0, _useLazyRef.default)(() => createScrollCache(isRtl, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * 15, MINIMUM_COLUMN_WIDTH * 6, layoutMode)).current;
++  const scrollCache = (0, _useLazyRef.default)(() => createScrollCache(isRtl, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * (layoutMode === 'uncontrolled' ? 4 : 15), MINIMUM_COLUMN_WIDTH * 6, layoutMode)).current;
+ 
+   /**
+    * Re-derives the buffers for `direction`. The buffers depend on the measured row
+@@ -217,7 +217,7 @@ function useVirtualization(store, params, api) {
+    */
+   const updateScrollCacheBuffer = direction => {
+     scrollCache.direction = direction;
+-    scrollCache.buffer = bufferForDirection(isRtl, direction, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * 15, MINIMUM_COLUMN_WIDTH * 6, layoutMode);
++    scrollCache.buffer = bufferForDirection(isRtl, direction, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * (layoutMode === 'uncontrolled' ? 4 : 15), MINIMUM_COLUMN_WIDTH * 6, layoutMode);
+   };
+   const updateRenderContext = React.useCallback((nextRenderContext, nextAnchor) => {
+     const state = store.state.virtualization;
+@@ -284,12 +284,11 @@ function useVirtualization(store, params, api) {
+     // pass: the timeout may well have elapsed while a slow scroll is still going.
+     const isSettled = isSettlePass && direction === _models.ScrollDirection.NONE;
+     let shouldUpdate;
+-    if (layoutMode === 'sticky') {
+-      // In sticky mode, a render context update re-renders the window's row set and
+-      // rasterizes the entering rows. Updating on every crossed
+-      // row would spend a main-thread render + commit per row. Defer updates until
+-      // half of a buffer is consumed instead. The inverse-sticky clamp covers any
+-      // overshoot with stale content in the meantime.
++    if (layoutMode !== 'controlled') {
++      // Native scrolling already moves the buffered rows on the compositor.
++      // Recycle only after half the overscan is consumed, instead of forcing
++      // React to commit on every crossed row. Large jumps and direction
++      // changes still replenish the viewport synchronously.
+       shouldUpdate = didChangeDirection || isLowOnRenderedBuffer(store, params, scrollPosition.current, scrollCache);
+     } else {
+       // Since previous render, we have scrolled...
+diff --git a/features/virtualization/virtualization.mjs b/features/virtualization/virtualization.mjs
+index 62487655969ef245e78ea7207c2be78dcbf1ed56..b6d9b7315321f470cadfdb1dbd21ca69149f21ad 100644
+--- a/features/virtualization/virtualization.mjs
++++ b/features/virtualization/virtualization.mjs
+@@ -197,7 +197,7 @@ function useVirtualization(store, params, api) {
+       cancelAnimationFrame(deferredStickyFrame.current);
+     }
+   }, []);
+-  const scrollCache = useLazyRef(() => createScrollCache(isRtl, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * 15, MINIMUM_COLUMN_WIDTH * 6, layoutMode)).current;
++  const scrollCache = useLazyRef(() => createScrollCache(isRtl, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * (layoutMode === 'uncontrolled' ? 4 : 15), MINIMUM_COLUMN_WIDTH * 6, layoutMode)).current;
+ 
+   /**
+    * Re-derives the buffers for `direction`. The buffers depend on the measured row
+@@ -208,7 +208,7 @@ function useVirtualization(store, params, api) {
+    */
+   const updateScrollCacheBuffer = direction => {
+     scrollCache.direction = direction;
+-    scrollCache.buffer = bufferForDirection(isRtl, direction, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * 15, MINIMUM_COLUMN_WIDTH * 6, layoutMode);
++    scrollCache.buffer = bufferForDirection(isRtl, direction, rowBufferPx, columnBufferPx, averageRowHeight(store, rowHeight) * (layoutMode === 'uncontrolled' ? 4 : 15), MINIMUM_COLUMN_WIDTH * 6, layoutMode);
+   };
+   const updateRenderContext = React.useCallback((nextRenderContext, nextAnchor) => {
+     const state = store.state.virtualization;
+@@ -275,12 +275,11 @@ function useVirtualization(store, params, api) {
+     // pass: the timeout may well have elapsed while a slow scroll is still going.
+     const isSettled = isSettlePass && direction === ScrollDirection.NONE;
+     let shouldUpdate;
+-    if (layoutMode === 'sticky') {
+-      // In sticky mode, a render context update re-renders the window's row set and
+-      // rasterizes the entering rows. Updating on every crossed
+-      // row would spend a main-thread render + commit per row. Defer updates until
+-      // half of a buffer is consumed instead. The inverse-sticky clamp covers any
+-      // overshoot with stale content in the meantime.
++    if (layoutMode !== 'controlled') {
++      // Native scrolling already moves the buffered rows on the compositor.
++      // Recycle only after half the overscan is consumed, instead of forcing
++      // React to commit on every crossed row. Large jumps and direction
++      // changes still replenish the viewport synchronously.
+       shouldUpdate = didChangeDirection || isLowOnRenderedBuffer(store, params, scrollPosition.current, scrollCache);
+     } else {
+       // Since previous render, we have scrolled...

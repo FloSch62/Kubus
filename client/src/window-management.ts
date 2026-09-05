@@ -151,7 +151,7 @@ export function appWindowSurface(): AppWindowSurface {
   return sessionStorage.getItem(WINDOW_SURFACE_KEY) === 'dock' ? 'dock' : 'app';
 }
 
-/** Consume the one-shot browser fragment. Electron retains its launch across reloads. */
+/** Consume the one-shot browser fragment. Electrobun retains its launch across reloads. */
 export function consumeAppWindowLaunch(): AppWindowLaunch | undefined {
   const launch = peekAppWindowLaunch();
   if (!launch || window.kubusDesktop?.windowLaunch) return launch;
@@ -163,7 +163,7 @@ export function consumeAppWindowLaunch(): AppWindowLaunch | undefined {
   return launch;
 }
 
-/** Ask Electron for a native window, with a same-origin browser fallback. */
+/** Ask Electrobun for a native window, with a same-origin browser fallback. */
 export function openAppWindow(request: AppWindowRequest): boolean {
   const launch = { ...request, windowId: randomId() } as AppWindowLaunch;
   if (window.kubusDesktop) {

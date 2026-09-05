@@ -13,13 +13,13 @@ export const SERIES_DARK = ['#3987e5', '#008300', '#d55181', '#c98500', '#199e70
  * tick labels on ranges shorter than the tick spacing allows, so short spans
  * include seconds.
  */
+const minuteTicks = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const secondTicks = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
 export function timeTickFormatter(times: Array<Date | number>): (d: Date) => string {
   const first = times.length ? Number(times[0]) : 0;
   const last = times.length ? Number(times[times.length - 1]) : 0;
   const withSeconds = last - first < 15 * 60_000;
-  return (d: Date) =>
-    d.toLocaleTimeString(
-      [],
-      withSeconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' },
-    );
+  const formatter = withSeconds ? secondTicks : minuteTicks;
+  return (d: Date) => Number.isNaN(d.getTime()) ? 'Invalid Date' : formatter.format(d);
 }

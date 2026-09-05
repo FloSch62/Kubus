@@ -5,7 +5,7 @@ icon: lucide/tag
 # Releasing
 
 Releases are driven entirely by **git tags**. Pushing a `v*` tag kicks off a workflow that
-builds installers on Windows, macOS and Linux runners and attaches them to the GitHub
+builds installers on Windows x64, macOS arm64 and Linux x64 runners and attaches them to the GitHub
 release for that tag.
 
 ## Cut a release
@@ -19,7 +19,7 @@ That's it. The release workflow then:
 
 1. Builds installers on each platform's runner.
 2. Creates the GitHub release for the tag if it doesn't exist yet.
-3. Attaches the `.exe`, `.dmg`, `.AppImage` and `.deb` artifacts to it.
+3. Attaches the Electrobun Windows `.zip`, macOS `.dmg`, Linux `.deb` and installer `.tar.gz`, and update artifacts to it.
 4. Triggers a docs deploy, which republishes `latest.json` on GitHub Pages from the latest release. This powers the in-app update check.
 
 !!! tip "Releasing from the GitHub UI"
@@ -29,7 +29,7 @@ That's it. The release workflow then:
 
 ## Versioning
 
-The `version` in the root `package.json` should match the tag you're cutting. Bump it in a
+The `version` in the root and `desktop/package.json` manifests should match the tag you're cutting. Bump it in a
 commit before tagging so the in-app version and the release line up.
 
 ## See also

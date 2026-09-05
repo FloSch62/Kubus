@@ -1,19 +1,15 @@
-.PHONY: all deb win dmg clean helm-engine
+.PHONY: all desktop deb clean helm-engine
 
 helm-engine:
 	node helm-engine/build.mjs
 
-all: helm-engine
-	pnpm build && pnpm --filter @kubus/electron dist
+all: desktop
 
-deb: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --linux deb --x64
+desktop:
+	pnpm dist
 
-win: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --win --x64
-
-dmg: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --mac dmg
+deb: desktop
+	pnpm --filter @kubus/desktop deb
 
 clean:
-	rm -rf electron/release
+	node -e "for (const p of ['desktop/build', 'desktop/artifacts']) require('node:fs').rmSync(p, { recursive: true, force: true })"

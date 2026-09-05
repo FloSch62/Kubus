@@ -22,7 +22,7 @@ import { hasTabTransfer, readTabTransfer, shouldDetachTabDrag, writeTabTransfer 
 import { detachTabWindow } from '../window-management.js';
 import { currentAppWindowContext } from '../window-context.js';
 
-// Electron always starts at '/'; on the first mount we reopen the tab the user
+// Electrobun always starts at '/'; on the first mount we reopen the tab the user
 // left active. Module-scoped so StrictMode's double effect doesn't re-restore.
 let sessionRestored = false;
 

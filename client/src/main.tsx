@@ -19,6 +19,9 @@ import { applyAppWindowContext } from './window-context.js';
 
 initAuthToken();
 installCrossWindowStateSync();
+window.addEventListener('kubus:state-write-failed', () => {
+  showToast('warning', 'Desktop settings could not be saved. Kubus will retry.');
+}, { once: true });
 
 const surface = appWindowSurface();
 const launch = consumeAppWindowLaunch();

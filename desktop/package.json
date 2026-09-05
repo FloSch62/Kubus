@@ -1,0 +1,33 @@
+{
+  "name": "@kubus/desktop",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Kubus desktop app",
+  "license": "MIT",
+  "homepage": "https://github.com/FloSch62/Kubus",
+  "author": {
+    "name": "Florian Schwarz",
+    "email": "schwarz.flori.88@gmail.com"
+  },
+  "type": "module",
+  "scripts": {
+    "prepare:sdk": "electrobun prepare",
+    "build": "electrobun prepare && node scripts/render-icon.mjs && node scripts/build-preload.mjs && node scripts/build-main.mjs && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "start": "electrobun dev",
+    "pack": "electrobun build",
+    "dist": "electrobun build --env=stable",
+    "deb": "node scripts/package-deb.mjs"
+  },
+  "devDependencies": {
+    "@kubus/server": "workspace:*",
+    "@kubus/shared": "workspace:*",
+    "@types/node": "^24.13.3",
+    "esbuild": "^0.28.2",
+    "fix-path": "^5.0.0",
+    "sharp": "^0.35.4",
+    "typescript": "^7.0.2",
+    "electrobun": "2.0.1",
+    "@types/bun": "^1.3.0"
+  }
+}

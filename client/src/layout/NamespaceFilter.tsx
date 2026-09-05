@@ -10,7 +10,7 @@ import { useClustersStore } from '../state/clusters.js';
 export const namespaceFilterSx = {
   minWidth: 260,
   maxWidth: 480,
-  WebkitAppRegion: 'no-drag',
+  '--electrobun-app-region': 'no-drag',
 } as const;
 
 export function NamespaceFilter() {
@@ -56,7 +56,7 @@ export function NamespaceFilter() {
         ))
       }
       renderInput={(params) => <TextField {...params} placeholder={namespaces.length ? '' : 'All namespaces'} variant="outlined" />}
-      // Electron/macOS computes native title-bar hit regions from the painted
+      // Electrobun/macOS computes native title-bar hit regions from the painted
       // Autocomplete root. Marking only its input as no-drag leaves the root
       // draggable and swallows physical pointer clicks.
       sx={namespaceFilterSx}

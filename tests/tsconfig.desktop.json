@@ -1,0 +1,20 @@
+{
+  "extends": "../desktop/tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "bun",
+      "node"
+    ],
+    "lib": [
+      "ES2025",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "include": [
+    "unit/desktop",
+    "desktop",
+    "playwright.desktop.config.ts",
+    "../client/src/desktop.d.ts"
+  ]
+}

@@ -4,7 +4,7 @@ Helm's chart rendering pipeline — `loader` → `chartutil` → `engine` → `r
 `helm.sh/helm/v3` — compiled to a WASI module so the Kubus server can install and upgrade
 releases without a `helm` binary.
 
-It is a pure function over files: the Node host preopens a scratch directory containing
+It is a pure function over files: the TypeScript host creates an in-memory WASI directory containing
 `input.json` (chart archive or the chart object from a release record, values, release
 options, cluster capabilities) and the module writes `output.json` (sorted manifest,
 hooks, notes, CRDs, and the chart in release-record form). No network, no cluster access —

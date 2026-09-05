@@ -1,4 +1,3 @@
-import type { ElementType } from 'react';
 import { alpha, createTheme, type Theme } from '@mui/material/styles';
 import type {} from '@mui/x-data-grid/themeAugmentation';
 
@@ -35,8 +34,6 @@ export const layout = {
   zDetailResizeHandle: 71,
   zDetailCollapseButton: 72,
 } as const;
-
-const modalBackdropAlpha = 0.5;
 
 /**
  * Status hue for small colored text (status words, ready counts). The bright
@@ -88,29 +85,7 @@ const lightColors = {
         selectedPillHover: 'rgba(0, 0, 0, 0.10)',
       };
 
-/** Colors the desktop app paints the native window-controls overlay with —
- *  must match the rendered TopBar (AppBar uses `sidebar` as background). */
-export function titleBarColors(mode: 'light' | 'dark', options: { dim?: number } = {}): { color: string; symbolColor: string } {
-  const c = mode === 'dark' ? darkColors : lightColors;
-  const dim = options.dim ?? 0;
-  return {
-    color: compositeModalBackdrop(c.sidebar, dim),
-    symbolColor: compositeModalBackdrop(c.textPrimary, dim),
-  };
-}
-
-/** Composite the modal backdrop (black at modalBackdropAlpha × backdropOpacity)
- *  over an opaque hex color, so the native overlay can match the web backdrop
- *  at any point during its fade. */
-function compositeModalBackdrop(hex: string, backdropOpacity: number): string {
-  if (backdropOpacity <= 0) return hex;
-  const factor = 1 - modalBackdropAlpha * Math.min(1, backdropOpacity);
-  const value = hex.replace('#', '');
-  const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
-  return `#${channels.map((channel) => Math.round(channel * factor).toString(16).padStart(2, '0')).join('')}`;
-}
-
-export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: ElementType } = {}): Theme {
+export function buildTheme(mode: 'light' | 'dark'): Theme {
   const dark = mode === 'dark';
   const c = dark ? darkColors : lightColors;
 
@@ -146,20 +121,6 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
       button: { fontWeight: 550 },
     },
     components: {
-      ...(options.modalBackdrop
-        ? {
-            MuiDrawer: {
-              defaultProps: {
-                slots: { backdrop: options.modalBackdrop },
-              },
-            },
-            MuiModal: {
-              defaultProps: {
-                slots: { backdrop: options.modalBackdrop },
-              },
-            },
-          }
-        : {}),
       MuiCssBaseline: {
         styleOverrides: {
           '*': {
@@ -176,6 +137,43 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
             '&:hover': { backgroundColor: c.scrollThumbHover },
           },
           '*::-webkit-scrollbar-corner': { background: 'transparent' },
+          '.kubus-usage': { width: '100%', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 },
+          '.kubus-usage-value': { fontSize: 12, fontWeight: 600, flexShrink: 0, minWidth: 44 },
+          '.kubus-usage-track': { position: 'relative', display: 'block', flex: 1, minWidth: 36, height: 5, borderRadius: 999, backgroundColor: alpha(c.textPrimary, dark ? 0.08 : 0.04) },
+          '.kubus-usage-empty': { opacity: 0.5 },
+          '.kubus-usage-fill': {
+            appearance: 'none', display: 'block', width: '100%', height: '100%', border: 0, borderRadius: 'inherit', background: 'transparent',
+            '&::-webkit-progress-bar': { background: 'transparent', borderRadius: 'inherit' },
+            '&::-webkit-progress-value': { background: 'currentColor', borderRadius: 'inherit' },
+            '&::-moz-progress-bar': { background: 'currentColor', borderRadius: 'inherit' },
+          },
+          '.kubus-usage-success': { color: c.success },
+          '.kubus-usage-warning': { color: c.warning },
+          '.kubus-usage-error': { color: c.error },
+          '.kubus-usage-marker': { position: 'absolute', top: -3, width: 2, height: 11, marginLeft: -1, borderRadius: 1, backgroundColor: c.textPrimary, boxShadow: `0 0 0 1px ${c.bgPaper}` },
+          '.kubus-labels-cell': { display: 'flex', gap: 4, alignItems: 'center', minWidth: 0, overflow: 'hidden' },
+          '.kubus-labels-tooltip': { display: 'flex', flexWrap: 'wrap', gap: 4 },
+          '.kubus-label-chip': { display: 'inline-block', boxSizing: 'border-box', maxWidth: 170, height: 20, padding: '0 7px', border: `1px solid ${alpha(c.textPrimary, 0.23)}`, borderRadius: 16, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 11, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 },
+          'button.kubus-label-chip': { cursor: 'pointer', '&:hover': { backgroundColor: alpha(c.textPrimary, 0.08) }, '&:focus-visible': { outline: `2px solid ${c.primary}`, outlineOffset: -2 } },
+          '.kubus-label-overflow': { borderColor: 'transparent', backgroundColor: alpha(c.textPrimary, 0.08) },
+          '.kubus-grid-checkbox': {
+            appearance: 'none', display: 'block', width: 18, height: 18, margin: 4,
+            border: `2px solid ${c.textSecondary}`, borderRadius: 3, cursor: 'pointer',
+            '&:checked, &:indeterminate': { borderColor: c.primary, backgroundColor: c.primary },
+            '&:checked': { backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath fill=%22white%22 d=%22M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z%22/%3E%3C/svg%3E")' },
+            '&:indeterminate': { backgroundImage: 'linear-gradient(white, white)', backgroundSize: '10px 2px', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' },
+            '&:focus-visible': { outline: `2px solid ${c.primary}`, outlineOffset: 3 },
+            '&:disabled': { opacity: 0.4, cursor: 'default' },
+          },
+          '.kubus-status': { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 550, lineHeight: 1.6, whiteSpace: 'nowrap' },
+          '.kubus-status-md': { gap: 7, fontSize: 13 },
+          '.kubus-status-dot': { display: 'inline-block', width: 7, height: 7, borderRadius: '50%', backgroundColor: 'currentColor', flexShrink: 0 },
+          '.kubus-status-md .kubus-status-dot': { width: 8, height: 8 },
+          '.kubus-status-default': { color: c.textSecondary },
+          '.kubus-status-default .kubus-status-dot': { opacity: 0.6 },
+          '.kubus-status-success': { color: dark ? c.success : '#15803d' },
+          '.kubus-status-error': { color: dark ? c.error : '#b91c1c' },
+          '.kubus-status-warning, .kubus-ready-warning': { color: dark ? c.warning : '#8f6209' },
           '::selection': { backgroundColor: alpha(c.primary, 0.3) },
         },
       },
@@ -239,7 +237,6 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
         },
       },
       MuiDialog: {
-        defaultProps: options.modalBackdrop ? { slots: { backdrop: options.modalBackdrop } } : undefined,
         styleOverrides: {
           paper: {
             borderRadius: 12,
@@ -308,6 +305,8 @@ export function buildTheme(mode: 'light' | 'dark', options: { modalBackdrop?: El
               outline: `2px solid ${alpha(c.primary, 0.8)}`,
               outlineOffset: '-2px',
             },
+            // Keep each virtual row's raster stable when its render zone moves.
+            '& .MuiDataGrid-row': { transform: 'translateZ(0)' },
             '& .MuiDataGrid-row:hover': { backgroundColor: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' },
             '& .MuiDataGrid-row.Mui-selected': {
               backgroundColor: c.selectedPill,

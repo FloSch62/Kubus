@@ -64,7 +64,7 @@ export const DockWindowShell = memo(function DockWindowShell() {
           gap: 1.5,
           justifyItems: 'center',
           bgcolor: 'background.default',
-          WebkitAppRegion: 'drag',
+          '--electrobun-app-region': 'drag',
         }}
       >
         <CircularProgress size={22} />

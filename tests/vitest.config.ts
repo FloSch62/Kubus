@@ -45,20 +45,24 @@ export default defineConfig({
         resolve: {
           alias: [
             ...sharedSrcAlias,
+            { find: 'electrobun/main', replacement: path.join(repoRoot, 'desktop/.hutch/devkit/api/sdks/main/index.ts') },
+            { find: 'electrobun/view', replacement: path.join(repoRoot, 'desktop/.hutch/devkit/api/browser/index.ts') },
             {
               find: '@kubus/server',
               replacement: path.join(repoRoot, 'server/src/server.ts'),
             },
             {
               find: 'fix-path',
-              replacement: path.join(repoRoot, 'electron/node_modules/fix-path/index.js'),
+              replacement: path.join(repoRoot, 'desktop/node_modules/fix-path/index.js'),
             },
           ],
         },
         test: {
-          name: 'electron',
+          name: 'desktop',
+          testTimeout: 20_000,
+          hookTimeout: 20_000,
           environment: 'node',
-          include: ['tests/unit/electron/**/*.test.ts'],
+          include: ['tests/unit/desktop/**/*.test.ts'],
         },
       },
       {
@@ -102,7 +106,7 @@ export default defineConfig({
         'shared/src/**/*.ts',
         'server/src/**/*.ts',
         'client/src/**/*.{ts,tsx}',
-        'electron/src/**/*.ts',
+        'desktop/src/**/*.ts',
       ],
       exclude: ['**/*.d.ts'],
       // Keep every repository-wide metric at or above 50%. Package floors
@@ -114,7 +118,7 @@ export default defineConfig({
         functions: 50,
         lines: 50,
         'client/src/**': { statements: 11, branches: 9, functions: 7, lines: 11 },
-        'electron/src/**': { statements: 80, branches: 60, functions: 85, lines: 85 },
+        'desktop/src/**': { statements: 80, branches: 60, functions: 85, lines: 85 },
         'server/src/**': { statements: 14, branches: 15, functions: 14, lines: 14 },
         'shared/src/**': { statements: 95, branches: 90, functions: 90, lines: 95 },
       },

@@ -39,13 +39,13 @@ already carries the per-run access token.
 
 ## Run the desktop shell locally
 
-To launch the Electron desktop app from a source checkout:
+To launch the Electrobun desktop app from a source checkout:
 
 ```bash
-pnpm electron       # builds everything, then launches Electron
+pnpm desktop       # builds everything, then launches Electrobun
 ```
 
-To package installers for your current platform into `electron/release/`:
+To package installers for your current platform into `desktop/artifacts/`:
 
 ```bash
 pnpm dist
@@ -85,3 +85,7 @@ backend on `:3001`.
     [:octicons-arrow-right-24: Test clusters](../community/test-clusters.md)
 
 </div>
+
+Desktop builds use the pinned Electrobun/Hutch toolchain and require Go. The first
+build downloads Bun and the native SDK automatically. The renderer uses the system webview. Package on the target
+operating system; macOS packaging supports Apple Silicon only.

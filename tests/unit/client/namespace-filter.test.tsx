@@ -20,7 +20,7 @@ describe('NamespaceFilter', () => {
     const input = screen.getByPlaceholderText('All namespaces');
     const root = input.closest('.MuiAutocomplete-root');
     expect(root).not.toBeNull();
-    expect(namespaceFilterSx.WebkitAppRegion).toBe('no-drag');
+    expect(namespaceFilterSx['--electrobun-app-region']).toBe('no-drag');
   });
 
   it('does not render without a selected cluster', () => {

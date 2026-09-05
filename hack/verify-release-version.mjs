@@ -8,7 +8,7 @@ if (!refName || !refName.startsWith('v')) {
 }
 
 const expectedVersion = refName.slice(1);
-const manifests = ['package.json', 'electron/package.json'];
+const manifests = ['package.json', 'desktop/package.json'];
 const mismatches = [];
 
 for (const manifestPath of manifests) {

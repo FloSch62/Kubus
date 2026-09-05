@@ -8,6 +8,8 @@ import Chip from '@mui/material/Chip';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { READ_ONLY_GRID_SLOTS } from './ResourceGridCell.js';
+import { GridTooltips } from './CellTooltip.js';
 import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
@@ -216,27 +218,31 @@ export function ResourceTable({
   // Kubernetes watches can replace the rows prop every 100 ms. Let those
   // updates accumulate while the virtual scroller is moving so the grid does
   // not re-sort and recycle its visible rows in the middle of a scroll frame.
+  // Metric polls replace column renderers too; hold both as one snapshot.
   // The newest snapshot is committed shortly after scrolling settles.
   const scrollingRef = useRef(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const [, commitPendingRows] = useState(0);
-  const gridRowsRef = useRef(filtered);
-  if (!scrollingRef.current) gridRowsRef.current = filtered;
-  const gridRows = gridRowsRef.current;
+  const [, commitPendingGrid] = useState(0);
+  const gridSnapshot = useRef({ rows: filtered, columns: gridColumns });
+  if (!scrollingRef.current) gridSnapshot.current = { rows: filtered, columns: gridColumns };
+  const { rows: gridRows, columns: displayedColumns } = gridSnapshot.current;
   useEffect(() => {
-    const scroller = tableRef.current?.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
+    const table = tableRef.current;
+    const scroller = table?.querySelector<HTMLElement>('.MuiDataGrid-virtualScroller');
     if (!scroller) return;
     const handleScroll = () => {
       scrollingRef.current = true;
       clearTimeout(scrollTimerRef.current);
       scrollTimerRef.current = setTimeout(() => {
         scrollingRef.current = false;
-        commitPendingRows((epoch) => epoch + 1);
+        commitPendingGrid((epoch) => epoch + 1);
       }, SCROLL_SETTLE_MS);
     };
     scroller.addEventListener('scroll', handleScroll, { passive: true });
+    scroller.addEventListener('wheel', handleScroll, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', handleScroll);
+      scroller.removeEventListener('wheel', handleScroll);
       clearTimeout(scrollTimerRef.current);
       scrollingRef.current = false;
     };
@@ -300,10 +306,6 @@ export function ResourceTable({
       flex: 1,
       minHeight: 0,
       '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
-      '& .MuiDataGrid-row.kubus-active-resource-row': {
-        bgcolor: 'action.selected',
-        '&:hover': { bgcolor: 'action.selected' },
-      },
       '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
       '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
       ...copyCellGridSx,
@@ -369,11 +371,10 @@ export function ResourceTable({
     ),
     [filteredOut, labelFiltered, anyFilter, kind],
   );
-  const slots = useMemo(() => ({ noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
+  const slots = useMemo(() => ({ ...READ_ONLY_GRID_SLOTS, noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
   const getRowClassName = useCallback(
     (params: GridRowParams<ClusterRow>) => {
       const classes: string[] = [];
-      if (params.id === activeRowId) classes.push('kubus-active-resource-row');
       // Finished pods stay listed (and filterable) but recede visually so
       // the running set stands out; hover restores full contrast.
       if (kind === 'Pod') {
@@ -382,7 +383,7 @@ export function ResourceTable({
       }
       return classes.join(' ');
     },
-    [activeRowId, kind],
+    [kind],
   );
   const handleRowSelectionChange = useCallback<NonNullable<React.ComponentProps<typeof DataGrid<ClusterRow>>['onRowSelectionModelChange']>>(
     (model) => {
@@ -441,8 +442,18 @@ export function ResourceTable({
     [],
   );
 
+  // Highlighting a different resource changes one CSS rule. Passing a new
+  // getRowClassName callback would rebuild every visible row on drawer open.
+  const tableSx = useMemo(() => ({
+    display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0,
+    ...(activeRowId ? {
+      [`& .MuiDataGrid-row[data-id=${JSON.stringify(activeRowId)}]`]: {
+        bgcolor: 'action.selected', '&:hover': { bgcolor: 'action.selected' },
+      },
+    } : {}),
+  }), [activeRowId]);
   return (
-    <Box ref={tableRef} className="kubus-table" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <Box ref={tableRef} className="kubus-table" sx={tableSx}>
       <Stack direction="row" spacing={1} useFlexGap sx={{ px: 1.5, py: 1, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
         <SmartFilterInput
           value={inputValue}
@@ -495,33 +506,37 @@ export function ResourceTable({
         <Box sx={{ flex: 1 }} />
         {toolbar}
       </Stack>
-      <DataGrid
-        rows={gridRows}
-        columns={gridColumns}
-        loading={loading}
-        getRowId={getResourceRowId}
-        getRowClassName={getRowClassName}
-        density={tableDensity === 'comfortable' ? 'standard' : 'compact'}
-        // On overlay-scrollbar platforms the grid measures the native
-        // scrollbar as 0px and floats its own on top of the last column;
-        // an explicit size (matching the themed 10px scrollbars) makes it
-        // reserve a real gutter instead.
-        scrollbarSize={layout.scrollbarSize}
-        checkboxSelection={checkboxSelection}
-        rowSelectionModel={rowSelectionModel}
-        slots={slots}
-        onRowSelectionModelChange={onSelectionChange ? handleRowSelectionChange : undefined}
-        disableRowSelectionOnClick={!!checkboxSelection}
-        onRowClick={onRowClick ? handleRowClick : undefined}
-        slotProps={onRowContextMenu ? rowSlotProps : undefined}
-        columnVisibilityModel={visibility}
-        onColumnVisibilityModelChange={handleVisibilityChange}
-        onColumnWidthChange={tableId ? handleColumnWidthChange : undefined}
-        onCellKeyDown={handleCellKeyDown}
-        sortModel={sortModel}
-        onSortModelChange={handleSortChange}
-        sx={gridSx}
-      />
+      <GridTooltips rootRef={tableRef}>
+        <DataGrid
+          rows={gridRows}
+          columns={displayedColumns}
+          loading={loading}
+          getRowId={getResourceRowId}
+          getRowClassName={getRowClassName}
+          density={tableDensity === 'comfortable' ? 'standard' : 'compact'}
+          // On overlay-scrollbar platforms the grid measures the native
+          // scrollbar as 0px and floats its own on top of the last column;
+          // an explicit size (matching the themed 10px scrollbars) makes it
+          // reserve a real gutter instead.
+          scrollbarSize={layout.scrollbarSize}
+          rowBufferPx={80}
+          columnBufferPx={50}
+          checkboxSelection={checkboxSelection}
+          rowSelectionModel={rowSelectionModel}
+          slots={slots}
+          onRowSelectionModelChange={onSelectionChange ? handleRowSelectionChange : undefined}
+          disableRowSelectionOnClick={!!checkboxSelection}
+          onRowClick={onRowClick ? handleRowClick : undefined}
+          slotProps={onRowContextMenu ? rowSlotProps : undefined}
+          columnVisibilityModel={visibility}
+          onColumnVisibilityModelChange={handleVisibilityChange}
+          onColumnWidthChange={tableId ? handleColumnWidthChange : undefined}
+          onCellKeyDown={handleCellKeyDown}
+          sortModel={sortModel}
+          onSortModelChange={handleSortChange}
+          sx={gridSx}
+        />
+      </GridTooltips>
       <CellCopyOverlay rootRef={tableRef} />
     </Box>
   );

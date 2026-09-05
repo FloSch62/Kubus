@@ -13,6 +13,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@bjorn3/browser_wasi_shim": "0.4.2",
     "@fastify/static": "^10.1.3",
     "@fastify/websocket": "^11.3.0",
     "@kubernetes/client-node": "^2.0.0",

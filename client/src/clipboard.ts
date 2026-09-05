@@ -1,6 +1,6 @@
 /**
  * Copy text to the clipboard. The async Clipboard API only exists in secure
- * contexts (https/localhost/Electron); when the UI is served over plain http
+ * contexts (https/localhost/Electrobun); when the UI is served over plain http
  * on a LAN address it is undefined, so fall back to a hidden textarea +
  * execCommand. Returns whether the copy succeeded.
  */

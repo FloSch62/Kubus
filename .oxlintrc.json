@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["**/.hutch/**", "**/.cottontail-tmp/**", "desktop/build/**", "desktop/assets/**", "desktop/artifacts/**"],
   "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "jsx-a11y", "import"],
   "categories": {
     "correctness": "error"

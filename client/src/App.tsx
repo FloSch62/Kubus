@@ -1,8 +1,7 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import CssBaseline from '@mui/material/CssBaseline';
 import { ThemeProvider } from '@mui/material/styles';
 import { buildTheme } from './theme.js';
-import { setTitleBarMode } from './titlebar-overlay.js';
 import { useContextsInvalidation } from './api/queries.js';
 import { useClustersStore } from './state/clusters.js';
 import { AppRouter } from './router.js';
@@ -10,7 +9,6 @@ import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { ToastHost } from './components/ToastHost.js';
 import { BackendStatusBanner } from './components/BackendStatusBanner.js';
 import { UpdateNotification } from './components/UpdateNotification.js';
-import { TitleBarAwareBackdrop } from './components/TitleBarAwareBackdrop.js';
 import { setDebugLogging } from './api/logs.js';
 import { useUiPrefsStore } from './state/prefs.js';
 import { useUiStore } from './state/ui.js';
@@ -43,11 +41,7 @@ export default function App({ surface = 'app' }: { surface?: AppWindowSurface })
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   );
   const effectiveMode = themeMode === 'os' ? osTheme : themeMode;
-  const theme = useMemo(() => buildTheme(effectiveMode, { modalBackdrop: TitleBarAwareBackdrop }), [effectiveMode]);
-  useLayoutEffect(() => {
-    // Keep the desktop app's native window controls in sync with the theme.
-    setTitleBarMode(effectiveMode);
-  }, [effectiveMode]);
+  const theme = useMemo(() => buildTheme(effectiveMode), [effectiveMode]);
   useEffect(() => {
     // The debug preference is client-side; keep the server's live level in sync.
     void setDebugLogging(debugMode).catch(() => undefined);

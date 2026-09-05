@@ -90,20 +90,22 @@ function hotkeyFavorites(favorites: FavoriteItem[]): FavoriteItem[] {
 function useOpenInNewTab(to: string, pendingSavedView?: SavedView['grid'], fromFavorite = false) {
   const openTab = useTabsStore((s) => s.openTab);
   const navigate = useNavigate();
-  const open = (e: React.MouseEvent, foreground: boolean) => {
-    e.preventDefault();
-    if (foreground && pendingSavedView) applySavedViewGridState(to, pendingSavedView);
-    openTab(to, { activate: foreground, afterActive: true, pendingSavedView: foreground ? undefined : pendingSavedView });
-    if (foreground) void navigate(to, { state: fromFavorite ? FAVORITE_NAVIGATION_STATE : undefined });
-  };
-  return {
-    onClick: (e: React.MouseEvent) => {
-      if (e.ctrlKey || e.metaKey) open(e, e.shiftKey);
-    },
-    onAuxClick: (e: React.MouseEvent) => {
-      if (e.button === 1) open(e, false);
-    },
-  };
+  return useMemo(() => {
+    const open = (e: React.MouseEvent, foreground: boolean) => {
+      e.preventDefault();
+      if (foreground && pendingSavedView) applySavedViewGridState(to, pendingSavedView);
+      openTab(to, { activate: foreground, afterActive: true, pendingSavedView: foreground ? undefined : pendingSavedView });
+      if (foreground) void navigate(to, { state: fromFavorite ? FAVORITE_NAVIGATION_STATE : undefined });
+    };
+    return {
+      onClick: (e: React.MouseEvent) => {
+        if (e.ctrlKey || e.metaKey) open(e, e.shiftKey);
+      },
+      onAuxClick: (e: React.MouseEvent) => {
+        if (e.button === 1) open(e, false);
+      },
+    };
+  }, [openTab, navigate, to, pendingSavedView, fromFavorite]);
 }
 
 function kindPath(group: string, version: string, plural: string): string {
@@ -264,72 +266,83 @@ function NavEntry({
   const addFavorite = useNavigationStore((s) => s.addFavorite);
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
   const newTabHandlers = useOpenInNewTab(to, undefined, inFavorites);
-  const button = (
-    <ListItemButton
-      component={NavLink}
-      to={to}
-      state={inFavorites ? FAVORITE_NAVIGATION_STATE : undefined}
-      dense
-      selected={active}
-      onMouseEnter={onIntent}
-      onFocus={onIntent}
-      {...newTabHandlers}
-      sx={{ pl: icon ? 1.5 : (indent ?? ITEM_INDENT), py: subtitle ? 0.25 : 0.375, pr: favorite ? (favoriteAction ? 7 : 4) : undefined }}
-    >
-      {icon && (
-        <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
-      )}
-      <TruncationTooltip text={label} measureSelector=".MuiListItemText-primary">
-        <ListItemText
-          primary={label}
-          secondary={subtitle}
-          sx={{ my: subtitle ? 0.25 : undefined }}
-          slotProps={{
-            primary: { variant: 'body2', noWrap: true, sx: subtitle ? { lineHeight: 1.25 } : undefined },
-            secondary: { noWrap: true, title: subtitle, sx: { fontSize: 10.5, fontStyle: 'italic', lineHeight: 1.1 } },
-          }}
-        />
-      </TruncationTooltip>
-    </ListItemButton>
-  );
-  if (!favorite) return button;
-  return (
-    <ListItem
-      disablePadding
-      secondaryAction={
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, position: 'relative' }}>
-          {favoriteAction}
-          <FavStar
-            active={isFav}
-            onManage={onManageFavorite}
-            label={`${onManageFavorite ? 'Remove or edit' : isFav ? 'Remove' : 'Add'} favorite ${label}`}
-            onToggle={() => (isFav ? removeFavorite(favorite.id) : addFavorite(favorite))}
+  const favoriteRef = useRef(favorite);
+  favoriteRef.current = favorite;
+  const hasFavorite = !!favorite;
+  const toggleFavorite = useCallback(() => {
+    const current = favoriteRef.current;
+    if (current) { if (isFav) removeFavorite(current.id); else addFavorite(current); }
+  }, [isFav, removeFavorite, addFavorite]);
+  // Query-string changes (selection, filters, detail tabs) still update link
+  // matching, but only an entry whose appearance changes rebuilds its MUI tree.
+  return useMemo(() => {
+    const button = (
+      <ListItemButton
+        component={NavLink}
+        to={to}
+        state={inFavorites ? FAVORITE_NAVIGATION_STATE : undefined}
+        dense
+        selected={active}
+        onMouseEnter={onIntent}
+        onFocus={onIntent}
+        {...newTabHandlers}
+        sx={{ pl: icon ? 1.5 : (indent ?? ITEM_INDENT), py: subtitle ? 0.25 : 0.375, pr: hasFavorite ? (favoriteAction ? 7 : 4) : undefined }}
+      >
+        {icon && (
+          <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
+        )}
+        <TruncationTooltip text={label} measureSelector=".MuiListItemText-primary">
+          <ListItemText
+            primary={label}
+            secondary={subtitle}
+            sx={{ my: subtitle ? 0.25 : undefined }}
+            slotProps={{
+              primary: { variant: 'body2', noWrap: true, sx: subtitle ? { lineHeight: 1.25 } : undefined },
+              secondary: { noWrap: true, title: subtitle, sx: { fontSize: 10.5, fontStyle: 'italic', lineHeight: 1.1 } },
+            }}
           />
-          {hotkey && (
-            <Typography
-              className="fav-hotkey"
-              variant="caption"
-              aria-hidden
-              sx={{
-                position: 'absolute',
-                right: 6,
-                color: 'text.disabled',
-                fontWeight: 600,
-                whiteSpace: 'nowrap',
-                pointerEvents: 'none',
-                transition: 'opacity 120ms ease',
-              }}
-            >
-              {hotkey}
-            </Typography>
-          )}
-        </Box>
-      }
-      sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 }, '&:hover .fav-hotkey': { opacity: 0 } }}
-    >
-      {button}
-    </ListItem>
-  );
+        </TruncationTooltip>
+      </ListItemButton>
+    );
+    if (!hasFavorite) return button;
+    return (
+      <ListItem
+        disablePadding
+        secondaryAction={
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, position: 'relative' }}>
+            {favoriteAction}
+            <FavStar
+              active={isFav}
+              onManage={onManageFavorite}
+              label={`${onManageFavorite ? 'Remove or edit' : isFav ? 'Remove' : 'Add'} favorite ${label}`}
+              onToggle={toggleFavorite}
+            />
+            {hotkey && (
+              <Typography
+                className="fav-hotkey"
+                variant="caption"
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  right: 6,
+                  color: 'text.disabled',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  transition: 'opacity 120ms ease',
+                }}
+              >
+                {hotkey}
+              </Typography>
+            )}
+          </Box>
+        }
+        sx={{ '& .MuiListItemSecondaryAction-root': { right: 4 }, '&:hover .fav-star': { opacity: 1 }, '&:hover .fav-hotkey': { opacity: 0 } }}
+      >
+        {button}
+      </ListItem>
+    );
+  }, [to, label, subtitle, icon, hasFavorite, favoriteAction, onManageFavorite, hotkey, onIntent, indent, inFavorites, active, isFav, toggleFavorite, newTabHandlers]);
 }
 
 const PreferFavoriteContext = createContext(false);
@@ -846,25 +859,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return map;
   }, [visibleFavs]);
 
-  const toggleGroup = (title: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(title)) next.delete(title);
-      else next.add(title);
-      return next;
-    });
-
-  const isFav = (id: string) => favorites.some((fav) => fav.id === id);
-  const toggleCategory = (title: string) => {
-    const id = `category:${title}`;
-    if (isFav(id)) {
-      removeFavorite(id);
-    } else {
-      addFavorite({ id, title });
-      setCollapsed((prev) => new Set(prev).add(`fav:${title}`));
-    }
-  };
-
   const customKinds = useMemo(() => {
     const custom = dedupeCustomNavKinds((apiResources?.resources ?? []).filter((r) => r.custom && r.verbs.includes('list')));
     const byGroup = new Map<string, ResourceKindInfo[]>();
@@ -1020,326 +1014,359 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return scrollActiveEntryIntoView();
   }, [overlay, open, scrollActiveEntryIntoView]);
 
-  const f = deferredFilter.toLowerCase();
-  const matches = (label: string) => !f || label.toLowerCase().includes(f);
-  // Branch containing the current page, for active-trail coloring in the tree.
-  const activeChain = groupChainByPath.get(location.pathname) ?? [];
-  // While filtering, always expand so matches are visible. CRD API groups are
-  // discovered dynamically, so they use the set as an explicit open override.
-  const isOpen = (title: string) => !!f || (title.startsWith(CUSTOM_GROUP_PREFIX) ? collapsed.has(title) : !collapsed.has(title));
-  const canReorderFavorites = visibleFavs.length > 1 && !f;
-  const openScopeMenu = (fav: FavoriteItem, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setScopeMenu({ favorite: fav, position: { top: e.clientY, left: e.clientX } });
-  };
-  const clearFavoriteDrag = () => {
-    setDraggingFavoriteId(null);
-    setFavoriteDropTarget(null);
-  };
-  const favoriteDragHandle = (fav: FavoriteItem) =>
-    canReorderFavorites ? (
-      <FavoriteDragHandle
-        favorite={fav}
-        onDragStart={(favorite, e) => {
-          e.stopPropagation();
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData(FAVORITE_DRAG_TYPE, favorite.id);
-          setDraggingFavoriteId(favorite.id);
-        }}
-        onDragEnd={clearFavoriteDrag}
-      />
-    ) : undefined;
-  const favoriteDragShell = (fav: FavoriteItem, children: ReactNode) =>
-    canReorderFavorites ? (
-      <FavoriteDragShell
-        favorite={fav}
-        draggingId={draggingFavoriteId}
-        dropTarget={favoriteDropTarget}
-        onDropTarget={setFavoriteDropTarget}
-        onClearDropTarget={(id) => {
-          setFavoriteDropTarget((target) => (target?.id === id ? null : target));
-        }}
-        onDropFavorite={({ id, position }) => {
-          const draggedId = draggingFavoriteId;
-          clearFavoriteDrag();
-          if (draggedId) moveFavorite(draggedId, id, position);
+  const pathname = location.pathname;
+  // Selection/detail-tab URL changes still reach NavEntry's location observer,
+  // but must not rebuild every category, star, tooltip and collapsed tree.
+  return useMemo(() => {
+    const toggleGroup = (title: string) =>
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        if (next.has(title)) next.delete(title);
+        else next.add(title);
+        return next;
+      });
+
+    const isFav = (id: string) => favorites.some((fav) => fav.id === id);
+    const toggleCategory = (title: string) => {
+      const id = `category:${title}`;
+      if (isFav(id)) {
+        removeFavorite(id);
+      } else {
+        addFavorite({ id, title });
+        setCollapsed((prev) => new Set(prev).add(`fav:${title}`));
+      }
+    };
+
+    const f = deferredFilter.toLowerCase();
+    const matches = (label: string) => !f || label.toLowerCase().includes(f);
+    // Branch containing the current page, for active-trail coloring in the tree.
+    const activeChain = groupChainByPath.get(pathname) ?? [];
+    // While filtering, always expand so matches are visible. CRD API groups are
+    // discovered dynamically, so they use the set as an explicit open override.
+    const isOpen = (title: string) => !!f || (title.startsWith(CUSTOM_GROUP_PREFIX) ? collapsed.has(title) : !collapsed.has(title));
+    const canReorderFavorites = visibleFavs.length > 1 && !f;
+    const openScopeMenu = (fav: FavoriteItem, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setScopeMenu({ favorite: fav, position: { top: e.clientY, left: e.clientX } });
+    };
+    const clearFavoriteDrag = () => {
+      setDraggingFavoriteId(null);
+      setFavoriteDropTarget(null);
+    };
+    const favoriteDragHandle = (fav: FavoriteItem) =>
+      canReorderFavorites ? (
+        <FavoriteDragHandle
+          favorite={fav}
+          onDragStart={(favorite, e) => {
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData(FAVORITE_DRAG_TYPE, favorite.id);
+            setDraggingFavoriteId(favorite.id);
+          }}
+          onDragEnd={clearFavoriteDrag}
+        />
+      ) : undefined;
+    const favoriteDragShell = (fav: FavoriteItem, children: ReactNode) =>
+      canReorderFavorites ? (
+        <FavoriteDragShell
+          favorite={fav}
+          draggingId={draggingFavoriteId}
+          dropTarget={favoriteDropTarget}
+          onDropTarget={setFavoriteDropTarget}
+          onClearDropTarget={(id) => {
+            setFavoriteDropTarget((target) => (target?.id === id ? null : target));
+          }}
+          onDropFavorite={({ id, position }) => {
+            const draggedId = draggingFavoriteId;
+            clearFavoriteDrag();
+            if (draggedId) moveFavorite(draggedId, id, position);
+          }}
+        >
+          {children}
+        </FavoriteDragShell>
+      ) : (
+        children
+      );
+
+    const railHidden = !overlay && hidden;
+    return (
+      <Drawer
+        variant={overlay ? 'temporary' : 'permanent'}
+        open={overlay ? open : true}
+        onClose={onClose}
+        slotProps={{ paper: { inert: railHidden || undefined } }}
+        sx={{
+          width: overlay || railHidden ? 0 : WIDTH,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: WIDTH,
+            borderRight: railHidden ? 0 : 1,
+            borderColor: 'divider',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            bgcolor: (theme) => theme.palette.sidebar,
+            ...(overlay
+              ? { top: `${layout.topBarHeight}px`, height: `calc(100% - ${layout.topBarHeight}px)` }
+              : {
+                  position: 'relative',
+                  transform: railHidden ? 'translate3d(-100%, 0, 0)' : 'translate3d(0, 0, 0)',
+                  willChange: 'transform',
+                  transition: 'transform 150ms ease',
+                  '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                }),
+          },
         }}
       >
-        {children}
-      </FavoriteDragShell>
-    ) : (
-      children
-    );
-
-  const railHidden = !overlay && hidden;
-  return (
-    <Drawer
-      variant={overlay ? 'temporary' : 'permanent'}
-      open={overlay ? open : true}
-      onClose={onClose}
-      sx={{
-        width: overlay || railHidden ? 0 : WIDTH,
-        flexShrink: 0,
-        transition: 'width 150ms ease',
-        '& .MuiDrawer-paper': {
-          width: railHidden ? 0 : WIDTH,
-          borderRight: railHidden ? 0 : 1,
-          borderColor: 'divider',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          bgcolor: (theme) => theme.palette.sidebar,
-          ...(overlay
-            ? { top: `${layout.topBarHeight}px`, height: `calc(100% - ${layout.topBarHeight}px)` }
-            : { position: 'relative', transition: 'width 150ms ease' }),
-        },
-      }}
-    >
-      <Box sx={{ p: 1.25, pb: 0.5 }}>
-        <TextField
-          fullWidth
-          placeholder="Filter resources…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Escape') return;
-            e.stopPropagation();
-            if (filter) setFilter('');
-            else (e.target as HTMLElement).blur();
-          }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ fontSize: 18 }} />
-                </InputAdornment>
-              ),
-              endAdornment: filter ? (
-                <InputAdornment position="end">
-                  <IconButton
-                    aria-label="Clear resource filter"
-                    edge="end"
-                    size="small"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setFilter('')}
-                    sx={{ mr: -0.75 }}
-                  >
-                    <ClearIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </InputAdornment>
-              ) : undefined,
-            },
-          }}
-        />
-      </Box>
-      <PreferFavoriteContext value={activeFavoriteEntry}>
-        <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
-          <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
-          <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
-          <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
-          <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
-          <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
-          <NavEntry to="/network" label="Network Metrics" icon={<NetworkCheckOutlinedIcon />} />
-          <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
-          <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
-          <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
-        {visibleFavs.length > 0 && (
-          <Box>
-            <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
-            <Collapse in={isOpen('Favorites')}>
-              {visibleFavs.map((fav) => {
-                // The star opens this favorite's menu; right-click anywhere on
-                // the row is the shortcut to the same thing.
-                const scopeHandlers = { onContextMenu: (e: React.MouseEvent) => openScopeMenu(fav, e) };
-                const manageFavorite = (e: React.MouseEvent) => openScopeMenu(fav, e);
-                if (fav.id.startsWith('category:')) {
-                  const all = categoryKindsMap.get(fav.title) ?? [];
-                  const titleMatch = matches(fav.title);
-                  const kinds = titleMatch ? all : all.filter((k) => matches(k.kind));
-                  if (f && !titleMatch && kinds.length === 0) return null;
-                  const key = `fav:${fav.title}`;
+        <Box sx={{ p: 1.25, pb: 0.5 }}>
+          <TextField
+            fullWidth
+            placeholder="Filter resources…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return;
+              e.stopPropagation();
+              if (filter) setFilter('');
+              else (e.target as HTMLElement).blur();
+            }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ fontSize: 18 }} />
+                  </InputAdornment>
+                ),
+                endAdornment: filter ? (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label="Clear resource filter"
+                      edge="end"
+                      size="small"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setFilter('')}
+                      sx={{ mr: -0.75 }}
+                    >
+                      <ClearIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </InputAdornment>
+                ) : undefined,
+              },
+            }}
+          />
+        </Box>
+        <PreferFavoriteContext value={activeFavoriteEntry}>
+          <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
+            <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
+            <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
+            <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
+            <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
+            <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
+            <NavEntry to="/network" label="Network Metrics" icon={<NetworkCheckOutlinedIcon />} />
+            <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
+            <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
+            <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
+          {visibleFavs.length > 0 && (
+            <Box>
+              <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
+              <Collapse unmountOnExit in={isOpen('Favorites')}>
+                {visibleFavs.map((fav) => {
+                  // The star opens this favorite's menu; right-click anywhere on
+                  // the row is the shortcut to the same thing.
+                  const scopeHandlers = { onContextMenu: (e: React.MouseEvent) => openScopeMenu(fav, e) };
+                  const manageFavorite = (e: React.MouseEvent) => openScopeMenu(fav, e);
+                  if (fav.id.startsWith('category:')) {
+                    const all = categoryKindsMap.get(fav.title) ?? [];
+                    const titleMatch = matches(fav.title);
+                    const kinds = titleMatch ? all : all.filter((k) => matches(k.kind));
+                    if (f && !titleMatch && kinds.length === 0) return null;
+                    const key = `fav:${fav.title}`;
+                    return (
+                      <Box key={fav.id} {...scopeHandlers}>
+                        {favoriteDragShell(
+                          fav,
+                          <GroupHeader
+                            title={fav.title}
+                            icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
+                            open={isOpen(key)}
+                            onClick={() => toggleGroup(key)}
+                            favorite={{ active: true, onToggle: () => removeFavorite(fav.id), onManage: manageFavorite }}
+                            favoriteAction={favoriteDragHandle(fav)}
+                          />,
+                        )}
+                        <Collapse unmountOnExit in={isOpen(key)}>
+                          {kinds.map((k) => (
+                            <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} inFavorites />
+                          ))}
+                        </Collapse>
+                      </Box>
+                    );
+                  }
+                  const gvk = favoriteGvk(fav, apiResources?.resources ?? []);
+                  if (!matches(fav.title) && !(gvk && matches(gvk))) return null;
+                  // A scoped favorite names its clusters on the subtitle line —
+                  // the only hint that it is missing from the other sidebars.
+                  const scopes = favoriteScopes(fav);
+                  const subtitle = [gvk, ...(scopes.length ? [scopes.join(', ')] : [])].filter(Boolean).join(' · ') || undefined;
                   return (
                     <Box key={fav.id} {...scopeHandlers}>
                       {favoriteDragShell(
                         fav,
-                        <GroupHeader
-                          title={fav.title}
-                          icon={GROUP_ICONS[fav.title] ?? <ExtensionOutlinedIcon />}
-                          open={isOpen(key)}
-                          onClick={() => toggleGroup(key)}
-                          favorite={{ active: true, onToggle: () => removeFavorite(fav.id), onManage: manageFavorite }}
+                        <NavEntry
+                          to={fav.path ?? '/'}
+                          label={fav.title}
+                          subtitle={subtitle}
+                          favorite={fav}
                           favoriteAction={favoriteDragHandle(fav)}
+                          onManageFavorite={manageFavorite}
+                          hotkey={hotkeyByFavorite.get(fav.id)}
+                          inFavorites
                         />,
                       )}
-                      <Collapse in={isOpen(key)}>
-                        {kinds.map((k) => (
-                          <NavEntry key={`${k.group}/${k.version}/${k.plural}`} to={kindPath(k.group, k.version, k.plural)} label={k.label} inFavorites />
-                        ))}
-                      </Collapse>
                     </Box>
                   );
-                }
-                const gvk = favoriteGvk(fav, apiResources?.resources ?? []);
-                if (!matches(fav.title) && !(gvk && matches(gvk))) return null;
-                // A scoped favorite names its clusters on the subtitle line —
-                // the only hint that it is missing from the other sidebars.
-                const scopes = favoriteScopes(fav);
-                const subtitle = [gvk, ...(scopes.length ? [scopes.join(', ')] : [])].filter(Boolean).join(' · ') || undefined;
-                return (
-                  <Box key={fav.id} {...scopeHandlers}>
-                    {favoriteDragShell(
-                      fav,
-                      <NavEntry
-                        to={fav.path ?? '/'}
-                        label={fav.title}
-                        subtitle={subtitle}
-                        favorite={fav}
-                        favoriteAction={favoriteDragHandle(fav)}
-                        onManageFavorite={manageFavorite}
-                        hotkey={hotkeyByFavorite.get(fav.id)}
-                        inFavorites
-                      />,
-                    )}
-                  </Box>
-                );
-              })}
-            </Collapse>
-          </Box>
-        )}
-        {savedViews.length > 0 && (
-          <Box>
-            <GroupHeader title="Saved Views" icon={<SearchIcon />} open={isOpen('Saved Views')} onClick={() => toggleGroup('Saved Views')} />
-            <Collapse in={isOpen('Saved Views')}>
-              {savedViews.map((v) => (
-                <SavedViewEntry key={v.id} view={v} onDelete={removeSavedView} />
-              ))}
-            </Collapse>
-          </Box>
-        )}
-        {BUILTIN_NAV_GROUPS.map((group) => {
-          const visible = group.kinds.filter((k) => matches(k.kind));
-          if (!visible.length) return null;
-          return (
-            <Box key={group.title}>
-              <GroupHeader
-                title={group.title}
-                icon={GROUP_ICONS[group.title]}
-                open={isOpen(group.title)}
-                onClick={() => toggleGroup(group.title)}
-                favorite={{ active: isFav(`category:${group.title}`), onToggle: () => toggleCategory(group.title) }}
-              />
-              <Collapse in={isOpen(group.title)}>
-                {visible.map((k) => (
-                  <NavEntry
-                    key={k.plural}
-                    to={kindPath(k.group, k.version, k.plural)}
-                    label={pluralLabel(k.kind)}
-                    favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
-                  />
+                })}
+              </Collapse>
+            </Box>
+          )}
+          {savedViews.length > 0 && (
+            <Box>
+              <GroupHeader title="Saved Views" icon={<SearchIcon />} open={isOpen('Saved Views')} onClick={() => toggleGroup('Saved Views')} />
+              <Collapse unmountOnExit in={isOpen('Saved Views')}>
+                {savedViews.map((v) => (
+                  <SavedViewEntry key={v.id} view={v} onDelete={removeSavedView} />
                 ))}
               </Collapse>
             </Box>
-          );
-        })}
-        {customKinds.length > 0 && (
-          <>
-            <GroupHeader
-              title="Custom Resources"
-              icon={<ExtensionOutlinedIcon />}
-              open={isOpen('Custom Resources')}
-              onClick={() => toggleGroup('Custom Resources')}
-              favorite={{ active: isFav('category:Custom Resources'), onToggle: () => toggleCategory('Custom Resources') }}
-            />
-            <Collapse in={isOpen('Custom Resources')}>
-              {(!f || 'crd definitions customresourcedefinitions'.includes(f)) && (
-                <NavEntry
-                  to={CRD_LIST_PATH}
-                  label="Definitions"
-                  favorite={kindFavorite({
-                    group: 'apiextensions.k8s.io',
-                    version: 'v1',
-                    plural: 'customresourcedefinitions',
-                    kind: 'CustomResourceDefinition',
-                    label: 'CRD Definitions',
-                  })}
+          )}
+          {BUILTIN_NAV_GROUPS.map((group) => {
+            const visible = group.kinds.filter((k) => matches(k.kind));
+            if (!visible.length) return null;
+            return (
+              <Box key={group.title}>
+                <GroupHeader
+                  title={group.title}
+                  icon={GROUP_ICONS[group.title]}
+                  open={isOpen(group.title)}
+                  onClick={() => toggleGroup(group.title)}
+                  favorite={{ active: isFav(`category:${group.title}`), onToggle: () => toggleCategory(group.title) }}
                 />
-              )}
-              {customNav.map((node) => {
-                const nodeKey = `${CUSTOM_GROUP_PREFIX}${node.label}`;
-                const nodeMatches = matches(node.label);
-                const ownKinds = nodeMatches ? node.kinds : node.kinds.filter((k) => matches(k.kind));
-                const subgroups = node.subgroups
-                  .map((sg) => ({ ...sg, kinds: nodeMatches || matches(sg.group) ? sg.kinds : sg.kinds.filter((k) => matches(k.kind)) }))
-                  .filter((sg) => sg.kinds.length > 0);
-                if (!ownKinds.length && !subgroups.length) return null;
-                const kindCount = node.kinds.length + node.subgroups.reduce((n, sg) => n + sg.kinds.length, 0);
-                return (
-                  <Box key={node.label}>
-                    <CustomGroupHeader
-                      label={node.label}
-                      count={kindCount}
-                      indent={ITEM_INDENT}
-                      open={isOpen(nodeKey)}
-                      active={activeChain.includes(nodeKey)}
-                      onClick={() => toggleGroup(nodeKey)}
+                <Collapse unmountOnExit in={isOpen(group.title)}>
+                  {visible.map((k) => (
+                    <NavEntry
+                      key={k.plural}
+                      to={kindPath(k.group, k.version, k.plural)}
+                      label={pluralLabel(k.kind)}
+                      favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
                     />
-                    <Collapse in={isOpen(nodeKey)}>
-                      <TreeChildren railLeft="45px" active={activeChain.includes(nodeKey)}>
-                        {ownKinds.map((k) => (
-                          <NavEntry
-                            key={`${k.group}/${k.version}/${k.plural}`}
-                            to={kindPath(k.group, k.version, k.plural)}
-                            label={k.kind}
-                            indent={SUB_INDENT}
-                            favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
-                          />
-                        ))}
-                        {subgroups.map((sg) => {
-                          const sgKey = `${CUSTOM_GROUP_PREFIX}${sg.group}`;
-                          return (
-                            <Box key={sg.group}>
-                              <CustomGroupHeader
-                                label={sg.label}
-                                title={sg.group}
-                                count={sg.kinds.length}
-                                indent={SUB_INDENT}
-                                open={isOpen(sgKey)}
-                                active={activeChain.includes(sgKey)}
-                                onClick={() => toggleGroup(sgKey)}
-                              />
-                              <Collapse in={isOpen(sgKey)}>
-                                <TreeChildren>
-                                  {sg.kinds.map((k) => (
-                                    <NavEntry
-                                      key={`${k.group}/${k.version}/${k.plural}`}
-                                      to={kindPath(k.group, k.version, k.plural)}
-                                      label={k.kind}
-                                      indent={KIND_INDENT}
-                                      favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
-                                    />
-                                  ))}
-                                </TreeChildren>
-                              </Collapse>
-                            </Box>
-                          );
-                        })}
-                      </TreeChildren>
-                    </Collapse>
-                  </Box>
-                );
-              })}
-            </Collapse>
-          </>
-        )}
-        </List>
-      </PreferFavoriteContext>
-      <FavoriteScopeMenu
-        state={scopeMenu}
-        contexts={(contexts ?? []).map((c) => c.name)}
-        connected={selected}
-        subtitle={scopeMenu ? favoriteGvk(scopeMenu.favorite, apiResources?.resources ?? []) : undefined}
-        onClose={() => setScopeMenu(null)}
-      />
-    </Drawer>
-  );
+                  ))}
+                </Collapse>
+              </Box>
+            );
+          })}
+          {customKinds.length > 0 && (
+            <>
+              <GroupHeader
+                title="Custom Resources"
+                icon={<ExtensionOutlinedIcon />}
+                open={isOpen('Custom Resources')}
+                onClick={() => toggleGroup('Custom Resources')}
+                favorite={{ active: isFav('category:Custom Resources'), onToggle: () => toggleCategory('Custom Resources') }}
+              />
+              <Collapse unmountOnExit in={isOpen('Custom Resources')}>
+                {(!f || 'crd definitions customresourcedefinitions'.includes(f)) && (
+                  <NavEntry
+                    to={CRD_LIST_PATH}
+                    label="Definitions"
+                    favorite={kindFavorite({
+                      group: 'apiextensions.k8s.io',
+                      version: 'v1',
+                      plural: 'customresourcedefinitions',
+                      kind: 'CustomResourceDefinition',
+                      label: 'CRD Definitions',
+                    })}
+                  />
+                )}
+                {customNav.map((node) => {
+                  const nodeKey = `${CUSTOM_GROUP_PREFIX}${node.label}`;
+                  const nodeMatches = matches(node.label);
+                  const ownKinds = nodeMatches ? node.kinds : node.kinds.filter((k) => matches(k.kind));
+                  const subgroups = node.subgroups
+                    .map((sg) => ({ ...sg, kinds: nodeMatches || matches(sg.group) ? sg.kinds : sg.kinds.filter((k) => matches(k.kind)) }))
+                    .filter((sg) => sg.kinds.length > 0);
+                  if (!ownKinds.length && !subgroups.length) return null;
+                  const kindCount = node.kinds.length + node.subgroups.reduce((n, sg) => n + sg.kinds.length, 0);
+                  return (
+                    <Box key={node.label}>
+                      <CustomGroupHeader
+                        label={node.label}
+                        count={kindCount}
+                        indent={ITEM_INDENT}
+                        open={isOpen(nodeKey)}
+                        active={activeChain.includes(nodeKey)}
+                        onClick={() => toggleGroup(nodeKey)}
+                      />
+                      <Collapse unmountOnExit in={isOpen(nodeKey)}>
+                        <TreeChildren railLeft="45px" active={activeChain.includes(nodeKey)}>
+                          {ownKinds.map((k) => (
+                            <NavEntry
+                              key={`${k.group}/${k.version}/${k.plural}`}
+                              to={kindPath(k.group, k.version, k.plural)}
+                              label={k.kind}
+                              indent={SUB_INDENT}
+                              favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
+                            />
+                          ))}
+                          {subgroups.map((sg) => {
+                            const sgKey = `${CUSTOM_GROUP_PREFIX}${sg.group}`;
+                            return (
+                              <Box key={sg.group}>
+                                <CustomGroupHeader
+                                  label={sg.label}
+                                  title={sg.group}
+                                  count={sg.kinds.length}
+                                  indent={SUB_INDENT}
+                                  open={isOpen(sgKey)}
+                                  active={activeChain.includes(sgKey)}
+                                  onClick={() => toggleGroup(sgKey)}
+                                />
+                                <Collapse unmountOnExit in={isOpen(sgKey)}>
+                                  <TreeChildren>
+                                    {sg.kinds.map((k) => (
+                                      <NavEntry
+                                        key={`${k.group}/${k.version}/${k.plural}`}
+                                        to={kindPath(k.group, k.version, k.plural)}
+                                        label={k.kind}
+                                        indent={KIND_INDENT}
+                                        favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind })}
+                                      />
+                                    ))}
+                                  </TreeChildren>
+                                </Collapse>
+                              </Box>
+                            );
+                          })}
+                        </TreeChildren>
+                      </Collapse>
+                    </Box>
+                  );
+                })}
+              </Collapse>
+            </>
+          )}
+          </List>
+        </PreferFavoriteContext>
+        <FavoriteScopeMenu
+          state={scopeMenu}
+          contexts={(contexts ?? []).map((c) => c.name)}
+          connected={selected}
+          subtitle={scopeMenu ? favoriteGvk(scopeMenu.favorite, apiResources?.resources ?? []) : undefined}
+          onClose={() => setScopeMenu(null)}
+        />
+      </Drawer>
+    );
+  }, [pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
+    favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, apiResources, contexts, selected,
+    hotkeyByFavorite, activeFavoriteEntry, draggingFavoriteId, favoriteDropTarget, scopeMenu,
+    addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews]);
 });

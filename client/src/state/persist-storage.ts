@@ -14,48 +14,13 @@ function browserStorage(): Storage | undefined {
 
 export const kubusStateStorage: StateStorage = {
   getItem(name) {
-    const desktop = desktopStorage();
-    if (desktop) {
-      try {
-        const value = desktop.getItem(name);
-        if (value !== null) return value;
-      } catch {
-        /* fall back to browser storage */
-      }
-    }
-
-    const value = browserStorage()?.getItem(name) ?? null;
-    if (desktop && value !== null) {
-      try {
-        desktop.setItem(name, value);
-      } catch {
-        /* best-effort migration from origin-scoped storage */
-      }
-    }
-    return value;
+    return (desktopStorage() ?? browserStorage())?.getItem(name) ?? null;
   },
   setItem(name, value) {
-    const desktop = desktopStorage();
-    if (desktop) {
-      try {
-        desktop.setItem(name, value);
-        return;
-      } catch {
-        /* fall back to browser storage */
-      }
-    }
-    browserStorage()?.setItem(name, value);
+    (desktopStorage() ?? browserStorage())?.setItem(name, value);
   },
   removeItem(name) {
-    const desktop = desktopStorage();
-    if (desktop) {
-      try {
-        desktop.removeItem(name);
-      } catch {
-        /* also clear browser storage below */
-      }
-    }
-    browserStorage()?.removeItem(name);
+    (desktopStorage() ?? browserStorage())?.removeItem(name);
   },
 };
 

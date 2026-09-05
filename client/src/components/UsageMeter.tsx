@@ -1,7 +1,4 @@
-import Box from '@mui/material/Box';
-import LinearProgress from '@mui/material/LinearProgress';
-import Tooltip from '@mui/material/Tooltip';
-import Typography from '@mui/material/Typography';
+import { CellTooltip as Tooltip } from './CellTooltip.js';
 
 export function usageColor(pct: number): 'success' | 'warning' | 'error' {
   return pct >= 100 ? 'error' : pct >= 80 ? 'warning' : 'success';
@@ -43,9 +40,7 @@ export function UsageMeter({
   const text = format(value);
   if (!max && !placeholder) {
     return (
-      <Typography variant="caption" sx={{ fontWeight: 600 }}>
-        {text}
-      </Typography>
+      <span className="kubus-usage-value">{text}</span>
     );
   }
   const pct = max ? (value / max) * 100 : undefined;
@@ -58,38 +53,16 @@ export function UsageMeter({
       : `${text} · ${emptyHint ?? 'no requests set'}`;
   return (
     <Tooltip title={tip}>
-      <Box sx={{ width: '100%', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0, minWidth: 44 }}>
-          {text}
-        </Typography>
-        {pct !== undefined ? (
-          <Box sx={{ position: 'relative', flex: 1, minWidth: 36 }}>
-            <LinearProgress
-              variant="determinate"
-              value={over ? 100 : Math.max(0, Math.min(100, pct))}
-              color={usageColor(pct)}
-              sx={{ height: 5, borderRadius: 999, bgcolor: 'action.hover' }}
-            />
-            {markerPct !== undefined && (
-              <Box
-                sx={(theme) => ({
-                  position: 'absolute',
-                  top: '50%',
-                  left: `${markerPct}%`,
-                  transform: 'translate(-50%, -50%)',
-                  width: 2,
-                  height: 11,
-                  borderRadius: 1,
-                  bgcolor: 'text.primary',
-                  boxShadow: `0 0 0 1px ${theme.palette.background.paper}`,
-                })}
-              />
-            )}
-          </Box>
-        ) : (
-          <Box sx={{ flex: 1, minWidth: 36, height: 5, borderRadius: 999, bgcolor: 'action.hover', opacity: 0.5 }} />
-        )}
-      </Box>
+      <span className="kubus-usage">
+        <span className="kubus-usage-value">{text}</span>
+        <span className={`kubus-usage-track${pct === undefined ? ' kubus-usage-empty' : ''}`}>
+          {pct !== undefined && <progress
+            className={`kubus-usage-fill kubus-usage-${usageColor(pct)}`}
+            aria-label={tip} max={100} value={Math.max(0, Math.min(100, pct))}
+          />}
+          {markerPct !== undefined && <span className="kubus-usage-marker" style={{ left: `${markerPct}%` }} />}
+        </span>
+      </span>
     </Tooltip>
   );
 }

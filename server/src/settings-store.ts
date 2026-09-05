@@ -16,7 +16,7 @@ export interface PersistedSettings {
 
 /**
  * Server-side settings persisted across runs. Lives in the XDG config dir so
- * the CLI server and the Electron-embedded server share the same file.
+ * the CLI server and the Electrobun-embedded server share the same file.
  */
 export class SettingsStore {
   readonly filePath: string;

@@ -14,15 +14,16 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 | Platform | File |
 | --- | --- |
-| :material-microsoft-windows: Windows | `Kubus-Setup-<version>.exe` |
-| :material-apple: macOS (universal) | `Kubus-<version>.dmg` |
-| :material-linux: Linux | `Kubus-<version>.AppImage` or `.deb` |
+| :material-microsoft-windows: Windows x64 | `win-x64-Kubus-Setup.zip` |
+| :material-apple: macOS (Apple Silicon only) | `macos-arm64-Kubus.dmg` |
+| :material-linux: Debian / Ubuntu x64 | `kubus-<version>-linux-x64.deb` |
+| :material-linux: Other Linux x64 | `linux-x64-Kubus-Setup.tar.gz` |
 
 ## Install & launch
 
 === ":material-microsoft-windows: Windows"
 
-    1. Run the `.exe` installer and follow the prompts.
+    1. Extract the `.zip` archive, then run its `.exe` installer. Keep the accompanying payload beside the executable.
     2. Launch **Kubus** from the Start menu.
 
     Windows SmartScreen may warn that the publisher is unrecognised (the builds aren't
@@ -44,19 +45,25 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 === ":material-linux: Linux"
 
-    === "AppImage"
+    On Debian or Ubuntu, install the `.deb` with its dependencies:
 
-        ```bash
-        chmod +x Kubus-*.AppImage
-        ./Kubus-*.AppImage
-        ```
+    ```bash
+    sudo apt install ./kubus-*-linux-x64.deb
+    ```
 
-    === "Debian / Ubuntu (.deb)"
+    Launch **Kubus** from the application menu or run `kubus`.
 
-        ```bash
-        sudo apt install ./kubus_*_amd64.deb
-        kubus
-        ```
+    For other distributions, extract the installer archive and run its installer:
+
+    ```bash
+    tar -xzf linux-x64-Kubus-Setup.tar.gz
+    ./installer
+    ```
+
+    The installer creates an application menu entry. Kubus requires GTK 3,
+    WebKitGTK 4.1 and Ayatana AppIndicator 3. The `.deb` declares these dependencies
+    so apt installs them automatically. Kubus uses the system webview; Chromium
+    is not bundled.
 
 !!! note "Why isn't it signed?"
 
@@ -66,8 +73,8 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 ## Updating
 
-Download the newer installer and install over the top. Your settings live in the
-browser/app profile and are preserved. There's no telemetry and no auto-updater phoning
+Download the newer installer and install over the top. Desktop state is stored in
+`kubus/desktop` under your platform’s application configuration directory and survives updates. There's no telemetry and no auto-updater phoning
 home.
 
 ## Next steps

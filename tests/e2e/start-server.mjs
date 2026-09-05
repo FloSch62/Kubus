@@ -5,7 +5,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
 import { ensureKubeconfig, kubeconfigPath, repoRoot, stateDir } from './helpers/cluster.mjs';
 
 const port = process.env.KUBUS_E2E_PORT ?? '3399';
@@ -25,13 +24,7 @@ if (!fs.existsSync(entry)) {
   process.exit(1);
 }
 
-process.argv = [
-  process.argv[0],
-  entry,
-  '--port',
-  port,
-  '--kubeconfig',
-  kubeconfigPath,
-  '--no-open',
-];
-await import(pathToFileURL(entry).href);
+process.env.KUBUS_HELM_ENGINE = path.join(repoRoot, 'server/assets/helm-engine.wasm.gz');
+const { startServer } = await import('../../server/dist/server.js');
+const server = await startServer({ port: Number(port), kubeconfigOverride: kubeconfigPath, devToken: 'dev', openBrowser: false, prettyLogs: false, staticRoot: path.join(repoRoot, 'client/dist') });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { void server.close().then(() => process.exit(0)); });

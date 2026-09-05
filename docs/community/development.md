@@ -21,7 +21,7 @@ Kubus is a pnpm workspace:
 | `client/` | The React 19 + MUI 9 single-page app (Vite). |
 | `server/` | The Fastify 5 server: Kubernetes client, watches, exec, port-forward, Helm, metrics. |
 | `shared/` | Types and metadata shared between client and server. |
-| `electron/` | The Electron desktop shell. |
+| `desktop/` | The Electrobun desktop runtime, RPC bridge, and packaging. |
 | `hack/` | Dev scripts, including the [test-cluster](test-clusters.md) bootstrap. |
 
 ## Hot-reload dev servers
@@ -44,8 +44,9 @@ pnpm start          # runs the compiled server and opens your browser
 ## Desktop shell
 
 ```bash
-pnpm electron       # builds everything, then launches Electron
-pnpm dist           # packages installers for the current platform → electron/release/
+make deb           # Linux: builds a .deb in desktop/artifacts/ (dpkg-deb + zstd required)
+pnpm desktop       # builds everything, then launches Electrobun
+pnpm dist           # packages installers for the current platform → desktop/artifacts/
 ```
 
 ## Checks
@@ -65,3 +66,11 @@ pnpm lint:perf     # optional performance audit; reports suggestions without fai
 -   :material-tag: **[Releasing](releasing.md)** for the release workflow that builds the installers
 
 </div>
+
+The desktop build pins Electrobun 2.0.1. Its npm command downloads the matching Hutch,
+Bun and the native SDK into the managed toolchain cache on first build. Go is required for
+the Helm WASI engine and native URL relay. `pnpm --filter @kubus/desktop run pack`
+builds a development bundle; `pnpm test:desktop` drives its system WebKitGTK view on Linux using `webkit2gtk-driver`.
+On headless Linux use `xvfb-run --auto-servernum pnpm test:desktop`.
+Desktop packaging runs on the target OS. macOS builds require arm64; Intel and
+universal macOS artifacts are not produced.

@@ -4,8 +4,8 @@
 //
 // Runs in plain Node on every OS with no display, so it catches startup
 // regressions (server won't listen, static assets missing, a crash-on-boot)
-// that `electron-builder --dir` alone can't — without the flakiness of driving
-// a real Electron window in CI.
+// that `electrobun build` alone can't — without the flakiness of driving
+// a real Electrobun window in CI.
 //
 // Requires `pnpm build` first (needs server/dist and client/dist).
 import { spawn } from 'node:child_process';

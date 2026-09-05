@@ -17,7 +17,7 @@ jobs:
       # Report every OS result; don't cancel the matrix on the first failure.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -32,44 +32,39 @@ jobs:
         with:
           go-version-file: helm-engine/go.mod
           cache-dependency-path: helm-engine/go.sum
-      - name: Cache Electron binaries
+      - name: Cache Electrobun toolchains
         uses: actions/cache@v6
         with:
-          path: |
-            ~/.cache/electron
-            ~/.cache/electron-builder
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-            ~\AppData\Local\electron\Cache
-            ~\AppData\Local\electron-builder\Cache
-          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: ~/.hutch
+          key: electrobun-2.0.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb openbox libgtk-3-0 libwebkit2gtk-4.1-0 libayatana-appindicator3-1 webkit2gtk-driver
       - run: pnpm install --frozen-lockfile
-      # build first: @kubus/shared (and /server for electron) resolve types
+      # build first: @kubus/shared (and /server for desktop) resolve types
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm build:helm-engine
+      - run: pnpm --filter @kubus/desktop run pack
       # One platform also collects repository-wide coverage and enforces the
       # non-regression floors; every matrix job exposes the same always-running
       # test step so OS-specific behavior is visible without misleading skips.
       - name: Unit tests
         run: pnpm ${{ runner.os == 'Linux' && 'test:coverage' || 'test' }}
       # The namespace selector lives inside a native draggable title bar. Run
-      # the real Electron renderer on every supported desktop OS so platform
-      # hit-testing differences cannot regress unnoticed.
-      - name: Electron end-to-end tests (Linux)
+      # the actual system WebKitGTK renderer using its W3C automation driver.
+      # macOS/Windows retain build, unit, and server/runtime smoke coverage.
+      - name: Electrobun end-to-end tests (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum pnpm test:electron
-      - name: Electron end-to-end tests (macOS and Windows)
-        if: runner.os != 'Linux'
-        run: pnpm test:electron
-      - name: Upload Electron diagnostics
+        run: xvfb-run --auto-servernum sh -c 'openbox >/tmp/kubus-openbox.log 2>&1 & pnpm test:desktop'
+      - name: Upload Electrobun diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: electron-report-${{ runner.os }}
+          name: desktop-report-${{ runner.os }}
           path: |
-            tests/electron-report
-            tests/electron/.results
+            tests/desktop-report
+            tests/desktop/.results
           retention-days: 7
       - name: Upload coverage report
         if: runner.os == 'Linux' && always()
@@ -81,15 +76,11 @@ jobs:
       # Type-aware linting also resolves workspace package declarations.
       - run: pnpm lint
       - run: pnpm typecheck
-      # Unpacked desktop build so a broken electron-builder config fails PRs.
-      # No platform flag: each runner packages for its own OS.
-      - run: pnpm --filter @kubus/electron exec electron-builder --dir
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       # Boot the app's server on each OS to catch runtime startup regressions
       # (won't listen, missing static assets, crash-on-boot) that packaging
       # alone misses. Headless, so it needs no display on any runner.
       - run: pnpm smoke
+      - run: pnpm smoke:helm
 
   # Full-stack Playwright suite: built client + real server + a kind cluster
   # seeded with the fixtures in tests/e2e/fixtures.
@@ -105,15 +96,31 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @kubus/shared --filter @kubus/server --filter @kubus/client --filter @kubus/electron build
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: helm-engine/go.mod
+          cache-dependency-path: helm-engine/go.sum
+      - name: Cache Electrobun toolchains
+        uses: actions/cache@v6
+        with:
+          path: ~/.hutch
+          key: electrobun-2.0.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install Linux desktop libraries
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libayatana-appindicator3-1 webkit2gtk-driver
+      - run: pnpm build
+      - run: pnpm build:helm-engine
+      - run: pnpm --filter @kubus/desktop run pack
       # Cluster name kubus-a matches the local dev clusters, so the suite
       # runs unchanged in both places (context kind-kubus-a).
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
           cluster_name: kubus-a
-      # The suite drives the system Chrome that ships on ubuntu runners.
+      - run: pnpm --filter @kubus/tests exec playwright install --with-deps webkit
       - run: pnpm test:e2e
+        env:
+          KUBUS_E2E_RUNTIME: bun
+          PLAYWRIGHT_BROWSER: webkit
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7

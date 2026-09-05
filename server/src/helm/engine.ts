@@ -1,17 +1,15 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { WASI } from 'node:wasi';
+import { WASI, File, OpenFile, PreopenDirectory } from '@bjorn3/browser_wasi_shim';
 import { HttpProblem } from '../util/errors.js';
 
 /**
  * Helm's chart rendering pipeline (loader → chartutil → engine → releaseutil)
  * compiled from helm.sh/helm/v3 to a WASI module — see /helm-engine. Each call
  * runs a fresh, fully sandboxed instance whose only filesystem access is a
- * scratch dir holding input.json/output.json. The compiled module is cached
+ * in-memory directory holding input.json/output.json. The compiled module is cached
  * in memory while helm write-actions are in use and dropped after idle.
  */
 
@@ -113,23 +111,23 @@ async function invoke<T>(input: Record<string, unknown>): Promise<T> {
     throw new HttpProblem(501, 'Helm engine not available: build server/assets/helm-engine.wasm.gz with `node helm-engine/build.mjs` (requires Go)');
   }
   const mod = await getModule();
-  const workDir = await mkdtemp(path.join(os.tmpdir(), 'kubus-helm-'));
-  try {
-    await writeFile(path.join(workDir, 'input.json'), JSON.stringify(input));
-    const wasi = new WASI({
-      version: 'preview1',
-      args: ['helm-engine', '/work/input.json', '/work/output.json'],
-      preopens: { '/work': workDir },
-    });
-    const instance = await WebAssembly.instantiate(mod, wasi.getImportObject() as WebAssembly.Imports);
-    wasi.start(instance);
-    const raw = await readFile(path.join(workDir, 'output.json'), 'utf8');
-    const out = JSON.parse(raw) as T & { error?: string };
-    if (out.error) throw new HttpProblem(422, `helm: ${out.error}`);
-    return out;
-  } finally {
-    void rm(workDir, { recursive: true, force: true }).catch(() => {});
-  }
+  const output = new File([]);
+  const stderr = new File([]);
+  const directory = new PreopenDirectory('/work', new Map([
+    ['input.json', new File(new TextEncoder().encode(JSON.stringify(input)), { readonly: true })],
+    ['output.json', output],
+  ]));
+  // A runtime-independent WASI host: no host filesystem, sockets, or proc_exit
+  // access. Go's exit returns to this invocation, never terminating the app.
+  const wasi = new WASI(['helm-engine', '/work/input.json', '/work/output.json'], [], [
+    new OpenFile(new File([])), new OpenFile(new File([])), new OpenFile(stderr), directory,
+  ], { debug: false });
+  const instance = await WebAssembly.instantiate(mod, { wasi_snapshot_preview1: wasi.wasiImport });
+  const code = wasi.start(instance as Parameters<WASI['start']>[0]);
+  if (code !== 0) throw new HttpProblem(422, `helm engine exited with code ${code}: ${new TextDecoder().decode(stderr.data)}`);
+  const out = JSON.parse(new TextDecoder().decode(output.data)) as T & { error?: string };
+  if (out.error) throw new HttpProblem(422, `helm: ${out.error}`);
+  return out;
 }
 
 export async function renderChart(req: EngineRenderRequest): Promise<EngineRenderResult> {
