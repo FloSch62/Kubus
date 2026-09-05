@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DebugImagePreset, KubeconfigSettings, KubeObject } from '@kubus/shared';
 import {
   DetailQuickActions,
+  drainBudgetHints,
   isLogTargetKind,
   RowActionMenu,
   RowActions,
@@ -14,6 +15,24 @@ import {
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useDockStore } from '../../../client/src/state/dock';
 import { useNavigationStore } from '../../../client/src/state/navigation';
+
+describe('drainBudgetHints', () => {
+  const pod = (name: string, phase: string, ready: boolean): KubeObject => ({
+    apiVersion: 'v1', kind: 'Pod', metadata: { name, namespace: 'apps', uid: name },
+    status: { phase, conditions: [{ type: 'Ready', status: ready ? 'True' : 'False' }] },
+  });
+  it.each([
+    ['AlwaysAllow', 0, 1, 1],
+    ['IfHealthyBudget', 0, 1, 2],
+    ['IfHealthyBudget', 1, 1, 1],
+  ])('counts budget-gated pods for %s with health %i/%i', (policy, healthy, desired, gated) => {
+    const budget: KubeObject = { apiVersion: 'policy/v1', kind: 'PodDisruptionBudget', metadata: { name: 'budget', namespace: 'apps', uid: 'budget' },
+      spec: { selector: {}, unhealthyPodEvictionPolicy: policy }, status: { disruptionsAllowed: 0, currentHealthy: healthy, desiredHealthy: desired } };
+    const hints = drainBudgetHints([pod('ready', 'Running', true), pod('unhealthy', 'Running', false), pod('pending', 'Pending', false), pod('done', 'Succeeded', false)], [budget]);
+    expect(hints).toMatchObject([{ pods: 3, budgetGatedPods: gated, disruptionsAllowed: 0, unhealthyPodEvictionPolicy: policy }]);
+    if (policy === 'AlwaysAllow') expect(drainBudgetHints([pod('unhealthy', 'Running', false)], [budget])[0]?.budgetGatedPods).toBe(0);
+  });
+});
 
 const queryMocks = vi.hoisted(() => {
   const mutation = (value: unknown = {}) => ({

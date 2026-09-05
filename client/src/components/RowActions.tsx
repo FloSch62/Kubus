@@ -1287,7 +1287,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
 }
 
 interface PdbShape {
-  spec?: { selector?: LabelSelector; minAvailable?: number | string; maxUnavailable?: number | string };
+  spec?: { selector?: LabelSelector; minAvailable?: number | string; maxUnavailable?: number | string; unhealthyPodEvictionPolicy?: string };
   status?: { disruptionsAllowed?: number; currentHealthy?: number; desiredHealthy?: number; expectedPods?: number };
 }
 
@@ -1296,6 +1296,9 @@ export interface DrainBudgetHint {
   name: string;
   /** Pods on the node the budget covers. */
   pods: number;
+  /** Covered pods whose eviction consumes the disruption budget. */
+  budgetGatedPods: number;
+  unhealthyPodEvictionPolicy: string;
   disruptionsAllowed: number;
   currentHealthy?: number;
   desiredHealthy?: number;
@@ -1303,8 +1306,8 @@ export interface DrainBudgetHint {
 
 /**
  * Budgets that cover pods on the node, worst first — the ones at zero
- * allowed disruptions are exactly where a drain will hang. Daemon and
- * mirror pods are skipped like the drain itself skips them.
+ * allowed disruptions may hold up a drain. Pod health and the unhealthy
+ * eviction policy decide which covered pods need that allowance.
  */
 export function drainBudgetHints(pods: KubeObject[], budgets: KubeObject[]): DrainBudgetHint[] {
   const evictable = pods.filter((pod) => {
@@ -1317,12 +1320,23 @@ export function drainBudgetHints(pods: KubeObject[], budgets: KubeObject[]): Dra
   const hints: DrainBudgetHint[] = [];
   for (const budget of budgets) {
     const shape = budget as PdbShape;
-    const covered = evictable.filter((pod) => pod.metadata.namespace === budget.metadata.namespace && labelSelectorMatches(shape.spec?.selector, pod.metadata.labels)).length;
-    if (!covered) continue;
+    const covered = evictable.filter((pod) => pod.metadata.namespace === budget.metadata.namespace && labelSelectorMatches(shape.spec?.selector, pod.metadata.labels));
+    if (!covered.length) continue;
+    const unhealthyPodEvictionPolicy = shape.spec?.unhealthyPodEvictionPolicy ?? 'IfHealthyBudget';
+    const budgetGatedPods = covered.filter((pod) => {
+      const status = pod.status as { phase?: string; conditions?: Array<{ type: string; status: string }> } | undefined;
+      if (status?.phase === 'Pending') return false;
+      const unhealthyRunning = status?.phase === 'Running' && !status.conditions?.some((condition) => condition.type === 'Ready' && condition.status === 'True');
+      if (!unhealthyRunning) return true;
+      if (unhealthyPodEvictionPolicy === 'AlwaysAllow') return false;
+      return unhealthyPodEvictionPolicy !== 'IfHealthyBudget' || shape.status?.currentHealthy === undefined || shape.status.desiredHealthy === undefined || shape.status.currentHealthy < shape.status.desiredHealthy;
+    }).length;
     hints.push({
       namespace: budget.metadata.namespace ?? '',
       name: budget.metadata.name,
-      pods: covered,
+      pods: covered.length,
+      budgetGatedPods,
+      unhealthyPodEvictionPolicy,
       disruptionsAllowed: shape.status?.disruptionsAllowed ?? 0,
       currentHealthy: shape.status?.currentHealthy,
       desiredHealthy: shape.status?.desiredHealthy,
@@ -1343,7 +1357,7 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
   const nodePods = useResourceList({ ctx: target.ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${target.obj.metadata.name}` });
   const budgets = useResourceList({ ctx: target.ctx, group: 'policy', version: 'v1', plural: 'poddisruptionbudgets' });
   const hints = useMemo(() => drainBudgetHints(nodePods.data?.items ?? [], budgets.data?.items ?? []), [nodePods.data, budgets.data]);
-  const blocking = hints.filter((h) => h.disruptionsAllowed === 0);
+  const blocking = hints.filter((h) => h.disruptionsAllowed === 0 && h.budgetGatedPods > 0);
   const openBudget = (hint: DrainBudgetHint) => {
     onClose();
     void navigate(kindListPath({ group: 'policy', version: 'v1', plural: 'poddisruptionbudgets' }, { sel: { ctx: target.ctx, namespace: hint.namespace, name: hint.name } }));
@@ -1376,14 +1390,14 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
                   {blocking.length === 1 ? 'A PodDisruptionBudget allows no disruptions right now' : `${blocking.length} PodDisruptionBudgets allow no disruptions right now`}
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 0.5 }}>
-                  Evicting the pods they cover will wait on the budget (Kubus retries for about two minutes per pod). Fix or relax these first, or expect the drain to stall.
+                  Evicting the pods that need a disruption allowance will wait on the budget (Kubus retries for about two minutes per pod). Fix or relax these first, or expect the drain to stall.
                 </Typography>
                 {blocking.map((hint) => (
                   <Typography key={`${hint.namespace}/${hint.name}`} variant="body2">
                     <Link component="button" underline="hover" onClick={() => openBudget(hint)} sx={{ fontWeight: 600, verticalAlign: 'baseline' }}>
                       {hint.namespace}/{hint.name}
                     </Link>
-                    {' '}covers {hint.pods} pod{hint.pods === 1 ? '' : 's'} here
+                    {' '}{hint.budgetGatedPods} of {hint.pods} covered pod{hint.pods === 1 ? '' : 's'} here need a disruption allowance
                     {hint.currentHealthy !== undefined && hint.desiredHealthy !== undefined ? ` · ${hint.currentHealthy} healthy of ${hint.desiredHealthy} required` : ''}
                   </Typography>
                 ))}
@@ -1391,7 +1405,7 @@ function DrainDialog({ target, onClose }: { target: RowActionTarget; onClose: ()
             )}
             {blocking.length === 0 && hints.length > 0 && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                {hints.length === 1 ? '1 PodDisruptionBudget covers' : `${hints.length} PodDisruptionBudgets cover`} pods on this node; all currently allow evictions.
+                {hints.length === 1 ? '1 PodDisruptionBudget covers' : `${hints.length} PodDisruptionBudgets cover`} pods on this node; none currently blocks their eviction.
               </Typography>
             )}
             {isProtected && (

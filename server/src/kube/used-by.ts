@@ -618,7 +618,6 @@ export function customCandidates(crds: KubeObject[], target: UsedByTarget, exclu
   }
   return out
     .sort((a, b) => a.rank - b.rank || a.kind.localeCompare(b.kind))
-    .slice(0, CUSTOM_CANDIDATE_LIMIT)
     .map(({ rank: _rank, ...spec }) => spec);
 }
 
@@ -667,9 +666,9 @@ export function digestRelations(entry: DigestEntry, target: UsedByTarget, rivals
     if (hint.value !== target.name || !scopeAllows(entry.namespace, target, hint.referenceNamespace)) continue;
     if (pathPrefersKind(hint, kindTarget, rivals)) add('references', hintPath(hint.path));
   }
-  if (target.labels && scopeAllows(entry.namespace, target)) {
-    for (const { path, selector } of entry.digest.selectors) {
-      if (selectorMatches(selector, target.labels) && pathNamesKind(path, target.kind)) add('selects', hintPath(path));
+  for (const hint of entry.digest.selectors) {
+    if (scopeAllows(entry.namespace, target, hint.referenceNamespace) && selectorMatches(hint.selector, target.labels) && pathPrefersKind({ ...hint, value: '' }, kindTarget, rivals)) {
+      add('selects', hintPath(hint.path));
     }
   }
   if (opts.labels !== false && scopeAllows(entry.namespace, target)) {
@@ -687,6 +686,7 @@ interface CustomScan {
   partial: string[];
   /** Time spent on custom kinds; zero when nothing had to be listed. */
   scanMs: number;
+  skippedKinds?: string[];
 }
 
 async function mapLimit<T, R>(inputs: T[], limit: number, fn: (input: T) => Promise<R>): Promise<R[]> {
@@ -762,7 +762,8 @@ async function scanCustomKinds(handle: ClusterHandle, target: UsedByTarget, excl
   const deadline = Date.now() + (opts.timeBudgetMs ?? CUSTOM_TIME_BUDGET_MS);
   const unavailable: string[] = [];
   const partial: string[] = [];
-  await mapLimit(candidates, CUSTOM_CONCURRENCY, async (spec) => {
+  const skippedKinds = candidates.slice(CUSTOM_CANDIDATE_LIMIT).map((spec) => `${spec.kind} (${spec.group})`);
+  await mapLimit(candidates.slice(0, CUSTOM_CANDIDATE_LIMIT), CUSTOM_CONCURRENCY, async (spec) => {
     const lookup = await handle.referenceIndex.lookup(spec, { deadline });
     if (lookup.unavailable) {
       unavailable.push(spec.kind);
@@ -777,7 +778,7 @@ async function scanCustomKinds(handle: ClusterHandle, target: UsedByTarget, excl
       if (relations.length) mergeRows(rows, entryRef(handle.contextName, spec, entry), relations);
     }
   });
-  return { items: [...rows.values()], unavailable, partial, scanMs: candidates.length ? Date.now() - started : 0 };
+  return { items: [...rows.values()], unavailable, partial, skippedKinds, scanMs: candidates.length ? Date.now() - started : 0 };
 }
 
 export async function computeUsedBy(handle: ClusterHandle, target: UsedByTarget, opts: UsedByOptions = {}): Promise<UsedByResponse> {
@@ -823,6 +824,7 @@ export async function computeUsedBy(handle: ClusterHandle, target: UsedByTarget,
       partial: custom.partial.length ? custom.partial : undefined,
       scanMs: custom.scanMs > 0 ? custom.scanMs : undefined,
       truncated,
+      ...(custom.skippedKinds?.length ? { skippedKinds: custom.skippedKinds } : {}),
     };
   } finally {
     for (const a of acquired) a.handle.release();

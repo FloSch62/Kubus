@@ -3,7 +3,7 @@ import type { GraphEdge, GraphNode, GraphNodeStatus, KubeObject, RelationshipGra
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
-import { bestTypedHint, collectMetadataRelationHints, collectRelationHints, hintLabel, selectorMatches, tokens, type RelationHint } from '../kube/relation-hints.js';
+import { bestTypedHint, collectMapSelectors, collectMetadataRelationHints, collectRelationHints, hintLabel, selectorMatches, tokens, type RelationHint } from '../kube/relation-hints.js';
 import { sendError } from '../util/errors.js';
 
 interface KindSpec {
@@ -269,7 +269,7 @@ function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hintTer
 }
 
 function pickDynamicCandidateSpecs(kinds: ResourceKindInfo[], focusSpec: KindSpec, focusObj: KubeObject): KindSpec[] {
-  const hints = collectRelationHints({ spec: focusObj.spec, status: focusObj.status });
+  const hints = [...collectRelationHints({ spec: focusObj.spec, status: focusObj.status }), ...collectMapSelectors({ spec: focusObj.spec, status: focusObj.status }).map((hint) => ({ ...hint, value: '' }))];
   const hintTerms = new Set(hints.flatMap((hint) => [...tokens(hint.path), ...tokens(hint.referenceKind ?? '')]));
   return dedupeResourceKinds(kinds)
     .flatMap((kind) => {
@@ -359,7 +359,7 @@ function inferredRelation(focus: Item, item: Item, focusHints: RelationHint[]): 
   );
   if (directSelector) return { kind: 'selects', label: hintLabel(directSelector.path) };
 
-  const reverseHints = collectRelationHints({ spec: item.obj.spec, status: item.obj.status });
+  const reverseHints = [...collectRelationHints({ spec: item.obj.spec, status: item.obj.status }), ...collectMapSelectors({ spec: item.obj.spec, status: item.obj.status }).map((hint) => ({ ...hint, value: '' }))];
   const reverseName = bestTypedHint(
     reverseHints.filter((hint) => hint.value === focus.obj.metadata.name && referenceScopeMatches(item, focus, hint)),
     focus.spec,
@@ -395,7 +395,7 @@ function addFocusedResourceEdges(edges: GraphEdge[], focus: Item | undefined, no
   if (!focus) return;
   const actualFocusId = [...nodeItems.entries()].find(([, item]) => sameGvr(item.spec, focus.spec) && item.obj.metadata.name === focus.obj.metadata.name && (item.obj.metadata.namespace ?? '') === (focus.obj.metadata.namespace ?? ''))?.[0];
   if (!actualFocusId) return;
-  const focusHints = collectRelationHints({ spec: focus.obj.spec, status: focus.obj.status });
+  const focusHints = [...collectRelationHints({ spec: focus.obj.spec, status: focus.obj.status }), ...collectMapSelectors({ spec: focus.obj.spec, status: focus.obj.status }).map((hint) => ({ ...hint, value: '' }))];
   const focusOwnerUids = new Set((focus.obj.metadata.ownerReferences ?? []).map((owner) => owner.uid));
 
   for (const [id, item] of nodeItems) {

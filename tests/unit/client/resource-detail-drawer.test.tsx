@@ -163,7 +163,7 @@ vi.mock('../../../client/src/components/TopologyGraph.js', () => ({ TopologyGrap
 vi.mock('../../../client/src/components/RowActions.js', () => ({
   DetailQuickActions: ({ target }: { target: { obj: KubeObject } }) => <button>Quick actions {target.obj.metadata.name}</button>,
 }));
-vi.mock('../../../client/src/components/AgeCell.js', () => ({ AgeCell: ({ timestamp }: { timestamp?: string }) => <span>{timestamp ? 'age' : 'unknown age'}</span> }));
+vi.mock('../../../client/src/components/AgeCell.js', () => ({ useNow: () => Date.now(), AgeCell: ({ timestamp }: { timestamp?: string }) => <span>{timestamp ? 'age' : 'unknown age'}</span> }));
 vi.mock('../../../client/src/components/truncation.js', () => ({ TruncationTooltip: ({ children }: { children: ReactNode }) => <>{children}</> }));
 
 /** The YAML editor lives behind the Manifest tab's Tree/YAML toggle. */
@@ -248,11 +248,34 @@ beforeEach(() => {
 });
 
 describe('ResourceDetailDrawer', () => {
+  it('counts only recent warnings for the current object and expires them as time passes', () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const sel = selection('Pod');
+    queries.current = objectFor(sel);
+    const timestamp = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+    queries.events = [
+      event('recent', { type: 'Warning', lastTimestamp: timestamp(59), involvedObject: { uid: queries.current.metadata.uid } }),
+      event('stale', { type: 'Warning', lastTimestamp: timestamp(61) }),
+      event('boundary', { type: 'Warning', lastTimestamp: timestamp(60) }),
+      event('predecessor', { type: 'Warning', eventTime: timestamp(5), involvedObject: { uid: 'previous' } }),
+      event('invalid', { type: 'Warning', lastTimestamp: 'invalid' }),
+      event('normal', { type: 'Normal', lastTimestamp: timestamp(1) }),
+    ];
+    try {
+      const view = render(<ResourceDetailPanel sel={sel} onClose={() => undefined} />);
+      expect(screen.getByRole('tab', { name: /^Events/ })).toHaveAccessibleName('Events 1');
+      clock.mockReturnValue(now + 61_000);
+      view.rerender(<ResourceDetailPanel sel={sel} onClose={() => undefined} />);
+      expect(screen.getByRole('tab', { name: /^Events/ })).toHaveAccessibleName('Events');
+    } finally { clock.mockRestore(); }
+  });
+
   it('routes a pod through map, YAML, events, metrics, fullscreen, keyboard, and error paths', async () => {
     const sel = selection('Pod');
     queries.current = objectFor(sel, { spec: { containers: [{ name: 'app' }] } });
     queries.events = [
-      event('warning', { type: 'Warning', reason: 'FailedMount', message: 'volume missing', count: 3, lastTimestamp: '2026-07-22T10:10:00Z' }),
+      event('warning', { type: 'Warning', reason: 'FailedMount', message: 'volume missing', count: 3, lastTimestamp: new Date().toISOString() }),
       event('normal', { type: 'Normal', reason: 'Started', message: 'container started', count: 1 }),
     ];
     const onBack = vi.fn();

@@ -120,6 +120,23 @@ describe('kindsForHint', () => {
 });
 
 describe('computeReferences', () => {
+  it.each([true, false])('enforces structured selector expressions with matchLabels=%s', async (withLabels) => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      target: { kind: 'TopoNode', group: EDA, namespace: 'other', selector: {
+        ...(withLabels ? { matchLabels: { app: 'api' } } : {}),
+        matchExpressions: [{ key: 'tier', operator: 'In', values: ['frontend'] }],
+      } },
+    });
+    const { handle } = handleWith({ focus, custom: { toponodes: [
+      { name: 'front', namespace: 'other', uid: 'front', labels: { app: 'api', tier: 'frontend' } },
+      { name: 'back', namespace: 'other', uid: 'back', labels: { app: 'api', tier: 'backend' } },
+      { name: 'wrong-ns', namespace: 'eda', uid: 'wrong-ns', labels: { app: 'api', tier: 'frontend' } },
+    ] } }, { indexLive: true });
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items.map((item) => item.ref.name)).toEqual(['front']);
+    expect(result.items[0]?.relation).toBe('selects');
+  });
+
   it('uses only names from typed references, not their namespace or API metadata', async () => {
     const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
       target: { apiVersion: 'apps/v1', group: 'apps', version: 'v1', kind: 'Deployment', namespace: 'team-a', name: 'api' },

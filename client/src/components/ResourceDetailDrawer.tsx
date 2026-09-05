@@ -19,7 +19,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { SxProps, Theme } from '@mui/material/styles';
-import { gvkForResource, type KubeObject } from '@kubus/shared';
+import { gvkForResource, isRecentWarning, type KubeObject } from '@kubus/shared';
+import { useNow } from './AgeCell.js';
 import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { jobPhase, nodeStatus, podSummary, withoutManagedFields, workloadStatus } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
@@ -170,13 +171,14 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   const { data: events } = useResourceEvents(sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
   // Events are matched by name; an event that names a different uid belongs
   // to an earlier object of the same name and does not count against this one.
+  const now = useNow();
   const warningCount = useMemo(() => {
     const uid = obj?.metadata.uid;
     return (events?.items ?? []).filter((e) => {
       const event = e as { type?: string; involvedObject?: { uid?: string } };
-      return event.type === 'Warning' && (!uid || !event.involvedObject?.uid || event.involvedObject.uid === uid);
+      return isRecentWarning(e, now) && (!uid || !event.involvedObject?.uid || event.involvedObject.uid === uid);
     }).length;
-  }, [events, obj?.metadata.uid]);
+  }, [events, obj?.metadata.uid, now]);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
   // Warm the schema (fetch + yaml-worker registration) while the drawer is on

@@ -393,6 +393,18 @@ describe('digestRelations', () => {
   const rivals = CRDS.map((c) => (c.spec as { names: { kind: string; plural: string } }).names);
   const target = { kind: 'TopoNode', name: 'l001', namespace: 'eda', group: EDA, plural: 'toponodes', uid: 'TopoNode-l001', labels: { role: 'leaf' } };
 
+  it('keeps typed selector context and every expression in reverse links', () => {
+    const make = (operator: string, group = EDA) => digestEntry(cr('Fabric', 'typed', 'other', {
+      target: { kind: 'TopoNode', group, namespace: 'eda', selector: {
+        matchLabels: { role: 'leaf' }, matchExpressions: [{ key: 'tier', operator, values: ['frontend'] }],
+      } },
+    }));
+    expect(digestRelations(make('In'), target, rivals)).toEqual([]);
+    expect(digestRelations(make('In'), { ...target, labels: { role: 'leaf', tier: 'frontend' } }, rivals)).toEqual([{ relation: 'selects', detail: 'spec.target.selector' }]);
+    expect(digestRelations(make('DoesNotExist'), target, rivals)).toEqual([{ relation: 'selects', detail: 'spec.target.selector' }]);
+    expect(digestRelations(make('DoesNotExist', 'other.example'), target, rivals)).toEqual([]);
+  });
+
   it('matches names in kind-naming fields, selectors against labels and labels keyed after the kind, within scope', () => {
     expect(digestRelations(digestEntry(cr('TopoLink', 'a', 'eda', { links: [{ local: { node: 'l001' } }] })), target, rivals)).toEqual([{ relation: 'references', detail: 'spec.links.local.node' }]);
     // A field that names another kind better (nodeProfile → NodeProfile) is not a TopoNode reference.
@@ -416,6 +428,18 @@ describe('digestRelations', () => {
 });
 
 describe('computeUsedBy for custom kinds', () => {
+  it('discloses candidate kinds omitted by the cap without marking them as loading', async () => {
+    const crds = Array.from({ length: 130 }, (_, i) => crd(EDA, `Ref${String(i).padStart(3, '0')}`, `refs${i}`, object({ node: string })));
+    const handle = handleWith({ customresourcedefinitions: crds });
+    const lookup = vi.fn(async () => ({ entries: [], ready: true, unavailable: false }));
+    handle.referenceIndex.lookup = lookup;
+    const result = await computeUsedBy(handle, { kind: 'TopoNode', name: 'node', group: EDA, plural: 'toponodes' });
+    expect(lookup).toHaveBeenCalledTimes(128);
+    expect(result.skippedKinds).toEqual([`Ref128 (${EDA})`, `Ref129 (${EDA})`]);
+    expect(result.partial).toBeUndefined();
+    expect(result.truncated).toBe(0);
+  });
+
   const target = { kind: 'TopoNode', name: 'l001', namespace: 'eda', group: EDA, plural: 'toponodes', uid: 'TopoNode-l001', labels: { role: 'leaf' } };
   const objects = {
     fabrics: [cr('Fabric', 'fab1', 'eda', { leafs: { leafNodeSelectors: ['role=leaf'] } }), cr('Fabric', 'spines', 'eda', { leafs: { leafNodeSelectors: ['role=spine'] } })],

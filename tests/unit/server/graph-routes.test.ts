@@ -182,6 +182,28 @@ describe('topology graph routes', () => {
     await Promise.all(apps.splice(0).map((instance) => instance.close()));
   });
 
+  it('enforces expressions in structured custom-resource selector edges', async () => {
+    getResources.mockResolvedValue([
+      { group: 'example.io', version: 'v1', plural: 'widgets', kind: 'Widget', namespaced: true, verbs: ['list'], custom: true },
+      { group: 'example.io', version: 'v1', plural: 'routers', kind: 'Router', namespaced: true, verbs: ['list'], custom: true },
+    ]);
+    rawJson.mockImplementation(async (path: string) => {
+      if (path.includes('/widgets/widget-a')) return object('Widget', 'widget-a', 'team-a', {
+        target: { kind: 'Router', group: 'example.io', selector: { matchLabels: { app: 'api' }, matchExpressions: [{ key: 'tier', operator: 'In', values: ['frontend'] }] } },
+      });
+      if (path.includes('/routers')) return { items: ['frontend', 'backend'].map((tier) => object('Router', tier, 'team-a', {}, {}, {
+        metadata: { name: tier, namespace: 'team-a', uid: tier, labels: { app: 'api', tier } },
+      })) };
+      return { items: [] };
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/contexts/dev/graph?focusGroup=example.io&focusVersion=v1&focusPlural=widgets&focusKind=Widget&focusNamespace=team-a&focusName=widget-a&depth=2' });
+    expect(response.statusCode).toBe(200);
+    const graph = response.json();
+    const selected = graph.edges.filter((edge: { kind: string }) => edge.kind === 'selects');
+    expect(selected).toHaveLength(1);
+    expect(graph.nodes.find((node: { id: string }) => node.id === selected[0].target).ref.name).toBe('frontend');
+  });
+
   it('builds ownership, routing, selector, scheduling, mount, and volume relationships', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/contexts/dev/graph' });
     expect(response.statusCode).toBe(200);

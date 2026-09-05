@@ -637,6 +637,8 @@ export interface ReferencesResponse {
 }
 
 export interface UsedByResponse {
+  /** Candidate kinds omitted by the scan cap; these are not being indexed in the background. */
+  skippedKinds?: string[];
   items: UsedByEntry[];
   /** Referencing kinds that could not be read (RBAC-denied or not installed). */
   unavailable: string[];

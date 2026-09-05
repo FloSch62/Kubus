@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectMapSelectors,
+  collectRelationHints,
   createPathFilter,
   descriptionNamesKind,
   digestObject,
@@ -15,11 +16,36 @@ import {
   schemaFieldDescription,
   schemaKindMention,
   schemaMentionsKind,
+  selectorMatches,
   textNamesKind,
   tokens,
 } from '../../../server/src/kube/relation-hints';
 
 describe('relation hints', () => {
+  it('keeps structured selectors in arrays intact and excludes their leaves from name hints', () => {
+    const selector = { matchLabels: { app: 'api' }, matchExpressions: [{ key: 'tier', operator: 'In', values: ['frontend'] }] };
+    const body = { spec: { kind: 'Widget', namespace: 'other', selectors: [selector] } };
+    expect(collectMapSelectors(body)).toEqual([{ path: 'spec.selectors[0]', selector, referenceKind: 'Widget', referenceNamespace: 'other' }]);
+    expect(collectRelationHints(body).some((hint) => hint.path.includes('selectors'))).toBe(false);
+  });
+
+  it('requires all structured selector expressions, including absence checks', () => {
+    const selector = { matchLabels: { app: 'api' }, matchExpressions: [
+      { key: 'tier', operator: 'In', values: ['frontend'] },
+      { key: 'zone', operator: 'NotIn', values: ['excluded'] },
+      { key: 'enabled', operator: 'Exists' },
+      { key: 'legacy', operator: 'DoesNotExist' },
+    ] };
+    const matching = { app: 'api', tier: 'frontend', enabled: '' };
+    expect(selectorMatches(selector, matching)).toBe(true);
+    for (const labels of [{ ...matching, app: 'other' }, { ...matching, tier: 'backend' }, { ...matching, zone: 'excluded' }, { app: 'api', tier: 'frontend' }, { ...matching, legacy: '' }]) {
+      expect(selectorMatches(selector, labels)).toBe(false);
+    }
+    expect(selectorMatches({ matchExpressions: [{ key: 'legacy', operator: 'DoesNotExist' }] }, undefined)).toBe(true);
+    expect(selectorMatches({ matchExpressions: [{ key: 'tier', operator: 'Unknown' }] }, matching)).toBe(false);
+    expect(selectorMatches({}, matching)).toBe(false);
+  });
+
   it('tokenizes camel case, dotted paths and label keys, singularized and without filler words', () => {
     expect(tokens('spec.leafs.leafNodeSelectors[0]')).toEqual(['leaf', 'leaf', 'node', 'selector', '0']);
     expect(tokens('services.eda.nokia.com/virtualnetwork')).toEqual(['service', 'eda', 'nokia', 'com', 'virtualnetwork']);
@@ -64,8 +90,9 @@ describe('relation hints', () => {
 
   it('finds map-shaped selectors and leaves lists and scalars alone', () => {
     expect(collectMapSelectors({ spec: { podSelector: { matchLabels: { app: 'web' } }, selector: { tier: 'db' }, nodeSelector: ['role=leaf'], deep: [{ endpointSelector: { matchLabels: {} } }] } })).toEqual([
-      { path: 'spec.podSelector.matchLabels', selector: { app: 'web' } },
+      { path: 'spec.podSelector', selector: { matchLabels: { app: 'web' } } },
       { path: 'spec.selector', selector: { tier: 'db' } },
+      { path: 'spec.deep[0].endpointSelector', selector: { matchLabels: {} } },
     ]);
   });
 

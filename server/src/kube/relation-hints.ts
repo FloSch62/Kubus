@@ -12,17 +12,43 @@ import type { KubeObject } from '@kubus/shared';
 export interface RelationHint {
   path: string;
   value: string;
-  selector?: Record<string, string>;
+  selector?: RelationSelector;
   referenceKind?: string;
   referenceNamespace?: string;
   /** API group named by a sibling `group` or `apiVersion` field (`''` for the core group); absent when unspecified. */
   referenceGroup?: string;
 }
 
-/** Plain map selector (Services, EDA node selectors): every pair must match; an empty map selects nothing. */
-export function selectorMatches(selector: Record<string, string> | undefined, labels: Record<string, string> | undefined): boolean {
-  const entries = Object.entries(selector ?? {});
-  return entries.length > 0 && entries.every(([k, v]) => labels?.[k] === v);
+export interface StructuredSelector {
+  matchLabels?: Record<string, string>;
+  matchExpressions?: Array<{ key: string; operator: string; values?: string[] }>;
+}
+
+export type RelationSelector = Record<string, string> | StructuredSelector;
+
+function structuredSelector(selector: RelationSelector): selector is StructuredSelector {
+  return (selector.matchLabels !== undefined && typeof selector.matchLabels !== 'string') || Array.isArray(selector.matchExpressions);
+}
+
+/** Equality maps select nothing when empty; structured selectors require every label and expression. */
+export function selectorMatches(selector: RelationSelector | undefined, labels: Record<string, string> | undefined): boolean {
+  if (!selector) return false;
+  if (!structuredSelector(selector)) {
+    const entries = Object.entries(selector);
+    return entries.length > 0 && entries.every(([k, v]) => labels?.[k] === v);
+  }
+  const have = labels ?? {};
+  if (!Object.entries(selector.matchLabels ?? {}).every(([key, value]) => have[key] === value)) return false;
+  return (selector.matchExpressions ?? []).every(({ key, operator, values }) => {
+    const actual = have[key];
+    switch (operator) {
+      case 'In': return actual !== undefined && !!values?.includes(actual);
+      case 'NotIn': return actual === undefined || !values?.includes(actual);
+      case 'Exists': return actual !== undefined;
+      case 'DoesNotExist': return actual === undefined;
+      default: return false;
+    }
+  });
 }
 
 const IGNORED_RELATION_TERMS = new Set([
@@ -119,12 +145,17 @@ export function collectRelationHints(value: unknown, prefix = '', context: Relat
   }
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
+    if (structuredSelector(record as RelationSelector)) return [];
     const siblingContext: RelationContext = {
       referenceKind: trimmedString(record.kind),
       referenceNamespace: trimmedString(record.namespace),
       referenceGroup: siblingGroup(record),
     };
-    return Object.entries(record).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext));
+    return Object.entries(record).flatMap(([key, item]) => {
+      // Selector leaves are constraints, never object-name references.
+      if (SELECTOR_KEY_RE.test(key) && item && typeof item === 'object' && !Array.isArray(item)) return [];
+      return collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext);
+    });
   }
   return [];
 }
@@ -145,21 +176,24 @@ export function hintPath(path: string): string {
 const SELECTOR_KEY_RE = /(selector|matchLabels)$/i;
 
 /** Map-shaped selectors (`podSelector.matchLabels`, `spec.selector`) anywhere under a value. */
-export function collectMapSelectors(value: unknown, prefix = ''): Array<RelationContext & { path: string; selector: Record<string, string> }> {
-  if (Array.isArray(value)) return value.flatMap((item, i) => collectMapSelectors(item, `${prefix}[${i}]`));
+export function collectMapSelectors(value: unknown, prefix = '', context: RelationContext = {}): Array<RelationContext & { path: string; selector: RelationSelector }> {
+  if (Array.isArray(value)) return value.flatMap((item, i) => collectMapSelectors(item, `${prefix}[${i}]`, context));
   if (!value || typeof value !== 'object') return [];
   const record = value as Record<string, unknown>;
-  const out: Array<RelationContext & { path: string; selector: Record<string, string> }> = [];
+  if (structuredSelector(record as RelationSelector)) return [{ path: prefix, selector: record as StructuredSelector, ...context }];
+  const siblingContext: RelationContext = { referenceKind: trimmedString(record.kind), referenceNamespace: trimmedString(record.namespace), referenceGroup: siblingGroup(record) };
+  const out: Array<RelationContext & { path: string; selector: RelationSelector }> = [];
   for (const [key, item] of Object.entries(record)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (SELECTOR_KEY_RE.test(key) && item && typeof item === 'object' && !Array.isArray(item)) {
-      const entries = Object.entries(item as Record<string, unknown>);
-      if (entries.length && entries.every(([, v]) => typeof v === 'string')) {
-        out.push({ path, selector: Object.fromEntries(entries) as Record<string, string>, referenceKind: trimmedString(record.kind), referenceNamespace: trimmedString(record.namespace), referenceGroup: siblingGroup(record) });
+      const selector = item as RelationSelector;
+      const entries = Object.entries(selector);
+      if (structuredSelector(selector) || (entries.length && entries.every(([, v]) => typeof v === 'string'))) {
+        out.push({ path, selector, ...siblingContext });
         continue;
       }
     }
-    out.push(...collectMapSelectors(item, path));
+    out.push(...collectMapSelectors(item, path, siblingContext));
   }
   return out;
 }
@@ -167,7 +201,7 @@ export function collectMapSelectors(value: unknown, prefix = ''): Array<Relation
 /** What one object says about other objects: the fields that can name a kind, and its selectors. */
 export interface ReferenceDigest {
   hints: RelationHint[];
-  selectors: Array<{ path: string; selector: Record<string, string> }>;
+  selectors: Array<RelationContext & { path: string; selector: RelationSelector }>;
 }
 
 /**
@@ -209,7 +243,10 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
   const selectors: ReferenceDigest['selectors'] = [];
   for (const hint of collectRelationHints(body)) {
     if (hint.selector) {
-      if (namesKind(hint.path)) selectors.push({ path: hint.path, selector: hint.selector });
+      if (hint.referenceKind || namesKind(hint.path)) {
+        const { value: _value, ...selector } = hint;
+        selectors.push({ ...selector, selector: hint.selector });
+      }
       continue;
     }
     if (!looksLikeName(hint.value)) continue;
@@ -221,7 +258,7 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
     hints.push(kept);
   }
   for (const selector of collectMapSelectors(body)) {
-    if (namesKind(selector.path)) selectors.push(selector);
+    if (selector.referenceKind || namesKind(selector.path)) selectors.push(selector);
   }
   return { hints, selectors };
 }

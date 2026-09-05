@@ -40,7 +40,7 @@ export function usedBySummary(items: UsedByEntry[]): string {
 }
 
 interface RelationQuery {
-  data?: { items: UsedByEntry[]; unavailable: string[]; partial?: string[]; truncated?: number };
+  data?: { items: UsedByEntry[]; unavailable: string[]; partial?: string[]; truncated?: number; skippedKinds?: string[] };
   isLoading: boolean;
   isError: boolean;
   error: unknown;
@@ -94,6 +94,8 @@ function RelationSection({
 
   const notes: ReactNode[] = [];
   if (truncated > 0) notes.push(`${truncated} more not shown.`);
+  const skippedKinds = query.data?.skippedKinds ?? [];
+  if (skippedKinds.length) notes.push(`${skippedKinds.length} additional resource kind${skippedKinds.length === 1 ? '' : 's'} not scanned (scan limit reached).`);
   if (unavailable.length > 0) notes.push(`${unavailable.map(pluralLabel).join(', ')} could not be read.`);
   if (partial.length > 0) {
     notes.push(

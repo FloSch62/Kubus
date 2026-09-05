@@ -3,3 +3,4 @@ export * from './api-types.js';
 export type * from './ws-protocol.js';
 export * from './resource-meta.js';
 export * from './jsonpath.js';
+export * from './events.js';

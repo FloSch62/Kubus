@@ -1,4 +1,4 @@
-import type { ClusterSignals, KubeObject, ObjectSignal } from '@kubus/shared';
+import { eventTimestamp, isRecentWarning, SIGNAL_WINDOW_MS, type ClusterSignals, type KubeObject, type ObjectSignal } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 
 /**
@@ -8,7 +8,7 @@ import type { ClusterHandle } from './cluster-manager.js';
  * pinned event and pod watcher caches; no API calls.
  */
 
-export const SIGNAL_WINDOW_MS = 60 * 60 * 1000;
+export { SIGNAL_WINDOW_MS } from '@kubus/shared';
 
 interface EventShape extends KubeObject {
   type?: string;
@@ -31,10 +31,6 @@ export function signalKey(kind: string, namespace: string | undefined, name: str
   return `${kind}|${namespace ?? ''}|${name}`;
 }
 
-function eventTime(e: EventShape): string {
-  return e.lastTimestamp ?? e.eventTime ?? e.firstTimestamp ?? e.metadata.creationTimestamp ?? '';
-}
-
 /** Pure aggregation over cached events and pods, exported for tests. */
 export function aggregateSignals(events: KubeObject[], pods: KubeObject[], now: number, windowMs = SIGNAL_WINDOW_MS): ClusterSignals {
   const objects: Record<string, ObjectSignal> = {};
@@ -42,10 +38,8 @@ export function aggregateSignals(events: KubeObject[], pods: KubeObject[], now: 
 
   for (const raw of events) {
     const e = raw as EventShape;
-    if (e.type !== 'Warning' || !e.involvedObject?.kind || !e.involvedObject.name) continue;
-    const time = eventTime(e);
-    const t = Date.parse(time);
-    if (Number.isNaN(t) || now - t >= windowMs) continue;
+    if (!isRecentWarning(e, now, windowMs) || !e.involvedObject?.kind || !e.involvedObject.name) continue;
+    const time = eventTimestamp(e);
     // Cluster-scoped objects carry no involvedObject.namespace even though
     // the event itself lives in one — key on the object's own scope.
     const key = signalKey(e.involvedObject.kind, e.involvedObject.namespace || undefined, e.involvedObject.name);
