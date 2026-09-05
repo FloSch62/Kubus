@@ -90,7 +90,9 @@ test('opens logs in a focused utility window without the Kubus application chrom
   await gotoApp(page, '/r/core/v1/pods');
   const row = page.getByRole('row').filter({ hasText: 'logger' }).filter({ hasText: namespace }).first();
   await expect(row).toBeVisible({ timeout: 20_000 });
-  await row.getByRole('checkbox').check();
+  // WebKit can return from the click before React commits a controlled input.
+  await row.getByRole('checkbox').click();
+  await expect(row.getByRole('checkbox')).toBeChecked();
   await page.getByRole('button', { name: /^Logs/ }).click();
   await expect(page.getByText('kubus-e2e log line').first()).toBeVisible({ timeout: 30_000 });
 

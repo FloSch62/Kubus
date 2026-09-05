@@ -2,7 +2,7 @@ packages:
   - shared
   - server
   - client
-  - electron
+  - desktop
   - tests
 # Keep local lockfile updates aligned with pnpm 11's CI supply-chain policy.
 minimumReleaseAge: 1440
@@ -22,13 +22,13 @@ overrides:
   undici@<6.28.0: ^6.28.0
 allowBuilds:
   esbuild: true
-  electron: true
   sharp: true
   core-js-pure: false
-  electron-winstaller: false
 minimumReleaseAgeExclude:
   - tar@7.5.21
   - brace-expansion@1.1.18 || 2.1.4
   - undici@6.28.0
   - fast-uri@3.1.5
   - js-yaml@4.3.1
+patchedDependencies:
+  '@mui/x-virtualizer@0.7.0': patches/@mui__x-virtualizer@0.7.0.patch

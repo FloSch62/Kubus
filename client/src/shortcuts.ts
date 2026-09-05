@@ -49,7 +49,7 @@ export interface ShortcutRowDef {
   description: string;
   /** The combo's keys are pressed one after another (rendered "G then P"), not as a chord. */
   sequence?: boolean;
-  /** Shown only in the desktop app (the chord needs the Electron main process). */
+  /** Shown only in the desktop app (the chord needs the Electrobun main process). */
   desktopOnly?: boolean;
   /** Shown only in the browser (the desktop app has a native equivalent). */
   webOnly?: boolean;
@@ -159,7 +159,7 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
  *   terminals) always get first refusal — MUI modals stop propagation, text
  *   surfaces are guarded explicitly.
  *
- * Also owns the desktop (Electron) tab chords: Cmd/Ctrl+W close and
+ * Also owns the desktop (Electrobun) tab chords: Cmd/Ctrl+W close and
  * Ctrl+Tab cycling arrive over IPC and reuse the same tab helpers.
  */
 export function GlobalShortcuts() {

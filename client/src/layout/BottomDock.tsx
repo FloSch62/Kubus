@@ -1,3 +1,4 @@
+import { WindowControls } from './WindowControls.js';
 import { memo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
@@ -123,12 +124,9 @@ export const BottomDock = memo(function BottomDock({
           borderBottom: 1,
           borderColor: 'divider',
           flexShrink: 0,
-          WebkitAppRegion: standalone ? 'drag' : undefined,
-          pl: standalone ? 'env(titlebar-area-x, 0px)' : undefined,
-          pr: standalone
-            ? 'calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))'
-            : undefined,
-          '& button': { WebkitAppRegion: 'no-drag' },
+          '--electrobun-app-region': standalone ? 'drag' : undefined,
+          pl: standalone && window.kubusDesktop?.platform === 'darwin' ? '80px' : undefined,
+          '& button': { '--electrobun-app-region': 'no-drag' },
         }}
       >
         <Tabs
@@ -247,6 +245,7 @@ export const BottomDock = memo(function BottomDock({
             />
           ))}
         </Tabs>
+        {standalone && <WindowControls />}
         {!standalone ? (
           <>
             <Tooltip title={maximized ? 'Restore' : 'Maximize'}>

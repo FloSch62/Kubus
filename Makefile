@@ -1,19 +1,19 @@
-.PHONY: all deb win dmg clean helm-engine
+.PHONY: all desktop deb win clean helm-engine
 
 helm-engine:
 	node helm-engine/build.mjs
 
-all: helm-engine
-	pnpm build && pnpm --filter @kubus/electron dist
+all: desktop
 
-deb: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --linux deb --x64
+desktop:
+	pnpm dist
 
-win: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --win --x64
+deb: desktop
+	pnpm --filter @kubus/desktop deb
 
-dmg: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --mac dmg
+win:
+	node -e "if (process.platform !== 'win32') { console.error('make win requires Windows. Electrobun does not support cross-compilation; use a Windows host or the Windows CI runner.'); process.exit(1) }"
+	pnpm dist
 
 clean:
-	rm -rf electron/release
+	node -e "for (const p of ['desktop/build', 'desktop/artifacts']) require('node:fs').rmSync(p, { recursive: true, force: true })"

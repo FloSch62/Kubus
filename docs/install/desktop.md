@@ -14,15 +14,16 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 | Platform | File |
 | --- | --- |
-| :material-microsoft-windows: Windows | `Kubus-Setup-<version>.exe` |
-| :material-apple: macOS (universal) | `Kubus-<version>.dmg` |
-| :material-linux: Linux | `Kubus-<version>.AppImage` or `.deb` |
+| :material-microsoft-windows: Windows x64 | `win-x64-Kubus-Setup.zip` |
+| :material-apple: macOS (Apple Silicon only) | `macos-arm64-Kubus.dmg` |
+| :material-linux: Debian / Ubuntu x64 | `kubus-<version>-linux-x64.deb` |
+| :material-linux: Other Linux x64 | `linux-x64-Kubus-Setup.tar.gz` |
 
 ## Install & launch
 
 === ":material-microsoft-windows: Windows"
 
-    1. Run the `.exe` installer and follow the prompts.
+    1. Extract the `.zip` archive, then run its `.exe` installer. Keep the accompanying payload beside the executable.
     2. Launch **Kubus** from the Start menu.
 
     Windows SmartScreen may warn that the publisher is unrecognised (the builds aren't
@@ -33,42 +34,67 @@ Grab the installer for your platform from the **[releases page](https://github.c
     1. Open the `.dmg` and drag **Kubus** into **Applications**.
     2. The builds aren't notarised yet, so the first launch needs one extra step:
 
-        - **Right-click** the app → **Open**, then confirm in the dialog, *or*
-        - clear the quarantine flag from a terminal:
+        - Open **System Settings → Privacy & Security**, choose **Open Anyway**
+          if offered after the failed launch, then confirm, *or*
+        - for a download you trust, clear its quarantine flag from a terminal:
 
         ```bash
-        xattr -d com.apple.quarantine /Applications/Kubus.app
+        xattr -r -d com.apple.quarantine /Applications/Kubus.app
         ```
 
     After the first launch you can open it normally from Spotlight or the Dock.
 
 === ":material-linux: Linux"
 
-    === "AppImage"
+    On Debian or Ubuntu, install the `.deb` with its dependencies:
 
-        ```bash
-        chmod +x Kubus-*.AppImage
-        ./Kubus-*.AppImage
-        ```
+    ```bash
+    sudo apt install ./kubus-*-linux-x64.deb
+    ```
 
-    === "Debian / Ubuntu (.deb)"
+    Launch **Kubus** from the application menu or run `kubus`.
 
-        ```bash
-        sudo apt install ./kubus_*_amd64.deb
-        kubus
-        ```
+    For other distributions, extract the installer archive and run its installer:
 
-!!! note "Why isn't it signed?"
+    ```bash
+    tar -xzf linux-x64-Kubus-Setup.tar.gz
+    ./installer
+    ```
+
+    The installer creates an application menu entry. Kubus requires GTK 3,
+    WebKitGTK 4.1 and Ayatana AppIndicator 3. The `.deb` declares these dependencies
+    so apt installs them automatically. Kubus uses the system webview; Chromium
+    is not bundled.
+
+!!! note "Why does macOS still warn?"
 
     Kubus is an open-source project without an Apple Developer or Windows code-signing
-    certificate yet. The steps above are the standard way to run unsigned apps. You can
-    always [build from source](from-source.md) if you'd rather not.
+    certificate yet. macOS builds use ad-hoc signatures to seal their resources;
+    these do not establish developer identity or provide Apple notarization.
+    You can also [build from source](from-source.md).
 
 ## Updating
 
-Download the newer installer and install over the top. Your settings live in the
-browser/app profile and are preserved. There's no telemetry and no auto-updater phoning
-home.
+Installed macOS, Windows, and Linux archive builds check GitHub for a newer release
+at startup and every six hours. These requests fetch release metadata; Kubus has
+no telemetry and does not send your kubeconfig or cluster data with update checks.
+
+Open **Settings → About → Updates** to check manually. When an update is available,
+choose **Download update**, then **Restart and install** when ready. Restarting
+closes active terminals and port forwards. Downloads and installation require
+your action.
+
+Debian packages use manual updates: download the newer `.deb` and install it with
+`sudo apt install ./kubus-<version>-linux-x64.deb`. In-app updates are disabled for
+these installations and for development builds.
+
+Desktop state is stored in `kubus/desktop` under your platform’s application
+configuration directory and survives updates.
+
+On the first launch after upgrading from Electron, Kubus imports tabs, favorites,
+theme, and UI preferences from the previous `Kubus/client-state.json` when no state
+exists in the new directory. The original file is kept. Launches with a custom
+`KUBUS_DESKTOP_DATA` directory do not import it.
 
 ## Next steps
 

@@ -1,10 +1,11 @@
-import type { AppInfo, AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
+import type { AppInfo, AppWindowLaunch, AppUpdateState } from '@kubus/shared';
 
 declare global {
-  /** Bridge exposed by the Electron preload (absent in regular browsers). */
+  /** Bridge exposed by the Electrobun preload (absent in regular browsers). */
   interface Window {
+    kubusDesktopReady?: Promise<void>;
     kubusDesktop?: {
-      /** Electron's process.platform ('linux', 'win32', 'darwin', …). */
+      /** Host process.platform ('linux', 'win32', 'darwin', …). */
       platform: string;
       /** One-shot payload describing the content of a secondary app window. */
       windowLaunch?: AppWindowLaunch;
@@ -13,9 +14,14 @@ declare global {
         setItem(name: string, value: string): void;
         removeItem(name: string): void;
       };
-      setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
+      minimizeWindow(): void;
+      toggleMaximize(): void;
       getAppInfo(): Promise<AppInfo | undefined>;
-      checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult>;
+      getUpdateState(): AppUpdateState;
+      onUpdateStateChanged(callback: () => void): () => void;
+      checkForUpdate(): void;
+      downloadUpdate(): void;
+      applyUpdate(): void;
       /** Open a secondary native application window. */
       openWindow(launch: AppWindowLaunch): void;
       /** Detach only if the native cursor is outside every Kubus window. */

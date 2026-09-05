@@ -120,6 +120,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
     if (!root) return;
     const hide = () => setActiveCell(null);
     const showForPointer = (event: PointerEvent) => {
+      if (root.classList.contains('kubus-scrolling')) return;
       const target = event.target instanceof Element ? event.target : null;
       const cell = target?.closest<HTMLElement>('.MuiDataGrid-cell');
       const value = cell?.querySelector<HTMLElement>('[data-copy-text]');
@@ -133,6 +134,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
 
     root.addEventListener('pointerover', showForPointer);
     root.addEventListener('pointerleave', hide);
+    root.addEventListener('wheel', hide, { passive: true });
     // A stationary pointer does not reliably emit enter/leave events while
     // virtualization replaces the row beneath it. Hide immediately; the next
     // pointer movement reveals the button for the new cell.
@@ -142,6 +144,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
     return () => {
       root.removeEventListener('pointerover', showForPointer);
       root.removeEventListener('pointerleave', hide);
+      root.removeEventListener('wheel', hide);
       root.removeEventListener('scroll', hide, true);
     };
   }, [rootRef]);
@@ -151,6 +154,9 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
 
 function updateTruncationTitle(event: ReactMouseEvent<HTMLSpanElement>) {
   const element = event.currentTarget;
+  // Native scrolling retargets mouseenter as rows pass a stationary pointer.
+  // Measuring overflow there forces layout in the middle of every scroll frame.
+  if (element.closest('.kubus-scrolling')) return;
   if (element.scrollWidth > element.clientWidth) element.title = element.textContent ?? '';
   else element.removeAttribute('title');
 }

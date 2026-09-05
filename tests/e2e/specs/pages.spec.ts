@@ -12,6 +12,8 @@ test('namespaces list includes the fixture namespace', async ({ page }) => {
 test('events page loads live cluster events', async ({ page }) => {
   await gotoApp(page, '/events');
 
+  // Search before asserting: older fixture events may be beyond page one.
+  await page.getByPlaceholder('Search… type / for smart filter').fill('BackOff');
   // The crasher fixture reliably produces BackOff warning events.
   await expect(page.getByText('BackOff').first()).toBeVisible({ timeout: 30_000 });
 });

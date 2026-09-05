@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { layout, statusTextColor } from '../theme.js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -24,7 +24,7 @@ import { useNow } from './AgeCell.js';
 import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
 import { jobPhase, nodeStatus, podSummary, withoutManagedFields, workloadStatus } from '../kube-display.js';
 import { isTextEntryTarget } from '../text-entry.js';
-import { YamlEditor, useYamlSchema } from './YamlEditor.js';
+import { YamlEditor } from './YamlEditor.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { GenericDetail } from './detail/GenericDetail.js';
 import { ConfigMapDetail } from './detail/ConfigMapDetail.js';
@@ -154,6 +154,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   });
   // The last state stays on screen for post-mortem, but the drawer must say
   // the object is gone instead of freezing on e.g. "Terminating" forever.
+  // Commit the drawer shell first. Building a detailed overview is interruptible
+  // background work, so an already-cached object cannot block the first slide frame.
+  const overviewObj = useDeferredValue(tab === 'overview' ? obj ?? null : null, null);
   const objGone = !!obj && isResourceGone(error);
   // Secret manifests are edited from the revealed object so an apply never
   // writes the redaction placeholders back; the tree and the YAML view mask
@@ -169,21 +172,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   // server's event cache), so the Events tab can carry its warning count
   // before anyone clicks it.
   const { data: events } = useResourceEvents(sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
-  // Events are matched by name; an event that names a different uid belongs
-  // to an earlier object of the same name and does not count against this one.
-  const now = useNow();
-  const warningCount = useMemo(() => {
-    const uid = obj?.metadata.uid;
-    return (events?.items ?? []).filter((e) => {
-      const event = e as { type?: string; involvedObject?: { uid?: string } };
-      return isRecentWarning(e, now) && (!uid || !event.involvedObject?.uid || event.involvedObject.uid === uid);
-    }).length;
-  }, [events, obj?.metadata.uid, now]);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
-  // Warm the schema (fetch + yaml-worker registration) while the drawer is on
-  // Overview, so hover/validation are ready the moment the YAML view opens.
-  useYamlSchema(sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined);
 
   const liveBase = useMemo(() => (manifestObj ? withoutManagedFields(manifestObj) : undefined), [manifestObj]);
   const showYaml = tab === 'manifest' && view === 'yaml';
@@ -442,22 +432,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
             {hasDataTab && <Tab value="data" label="Data" sx={{ minHeight: 36 }} />}
             {versions.length > 0 && <Tab value="schema" label="Schema" sx={{ minHeight: 36 }} />}
             {showMap && <Tab value="map" label="Map" sx={{ minHeight: 36 }} />}
-            <Tab
-              value="events"
-              label={
-                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
-                  Events
-                  {warningCount > 0 && (
-                    <CountPill
-                      value={warningCount}
-                      sx={{ bgcolor: (t) => `${t.palette.warning.main}26`, color: statusTextColor('warning') }}
-                    />
-                  )}
-                </Box>
-              }
-              title={warningCount > 0 ? `${warningCount} warning event${warningCount === 1 ? '' : 's'}` : undefined}
-              sx={{ minHeight: 36 }}
-            />
+            <Tab value="events" label={<EventTabLabel events={events?.items} uid={obj?.metadata.uid} />} sx={{ minHeight: 36 }} />
             {hasMetrics && <Tab value="metrics" label="Metrics" sx={{ minHeight: 36 }} />}
             {hasRolloutHistory && <Tab value="history" label="History" sx={{ minHeight: 36 }} />}
           </Tabs>
@@ -492,7 +467,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 onConflict={() => void (isSecret ? refetchRevealed() : refetch())}
               />
             )}
-            {tab === 'overview' && obj && <OverviewForKind kind={behaviorKind} obj={obj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
+            {tab === 'overview' && overviewObj && overviewObj.metadata.uid === obj?.metadata.uid && <OverviewForKind kind={behaviorKind} obj={overviewObj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
             {hasDataTab && tab === 'data' && (
               <DataEditor
                 key={selKey}
@@ -570,9 +545,22 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   );
 }
 
-export function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
-  return <ResourceDetailDrawer {...props} inline />;
+/** Only the warning badge ticks; a clock update must not rebuild the overview. */
+function EventTabLabel({ events, uid }: { events?: KubeObject[]; uid?: string }) {
+  const now = useNow();
+  const count = (events ?? []).filter(e => {
+    const event = e as { involvedObject?: { uid?: string } };
+    return isRecentWarning(e, now) && (!uid || !event.involvedObject?.uid || event.involvedObject.uid === uid);
+  }).length;
+  return <Box component="span" title={count ? `${count} warning event${count === 1 ? '' : 's'}` : undefined} sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+    Events
+    {count > 0 && <CountPill value={count} sx={{ bgcolor: t => `${t.palette.warning.main}26`, color: statusTextColor('warning') }} />}
+  </Box>;
 }
+
+export const ResourceDetailPanel = memo(function ResourceDetailPanel(props: Omit<Props, 'inline'>) {
+  return <ResourceDetailDrawer {...props} inline />;
+});
 
 /** Every Secret value replaced by the redaction placeholder, for display while not revealed. */
 function maskAll(obj: KubeObject): KubeObject {
@@ -621,7 +609,7 @@ function headerStatus(kind: string | undefined, obj: KubeObject): string | undef
   }
 }
 
-function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | undefined; obj: KubeObject; ctx: string; crd?: KubeObject; version: string }) {
+const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | undefined; obj: KubeObject; ctx: string; crd?: KubeObject; version: string }) {
   switch (kind) {
     case 'Deployment':
       return <DeploymentDetail obj={obj} ctx={ctx} />;
@@ -655,7 +643,7 @@ function OverviewForKind({ kind, obj, ctx, crd, version }: { kind: string | unde
       // overview driven by the CRD's printer columns.
       return crd ? <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} /> : <GenericDetail obj={obj} ctx={ctx} />;
   }
-}
+});
 
 function EventsList({ events }: { events: KubeObject[] }) {
   if (!events.length) {

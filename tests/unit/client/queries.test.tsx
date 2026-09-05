@@ -139,6 +139,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('rechecks a provisional metrics snapshot promptly, then resumes the normal cadence', () => {
+  renderHook(() => queries.useResourceMetrics(['dev'], 'pods'));
+  const multi = harness.multiQueryConfigs.at(-1) as { queries: unknown[] };
+  const interval = config(multi.queries[0]).refetchInterval;
+  expect(typeof interval).toBe('function');
+  if (typeof interval !== 'function') throw new Error('Expected adaptive metrics interval');
+  expect(interval({ state: { data: { available: false, probed: false, items: [] } } })).toBe(1000);
+  expect(interval({ state: { data: { available: true, probed: true, items: [{}] } } })).toBe(20_000);
+  expect(interval({ state: { data: { available: false, probed: true, items: [] } } })).toBe(20_000);
+});
+
 describe('query hook contracts', () => {
   it('registers every query and executes each request contract', async () => {
     const { result, unmount } = renderHook(() => ({

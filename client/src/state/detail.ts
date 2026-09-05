@@ -105,6 +105,7 @@ export const useDetailStore = create<DetailState>((set, get) => {
       const embedded = opts?.embedded ?? false;
       const { stack } = get();
       const sameSel = stack.length === 1 && selKeyOf(stack[0]!) === selKeyOf(sel);
+      if (sameSel && embedded === get().embedded && stack[0]!.kind === sel.kind && stack[0]!.custom === sel.custom) return;
       if (sameSel) update({ stack: [sel], embedded });
       else get().guard(() => update({ stack: [sel], embedded }));
     },

@@ -5,7 +5,7 @@ icon: lucide/network
 # Architecture
 
 Kubus is a small, two-tier app: a React single-page app in your browser, talking to a
-local Node.js server that holds the connections to your clusters. The server is the only
+local Fastify server (Node.js standalone, Bun in the desktop app) that holds the connections to your clusters. The server is the only
 thing that touches Kubernetes. The browser never connects to an API server directly.
 
 ```mermaid
@@ -13,7 +13,7 @@ graph TD
   subgraph Browser["Browser: React 19 + MUI 7 SPA"]
     UI["TanStack Query · Monaco · xterm.js"]
   end
-  subgraph Server["Node.js: Fastify 5 (binds 127.0.0.1)"]
+  subgraph Server["Fastify 5: Node.js / Bun (127.0.0.1)"]
     K["@kubernetes/client-node"]
     W["watch multiplexing · log fan-in"]
     E["exec bridge · port-forward manager"]
@@ -56,9 +56,11 @@ lifting that a browser can't:
 
 ## The desktop shell
 
-The desktop app is an **Electron** wrapper. It runs the very same server in-process on a
+The desktop app uses **Electrobun 2** with a **Bun** main process and the system webview (WKWebView on macOS, WebKitGTK on Linux, WebView2 on Windows). It runs the very same server in-process on a
 random localhost port, opens it in a native window, and persists window state between
-launches. There's no separate codebase for the desktop UI; it's the same SPA.
+launches. The renderer calls native window actions through typed Electrobun RPC. A bootstrap worker claims the single-instance socket before the native UI initializes, and a small native URL relay forwards `kubus://` links. There's no separate codebase for the desktop UI; it's the same SPA.
+
+The main process is bundled with Node dependency resolution before Electrobun packages it for Bun. This preserves the Kubernetes client's real HTTP and WebSocket implementations, including client certificates, custom CAs, and proxy agents. Helm runs in an in-memory WASI host shared by both runtimes.
 
 ## Data flow in one sentence
 

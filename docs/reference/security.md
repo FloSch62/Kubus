@@ -4,16 +4,20 @@ icon: lucide/shield-check
 
 # Security model
 
-Kubus is a **local** tool. It runs on your machine, uses credentials you already have, and
-is built so that nothing leaves your laptop. This page spells out exactly what that means.
+Kubus is a **local** tool. It runs on your machine and uses your existing credentials
+to connect directly to your clusters. This page describes its access controls and
+outbound connections.
 
 ## Local-only by design
 
 - The server binds to **`127.0.0.1`** and nothing else. Other machines on your network
   can't reach it.
 - It talks to your cluster API servers **directly**, using your existing **kubeconfig**
-  credentials. There is no Kubus cloud, no account, and no telemetry. Data only moves
-  between your machine and the clusters you point it at.
+  credentials. There is no Kubus cloud, no account, and no telemetry.
+- Installed desktop builds, except Debian packages, also contact GitHub for release
+  metadata at startup and every six hours. Update checks do not send kubeconfig or
+  cluster data. Downloads and installation require your action; see
+  [Updating](../install/desktop.md#updating).
 
 ## Per-run access token
 
@@ -54,9 +58,10 @@ namespaces, so can Kubus (behind the guard, if protected).
 
 ## Code signing
 
-Desktop builds aren't code-signed or notarised yet, which is why the first launch needs an
-extra step on macOS and Windows. See [Desktop app](../install/desktop.md). If you'd rather
-not run unsigned binaries, [build from source](../install/from-source.md).
+macOS builds use ad-hoc signatures to seal the app and installer resources, but
+aren't Developer ID signed or notarised. Windows builds aren't code-signed yet.
+First launch can therefore require an extra step; see [Desktop app](../install/desktop.md).
+You can also [build from source](../install/from-source.md).
 
 ## See also
 

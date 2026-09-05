@@ -1,8 +1,7 @@
 import type { GridColDef } from '@mui/x-data-grid';
 import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
-import Tooltip from '@mui/material/Tooltip';
+import { CellTooltip as Tooltip } from './CellTooltip.js';
 import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
@@ -767,23 +766,9 @@ function LabelsCell({ labels, onLabelClick }: { labels?: Record<string, string>;
   const overflow = entries.length - visible.length;
   const chip = ([key, value]: [string, string]) => {
     const term = value ? `${key}=${value}` : key;
-    return (
-      <Chip
-        key={key}
-        label={term}
-        size="small"
-        variant="outlined"
-        onClick={
-          onLabelClick
-            ? (event) => {
-                event.stopPropagation();
-                onLabelClick(term);
-              }
-            : undefined
-        }
-        sx={{ maxWidth: 170, height: 20, fontSize: 11 }}
-      />
-    );
+    return onLabelClick ? (
+      <button type="button" key={key} className="kubus-label-chip" onClick={event => { event.stopPropagation(); onLabelClick(term); }}>{term}</button>
+    ) : <span key={key} className="kubus-label-chip">{term}</span>;
   };
   return (
     <Tooltip
@@ -802,15 +787,13 @@ function LabelsCell({ labels, onLabelClick }: { labels?: Record<string, string>;
         },
       }}
       title={
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-          {entries.map(chip)}
-        </Box>
+        <span className="kubus-labels-tooltip">{entries.map(chip)}</span>
       }
     >
-      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+      <span className="kubus-labels-cell">
         {visible.map(chip)}
-        {overflow > 0 && <Chip label={`+${overflow}`} size="small" sx={{ height: 20, fontSize: 11, flexShrink: 0 }} />}
-      </Box>
+        {overflow > 0 && <span className="kubus-label-chip kubus-label-overflow">+{overflow}</span>}
+      </span>
     </Tooltip>
   );
 }

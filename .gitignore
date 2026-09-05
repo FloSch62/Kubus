@@ -5,8 +5,11 @@ dist/
 # built helm rendering engine (node helm-engine/build.mjs, requires Go)
 server/assets/helm-engine.wasm.gz
 helm-engine/helm-engine.wasm
-electron/build/
-electron/release/
+desktop/build/
+desktop/artifacts/
+desktop/assets/
+.hutch/
+.cottontail-tmp/
 .env
 .DS_Store
 

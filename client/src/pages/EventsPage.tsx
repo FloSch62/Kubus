@@ -1,3 +1,5 @@
+import { READ_ONLY_GRID_SLOTS } from '../components/ResourceGridCell.js';
+import { GridTooltips } from '../components/CellTooltip.js';
 import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -268,18 +270,23 @@ export function EventsPage() {
           label={<Typography variant="body2">Warnings only</Typography>}
         />
       </Stack>
-      <DataGrid
-        rows={rows}
-        columns={grid.columns}
-        loading={Object.values(list.status).some((s) => s.state === 'loading')}
-        getRowId={getEventRowId}
-        density={grid.density}
-        onColumnWidthChange={grid.onColumnWidthChange}
-        onRowClick={onRowClick}
-        onCellKeyDown={onCellKeyDown}
-        initialState={eventsGridInitialState}
-        sx={eventsGridSx}
-      />
+      <GridTooltips rootRef={gridRootRef}>
+        <DataGrid
+          slots={READ_ONLY_GRID_SLOTS}
+          rowBufferPx={80}
+          columnBufferPx={50}
+          rows={rows}
+          columns={grid.columns}
+          loading={Object.values(list.status).some((s) => s.state === 'loading')}
+          getRowId={getEventRowId}
+          density={grid.density}
+          onColumnWidthChange={grid.onColumnWidthChange}
+          onRowClick={onRowClick}
+          onCellKeyDown={onCellKeyDown}
+          initialState={eventsGridInitialState}
+          sx={eventsGridSx}
+        />
+      </GridTooltips>
       <CellCopyOverlay rootRef={gridRootRef} />
     </Box>
   );

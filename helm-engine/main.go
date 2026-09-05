@@ -2,7 +2,7 @@
 // Kubus server can install/upgrade releases without a helm binary.
 //
 // Usage: helm-engine <input.json> <output.json>
-// Input/output live in a preopened directory supplied by the Node host.
+// Input/output live in an in-memory preopened directory supplied by the WASI host.
 package main
 
 import (

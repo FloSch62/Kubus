@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'esnext',
+    target: ['es2022', 'safari17'],
     chunkSizeWarningLimit: 4096,
     rolldownOptions: {
       output: {

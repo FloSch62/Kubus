@@ -1,4 +1,4 @@
-import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Activity, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { layout } from '../theme.js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -49,9 +49,13 @@ const BUILTIN_HIDDEN_FIELDS: Record<string, string[]> = { Node: ['nodeProviderID
 function usePreservedSearchParams(): [URLSearchParams, SetURLSearchParams] {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const current = useRef({ setSearchParams, state: location.state });
+  current.current = { setSearchParams, state: location.state };
+  // Router setters change identity with the query string. Keep handlers in
+  // column definitions stable when selection or the detail sub-tab changes.
   const setPreservedSearchParams = useCallback<SetURLSearchParams>(
-    (nextInit, navigateOpts) => setSearchParams(nextInit, { state: location.state, ...navigateOpts }),
-    [location.state, setSearchParams],
+    (nextInit, navigateOpts) => current.current.setSearchParams(nextInit, { state: current.current.state, ...navigateOpts }),
+    [],
   );
   return [searchParams, setPreservedSearchParams];
 }
@@ -179,29 +183,31 @@ function EmbeddedResourceDetail() {
   // re-renders with the same value, drop the inline override so sx takes
   // over again (otherwise collapse and double-click reset can't shrink it).
   useLayoutEffect(() => {
-    if (asideRef.current) asideRef.current.style.width = '';
+    if (asideRef.current) asideRef.current.style.removeProperty('--detail-width');
   }, [width, collapsed]);
 
   const sel = stack.at(-1);
-  if (!sel) return null;
+  const panelSelection = useDeferredValue(sel ?? null, null);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     close();
-    if (!searchParams.has('sel') && !searchParams.has('dt')) return;
+    // Always supersede a pending row-navigation transition. An immediate
+    // Escape can arrive before its ?sel has reached this render.
     const next = new URLSearchParams(searchParams);
     next.delete('sel');
     next.delete('dt');
     setSearchParams(next, { replace: true });
-  };
+  }, [close, searchParams, setSearchParams]);
   // The drawer's sub-tab rides in the URL (`dt`), so a reopened or restored
   // page tab lands on the object *and* the tab that was open.
   const detailTab = searchParams.get('dt') ?? undefined;
-  const rememberTab = (tab: string) => {
+  const rememberTab = useCallback((tab: string) => {
     const next = new URLSearchParams(searchParams);
     if (tab === 'overview') next.delete('dt');
     else next.set('dt', tab);
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
-  };
+  }, [searchParams, setSearchParams]);
+  if (!sel) return null;
 
   // Same drag pattern as BottomDock: width goes straight to the DOM (one
   // write per frame) and the store is committed once on mouseup.
@@ -215,7 +221,6 @@ function EmbeddedResourceDetail() {
     if (fromCollapseHandle) collapseHandleDraggedRef.current = false;
     let pending = startWidth;
     let frame = 0;
-    el.style.transition = 'none';
     document.body.style.cursor = 'col-resize';
     const onMove = (ev: MouseEvent) => {
       const delta = startX - ev.clientX;
@@ -230,14 +235,13 @@ function EmbeddedResourceDetail() {
       if (!frame) {
         frame = requestAnimationFrame(() => {
           frame = 0;
-          el.style.width = `${pending}px`;
+          el.style.setProperty('--detail-width', `${pending}px`);
         });
       }
     };
     const onUp = () => {
       if (frame) cancelAnimationFrame(frame);
-      el.style.width = `${pending}px`;
-      el.style.transition = '';
+      el.style.setProperty('--detail-width', `${pending}px`);
       document.body.style.cursor = '';
       setWidth(pending);
       window.removeEventListener('mousemove', onMove);
@@ -275,12 +279,8 @@ function EmbeddedResourceDetail() {
           position: 'relative',
           flexShrink: 0,
           minHeight: 0,
-          width: collapsed ? 0 : width,
-          maxWidth: '70%',
-          transition: 'width 150ms ease',
-          bgcolor: 'background.paper',
-          borderLeft: 1,
-          borderColor: 'divider',
+          '--detail-width': `${width}px`,
+          width: collapsed ? 0 : 'min(var(--detail-width), 70cqw)',
           outline: 'none',
         }}
       >
@@ -359,10 +359,24 @@ function EmbeddedResourceDetail() {
             {collapsed ? <ChevronLeftIcon sx={{ fontSize: 16 }} /> : <ChevronRightIcon sx={{ fontSize: 16 }} />}
           </ButtonBase>
         </Tooltip>
-        {/* Kept mounted through a collapse so tab/editor state survives; inert
-            drops it from tab order while it is hidden. */}
-        <Box inert={collapsed} sx={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ResourceDetailPanel sel={sel} onClose={handleClose} onBack={stack.length > 1 ? back : undefined} initialTab={detailTab} onTabChange={rememberTab} />
+        {/* Keep editor state through collapse; inert removes hidden content
+            from focus order. */}
+        <Box inert={collapsed} sx={{
+          position: 'absolute', top: 0, right: 0,
+          width: 'min(var(--detail-width), 70cqw)', height: '100%', minHeight: 0,
+          overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          bgcolor: 'background.paper', borderLeft: 1, borderColor: 'divider',
+          transform: collapsed ? 'translate3d(100%, 0, 0)' : 'translate3d(0, 0, 0)',
+          willChange: 'transform',
+          transition: 'transform 150ms ease',
+          animation: 'kubus-details-enter 150ms ease-out',
+          '@keyframes kubus-details-enter': { from: { transform: 'translate3d(100%, 0, 0)' }, to: { transform: 'translate3d(0, 0, 0)' } },
+          '@media (prefers-reduced-motion: reduce)': { transition: 'none', animation: 'none' },
+        }}>
+          {panelSelection === sel
+            ? <ResourceDetailPanel sel={sel} onClose={handleClose} onBack={stack.length > 1 ? back : undefined} initialTab={detailTab} onTabChange={rememberTab} />
+            : <Box aria-busy="true" sx={{ p: 2, fontWeight: 600 }}>{sel.namespace ? `${sel.namespace} / ` : ''}{sel.name}</Box>}
+
         </Box>
       </Box>
     </Activity>
@@ -401,7 +415,7 @@ export function ResourceListPage() {
   const isWorkloadMetricsKind = !!behaviorKind && WORKLOAD_METRIC_KINDS.has(behaviorKind);
   const wantsMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node' || isWorkloadMetricsKind;
   const { data: podMetrics } = useResourceMetrics(wantsMetrics ? selected : [], behaviorKind === 'Node' ? 'nodes' : 'pods');
-  const metricsUnavailable = wantsMetrics ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false) : [];
+  const metricsUnavailable = wantsMetrics ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false && podMetrics.get(ctx)?.probed !== false) : [];
   // Node lists watch all pods for allocation totals; workload lists watch them
   // to attribute per-pod usage to the owning workload.
   const auxPods = useWatchedList(behaviorKind === 'Node' || isWorkloadMetricsKind ? selected : [], '', 'v1', 'pods');
@@ -694,7 +708,7 @@ export function ResourceListPage() {
   };
 
   return (
-    <Box className="kubus-resource-page" sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <Box className="kubus-resource-page" sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', containerType: 'inline-size' }}>
       <DetailUrlSync sel={sel} />
       <RememberedFilters kindPath={kindPath} />
       <CreateShortcut onCreate={openCreate} />

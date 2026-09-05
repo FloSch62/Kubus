@@ -8,8 +8,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:electron": "playwright test --config playwright.electron.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.desktop.json",
+    "test:desktop": "playwright test --config playwright.desktop.config.ts"
   },
   "devDependencies": {
     "@kubernetes/client-node": "^2.0.0",
@@ -18,12 +18,13 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
+    "@types/bun": "^1.4.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "^4.1.11",
-    "electron": "^44.0.0",
+    "esbuild": "^0.28.2",
     "fastify": "^5.12.1",
     "js-yaml": "^5.4.1",
     "jsdom": "^30.0.1",

@@ -1,7 +1,19 @@
-import { useSyncExternalStore } from 'react';
-import Tooltip from '@mui/material/Tooltip';
+import { useMemo, useSyncExternalStore } from 'react';
+import { CellTooltip as Tooltip } from './CellTooltip.js';
 import Typography from '@mui/material/Typography';
 import type { TypographyProps } from '@mui/material/Typography';
+
+// WebKit rebuilds locale formatting machinery for each toLocaleString call.
+// Reuse it across cells; the absolute tooltip does not change on age ticks.
+const localDateTime = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric', month: 'numeric', day: 'numeric',
+  hour: 'numeric', minute: 'numeric', second: 'numeric',
+});
+function formatTooltip(timestamp: string | undefined): string {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? 'Invalid Date' : localDateTime.format(date);
+}
 
 const tickListeners = new Set<() => void>();
 let tickTimer: number | undefined;
@@ -65,9 +77,10 @@ export function formatRelative(timestamp: string | undefined): string {
 /** Live-ticking relative age. */
 export function AgeCell({ timestamp, variant = 'body2' }: { timestamp?: string; variant?: TypographyProps['variant'] }) {
   useSyncExternalStore(subscribeTick, getTick);
+  const tooltip = useMemo(() => formatTooltip(timestamp), [timestamp]);
   if (!timestamp) return null;
   return (
-    <Tooltip title={new Date(timestamp).toLocaleString()}>
+    <Tooltip title={tooltip}>
       <Typography variant={variant} component="span">
         {formatAge(timestamp)}
       </Typography>
@@ -81,9 +94,10 @@ export function AgeCell({ timestamp, variant = 'body2' }: { timestamp?: string; 
  */
 export function RelativeTimeCell({ timestamp, variant = 'body2' }: { timestamp?: string; variant?: TypographyProps['variant'] }) {
   useSyncExternalStore(subscribeTick, getTick);
+  const tooltip = useMemo(() => formatTooltip(timestamp), [timestamp]);
   if (!timestamp) return null;
   return (
-    <Tooltip title={new Date(timestamp).toLocaleString()}>
+    <Tooltip title={tooltip}>
       <Typography variant={variant} component="span">
         {formatRelative(timestamp)}
       </Typography>

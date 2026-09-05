@@ -116,21 +116,15 @@ export interface AppLogSettingsInput {
   debugEnabled: boolean;
 }
 
-export type UpdateCheckResult =
-  | {
-      available: true;
-      currentVersion: string;
-      latestVersion: string;
-      releaseName?: string;
-      releaseUrl: string;
-      publishedAt?: string;
-    }
-  | {
-      available: false;
-      currentVersion: string;
-      latestVersion?: string;
-      reason?: string;
-    };
+/** Desktop update lifecycle, owned by the main process and shared across windows. */
+export interface AppUpdateState {
+  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'installing' | 'disabled' | 'error';
+  currentVersion: string;
+  latestVersion?: string;
+  progress?: number;
+  message?: string;
+  retry?: 'check' | 'download' | 'install';
+}
 
 export type ContextHealth = 'connected' | 'connecting' | 'error' | 'unknown';
 

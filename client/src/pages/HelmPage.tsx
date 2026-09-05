@@ -1,3 +1,5 @@
+import { READ_ONLY_GRID_SLOTS } from '../components/ResourceGridCell.js';
+import { GridTooltips } from '../components/CellTooltip.js';
 import { Suspense, lazy, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -14,7 +16,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Tooltip from '@mui/material/Tooltip';
+import { CellTooltip as Tooltip } from '../components/CellTooltip.js';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
@@ -271,7 +273,7 @@ export function HelmPage() {
     () => <NoReleasesOverlay hidden={hiddenByFilters} total={totalReleases} helmEngine={helmEngine} onInstall={openInstall} />,
     [helmEngine, hiddenByFilters, openInstall, totalReleases],
   );
-  const gridSlots = useMemo(() => ({ noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
+  const gridSlots = useMemo(() => ({ ...READ_ONLY_GRID_SLOTS, noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
 
   if (selected.length === 0) {
     return <NoClustersState icon={<SailingOutlinedIcon />} />;
@@ -355,32 +357,36 @@ export function HelmPage() {
           <ToggleButton value="updates">Updates · {availableUpdates}</ToggleButton>
         </ToggleButtonGroup>
       </Stack>
-      <DataGrid
-        rows={rows}
-        columns={grid.columns}
-        loading={releases.isLoading}
-        getRowId={rowId}
-        density={grid.density}
-        onColumnWidthChange={grid.onColumnWidthChange}
-        onRowClick={(p) => openRelease(p.row)}
-        slots={gridSlots}
-        slotProps={rowSlotProps}
-        onCellKeyDown={(params, event, details) => {
-          handleCopyCellKeyDown(params, event, details);
-          // Keyboard equivalent of clicking the row.
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            openRelease(params.row);
-          } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-            event.preventDefault();
-            const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
-            const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
-            openContextMenu(params.row, rect.left + 8, rect.bottom - 4);
-          }
-        }}
-        sx={releasesGridSx}
-        initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
-      />
+      <GridTooltips rootRef={gridRootRef}>
+        <DataGrid
+          rowBufferPx={80}
+          columnBufferPx={50}
+          rows={rows}
+          columns={grid.columns}
+          loading={releases.isLoading}
+          getRowId={rowId}
+          density={grid.density}
+          onColumnWidthChange={grid.onColumnWidthChange}
+          onRowClick={(p) => openRelease(p.row)}
+          slots={gridSlots}
+          slotProps={rowSlotProps}
+          onCellKeyDown={(params, event, details) => {
+            handleCopyCellKeyDown(params, event, details);
+            // Keyboard equivalent of clicking the row.
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              openRelease(params.row);
+            } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault();
+              const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
+              const rect = (cell ?? (event.target as HTMLElement)).getBoundingClientRect();
+              openContextMenu(params.row, rect.left + 8, rect.bottom - 4);
+            }
+          }}
+          sx={releasesGridSx}
+          initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
+        />
+      </GridTooltips>
       <CellCopyOverlay rootRef={gridRootRef} />
       <Menu
         open={contextMenu !== null}
