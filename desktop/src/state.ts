@@ -1,5 +1,23 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+
+/** Import once, without modifying the legacy file or replacing newer desktop state. */
+export function migrateClientState(file: string, legacyFile: string | undefined): void {
+  if (!legacyFile || existsSync(file)) return;
+  let contents: string;
+  try { contents = readFileSync(legacyFile, 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  const value: unknown = JSON.parse(contents);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid legacy client state');
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  try { copyFileSync(legacyFile, file, constants.COPYFILE_EXCL); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+}
 
 export class ClientState {
   private values: Record<string, string> = {};

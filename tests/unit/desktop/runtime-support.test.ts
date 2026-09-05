@@ -36,17 +36,21 @@ it('registers quoted per-user URL handlers on Linux and Windows', async () => {
 });
 
 it('chooses stable platform storage and honors isolation overrides', async () => {
-  const { userDataPath } = await import('../../../desktop/src/paths.js');
+  const { legacyClientStatePath, userDataPath } = await import('../../../desktop/src/paths.js');
   vi.stubEnv('KUBUS_DESKTOP_DATA', dir); expect(userDataPath()).toBe(dir);
+  expect(legacyClientStatePath()).toBeUndefined();
   vi.stubEnv('KUBUS_DESKTOP_DATA', '');
   Object.defineProperty(process, 'platform', { value: 'linux' });
   vi.stubEnv('XDG_CONFIG_HOME', dir); expect(userDataPath()).toBe(path.join(dir, 'kubus/desktop'));
+  expect(legacyClientStatePath()).toBe(path.join(dir, 'Kubus/client-state.json'));
   vi.stubEnv('XDG_CONFIG_HOME', ''); expect(userDataPath()).toContain('.config');
   Object.defineProperty(process, 'platform', { value: 'win32' });
   vi.stubEnv('APPDATA', dir); expect(userDataPath()).toBe(path.join(dir, 'kubus/desktop'));
+  expect(legacyClientStatePath()).toBe(path.join(dir, 'Kubus/client-state.json'));
   vi.stubEnv('APPDATA', ''); expect(userDataPath()).toContain('AppData');
   Object.defineProperty(process, 'platform', { value: 'darwin' });
-  expect(userDataPath()).toContain('Library/Application Support');
+  expect(userDataPath()).toContain(path.join('Library', 'Application Support'));
+  expect(legacyClientStatePath()).toBe(path.join(path.dirname(path.dirname(userDataPath())), 'Kubus/client-state.json'));
 });
 
 it('rotates diagnostics, mirrors errors, and tolerates unwritable paths', async () => {

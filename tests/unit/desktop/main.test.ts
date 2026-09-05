@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -42,8 +42,12 @@ const native = vi.hoisted(() => {
     setPageZoom(value: number) { this.zoom = value; }
   }
   const quit = vi.fn();
-  return { events, requests, messages, Window, menu, close, quit, openExternal: vi.fn(), showMessageBox: vi.fn(async () => ({})), cursor: { x: 2000, y: 2000 } };
+  return { events, requests, messages, Window, menu, close, quit, openExternal: vi.fn(), showMessageBox: vi.fn(async () => ({})), cursor: { x: 2000, y: 2000 }, legacyFile: undefined as string | undefined };
 });
+vi.mock('../../../desktop/src/paths.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../desktop/src/paths.js')>(),
+  legacyClientStatePath: () => native.legacyFile,
+}));
 vi.mock('electrobun/main', () => ({
   default: { events: { on: (name: string, callback: any) => native.events.set(name, callback) } },
   ApplicationMenu: { setApplicationMenu: native.menu },
@@ -63,7 +67,7 @@ vi.mock('@kubus/server', () => ({
 }));
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  return { ...fs, readFileSync: (...args: any[]) => String(args[0]).endsWith('/preload.js') ? '// preload' : (fs.readFileSync as any)(...args) };
+  return { ...fs, readFileSync: (...args: any[]) => path.basename(String(args[0])) === 'preload.js' ? '// preload' : (fs.readFileSync as any)(...args) };
 });
 let dir: string;
 let signalHandlers: Map<string, Set<(...args: any[]) => void>>;
@@ -71,6 +75,7 @@ beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks();
   native.Window.all.length = 0; native.requests.length = 0; native.messages.length = 0; native.events.clear();
   native.cursor = { x: 2000, y: 2000 };
+  native.legacyFile = undefined;
   dir = mkdtempSync(path.join(tmpdir(), 'kubus-main-'));
   vi.stubEnv('KUBUS_DESKTOP_DATA', dir);
   vi.stubEnv('KUBUS_DEEP_LINK', '');
@@ -89,6 +94,16 @@ async function boot() {
   await vi.waitFor(() => expect(native.Window.all).toHaveLength(1));
   return native.Window.all[0]!;
 }
+
+it('imports legacy preferences before the first renderer bootstrap', async () => {
+  native.legacyFile = path.join(dir, 'legacy-client-state.json');
+  const values = { tabs: '["/pods"]', favorites: '["Pods"]', theme: 'dark' };
+  writeFileSync(native.legacyFile, JSON.stringify(values));
+  await boot();
+  expect(native.requests[0]!.bootstrap!().state).toEqual(values);
+  expect(JSON.parse(readFileSync(path.join(dir, 'client-state.json'), 'utf8'))).toEqual(values);
+  expect(JSON.parse(readFileSync(native.legacyFile, 'utf8'))).toEqual(values);
+});
 
 it('owns a Bun server, constrains navigation, and persists state across native windows', async () => {
   const win = await boot();

@@ -7,8 +7,8 @@ import type { AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
 import { version } from '../package.json';
 import type { DesktopRPC } from './rpc.js';
 import { checkForUpdate, isApplicationLaunch, parseWindowLaunch, routeFromDeepLink } from './policy.js';
-import { ClientState } from './state.js';
-import { userDataPath } from './paths.js';
+import { ClientState, migrateClientState } from './state.js';
+import { legacyClientStatePath, userDataPath } from './paths.js';
 import { registerProtocol } from './protocol.js';
 import { initMainLog, installCrashCapture, mainLog, mainLogPath } from './main-log.js';
 
@@ -29,10 +29,7 @@ let update: Promise<UpdateCheckResult> | undefined;
 let closing: Promise<void> | undefined;
 let quitReady = false;
 let preload: string;
-const state = new ClientState(path.join(userData, 'client-state.json'), (error) => {
-  mainLog('error', 'could not persist client state; retrying', error);
-  for (const win of windows) win.webview.rpc?.send.stateWriteFailed();
-});
+let state: ClientState;
 
 function activate(link?: string): void {
   const route = link ? routeFromDeepLink(link) : undefined;
@@ -191,9 +188,9 @@ function performAction(action: string, win?: Window): void {
 
 function shutdown(): Promise<void> {
   return closing ??= (async () => {
-    state.flush(false);
+    state?.flush(false);
     const timer = setTimeout(() => {
-      state.flush(false);
+      state?.flush(false);
       mainLog('warn', 'server shutdown timed out after 5000ms; forcing application exit');
       quitReady = true;
       Utils.quit();
@@ -236,6 +233,13 @@ async function start(): Promise<void> {
   mkdirSync(userData, { recursive: true, mode: 0o700 });
   initMainLog(userData);
   installCrashCapture();
+  const clientStateFile = path.join(userData, 'client-state.json');
+  try { migrateClientState(clientStateFile, legacyClientStatePath()); }
+  catch (error) { mainLog('warn', 'could not import legacy client state', error); }
+  state = new ClientState(clientStateFile, (error) => {
+    mainLog('error', 'could not persist client state; retrying', error);
+    for (const win of windows) win.webview.rpc?.send.stateWriteFailed();
+  });
   fixPath();
   mainLog('info', `Kubus ${version} starting on ${process.platform}/${process.arch} (Electrobun, Bun ${process.versions.bun})`);
   const link = process.env.KUBUS_DEEP_LINK;

@@ -77,6 +77,11 @@ Download the newer installer and install over the top. Desktop state is stored i
 `kubus/desktop` under your platform’s application configuration directory and survives updates. There's no telemetry and no auto-updater phoning
 home.
 
+On the first launch after upgrading from Electron, Kubus imports tabs, favorites,
+theme, and UI preferences from the previous `Kubus/client-state.json` when no state
+exists in the new directory. The original file is kept. Launches with a custom
+`KUBUS_DESKTOP_DATA` directory do not import it.
+
 ## Next steps
 
 <div class="grid cards" markdown>
