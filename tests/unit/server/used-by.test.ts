@@ -432,7 +432,8 @@ describe('computeUsedBy for custom kinds', () => {
     expect(result.items[0]?.ref).toMatchObject({ ctx: 'eda', group: EDA, version: 'v1', plural: 'fabrics', namespace: 'eda' });
     expect(result.unavailable).toEqual([]);
     expect(result.partial).toBeUndefined();
-    expect(result.scanMs).toBeGreaterThanOrEqual(0);
+    // The scan cost is reported only when it took measurable time; a fast machine may finish within the millisecond.
+    expect(result.scanMs === undefined || result.scanMs > 0).toBe(true);
     // Every candidate kind was consulted, the label-only rest of the group included.
     expect(lookups.sort()).toEqual(['fabrics', 'interfaces', 'nodeprofiles', 'reports', 'topolinks', 'toponodes']);
   });
