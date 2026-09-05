@@ -19,6 +19,7 @@ const queries = vi.hoisted(() => ({
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useUsedBy: () => ({ data: { items: [], unavailable: [], truncated: 0 }, isLoading: false, isError: false }),
   useResourceMetrics: () => ({ data: queries.metrics }),
   usePodEnv: (selection: Record<string, unknown>) => {
     queries.envSelections.push(selection);

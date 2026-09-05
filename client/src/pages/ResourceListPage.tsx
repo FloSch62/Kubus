@@ -19,13 +19,13 @@ import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
 import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
-import { useApiResourcesForContexts, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
+import { useApiResourcesForContexts, useClusterSignals, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
-import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
@@ -119,6 +119,35 @@ function CreateShortcut({ onCreate }: { onCreate: () => void }) {
 }
 
 /**
+ * Renderless: opening a kind from the nav (a bare list URL) brings back the
+ * filter it was left with. Explicit URLs — a saved view, a deep link with a
+ * selection, a typed query — are left alone, and clearing the filter forgets
+ * it, so the memory never fights the user.
+ */
+function RememberedFilters({ kindPath }: { kindPath: string }) {
+  const paneActive = usePaneActive();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = usePreservedSearchParams();
+  // Keyed by the navigation, not the kind: two nav clicks in quick succession
+  // (Deployments, then Pods) can land in one commit, and the kind alone
+  // would then look unchanged.
+  const handledKey = useRef<string>(undefined);
+  useEffect(() => {
+    if (!paneActive || handledKey.current === location.key) return;
+    handledKey.current = location.key;
+    const fromSavedView = !!location.state && typeof location.state === 'object' && 'savedView' in location.state;
+    if (fromSavedView || searchParams.has('q') || searchParams.has('label') || searchParams.has('sel')) return;
+    const memory = useUiPrefsStore.getState().listState[kindPath];
+    if (!memory?.q && !memory?.label) return;
+    const next = new URLSearchParams(searchParams);
+    if (memory.q) next.set('q', memory.q);
+    if (memory.label) next.set('label', memory.label);
+    setSearchParams(next, { replace: true });
+  }, [kindPath, paneActive, location.key, location.state, searchParams, setSearchParams]);
+  return null;
+}
+
+/**
  * Side-by-side detail view. Unlike the global overlay drawer it never blocks
  * the table (other rows stay clickable) and only closes explicitly — but it
  * also only takes space while a resource is selected. The divider drags to
@@ -158,10 +187,20 @@ function EmbeddedResourceDetail() {
 
   const handleClose = () => {
     close();
-    if (!searchParams.has('sel')) return;
+    if (!searchParams.has('sel') && !searchParams.has('dt')) return;
     const next = new URLSearchParams(searchParams);
     next.delete('sel');
+    next.delete('dt');
     setSearchParams(next, { replace: true });
+  };
+  // The drawer's sub-tab rides in the URL (`dt`), so a reopened or restored
+  // page tab lands on the object *and* the tab that was open.
+  const detailTab = searchParams.get('dt') ?? undefined;
+  const rememberTab = (tab: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'overview') next.delete('dt');
+    else next.set('dt', tab);
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
   };
 
   // Same drag pattern as BottomDock: width goes straight to the DOM (one
@@ -323,7 +362,7 @@ function EmbeddedResourceDetail() {
         {/* Kept mounted through a collapse so tab/editor state survives; inert
             drops it from tab order while it is hidden. */}
         <Box inert={collapsed} sx={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ResourceDetailPanel sel={sel} onClose={handleClose} onBack={stack.length > 1 ? back : undefined} />
+          <ResourceDetailPanel sel={sel} onClose={handleClose} onBack={stack.length > 1 ? back : undefined} initialTab={detailTab} onTabChange={rememberTab} />
         </Box>
       </Box>
     </Activity>
@@ -367,6 +406,10 @@ export function ResourceListPage() {
   // to attribute per-pod usage to the owning workload.
   const auxPods = useWatchedList(behaviorKind === 'Node' || isWorkloadMetricsKind ? selected : [], '', 'v1', 'pods');
   const nodeAllocation = useMemo(() => (behaviorKind === 'Node' ? makeNodeAllocationLookup(auxPods.rows) : undefined), [behaviorKind, auxPods.rows]);
+
+  // Warning events and restarts per object, for the marker column.
+  const { data: signals } = useClusterSignals(behaviorKind === 'Event' ? [] : selected);
+  const signalsLookup = useMemo(() => makeSignalsLookup(signals), [signals]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const openCreate = useCallback(() => setCreateOpen(true), []);
@@ -430,14 +473,29 @@ export function ResourceListPage() {
     return { ctx, group, version, plural, kind, name, namespace: namespace || undefined, custom: isCustomKind };
   }, [searchParams, group, version, plural, kind, isCustomKind]);
 
-  // `replace` keeps filter typing from flooding the history stack.
-  const setQueryParam = (key: string, value: string) => {
+  const kindPath = `/r/${groupToPath(group)}/${version}/${plural}`;
+  const setListState = useUiPrefsStore((s) => s.setListState);
+
+  // `replace` keeps filter typing from flooding the history stack. The value
+  // is remembered per kind so the next nav click restores it.
+  const setQueryParam = (key: 'q' | 'label', value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value.trim()) next.set(key, value);
     else next.delete(key);
     next.delete('field');
     next.delete('sel');
+    next.delete('dt');
     setSearchParams(next, { replace: true });
+    setListState(kindPath, { [key]: value.trim() || undefined });
+  };
+
+  // Both filters in one URL write: two sequential writes would each start
+  // from the same pre-update params and the second would restore the first.
+  const clearFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    for (const key of ['q', 'label', 'field', 'sel', 'dt']) next.delete(key);
+    setSearchParams(next, { replace: true });
+    setListState(kindPath, { q: undefined, label: undefined });
   };
 
   const addLabelFilter = useCallback(
@@ -450,12 +508,14 @@ export function ResourceListPage() {
           else next.delete('label');
           next.delete('field');
           next.delete('sel');
+          next.delete('dt');
+          setListState(kindPath, { label: updated || undefined });
           return next;
         },
         { replace: true },
       );
     },
-    [setSearchParams],
+    [setSearchParams, setListState, kindPath],
   );
 
   // Schema and CRD printer columns come from the first selected cluster that
@@ -536,9 +596,18 @@ export function ResourceListPage() {
     return buildColumns(ids, { multiCluster: false, metrics: metricsLookup, nodeAllocation });
   }, [columnIds, metricsLookup, nodeAllocation]);
 
+  const signalColumn = useMemo(
+    () => (signalsLookup && behaviorKind && behaviorKind !== 'Event' ? buildColumns([SIGNALS_COLUMN_ID], { multiCluster: false, signals: signalsLookup, signalKind: behaviorKind })[0] : undefined),
+    [signalsLookup, behaviorKind],
+  );
+
   const columns = useMemo(() => {
-    if (!metricColumns.length) return staticColumns;
+    if (!metricColumns.length && !signalColumn) return staticColumns;
     const merged = [...staticColumns];
+    if (signalColumn) {
+      const nameIdx = merged.findIndex((c) => c.field === 'name');
+      merged.splice(nameIdx === -1 ? 0 : nameIdx + 1, 0, signalColumn);
+    }
     for (const col of metricColumns) {
       // Insert before the first following non-metric column present in the
       // merged list, falling back to just before the actions column.
@@ -556,7 +625,7 @@ export function ResourceListPage() {
       merged.splice(insertAt, 0, col);
     }
     return merged;
-  }, [staticColumns, metricColumns, columnIds]);
+  }, [staticColumns, metricColumns, columnIds, signalColumn]);
   const hiddenFields = useMemo(
     () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
     [isCustomKind, printerCols, behaviorKind],
@@ -584,7 +653,6 @@ export function ResourceListPage() {
   }
 
   const multiLogs = kind === 'Pod' && selectedRows.length > 0;
-  const kindPath = `/r/${groupToPath(group)}/${version}/${plural}`;
 
   const openRow = (row: ClusterRow) => {
     // Update immediately so the embedded panel responds in the same render
@@ -597,6 +665,7 @@ export function ResourceListPage() {
     setDetailCollapsed(false);
     const next = new URLSearchParams(searchParams);
     next.delete('field');
+    next.delete('dt');
     next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
     setSearchParams(next);
   };
@@ -627,6 +696,7 @@ export function ResourceListPage() {
   return (
     <Box className="kubus-resource-page" sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <DetailUrlSync sel={sel} />
+      <RememberedFilters kindPath={kindPath} />
       <CreateShortcut onCreate={openCreate} />
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
       <Box sx={{ px: 1.5, pt: 1.5 }}>
@@ -663,6 +733,7 @@ export function ResourceListPage() {
       </Box>
       <ResourceTable
         tableId={kindPath}
+        scrollKey={kindPath}
         rows={list.rows}
         columns={columns}
         loading={Object.values(list.status).some((s) => s.state === 'loading')}
@@ -672,6 +743,7 @@ export function ResourceListPage() {
         labelSelector={labelSelector}
         onFilterChange={(value) => setQueryParam('q', value)}
         onLabelSelectorChange={(value) => setQueryParam('label', value)}
+        onClearFilters={clearFilters}
         onRowClick={openRow}
         onRowActivate={(row) => {
           // Keyboard activation also moves focus into the panel; Escape there

@@ -41,6 +41,7 @@ const fixtures = vi.hoisted(() => ({
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useClusterSignals: () => ({ data: undefined }),
   useApiResourcesForContexts: () => ({ data: { resources: fixtures.resources, byContext: fixtures.byContext, errors: fixtures.discoveryErrors } }),
   useFilteredList: () => ({ rows: fixtures.rows, status: fixtures.status }),
   useResourceMetrics: () => ({ data: fixtures.metrics }),

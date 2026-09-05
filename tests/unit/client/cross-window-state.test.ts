@@ -78,16 +78,42 @@ describe('cross-window state boundaries', () => {
     expect(currentAppWindowContext()).toEqual({
       selected: ['source'],
       namespaces: ['production'],
+      namespacesByContext: { source: ['production'] },
       navCollapsed: false,
     });
 
+    // Namespaces are remembered per cluster: the destination cluster has no
+    // selection of its own yet, so the filter opens up to all namespaces.
     useClustersStore.getState().setSelected(['destination']);
     useUiPrefsStore.getState().set({ navCollapsed: true });
     expect(currentAppWindowContext()).toEqual({
       selected: ['destination'],
-      namespaces: ['production'],
+      namespaces: [],
+      namespacesByContext: {},
       navCollapsed: true,
     });
+    useClustersStore.getState().setSelected(['source']);
+    expect(currentAppWindowContext().namespaces).toEqual(['production']);
+  });
+
+  it('carries each cluster its own namespaces into a new window instead of the union', () => {
+    useClustersStore.setState({ selected: [], namespaces: [], namespacesByContext: {} });
+    useClustersStore.getState().setSelected(['dev', 'prod']);
+    useClustersStore.getState().setNamespaces(['team-a'], ['dev']);
+    useClustersStore.getState().setNamespaces(['payments'], ['prod']);
+    const context = currentAppWindowContext();
+    expect([...context.namespaces].sort()).toEqual(['payments', 'team-a']);
+    expect(context.namespacesByContext).toEqual({ dev: ['team-a'], prod: ['payments'] });
+
+    useClustersStore.getState().setSelected([]);
+    applyAppWindowContext(context);
+    expect(useClustersStore.getState().namespacesByContext).toEqual({ dev: ['team-a'], prod: ['payments'] });
+    useClustersStore.getState().setSelected(['prod']);
+    expect(useClustersStore.getState().namespaces).toEqual(['payments']);
+
+    // A snapshot from an older window only knows the union; every selected cluster gets it.
+    applyAppWindowContext({ selected: ['dev', 'prod'], namespaces: ['shared'], navCollapsed: false });
+    expect(useClustersStore.getState().namespacesByContext).toEqual({ dev: ['shared'], prod: ['shared'] });
   });
 
   it('does not persist window-local fields in app-wide store payloads', () => {

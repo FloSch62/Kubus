@@ -9,6 +9,7 @@ import { statusLikeName } from '../../kube-display.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
 import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
+import { ReferencesSection, UsedBySection } from './UsedBySection.js';
 import { crdVersions } from './CrdDetail.js';
 
 interface StatusRow {
@@ -39,6 +40,7 @@ function normalizeName(name: string): string {
  * Last Change without any per-kind code.
  */
 export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObject; ctx: string; crd: KubeObject; version: string }) {
+  const names = useMemo(() => crdNames(crd), [crd]);
   const rows = useMemo<StatusRow[]>(() => {
     const versions = crdVersions(crd);
     const v = versions.find((entry) => entry.name === version) ?? versions[0];
@@ -80,11 +82,23 @@ export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObje
         </Section>
       )}
       <ConditionsTable obj={obj} />
+      {names && (
+        <>
+          <ReferencesSection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
+          <UsedBySection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
+        </>
+      )}
       <MetadataSection obj={obj} ctx={ctx} />
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
     </Stack>
   );
+}
+
+/** Group, plural and kind of the CRD backing a custom object, for the reverse-link lookup. */
+function crdNames(crd: KubeObject): { group: string; plural: string; kind: string } | undefined {
+  const spec = crd.spec as { group?: string; names?: { plural?: string; kind?: string } } | undefined;
+  return spec?.group && spec.names?.plural && spec.names.kind ? { group: spec.group, plural: spec.names.plural, kind: spec.names.kind } : undefined;
 }
 
 function StatusRowValue({ row }: { row: StatusRow }) {

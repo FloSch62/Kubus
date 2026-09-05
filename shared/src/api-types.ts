@@ -13,7 +13,10 @@ export const EXEC_SESSION_CLOSE_REASON = 'kubus terminal closed';
 /** Per-window working context copied once when a secondary window is created. */
 export interface AppWindowContext {
   selected: string[];
+  /** Effective namespace filter (the union across the selected clusters), kept for older windows. */
   namespaces: string[];
+  /** The namespace filter of each selected cluster; takes precedence over `namespaces` when present. */
+  namespacesByContext?: Record<string, string[]>;
   navCollapsed: boolean;
 }
 
@@ -607,6 +610,73 @@ export interface TlsCertInfo {
 
 export interface SecretTlsResponse {
   certificates: TlsCertInfo[];
+}
+
+// ---- Reverse references ("Used by") ----
+
+/** One object that references the detail's object, with how it does so. */
+export interface UsedByEntry {
+  ref: ResourceRef;
+  /** Short relation word: "mounts", "env", "image pull secret", "routes to", "selects"… */
+  relation: string;
+  /** Where the reference sits (container name, volume name, host/path, rule index). */
+  detail?: string;
+  /** The referenced object does not exist: a dangling reference. */
+  missing?: boolean;
+}
+
+/** Everything one object points at, in the order its fields mention them. */
+export interface ReferencesResponse {
+  items: UsedByEntry[];
+  /** Kinds that could not be consulted (RBAC-denied or not installed). */
+  unavailable: string[];
+  /** Kinds whose objects were still loading when the answer was sent; references for them arrive on a later refresh. */
+  partial?: string[];
+  /** Distinct selector matches omitted by the per-selector cap. */
+  truncated?: number;
+}
+
+export interface UsedByResponse {
+  /** Candidate kinds omitted by the scan cap; these are not being indexed in the background. */
+  skippedKinds?: string[];
+  items: UsedByEntry[];
+  /** Referencing kinds that could not be read (RBAC-denied or not installed). */
+  unavailable: string[];
+  /** Kinds still being indexed for the first time; the answer completes on a later refresh. */
+  partial?: string[];
+  /** Wall-clock cost of the custom-kind scan, so clients poll heavy answers less often. */
+  scanMs?: number;
+  /** Entries dropped past the cap; the listed ones are the most useful subset. */
+  truncated: number;
+}
+
+// ---- Attention signals (warning markers on rows and tabs) ----
+
+/** Recent warning events and restarts for one object, from the cluster's event and pod caches. */
+export interface ObjectSignal {
+  /**
+   * Warning events in the window, one entry per reason. `count` is the number
+   * of event series seen inside the window (an Event's own counter is a
+   * lifetime total, so only its latest occurrence is known to be recent),
+   * `total` the sum of those lifetime counters. `uid` is the involved
+   * object's uid, so a recreated object does not inherit its predecessor's
+   * events.
+   */
+  warnings: Array<{ reason: string; message: string; count: number; total?: number; lastTimestamp?: string; uid?: string }>;
+  /**
+   * Pods only: containers that restarted inside the window. `restarts` counts
+   * the restarts known to fall in the window (a container's status only dates
+   * its last termination, so this is one per container), `total` its
+   * lifetime restart counter.
+   */
+  restarts?: Array<{ container: string; restarts: number; total?: number; reason?: string; finishedAt?: string }>;
+}
+
+export interface ClusterSignals {
+  /** Window the signals cover, in milliseconds. */
+  windowMs: number;
+  /** Keyed by `kind|namespace|name` (namespace empty for cluster-scoped kinds). */
+  objects: Record<string, ObjectSignal>;
 }
 
 // ---- Logs ----

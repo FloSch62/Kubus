@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode, GraphNodeStatus, KubeObject, RelationshipGra
 import type { AppContext } from '../app.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
+import { bestTypedHint, collectMapSelectors, collectMetadataRelationHints, collectRelationHints, hintLabel, selectorMatches, tokens, type RelationHint } from '../kube/relation-hints.js';
 import { sendError } from '../util/errors.js';
 
 interface KindSpec {
@@ -36,12 +37,28 @@ interface Item {
   obj: KubeObject;
 }
 
-interface RelationHint {
-  path: string;
-  value: string;
-  selector?: Record<string, string>;
-  referenceKind?: string;
-  referenceNamespace?: string;
+const GATEWAY_GROUP = 'gateway.networking.k8s.io';
+const GATEWAY_KINDS: Array<{ kind: string; layer: GraphNode['layer'] }> = [
+  { kind: 'Gateway', layer: 'entry' },
+  { kind: 'HTTPRoute', layer: 'route' },
+  { kind: 'GRPCRoute', layer: 'route' },
+  { kind: 'TLSRoute', layer: 'route' },
+  { kind: 'TCPRoute', layer: 'route' },
+  { kind: 'UDPRoute', layer: 'route' },
+];
+
+/**
+ * Gateway API kinds are core Kubernetes networking but ship as CRDs, so they
+ * join the graph only on clusters that serve them (no warnings elsewhere).
+ */
+async function gatewayKindSpecs(handle: ClusterHandle): Promise<KindSpec[]> {
+  const resources = await handle.discovery.getResources().catch(() => [] as ResourceKindInfo[]);
+  const out: KindSpec[] = [];
+  for (const { kind, layer } of GATEWAY_KINDS) {
+    const served = dedupeResourceKinds(resources.filter((r) => r.group === GATEWAY_GROUP && r.kind === kind && r.verbs.includes('list')))[0];
+    if (served) out.push({ group: served.group, version: served.version, plural: served.plural, kind, namespaced: served.namespaced, layer });
+  }
+  return out;
 }
 
 interface FocusQuery {
@@ -136,109 +153,6 @@ function sublabel(kind: string, obj: KubeObject): string | undefined {
   if (kind === 'Node') return (obj.status?.nodeInfo as { kubeletVersion?: string } | undefined)?.kubeletVersion;
   if (obj.metadata.namespace) return obj.metadata.namespace;
   return undefined;
-}
-
-function selectorMatches(selector: Record<string, string> | undefined, labels: Record<string, string> | undefined): boolean {
-  const entries = Object.entries(selector ?? {});
-  return entries.length > 0 && entries.every(([k, v]) => labels?.[k] === v);
-}
-
-const IGNORED_RELATION_TERMS = new Set([
-  'api',
-  'change',
-  'enabled',
-  'generation',
-  'health',
-  'kind',
-  'last',
-  'metadata',
-  'mode',
-  'name',
-  'namespace',
-  'operating',
-  'operational',
-  'protocol',
-  'reason',
-  'resource',
-  'score',
-  'spec',
-  'state',
-  'status',
-  'system',
-  'time',
-  'type',
-  'version',
-]);
-
-const CAMEL_BOUNDARY_RE = /([a-z0-9])([A-Z])/g;
-const ACRONYM_BOUNDARY_RE = /([A-Z]+)([A-Z][a-z])/g;
-const NON_ALPHANUMERIC_RE = /[^a-z0-9]+/;
-
-function tokens(input: string): string[] {
-  const spaced = input
-    .replace(CAMEL_BOUNDARY_RE, '$1 $2')
-    .replace(ACRONYM_BOUNDARY_RE, '$1 $2');
-  return spaced
-    .toLowerCase()
-    .split(NON_ALPHANUMERIC_RE)
-    .filter(Boolean)
-    .map((token) => (token.endsWith('ies') ? `${token.slice(0, -3)}y` : token.endsWith('s') && token.length > 3 ? token.slice(0, -1) : token))
-    .filter((token) => !IGNORED_RELATION_TERMS.has(token));
-}
-
-function parseEqualitySelector(value: string): Record<string, string> | undefined {
-  const out: Record<string, string> = {};
-  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
-  if (!parts.length) return undefined;
-  for (const part of parts) {
-    const eq = part.indexOf('=');
-    if (eq <= 0 || part.includes('!=')) return undefined;
-    const key = part.slice(0, eq).trim();
-    const val = part.slice(eq + 1).trim();
-    if (!key || !val) return undefined;
-    out[key] = val;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-const URL_VALUE_RE = /^https?:\/\//i;
-
-interface RelationContext {
-  referenceKind?: string;
-  referenceNamespace?: string;
-}
-
-function trimmedString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function collectRelationHints(value: unknown, prefix = '', context: RelationContext = {}): RelationHint[] {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed || trimmed.length > 120 || URL_VALUE_RE.test(trimmed)) return [];
-    return [{ path: prefix, value: trimmed, selector: parseEqualitySelector(trimmed), ...context }];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item, i) => collectRelationHints(item, `${prefix}[${i}]`, context));
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const siblingContext = {
-      referenceKind: trimmedString(record.kind),
-      referenceNamespace: trimmedString(record.namespace),
-    };
-    return Object.entries(record).flatMap(([key, item]) => collectRelationHints(item, prefix ? `${prefix}.${key}` : key, siblingContext));
-  }
-  return [];
-}
-
-const ARRAY_INDEX_RE = /\[\d+\]/g;
-
-function hintLabel(path: string): string {
-  const parts = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean);
-  return parts.slice(-2).join('.') || 'ref';
 }
 
 async function listKind(handle: ClusterHandle, spec: KindSpec, namespaces: Set<string> | undefined, warnings: string[]): Promise<Item[]> {
@@ -355,7 +269,7 @@ function scoreCandidateKind(kind: ResourceKindInfo, focusSpec: KindSpec, hintTer
 }
 
 function pickDynamicCandidateSpecs(kinds: ResourceKindInfo[], focusSpec: KindSpec, focusObj: KubeObject): KindSpec[] {
-  const hints = collectRelationHints({ spec: focusObj.spec, status: focusObj.status });
+  const hints = [...collectRelationHints({ spec: focusObj.spec, status: focusObj.status }), ...collectMapSelectors({ spec: focusObj.spec, status: focusObj.status }).map((hint) => ({ ...hint, value: '' }))];
   const hintTerms = new Set(hints.flatMap((hint) => [...tokens(hint.path), ...tokens(hint.referenceKind ?? '')]));
   return dedupeResourceKinds(kinds)
     .flatMap((kind) => {
@@ -373,35 +287,53 @@ async function listFocusedRelatedItems(handle: ClusterHandle, focus: Item, names
   return (await Promise.all(candidates.map((spec) => listKind(handle, spec, namespaces, warnings)))).flat();
 }
 
-function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
-  return [
-    ...Object.entries(obj.metadata.labels ?? {}).map(([key, value]) => ({ path: `metadata.labels.${key}`, value })),
-    ...Object.entries(obj.metadata.annotations ?? {}).map(([key, value]) => ({ path: `metadata.annotations.${key}`, value })),
-  ];
-}
+const MAX_ROUTE_TARGET_FETCHES = 20;
 
-const REFERENCE_CONTEXT_FIELDS = new Set(['apiversion', 'group', 'kind', 'namespace', 'version']);
-
-function canonicalKind(kind: string): string {
-  return kind.toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-function relationPathScore(hint: RelationHint, target: KindSpec): number {
-  const leaf = hint.path.replace(ARRAY_INDEX_RE, '').split('.').at(-1)?.toLowerCase();
-  if (leaf && REFERENCE_CONTEXT_FIELDS.has(leaf)) return 0;
-  const targetTerms = new Set(tokens(`${target.kind} ${target.plural}`));
-  const pathScore = new Set(tokens(hint.path).filter((term) => targetTerms.has(term))).size;
-  if (!hint.referenceKind) return pathScore;
-  return canonicalKind(hint.referenceKind) === canonicalKind(target.kind) ? 100 + pathScore : 0;
-}
-
-function bestTypedHint(hints: RelationHint[], target: KindSpec): RelationHint | undefined {
-  return hints
-    .flatMap((hint) => {
-      const score = relationPathScore(hint, target);
-      return score > 0 ? [{ hint, score }] : [];
-    })
-    .sort((a, b) => b.score - a.score || a.hint.path.length - b.hint.path.length || a.hint.path.localeCompare(b.hint.path))[0]?.hint;
+/**
+ * Routes may name a parent Gateway or a backend Service in another
+ * namespace. A namespace-scoped graph never listed those, so they would be
+ * drawn as missing; fetch the explicitly named ones (bounded) so the edges
+ * land on real nodes.
+ */
+async function fetchRouteTargetsOutsideScope(handle: ClusterHandle, items: Item[], kinds: KindSpec[], warnings: string[]): Promise<Item[]> {
+  const gateway = kinds.find((spec) => spec.group === GATEWAY_GROUP && spec.kind === 'Gateway');
+  const service = kinds.find((spec) => spec.group === '' && spec.kind === 'Service');
+  const present = new Set(items.map((item) => `${item.spec.kind}|${item.obj.metadata.namespace ?? ''}|${item.obj.metadata.name}`));
+  const wanted = new Map<string, { spec: KindSpec; namespace: string; name: string }>();
+  for (const item of items) {
+    if (item.spec.group !== GATEWAY_GROUP || !item.spec.kind.endsWith('Route')) continue;
+    const routeNamespace = item.obj.metadata.namespace ?? '';
+    const spec = item.obj.spec as {
+      parentRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }>;
+      rules?: Array<{ backendRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }> }>;
+    } | undefined;
+    const want = (target: KindSpec | undefined, namespace: string | undefined, name: string | undefined) => {
+      if (!target || !name || !namespace || namespace === routeNamespace) return;
+      const key = `${target.kind}|${namespace}|${name}`;
+      if (!present.has(key) && wanted.size < MAX_ROUTE_TARGET_FETCHES) wanted.set(key, { spec: target, namespace, name });
+    };
+    for (const parent of spec?.parentRefs ?? []) {
+      if ((parent.kind ?? 'Gateway') === 'Gateway' && (parent.group ?? GATEWAY_GROUP) === GATEWAY_GROUP) want(gateway, parent.namespace, parent.name);
+    }
+    for (const rule of spec?.rules ?? []) {
+      for (const backend of rule.backendRefs ?? []) {
+        if ((backend.kind ?? 'Service') === 'Service' && !backend.group) want(service, backend.namespace, backend.name);
+      }
+    }
+  }
+  const fetched = await Promise.all(
+    [...wanted.values()].map(async ({ spec, namespace, name }): Promise<Item[]> => {
+      try {
+        const obj = await handle.raw.json<KubeObject>(resourcePath(spec.group, spec.version, spec.plural, { namespace, name }));
+        return [{ spec, obj }];
+      } catch (err) {
+        // A missing target is still worth a warning edge; anything else is noted.
+        if ((err as { code?: number }).code !== 404) warnings.push(`${spec.kind} ${namespace}/${name}: ${err instanceof Error ? err.message : String(err)}`);
+        return [];
+      }
+    }),
+  );
+  return fetched.flat();
 }
 
 function referenceScopeMatches(source: Item, target: Item, hint?: RelationHint): boolean {
@@ -427,7 +359,7 @@ function inferredRelation(focus: Item, item: Item, focusHints: RelationHint[]): 
   );
   if (directSelector) return { kind: 'selects', label: hintLabel(directSelector.path) };
 
-  const reverseHints = collectRelationHints({ spec: item.obj.spec, status: item.obj.status });
+  const reverseHints = [...collectRelationHints({ spec: item.obj.spec, status: item.obj.status }), ...collectMapSelectors({ spec: item.obj.spec, status: item.obj.status }).map((hint) => ({ ...hint, value: '' }))];
   const reverseName = bestTypedHint(
     reverseHints.filter((hint) => hint.value === focus.obj.metadata.name && referenceScopeMatches(item, focus, hint)),
     focus.spec,
@@ -463,7 +395,7 @@ function addFocusedResourceEdges(edges: GraphEdge[], focus: Item | undefined, no
   if (!focus) return;
   const actualFocusId = [...nodeItems.entries()].find(([, item]) => sameGvr(item.spec, focus.spec) && item.obj.metadata.name === focus.obj.metadata.name && (item.obj.metadata.namespace ?? '') === (focus.obj.metadata.namespace ?? ''))?.[0];
   if (!actualFocusId) return;
-  const focusHints = collectRelationHints({ spec: focus.obj.spec, status: focus.obj.status });
+  const focusHints = [...collectRelationHints({ spec: focus.obj.spec, status: focus.obj.status }), ...collectMapSelectors({ spec: focus.obj.spec, status: focus.obj.status }).map((hint) => ({ ...hint, value: '' }))];
   const focusOwnerUids = new Set((focus.obj.metadata.ownerReferences ?? []).map((owner) => owner.uid));
 
   for (const [id, item] of nodeItems) {
@@ -581,11 +513,14 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const namespaces = query.namespace ? new Set(query.namespace.split(',').map((n) => n.trim()).filter(Boolean)) : undefined;
   const warnings: string[] = [];
   const focusSpec = focusKindSpec(query);
-  const listedItemsPromise = Promise.all(KINDS.map((spec) => listKind(handle, spec, namespaces, warnings)));
-  const focusItems = focusSpec && !KINDS.some((spec) => sameGvr(spec, focusSpec)) ? await getFocusedItem(handle, focusSpec, query, warnings) : [];
+  const gatewayKinds = await gatewayKindSpecs(handle);
+  const staticKinds = [...KINDS, ...gatewayKinds];
+  const listedItemsPromise = Promise.all(staticKinds.map((spec) => listKind(handle, spec, namespaces, warnings)));
+  const focusItems = focusSpec && !staticKinds.some((spec) => sameGvr(spec, focusSpec)) ? await getFocusedItem(handle, focusSpec, query, warnings) : [];
   const dynamicItems = focusItems[0] ? await listFocusedRelatedItems(handle, focusItems[0], namespaces, warnings) : [];
   const listedItems = (await listedItemsPromise).flat();
   const items = [...listedItems, ...focusItems, ...dynamicItems];
+  if (namespaces?.size) items.push(...(await fetchRouteTargetsOutsideScope(handle, items, staticKinds, warnings)));
 
   const nodes = new Map<string, GraphNode>(items.map(({ spec, obj }) => {
     const status = statusFor(spec.kind, obj);
@@ -610,6 +545,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const services: Item[] = [];
   const ingresses: Item[] = [];
   const pvcs: Item[] = [];
+  const routes: Item[] = [];
   for (const item of items) {
     const id = nodeId(handle.contextName, item.spec, item.obj);
     nodeItems.set(id, item);
@@ -620,6 +556,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
     else if (item.spec.kind === 'Service') services.push(item);
     else if (item.spec.kind === 'Ingress') ingresses.push(item);
     else if (item.spec.kind === 'PersistentVolumeClaim') pvcs.push(item);
+    else if (item.spec.group === GATEWAY_GROUP && item.spec.kind.endsWith('Route')) routes.push(item);
   }
 
   const edges: GraphEdge[] = [];
@@ -666,6 +603,36 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
       if (!addEdge(edges, ingId, target, 'routes')) {
         setNodeStatus(nodes, ingId, 'warning', `missing Service/${name}`);
         warnings.push(`Ingress ${ing.obj.metadata.namespace}/${ing.obj.metadata.name} points to missing Service ${name}.`);
+      }
+    }
+  }
+
+  // Gateway API: a Gateway accepts routes (parentRefs) and a route forwards
+  // to Services (backendRefs); both may cross namespaces explicitly.
+  for (const route of routes) {
+    const routeId = nodeId(handle.contextName, route.spec, route.obj);
+    const routeNamespace = route.obj.metadata.namespace ?? '';
+    const spec = route.obj.spec as {
+      parentRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }>;
+      rules?: Array<{ backendRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }> }>;
+    } | undefined;
+    // A parentRef is a Gateway only in the Gateway API group, a backendRef a
+    // core Service only with the core group; other groups are other kinds.
+    for (const parent of spec?.parentRefs ?? []) {
+      if ((parent.kind ?? 'Gateway') !== 'Gateway' || (parent.group ?? GATEWAY_GROUP) !== GATEWAY_GROUP || !parent.name) continue;
+      addEdge(edges, byKindNsName.get(`Gateway|${parent.namespace ?? routeNamespace}|${parent.name}`), routeId, 'routes');
+    }
+    const backends = new Set<string>();
+    for (const rule of spec?.rules ?? []) {
+      for (const backend of rule.backendRefs ?? []) {
+        if ((backend.kind ?? 'Service') === 'Service' && !backend.group && backend.name) backends.add(`${backend.namespace ?? routeNamespace}|${backend.name}`);
+      }
+    }
+    for (const backend of backends) {
+      if (!addEdge(edges, routeId, byKindNsName.get(`Service|${backend}`), 'routes')) {
+        const [, name] = backend.split('|');
+        setNodeStatus(nodes, routeId, 'warning', `missing Service/${name}`);
+        warnings.push(`${route.spec.kind} ${routeNamespace}/${route.obj.metadata.name} points to missing Service ${name}.`);
       }
     }
   }

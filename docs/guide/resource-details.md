@@ -21,7 +21,7 @@ you're on.
 | **Overview** | A kind-aware summary (see below). | Every kind |
 | **Manifest** | The object as a [browsable tree](#the-manifest-tab) or as [YAML](#editing-yaml), editable either way. | Every kind |
 | **Schema** | The CRD's OpenAPI schema, with a picker for the served versions. | CustomResourceDefinitions |
-| **Events** | Events involving this object, newest first, Warnings highlighted. | Every kind |
+| **Events** | Events involving this object, newest first, Warnings highlighted. The tab carries a count of recent warnings before you open it. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
 | **Metrics** | Live CPU/memory [history charts](metrics.md). | Pods, Nodes |
 | **History** | Rollout revisions with images and change-cause, and rollback. | Deployments, StatefulSets |
@@ -51,13 +51,60 @@ collapsible sections hold the rest.
   system info, addresses, capacity and the pods on the node.
 - **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
+- **NetworkPolicies** spell out what the policy does: the pods it applies to, whether it
+  isolates them for ingress or egress, and every rule as readable "from" or "to" peers
+  with their ports. A policy that denies everything says so up top.
+- **PodDisruptionBudgets** show allowed disruptions against healthy and required pods,
+  the covered pods, and a banner when evictions are blocked, which is exactly where a
+  node drain would hang. The drain dialog names such budgets before you start.
+- **ResourceQuotas** show used against hard per resource as bars, exhausted resources
+  first. **LimitRanges** show one table per type with defaults, minimums and maximums.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
   and copyable). The full spec and status live one tab over, in the Manifest tab.
+
+### Links in both directions
+
+Forward links have always been there: a pod's node, a referenced Secret, an owner. The
+overview also answers the other question, *who depends on this*:
+
+- **Used by** on ConfigMaps, Secrets, ServiceAccounts, PersistentVolumeClaims and
+  Volumes, StorageClasses, PriorityClasses, IngressClasses, Roles and ClusterRoles lists
+  every workload, pod, Ingress, route or binding that references the object, and how
+  (mounted as a volume, read into an environment variable, used as an image pull
+  secret, granted by a binding).
+  A Secret that says "mounted by 3 Deployments and a CronJob" before you edit it is the
+  point.
+- **References** and **Used by** on custom resources work without any hand-written
+  matcher. References lists everything the object points at: each field whose name,
+  or whose description in the CRD schema, names an installed kind is resolved to that
+  object, selectors are resolved against labels, and a reference to something that
+  does not exist is shown as not found. Used by is the other direction: the objects
+  that name this one, select it by label, or carry its name in a label. A network
+  operator's node shows the links, interfaces and fabrics built on it; a parent object
+  shows the children the operator tagged with its name.
+- The first Used by lookup of a kind reads it once and keeps a live digest of the
+  fields that can name other objects, so every later lookup, for any object, answers
+  from memory within a fraction of a second. Kinds still being read when the answer
+  is sent say so under the list and fill in on the next refresh.
+- **Routed by** on a Service lists the Ingresses and Gateway API routes that send
+  traffic to it, with their hosts and paths.
+- **Selected by** on a Pod or Deployment lists the Services, autoscalers,
+  PodDisruptionBudgets and NetworkPolicies whose selectors match it.
+- The **namespace** in the drawer header and in Metadata is a link: it opens the
+  namespace's overview (the Overview page filtered to that namespace).
+- Annotation values that are URLs, and bare hosts under link-shaped keys such as
+  `argocd.argoproj.io/url` or a `runbook`, open in a new tab.
+
+Every row in these sections opens the referrer in the drawer, with the usual back stack.
+Long lists get a filter box; the pod lists inside Node, Service and Deployment overviews
+accept the same `/` [smart filter](smart-filters.md) syntax as the list pages.
 
 !!! tip "Navigate and come back"
 
     Click a related object, such as a pod's node or a referenced Secret, and the drawer
     follows it, keeping a **back stack**. Use the back arrow to return to where you were.
+    The tab you were on (Events, Manifest, Metrics) rides along in the page tab's URL,
+    so reopening a closed tab or restarting Kubus brings back the object *and* the tab.
 
 ## The Manifest tab
 

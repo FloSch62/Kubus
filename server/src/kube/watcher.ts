@@ -32,6 +32,18 @@ export interface ResourceWatcherOptions {
   watchHeaders?: Record<string, string>;
   /** HTTP statuses that mark the resource unavailable (stop, no retries). Default: 404. */
   unavailableStatusCodes?: number[];
+  /**
+   * Replace each object before it enters the cache, keeping metadata.uid and
+   * metadata.resourceVersion intact — for caches that only need a digest of
+   * every object rather than the object itself.
+   */
+  project?: (obj: KubeObject) => KubeObject;
+  /**
+   * Serve the initial LIST from the API server's watch cache
+   * (`resourceVersion=0`): one unpaginated response instead of a series of
+   * quorum-read pages. Later relists after a 410 still read from quorum.
+   */
+  listFromWatchCache?: boolean;
 }
 
 /**
@@ -178,13 +190,19 @@ export class ResourceWatcher {
     throw new Error('watcher stopped before its initial list completed');
   }
 
-  private async listInto(target: Map<string, KubeObject>): Promise<string> {
+  private async listInto(target: Map<string, KubeObject>, opts?: { quorum?: boolean }): Promise<string> {
     const query = new URLSearchParams({ limit: '1000' });
+    if (this.options.listFromWatchCache && !opts?.quorum) query.set('resourceVersion', '0');
     let continueToken: string | undefined;
     let rv = '';
     target.clear();
     do {
-      if (continueToken) query.set('continue', continueToken);
+      if (continueToken) {
+        query.set('continue', continueToken);
+        // A continue token pins the list snapshot; the API server rejects it
+        // combined with an explicit resourceVersion.
+        query.delete('resourceVersion');
+      }
       const list = await this.raw.json<{ metadata?: { resourceVersion?: string; continue?: string }; items?: KubeObject[] }>(
         this.path(query),
         this.options.listHeaders ? { headers: this.options.listHeaders } : undefined,
@@ -193,7 +211,8 @@ export class ResourceWatcher {
       continueToken = list.metadata?.continue || undefined;
       for (const item of list.items ?? []) {
         prepare(item, this.group, this.version);
-        target.set(item.metadata.uid, item);
+        const stored = this.options.project ? this.options.project(item) : item;
+        target.set(stored.metadata.uid, stored);
       }
     } while (continueToken);
     this.rv = rv;
@@ -290,12 +309,13 @@ export class ResourceWatcher {
         if (newRv) this.rv = newRv;
         if (event.type === 'BOOKMARK') continue;
         prepare(obj, this.group, this.version);
+        const stored = this.options.project ? this.options.project(obj) : obj;
         if (event.type === 'DELETED') {
-          this.cache.delete(obj.metadata.uid);
+          this.cache.delete(stored.metadata.uid);
         } else {
-          this.cache.set(obj.metadata.uid, obj);
+          this.cache.set(stored.metadata.uid, stored);
         }
-        deltas.push({ type: event.type, object: obj });
+        deltas.push({ type: event.type, object: stored });
       }
       this.emitDeltas(deltas);
     }
@@ -306,7 +326,7 @@ export class ResourceWatcher {
   private async relistAndDiff(): Promise<void> {
     const old = this.cache;
     const fresh = new Map<string, KubeObject>();
-    await this.listInto(fresh);
+    await this.listInto(fresh, { quorum: true });
     const deltas: WatcherDelta[] = [];
     for (const [uid, obj] of fresh) {
       const prev = old.get(uid);

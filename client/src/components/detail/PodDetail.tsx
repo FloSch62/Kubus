@@ -28,6 +28,7 @@ import { usePodEnv, useResourceMetrics, useStopDebug } from '../../api/queries.j
 import { useDetailStore } from '../../state/detail.js';
 import { showToast } from '../../state/toast.js';
 import { useDockStore, dockTabId } from '../../state/dock.js';
+import { UsedBySection } from './UsedBySection.js';
 
 interface Toleration {
   key?: string;
@@ -67,6 +68,8 @@ interface PodStatus {
 }
 
 type RelatedKind = 'Node' | 'ConfigMap' | 'Secret' | 'PersistentVolumeClaim' | 'ServiceAccount';
+
+const SELECTOR_KINDS = ['Service', 'PodDisruptionBudget', 'NetworkPolicy'];
 
 function panelData(
   c: ContainerSpec,
@@ -276,6 +279,15 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         </Facts>
       </Section>
       <VolumesSection spec={spec} onOpenRef={openRelated} />
+      {!terminal && (
+        <UsedBySection
+          target={{ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: obj.metadata.name, namespace }}
+          title="Selected by"
+          kinds={SELECTOR_KINDS}
+          emptyText="No Service, PodDisruptionBudget or NetworkPolicy selects this pod."
+          defaultOpen={false}
+        />
+      )}
       <SchedulingSection spec={spec} />
       {!terminal && <ConditionsTable obj={obj} defaultOpen={false} />}
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />

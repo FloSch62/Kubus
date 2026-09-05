@@ -58,6 +58,8 @@ const FAVORITE_DRAG_TYPE = 'application/x-kubus-favorite';
 const CUSTOM_GROUP_PREFIX = 'custom:';
 const CRD_LIST_PATH = '/r/apiextensions.k8s.io/v1/customresourcedefinitions';
 const FAVORITE_NAVIGATION_STATE = { fromFavorite: true } as const;
+/** Saved-view links carry their own query; the list page must not restore a remembered filter over it. */
+const SAVED_VIEW_NAVIGATION_STATE = { savedView: true } as const;
 
 function isFavoriteNavigation(state: unknown): boolean {
   return !!state && typeof state === 'object' && 'fromFavorite' in state && state.fromFavorite === true;
@@ -368,6 +370,7 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
       <ListItemButton
         component={NavLink}
         to={view.path}
+        state={SAVED_VIEW_NAVIGATION_STATE}
         dense
         selected={active}
         onClick={(e) => {

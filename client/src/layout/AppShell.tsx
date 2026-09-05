@@ -72,8 +72,9 @@ export function AppShell() {
     closeDetail();
     const { pathname, search } = searchRef.current;
     const params = new URLSearchParams(search);
-    if (params.has('sel')) {
+    if (params.has('sel') || params.has('dt')) {
       params.delete('sel');
+      params.delete('dt');
       void navigate({ pathname, search: params.toString() }, { replace: true });
     }
   }, [closeDetail, navigate]);

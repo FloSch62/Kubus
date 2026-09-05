@@ -13,6 +13,8 @@ import { useClustersStore } from '../state/clusters.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { useApiResourcesForContexts } from '../api/queries.js';
 import { tabMeta } from './tab-meta.js';
+import { TabHealthWatchers } from './TabHealthWatcher.js';
+import { useTabAttentionStore } from '../state/tab-attention.js';
 import { TruncationTooltip } from '../components/truncation.js';
 import { TabActionsMenu, type TabMenuState } from '../components/TabActionsMenu.js';
 import { createTabTransferId, finishLocalTabTransfer, receiveTabTransfer, registerTabTransferSource } from '../tab-transfer.js';
@@ -91,6 +93,7 @@ export const TabsBar = memo(function TabsBar() {
   };
 
   const metas = useMemo(() => new Map(tabs.map((t) => [t.id, tabMeta(t.path, apiResources?.resources)])), [tabs, apiResources]);
+  const attention = useTabAttentionStore((s) => s.attention);
   const closeTab = (id: string) => act(() => useTabsStore.getState().closeTab(id));
 
   return (
@@ -263,6 +266,16 @@ export const TabsBar = memo(function TabsBar() {
                   {tab.customTitle ?? meta.title}
                 </Typography>
               </TruncationTooltip>
+              {attention[tab.id] && (
+                <Tooltip title={attention[tab.id]!.reason}>
+                  <Box
+                    component="span"
+                    aria-label={attention[tab.id]!.reason}
+                    className="tab-attention"
+                    sx={{ display: 'block', width: 8, height: 8, borderRadius: '50%', bgcolor: 'warning.main', flexShrink: 0, boxShadow: (theme) => `0 0 0 2px ${theme.palette.background.paper}` }}
+                  />
+                </Tooltip>
+              )}
               <IconButton
                 className="tab-close"
                 size="small"
@@ -290,6 +303,7 @@ export const TabsBar = memo(function TabsBar() {
         </IconButton>
       </Tooltip>
       <Box sx={{ flex: 1 }} onDoubleClick={() => act(() => useTabsStore.getState().openTab('/'))} />
+      <TabHealthWatchers tabs={tabs} activeId={activeId} discovered={apiResources?.resources} />
       <TabActionsMenu menu={menu} onClose={() => setMenu(null)} afterPageMutation={() => act(() => undefined)} />
     </Box>
   );

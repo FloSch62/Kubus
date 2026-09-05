@@ -25,6 +25,12 @@ function getTick(): number {
   return tickCount;
 }
 
+/** Current time on the shared ten-second clock used by relative ages. */
+export function useNow(): number {
+  useSyncExternalStore(subscribeTick, getTick);
+  return Date.now();
+}
+
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;

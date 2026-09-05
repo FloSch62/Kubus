@@ -100,7 +100,7 @@ function NoReleasesOverlay({ hidden, total, helmEngine, onInstall }: { hidden: n
 
 export function HelmPage() {
   const selected = useClustersStore((s) => s.selected);
-  const namespaces = useClustersStore((s) => s.namespaces);
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const releases = useHelmReleases(selected);
   const navigate = useNavigate();
   const [installOpen, setInstallOpen] = useState(false);
@@ -117,9 +117,13 @@ export function HelmPage() {
 
   const scoped = useMemo(() => {
     const all = releases.rows;
-    if (!namespaces.length) return all;
-    return all.filter((r) => namespaceVisible(r.release.namespace, namespaces));
-  }, [releases.rows, namespaces]);
+    if (!Object.values(namespacesByContext).some((list) => list.length > 0)) return all;
+    // Each cluster keeps its own namespace filter.
+    return all.filter((r) => {
+      const namespaces = namespacesByContext[r.ctx] ?? [];
+      return namespaces.length === 0 || namespaceVisible(r.release.namespace, namespaces);
+    });
+  }, [releases.rows, namespacesByContext]);
   const updateItems = useMemo(
     () =>
       scoped.map(({ ctx: rowCtx, release }) => ({

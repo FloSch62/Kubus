@@ -182,6 +182,28 @@ describe('topology graph routes', () => {
     await Promise.all(apps.splice(0).map((instance) => instance.close()));
   });
 
+  it('enforces expressions in structured custom-resource selector edges', async () => {
+    getResources.mockResolvedValue([
+      { group: 'example.io', version: 'v1', plural: 'widgets', kind: 'Widget', namespaced: true, verbs: ['list'], custom: true },
+      { group: 'example.io', version: 'v1', plural: 'routers', kind: 'Router', namespaced: true, verbs: ['list'], custom: true },
+    ]);
+    rawJson.mockImplementation(async (path: string) => {
+      if (path.includes('/widgets/widget-a')) return object('Widget', 'widget-a', 'team-a', {
+        target: { kind: 'Router', group: 'example.io', selector: { matchLabels: { app: 'api' }, matchExpressions: [{ key: 'tier', operator: 'In', values: ['frontend'] }] } },
+      });
+      if (path.includes('/routers')) return { items: ['frontend', 'backend'].map((tier) => object('Router', tier, 'team-a', {}, {}, {
+        metadata: { name: tier, namespace: 'team-a', uid: tier, labels: { app: 'api', tier } },
+      })) };
+      return { items: [] };
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/contexts/dev/graph?focusGroup=example.io&focusVersion=v1&focusPlural=widgets&focusKind=Widget&focusNamespace=team-a&focusName=widget-a&depth=2' });
+    expect(response.statusCode).toBe(200);
+    const graph = response.json();
+    const selected = graph.edges.filter((edge: { kind: string }) => edge.kind === 'selects');
+    expect(selected).toHaveLength(1);
+    expect(graph.nodes.find((node: { id: string }) => node.id === selected[0].target).ref.name).toBe('frontend');
+  });
+
   it('builds ownership, routing, selector, scheduling, mount, and volume relationships', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/contexts/dev/graph' });
     expect(response.statusCode).toBe(200);
@@ -315,6 +337,47 @@ describe('topology graph routes', () => {
     expect(relations(node('ResourcePool'))).toEqual([expect.objectContaining({ kind: 'manages', label: 'spec.targetPools' })]);
     expect(relations(node('HealthMonitor'))).toEqual([expect.objectContaining({ kind: 'manages', label: 'metadata' })]);
     expect(graph.edges.map((edge: { kind: string }) => edge.kind)).toEqual(expect.arrayContaining(['manages', 'selects']));
+  });
+
+  it('fetches Gateway API targets a route names in another namespace when the graph is scoped', async () => {
+    const gvr = { version: 'v1', namespaced: true, verbs: ['list'], custom: true };
+    getResources.mockResolvedValue([
+      { group: 'gateway.networking.k8s.io', plural: 'gateways', kind: 'Gateway', ...gvr },
+      { group: 'gateway.networking.k8s.io', plural: 'httproutes', kind: 'HTTPRoute', ...gvr },
+    ]);
+    const route = object('HTTPRoute', 'shop', 'team-a', {
+      parentRefs: [{ name: 'edge', namespace: 'infra' }, { name: 'local-gw' }],
+      rules: [{ backendRefs: [{ name: 'api', namespace: 'shared' }, { name: 'web' }, { name: 'gone', namespace: 'shared' }] }],
+    });
+    const edge = object('Gateway', 'edge', 'infra');
+    const api = object('Service', 'api', 'shared', { selector: { app: 'api' } });
+    rawJson.mockImplementation(async (path: string) => {
+      const single = /\/namespaces\/([^/]+)\/([^/?]+)\/([^/?]+)$/.exec(path);
+      if (single) {
+        const [, namespace, plural, name] = single;
+        const hit = [edge, api].find((obj) => obj.metadata.namespace === namespace && obj.metadata.name === name && path.includes(`/${plural}/`));
+        if (hit) return hit;
+        throw Object.assign(new Error('not found'), { code: 404 });
+      }
+      if (path.includes('/httproutes')) return { items: [route] };
+      const plural = pluralFromPath(path);
+      return { items: plural ? fixtures[plural]!.filter((obj) => obj.metadata.namespace === 'team-a') : [] };
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/contexts/dev/graph?namespace=team-a' });
+    expect(res.statusCode).toBe(200);
+    const graph = res.json() as { nodes: Array<{ id: string; ref: { kind: string; name: string; namespace?: string } }>; edges: Array<{ source: string; target: string; kind: string }>; warnings: string[] };
+    const node = (kind: string, name: string) => graph.nodes.find((n) => n.ref.kind === kind && n.ref.name === name);
+    expect(node('Gateway', 'edge')?.ref.namespace).toBe('infra');
+    expect(node('Service', 'api')?.ref.namespace).toBe('shared');
+    const routeNode = node('HTTPRoute', 'shop')!;
+    expect(graph.edges.some((e) => e.source === node('Gateway', 'edge')!.id && e.target === routeNode.id && e.kind === 'routes')).toBe(true);
+    expect(graph.edges.some((e) => e.source === routeNode.id && e.target === node('Service', 'api')!.id && e.kind === 'routes')).toBe(true);
+    // Only the targets outside the scope were fetched one by one; the one that does not exist stays a warning.
+    const singles = rawJson.mock.calls.map(([path]) => path as string).filter((path) => /\/namespaces\/[^/]+\/[^/?]+\/[^/?]+$/.test(path));
+    expect(singles.sort()).toEqual(['/api/v1/namespaces/shared/services/api', '/api/v1/namespaces/shared/services/gone', '/apis/gateway.networking.k8s.io/v1/namespaces/infra/gateways/edge']);
+    expect(graph.warnings).toContain('HTTPRoute team-a/shop points to missing Service gone.');
+    expect(graph.warnings.some((w) => w.includes('missing Service api'))).toBe(false);
   });
 
   it('reports missing focused data, list failures, and disconnected contexts', async () => {

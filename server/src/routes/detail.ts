@@ -1,12 +1,14 @@
 import { X509Certificate } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, SecretTlsResponse, TlsCertInfo } from '@kubus/shared';
+import type { KubeObject, LogTargetKind, LogTargetPodsResponse, PodEnvResponse, ReferencesResponse, SecretTlsResponse, TlsCertInfo, UsedByResponse } from '@kubus/shared';
 import type { AppContext } from '../app.js';
 import { podContainers } from '../kube/actions.js';
 import { getRolloutHistory } from '../kube/rollout.js';
 import { resolvePodEnv } from '../kube/pod-env.js';
 import { resourcePath } from '../kube/raw-client.js';
 import { resolveTargetPods } from '../kube/target-pods.js';
+import { computeReferences } from '../kube/references.js';
+import { computeUsedBy, selectableLabels } from '../kube/used-by.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 
 const CERT_BLOCK_RE = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
@@ -29,6 +31,51 @@ function publicKeyAlgorithm(cert: X509Certificate): string | undefined {
 }
 
 export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): void {
+  // Everything that points at one object: builtin kinds from the cached
+  // lists, custom kinds by scanning the CRDs whose schema names the target
+  // kind. The target's own labels ride along so selector-based references
+  // (Services, PDBs, NetworkPolicies, custom node selectors) resolve too.
+  app.get<{ Params: { ctx: string }; Querystring: { group?: string; version?: string; plural?: string; kind?: string; namespace?: string; name?: string } }>(
+    '/api/contexts/:ctx/detail/used-by',
+    async (req, reply) => {
+      try {
+        const { kind, name, namespace, group = '', version, plural } = req.query;
+        if (!kind || !name) throw new HttpProblem(422, 'kind and name are required');
+        const handle = ctx.clusters.get(req.params.ctx);
+        let labels: Record<string, string> | undefined;
+        let uid: string | undefined;
+        if (version && plural) {
+          const obj = await handle.raw.json<KubeObject>(resourcePath(group, version, plural, { namespace: namespace || undefined, name }));
+          labels = selectableLabels(kind, obj) ?? obj.metadata.labels;
+          uid = obj.metadata.uid;
+        }
+        const response: UsedByResponse = await computeUsedBy(handle, { kind, name, namespace: namespace || undefined, labels, group, plural, uid });
+        return response;
+      } catch (err) {
+        sendError(reply, err);
+        return reply;
+      }
+    },
+  );
+
+  // Everything one object points at, resolved to objects that exist (or
+  // flagged as missing), for kinds without a hand-written overview.
+  app.get<{ Params: { ctx: string }; Querystring: { group?: string; version?: string; plural?: string; kind?: string; namespace?: string; name?: string } }>(
+    '/api/contexts/:ctx/detail/references',
+    async (req, reply) => {
+      try {
+        const { kind, name, namespace, group = '', version, plural } = req.query;
+        if (!kind || !name || !version || !plural) throw new HttpProblem(422, 'kind, version, plural and name are required');
+        const handle = ctx.clusters.get(req.params.ctx);
+        const response: ReferencesResponse = await computeReferences(handle, { group, version, plural, kind, name, namespace: namespace || undefined });
+        return response;
+      } catch (err) {
+        sendError(reply, err);
+        return reply;
+      }
+    },
+  );
+
   app.get<{ Params: { ctx: string }; Querystring: { namespace?: string; name?: string; reveal?: string } }>(
     '/api/contexts/:ctx/detail/pod-env',
     async (req, reply) => {

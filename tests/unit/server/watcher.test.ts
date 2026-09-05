@@ -175,6 +175,29 @@ describe('ResourceWatcher', () => {
     expect(watcher.currentState()).toBe('live');
   });
 
+  it('projects objects before caching and can list from the watch cache', async () => {
+    const raw = new FakeRaw();
+    raw.queueList({ metadata: { resourceVersion: '10', continue: 'tok' }, items: [{ ...obj('uid-a', '1', 'a'), spec: { node: 'n1' } }] });
+    raw.queueList({ metadata: { resourceVersion: '11' }, items: [{ ...obj('uid-b', '2', 'b'), spec: { node: 'n2' } }] });
+    const watcher = new ResourceWatcher(raw.asClient(), '', 'v1', 'pods', undefined, makeLog().log, {
+      listFromWatchCache: true,
+      project: (o) => ({ apiVersion: o.apiVersion, kind: o.kind, metadata: o.metadata, node: (o.spec as { node?: string } | undefined)?.node }),
+    });
+    cleanups.push(() => watcher.stop());
+    await watcher.ready();
+    // The first page reads from the watch cache; a continue page must not repeat the resourceVersion pin.
+    expect(raw.jsonCalls).toEqual(['/api/v1/pods?limit=1000&resourceVersion=0', '/api/v1/pods?limit=1000&continue=tok']);
+    expect(watcher.items().map((o) => [o.metadata.uid, o.node, 'spec' in o])).toEqual([
+      ['uid-a', 'n1', false],
+      ['uid-b', 'n2', false],
+    ]);
+    await until(() => raw.streams.length === 1, 'watch stream');
+    raw.streamAt(0).pushEvent({ type: 'MODIFIED', object: { ...obj('uid-a', '3', 'a'), spec: { node: 'n3' } } });
+    await until(() => watcher.items().find((o) => o.metadata.uid === 'uid-a')?.node === 'n3', 'projected update');
+    raw.streamAt(0).pushEvent({ type: 'DELETED', object: obj('uid-b', '4', 'b') });
+    await until(() => watcher.items().length === 1, 'projected delete');
+  });
+
   it('follows continue tokens across list pages', async () => {
     const raw = new FakeRaw();
     raw.queueList({ metadata: { resourceVersion: '10', continue: 'tok' }, items: [obj('uid-a', '1', 'a')] });

@@ -7,7 +7,9 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import type { KubeObject, MetricsSnapshotEntry } from '@kubus/shared';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { MiniFilterInput } from '../MiniFilterInput.js';
+import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../../smart-filter.js';
 import { ReadyCounter } from '../ReadyCounter.js';
 import { StatusChip } from '../StatusChip.js';
 import { UsageMeter } from '../UsageMeter.js';
@@ -16,7 +18,14 @@ import { podRequestTotals, podSummary } from '../../kube-display.js';
 import { useResourceMetrics } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
 
-/** Compact clickable pod table used by Node, Service and Deployment detail views. */
+/** Rows a mini list needs before it grows a filter box. */
+const FILTER_THRESHOLD = 4;
+
+/**
+ * Compact clickable pod table used by Node, Service and Deployment detail
+ * views. Past a handful of rows it grows the same filter the list pages
+ * have: plain text, or `/status:crash restarts>2` smart clauses.
+ */
 export function PodMiniList({
   ctx,
   pods,
@@ -35,6 +44,20 @@ export function PodMiniList({
   hideNamespace?: boolean;
 }) {
   const push = useDetailStore((s) => s.push);
+  const [filter, setFilter] = useState('');
+  const shown = useMemo(() => {
+    const query = filter.trim();
+    if (!query) return pods;
+    const rows = pods.map((obj) => ({ ctx, obj }));
+    if (query.startsWith('/')) {
+      const clauses = parseSmartFilter(query.slice(1));
+      const filterCtx = { kind: 'Pod', nowMs: Date.now() };
+      return rows.filter((r) => matchesSmartFilter(r, clauses, filterCtx)).map((r) => r.obj);
+    }
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return rows.filter((r) => matchesPlainText(r, words, 'Pod')).map((r) => r.obj);
+  }, [pods, filter, ctx]);
+  const showFilter = pods.length >= FILTER_THRESHOLD || !!filter;
   const metricsQuery = useResourceMetrics([ctx], 'pods');
   const usageByPod = useMemo(() => {
     const snap = metricsQuery.data?.get(ctx);
@@ -50,6 +73,11 @@ export function PodMiniList({
           {!loading && ` (${pods.length})`}
         </Typography>
       )}
+      {!loading && showFilter && (
+        <Box sx={{ px: 1.5, pt: 1, pb: 0.5 }}>
+          <MiniFilterInput value={filter} onChange={setFilter} placeholder="Filter pods… / for smart filter" width={260} />
+        </Box>
+      )}
       {loading ? (
         <Box sx={{ p: 1.5 }}>
           <CircularProgress size={18} />
@@ -57,6 +85,10 @@ export function PodMiniList({
       ) : pods.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
           {emptyText ?? 'No pods.'}
+        </Typography>
+      ) : shown.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+          No pods match the filter.
         </Typography>
       ) : (
         <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
@@ -71,7 +103,7 @@ export function PodMiniList({
             </TableRow>
           </TableHead>
           <TableBody>
-            {pods.map((pod) => {
+            {shown.map((pod) => {
               const summary = podSummary(pod);
               const usage = usageByPod?.get(`${pod.metadata.namespace ?? ''}/${pod.metadata.name}`);
               const requests = usage ? podRequestTotals(pod) : undefined;

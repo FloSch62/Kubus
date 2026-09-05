@@ -140,10 +140,12 @@ export function OverviewPage() {
   );
 }
 
+const EMPTY_NAMESPACES: string[] = [];
+
 function ClusterOverviewSection({ ctx }: { ctx: string }) {
-  // The global namespace filter scopes the whole overview: with namespaces
-  // selected in the nav this section becomes the namespace-level view.
-  const namespaces = useClustersStore((s) => s.namespaces);
+  // The namespace filter scopes the whole overview: with namespaces selected
+  // for this cluster in the nav, its section becomes the namespace-level view.
+  const namespaces = useClustersStore((s) => s.namespacesByContext[ctx] ?? EMPTY_NAMESPACES);
 
   return (
     <Box>

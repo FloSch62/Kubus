@@ -5,7 +5,9 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
-import { evalPrinterColumnPath, type KubeObject, type MetricsSnapshot, type PrinterColumn } from '@kubus/shared';
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
+import ReplayRoundedIcon from '@mui/icons-material/ReplayRounded';
+import { evalPrinterColumnPath, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
@@ -19,6 +21,8 @@ import { statusTextColor } from '../theme.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
 export type NodeAllocationLookup = (ctx: string, nodeName: string) => NodeAllocationSummary;
+/** Recent warning events / restarts for an object, keyed like the server's signals map. */
+export type SignalsLookup = (ctx: string, kind: string, namespace: string | undefined, name: string, uid?: string) => ObjectSignal | undefined;
 
 type Col = GridColDef<ClusterRow>;
 
@@ -26,6 +30,9 @@ interface ColumnBuildOptions {
   multiCluster: boolean;
   metrics?: MetricsLookup;
   nodeAllocation?: NodeAllocationLookup;
+  /** Warning markers for the `signals` column; `signalKind` names the rows' kind (list objects carry no `kind`). */
+  signals?: SignalsLookup;
+  signalKind?: string;
   /** Clicking a label chip adds that `key=value` term to the label filter. */
   onLabelClick?: (term: string) => void;
 }
@@ -48,6 +55,9 @@ function obj(row: ClusterRow): KubeObject {
  */
 export const METRIC_COLUMN_IDS = new Set(['cpu', 'memory', 'nodePods', 'nodeCpuUsage', 'nodeMemoryUsage', 'nodeCpuAllocation', 'nodeMemoryAllocation']);
 
+/** Column carrying the warning marker; built with the signals lookup like the metric columns. */
+export const SIGNALS_COLUMN_ID = 'signals';
+
 /** Build DataGrid column definitions from semantic column ids. */
 export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col[] {
   const cols: Col[] = [];
@@ -60,6 +70,21 @@ export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col
 }
 
 const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
+  signals: (opts) => ({
+    field: SIGNALS_COLUMN_ID,
+    headerName: '',
+    description: 'Warning events and restarts in the last hour',
+    width: 34,
+    minWidth: 34,
+    resizable: false,
+    disableColumnMenu: true,
+    hideable: false,
+    align: 'center',
+    type: 'number',
+    // Sorting puts the noisiest objects first.
+    valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name, obj(row).metadata.uid)),
+    renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name, obj(params.row).metadata.uid)} />,
+  }),
   labels: (opts) => ({
     field: 'labels',
     headerName: 'Labels',
@@ -663,6 +688,62 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     },
   }),
 };
+
+function signalWeight(signal: ObjectSignal | undefined): number | null {
+  if (!signal) return null;
+  const warnings = signal.warnings.reduce((sum, w) => sum + w.count, 0);
+  const restarts = (signal.restarts ?? []).reduce((sum, r) => sum + r.restarts, 0);
+  return warnings + restarts || null;
+}
+
+/**
+ * The row marker: an amber triangle for recent warning events, a restart
+ * arrow when only restarts happened. The tooltip carries the reasons, so
+ * the answer to "what is wrong with this one" is a hover, not a click.
+ */
+function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
+  if (!signal || (!signal.warnings.length && !signal.restarts?.length)) return null;
+  const warningTotal = signal.warnings.reduce((sum, w) => sum + w.count, 0);
+  const lines = [
+    ...signal.warnings.slice(0, 4).map((w) => `${w.reason}${w.count > 1 ? ` ×${w.count}` : ''}${w.total && w.total > w.count ? ` (${w.total} in its lifetime)` : ''}: ${w.message.length > 140 ? `${w.message.slice(0, 140)}…` : w.message}`),
+    ...(signal.restarts ?? []).slice(0, 3).map((r) => `${r.container} restarted${r.reason ? ` (${r.reason})` : ''}${r.total && r.total > r.restarts ? `, ${r.total} times in its lifetime` : ''}`),
+  ];
+  const title = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+      <Typography variant="caption" sx={{ fontWeight: 700 }}>
+        {warningTotal ? `${warningTotal} warning event${warningTotal === 1 ? '' : 's'} in the last hour` : 'Restarted in the last hour'}
+      </Typography>
+      {lines.map((line, i) => (
+        <Typography key={i} variant="caption" sx={{ display: 'block', wordBreak: 'break-word' }}>
+          {line}
+        </Typography>
+      ))}
+    </Box>
+  );
+  return (
+    <Tooltip title={title} placement="right">
+      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: statusTextColor('warning'), cursor: 'help' }} aria-label={warningTotal ? 'Recent warning events' : 'Recent restarts'}>
+        {signal.warnings.length ? <WarningAmberRoundedIcon sx={{ fontSize: 16 }} /> : <ReplayRoundedIcon sx={{ fontSize: 16 }} />}
+      </Box>
+    </Tooltip>
+  );
+}
+
+/**
+ * Lookup over the per-context signal maps, keyed exactly like the server
+ * builds them. Given the row's uid, warnings recorded against an earlier
+ * object of the same name (a recreated StatefulSet pod) are left out.
+ */
+export function makeSignalsLookup(signals: Map<string, ClusterSignals> | undefined): SignalsLookup | undefined {
+  if (!signals || signals.size === 0) return undefined;
+  return (ctx, kind, namespace, name, uid) => {
+    const signal = signals.get(ctx)?.objects[`${kind}|${namespace ?? ''}|${name}`];
+    if (!signal || !uid) return signal;
+    const warnings = signal.warnings.filter((w) => !w.uid || w.uid === uid);
+    if (warnings.length === signal.warnings.length) return signal;
+    return warnings.length || signal.restarts?.length ? { ...signal, warnings } : undefined;
+  };
+}
 
 const EMPTY_NODE_ALLOCATION: NodeAllocationSummary = {
   podCount: 0,

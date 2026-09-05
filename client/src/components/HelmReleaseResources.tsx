@@ -11,7 +11,9 @@ import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { useMemo, useState } from 'react';
 import { gvkForResource, type HelmReleaseResource } from '@kubus/shared';
+import { MiniFilterInput, matchesMiniFilter } from './MiniFilterInput.js';
 import { useHelmReleaseResources } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
 import { AgeCell } from './AgeCell.js';
@@ -62,6 +64,8 @@ function resourceStatus(resource: HelmReleaseResource): { status: string; label:
   }
 }
 
+const EMPTY_RESOURCES: HelmReleaseResource[] = [];
+
 function openable(resource: HelmReleaseResource): boolean {
   return !!resource.plural && resource.state !== 'missing' && resource.state !== 'unknown';
 }
@@ -74,8 +78,13 @@ function openable(resource: HelmReleaseResource): boolean {
 export function HelmReleaseResources({ ctx, ns, name, active }: { ctx: string; ns: string; name: string; active: boolean }) {
   const query = useHelmReleaseResources(ctx, ns, name, { active });
   const push = useDetailStore((s) => s.push);
-  const resources = query.data ?? [];
+  const resources = query.data ?? EMPTY_RESOURCES;
   const summary = helmResourceSummary(query.data);
+  const [filter, setFilter] = useState('');
+  const shown = useMemo(
+    () => resources.filter((r) => matchesMiniFilter(filter, [r.kind, r.name, r.namespace ?? '', r.state, resourceStatus(r).label])),
+    [resources, filter],
+  );
 
   return (
     <Box>
@@ -84,6 +93,7 @@ export function HelmReleaseResources({ ctx, ns, name, active }: { ctx: string; n
           {query.data ? `${helmResourceSummaryText(summary)}${summary.hooks ? `, ${summary.hooks} hook${summary.hooks === 1 ? '' : 's'}` : ''}` : 'Resolving the manifest against the cluster…'}
         </Typography>
         <Box sx={{ flex: 1 }} />
+        {resources.length > 3 && <MiniFilterInput value={filter} onChange={setFilter} placeholder="Filter resources" width={200} />}
         {query.dataUpdatedAt ? (
           <Typography variant="caption" color="text.secondary">
             checked <AgeCell timestamp={new Date(query.dataUpdatedAt).toISOString()} variant="caption" /> ago
@@ -107,7 +117,12 @@ export function HelmReleaseResources({ ctx, ns, name, active }: { ctx: string; n
           This revision renders no Kubernetes objects.
         </Typography>
       ) : null}
-      {resources.length > 0 ? (
+      {resources.length > 0 && shown.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ px: 2, pb: 2 }}>
+          No resources match the filter.
+        </Typography>
+      ) : null}
+      {shown.length > 0 ? (
         <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
           <TableHead>
             <TableRow>
@@ -119,7 +134,7 @@ export function HelmReleaseResources({ ctx, ns, name, active }: { ctx: string; n
             </TableRow>
           </TableHead>
           <TableBody>
-            {resources.map((resource) => {
+            {shown.map((resource) => {
               const status = resourceStatus(resource);
               const clickable = openable(resource);
               return (

@@ -8,6 +8,7 @@ import { useUiStore } from './state/ui.js';
 import { useTabsStore } from './state/tabs.js';
 import { useDockStore, type DockTab } from './state/dock.js';
 import { useDetailStore } from './state/detail.js';
+import { registerAppNavigate } from './app-navigate.js';
 
 /** How long a pending `g` waits for its second key (the which-key panel shows meanwhile). */
 export const GO_TIMEOUT_MS = 3000;
@@ -165,6 +166,11 @@ export function GlobalShortcuts() {
   const navigate = useNavigate();
   const navRef = useRef(navigate);
   navRef.current = navigate;
+  // Helpers outside the router (store actions, dock windows) navigate through this.
+  useEffect(() => {
+    registerAppNavigate(navigate);
+    return () => registerAppNavigate(undefined);
+  }, [navigate]);
 
   useEffect(() => {
     // Where focus should return when Cmd/Ctrl+J hides the terminal. Kept
@@ -292,6 +298,7 @@ export function GlobalShortcuts() {
         if (e.key === ',' && !isTextEntryTarget(e.target)) {
           e.preventDefault();
           useUiStore.getState().setSettingsOpen(true);
+          return;
         }
         return;
       }
@@ -405,8 +412,9 @@ export function GlobalShortcuts() {
           // Drop the ?sel deep link so the tab doesn't reopen the selection.
           const { pathname, search } = window.location;
           const params = new URLSearchParams(search);
-          if (params.has('sel')) {
+          if (params.has('sel') || params.has('dt')) {
             params.delete('sel');
+            params.delete('dt');
             void navRef.current({ pathname, search: params.toString() }, { replace: true });
           }
           // Hand focus to the visible list's grid so arrow keys keep working.

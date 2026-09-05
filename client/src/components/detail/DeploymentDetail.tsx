@@ -26,6 +26,8 @@ import { ReplicaBar } from './ReplicaBar.js';
 import { CountPill, DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
 import { gvkForKind } from '@kubus/shared';
+import { UsedBySection } from './UsedBySection.js';
+import { quotaLinksFor } from './quota-link.js';
 
 interface LabelSelector {
   matchLabels?: Record<string, string>;
@@ -77,6 +79,8 @@ function ownedBy(obj: KubeObject, uid: string | undefined): boolean {
 function revisionOf(rs: KubeObject): number {
   return Number(rs.metadata.annotations?.['deployment.kubernetes.io/revision'] ?? 0);
 }
+
+const SELECTOR_KINDS = ['Service', 'HorizontalPodAutoscaler', 'PodDisruptionBudget', 'NetworkPolicy'];
 
 // ReplicaFailure=True is the only bad-when-true Deployment condition.
 const deploymentGoodWhen = (type: string): 'True' | 'False' => (type === 'ReplicaFailure' ? 'False' : 'True');
@@ -290,7 +294,12 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
   const conditions = dstatus?.conditions ?? [];
   const desired = spec?.replicas ?? dstatus?.replicas ?? 0;
   const ready = dstatus?.readyReplicas ?? 0;
-  const problems = useMemo(() => (desired > 0 && ready < desired ? rolloutProblems(dstatus, pods) : []), [desired, ready, dstatus, pods]);
+  // "exceeded quota: <name>" in a ReplicaFailure message names the quota that
+  // is holding the rollout — link straight to it.
+  const problems = useMemo(
+    () => (desired > 0 && ready < desired ? rolloutProblems(dstatus, pods).map((item) => ({ ...item, links: quotaLinksFor(item.message, namespace, (quota) => push(quota(ctx))) })) : []),
+    [desired, ready, dstatus, pods, namespace, ctx, push],
+  );
   const readyTone = desired === 0 ? undefined : ready >= desired ? 'success' : ready === 0 ? 'error' : 'warning';
   // Old ReplicaSets scaled to zero are history (the History tab has them
   // with images and rollback); the overview shows what holds pods now.
@@ -387,6 +396,13 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
           </Table>
         </Section>
       )}
+      <UsedBySection
+        target={{ ctx, group: 'apps', version: 'v1', plural: 'deployments', kind: 'Deployment', name: obj.metadata.name, namespace }}
+        title="Selected by"
+        kinds={SELECTOR_KINDS}
+        emptyText="No Service, autoscaler, PodDisruptionBudget or NetworkPolicy selects this Deployment's pods."
+        defaultOpen={false}
+      />
       <Section title="Details">
         <Facts>
           <Fact label="Selector" mono>

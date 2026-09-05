@@ -22,6 +22,7 @@ import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
 import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
+import { ReferenceIndex } from './reference-index.js';
 import { ResourceSearchIndex } from './search-index.js';
 import { CrdTracker } from './crd-tracker.js';
 import { HelmRecordWatcher } from '../helm/record-watcher.js';
@@ -47,6 +48,7 @@ export class ClusterHandle {
   readonly metricsPoller: MetricsPoller;
   readonly networkPoller: NetworkMetricsPoller;
   readonly searchIndex: ResourceSearchIndex;
+  readonly referenceIndex: ReferenceIndex;
   readonly crdTracker: CrdTracker;
   readonly helmRecords: HelmRecordWatcher;
   health: ContextInfo['health'] = 'connecting';
@@ -82,6 +84,7 @@ export class ClusterHandle {
     this.networkPoller = new NetworkMetricsPoller(this.raw, this.watchers, log);
     this.networkPoller.handle = this;
     this.searchIndex = new ResourceSearchIndex(this.discovery, this.raw, log);
+    this.referenceIndex = new ReferenceIndex(this.raw, log);
     this.crdTracker = new CrdTracker(this.raw, log, () => {
       this.discovery.invalidate();
       this.searchIndex.onCrdChange();
@@ -165,6 +168,7 @@ export class ClusterHandle {
     this.helmRecords.stop();
     this.watchers.stopAll();
     this.searchIndex.dispose();
+    this.referenceIndex.stopAll();
     this.raw.dispose();
   }
 }
@@ -367,6 +371,7 @@ export class ClusterManager extends EventEmitter {
       };
     });
   }
+
 
   /** Decoded CA certificate PEM for a context's cluster, or null if none. */
   getClusterCa(contextName: string): string | null {

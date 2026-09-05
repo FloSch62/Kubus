@@ -2,13 +2,46 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hashKey, keepPreviousData, queryOptions, useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { usePaneActive } from '../layout/pane-context.js';
 import type {
+  AppInfo,
+  AuditReport,
   ClusterMetricsSummary,
+  ClusterNetworkSummary,
   ClusterOverview,
+  ClusterSignals,
   ContextInfo,
+  CordonRequest,
+  DebugImagePreset,
+  DebugPodRequest,
+  DebugPodResponse,
+  DrainRequest,
+  DrainStartedResponse,
+  EditClusterRequest,
+  HelmChartDetail,
+  HelmChartHit,
+  HelmChartSourceRef,
+  HelmChartSummary,
+  HelmChartUpdate,
+  HelmChartVersion,
+  HelmDryRunResult,
+  HelmHubChart,
+  HelmInstallRequest,
+  HelmOperation,
+  HelmOperationStarted,
   HelmReleaseDetail,
+  HelmReleaseResource,
   HelmReleaseSummary,
+  HelmRepo,
   HelmRevision,
+  HelmUninstallResult,
+  HelmUpdateCheck,
+  HelmUpgradeRequest,
+  HelmWatchStatus,
   KubeObject,
+  KubeconfigImportRequest,
+  KubeconfigImportResponse,
+  KubeconfigSettings,
+  ListResponse,
+  LocalPortCheckResponse,
   LogTargetKind,
   LogTargetPodsResponse,
   MetricsHistoryResponse,
@@ -18,68 +51,38 @@ import type {
   MetricsServerUninstallResult,
   MetricsSnapshot,
   NamespaceOverview,
-  OperatorRollup,
-  OverviewCertificates,
-  PodResourcesResponse,
-  ClusterNetworkSummary,
   NetworkAgentInstallResult,
   NetworkAgentStatus,
   NetworkAgentUninstallResult,
-  LocalPortCheckResponse,
+  OperatorRollup,
+  OverviewCertificates,
+  PodEnvResponse,
+  PodResourcesResponse,
   PortForwardInfo,
   PortForwardPreflightResponse,
   PortForwardRequest,
-  ResourceKindInfo,
-  WatchStatusState,
-  ListResponse,
+  PrinterColumn,
+  ReferencesResponse,
   RelationshipGraph,
-  PodEnvResponse,
+  RerunJobRequest,
   ResourceDryRunResponse,
-  SecretTlsResponse,
+  ResourceKindInfo,
+  RolloutPauseRequest,
+  RolloutRestartRequest,
+  RolloutRevision,
+  RolloutUndoRequest,
   ScaleRequest,
   SearchResult,
-  RolloutRestartRequest,
-  CordonRequest,
-  DrainRequest,
-  DrainStartedResponse,
+  SecretTlsResponse,
   SetImageRequest,
-  SuspendCronJobRequest,
-  RerunJobRequest,
-  RolloutUndoRequest,
-  RolloutPauseRequest,
-  RolloutRevision,
-  DebugPodRequest,
-  DebugPodResponse,
-  DebugImagePreset,
-  StopDebugRequest,
-  HelmRepo,
-  HelmChartSummary,
-  HelmChartVersion,
-  HelmChartDetail,
-  HelmChartHit,
-  HelmChartSourceRef,
-  HelmChartUpdate,
-  HelmReleaseResource,
-  HelmUpdateCheck,
-  HelmWatchStatus,
-  HelmHubChart,
-  HelmInstallRequest,
-  HelmUpgradeRequest,
-  HelmDryRunResult,
-  HelmOperation,
-  HelmOperationStarted,
-  HelmUninstallResult,
-  AppInfo,
-  PrinterColumn,
-  AuditReport,
-  KubeconfigSettings,
   SetKubeconfigRequest,
-  KubeconfigImportRequest,
-  KubeconfigImportResponse,
-  EditClusterRequest,
   SetSshHostRequest,
   SshInfoResponse,
+  StopDebugRequest,
+  SuspendCronJobRequest,
   TestConnectionResponse,
+  UsedByResponse,
+  WatchStatusState,
 } from '@kubus/shared';
 import { groupToPath } from '@kubus/shared';
 import { apiFetch } from './http.js';
@@ -469,14 +472,17 @@ export function useWatchedList(contexts: string[], group: string, version: strin
 /** Convenience: watched list filtered to the selected namespaces, or server-filtered when selectors are set. */
 export function useFilteredList(group: string, version: string, plural: string, namespaced: boolean, filters?: ResourceListFilters): WatchedListState {
   const selected = useClustersStore((s) => s.selected);
-  const namespaces = useClustersStore((s) => s.namespaces);
+  // Each cluster filters by its own namespaces: dev on team-a and prod on
+  // payments must not show each other's namespaces just because both are open.
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const list = useWatchedList(selected, group, version, plural);
   const hasSelectors = !!filters?.labelSelector?.trim();
   const selectorList = useQuery({
-    queryKey: ['selector-list', selected, namespaces, group, version, plural, filters],
+    queryKey: ['selector-list', selected, namespacesByContext, group, version, plural, filters],
     queryFn: async () => {
       const batches = await Promise.all(
         selected.map(async (ctx) => {
+          const namespaces = namespacesByContext[ctx] ?? [];
           const nsTargets = namespaced && namespaces.length ? namespaces : [undefined];
           const perNs = await Promise.all(
             nsTargets.map(async (namespace) => {
@@ -498,10 +504,13 @@ export function useFilteredList(group: string, version: string, plural: string, 
   });
 
   const watchedRows = useMemo(() => {
-    if (!namespaced || namespaces.length === 0) return list.rows;
-    const set = new Set(namespaces);
-    return list.rows.filter((r) => set.has(r.obj.metadata.namespace ?? ''));
-  }, [list.rows, namespaces, namespaced]);
+    if (!namespaced || !selected.some((ctx) => namespacesByContext[ctx]?.length)) return list.rows;
+    const sets = new Map(selected.map((ctx) => [ctx, new Set(namespacesByContext[ctx] ?? [])]));
+    return list.rows.filter((r) => {
+      const set = sets.get(r.ctx);
+      return !set?.size || set.has(r.obj.metadata.namespace ?? '');
+    });
+  }, [list.rows, namespacesByContext, namespaced, selected]);
   if (hasSelectors) {
     const state = selectorList.isLoading ? 'loading' : selectorList.error ? 'error' : 'live';
     return {
@@ -522,8 +531,22 @@ export function resourceUrl(ctx: string, group: string, version: string, plural:
   return `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(group)}/${version}/${plural}/${encodeURIComponent(name)}${q ? `?${q}` : ''}`;
 }
 
+/**
+ * Objects off the watch stream come from the server's list cache, which
+ * carries no `kind` (and no `apiVersion` when the API server omits it from
+ * list items). Views that write the object back need both, so the mirror
+ * restores them from the selection before the object reaches the query.
+ */
+export function withIdentity(obj: KubeObject, sel: { group: string; version: string; kind?: string }): KubeObject {
+  if (obj.apiVersion && obj.kind) return obj;
+  const apiVersion = obj.apiVersion ?? (sel.group ? `${sel.group}/${sel.version}` : sel.version);
+  const kind = obj.kind ?? sel.kind;
+  // Identity first, as the API server orders it, so a YAML dump reads naturally.
+  return kind ? { apiVersion, kind, ...obj } : { apiVersion, ...obj };
+}
+
 export function useResource(
-  sel: { ctx: string; group: string; version: string; plural: string; name: string; namespace?: string; reveal?: boolean } | undefined,
+  sel: { ctx: string; group: string; version: string; plural: string; kind?: string; name: string; namespace?: string; reveal?: boolean } | undefined,
   opts?: { liveMs?: number; watch?: boolean },
 ) {
   const interval = useRefetchInterval(opts?.liveMs ?? 0);
@@ -550,7 +573,7 @@ export function useResource(
       {
         onSnapshot: (items) => {
           const obj = items.find(matches);
-          if (obj) qc.setQueryData(queryKey, obj);
+          if (obj) qc.setQueryData(queryKey, withIdentity(obj, watched));
           // Absent from a full snapshot (deleted while the watch was down):
           // re-fetch so the 404 marks the query gone, keeping the data.
           else if (qc.getQueryData(queryKey)) void qc.invalidateQueries({ queryKey });
@@ -561,7 +584,7 @@ export function useResource(
             // DELETED keeps the terminal object on screen for post-mortem;
             // the follow-up fetch's 404 tells views the resource is gone
             // (an error a later setQueryData clears if the name comes back).
-            qc.setQueryData(queryKey, ev.object);
+            qc.setQueryData(queryKey, withIdentity(ev.object, watched));
             if (ev.type === 'DELETED') void qc.invalidateQueries({ queryKey });
           }
         },
@@ -640,6 +663,76 @@ export function useResourceEvents(sel: { ctx: string; name: string; kind?: strin
 }
 
 // ---- Detail views ----
+
+/** Everything in the cluster that references the object (reverse links). */
+export function useUsedBy(sel: { ctx: string; group: string; version: string; plural: string; kind: string; name: string; namespace?: string } | undefined) {
+  const base = useRefetchInterval(30_000);
+  return useQuery({
+    queryKey: ['used-by', sel],
+    queryFn: () => {
+      const params = new URLSearchParams({ group: sel!.group, version: sel!.version, plural: sel!.plural, kind: sel!.kind, name: sel!.name });
+      if (sel!.namespace) params.set('namespace', sel!.namespace);
+      return apiFetch<UsedByResponse>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/detail/used-by?${params}`);
+    },
+    enabled: !!sel,
+    retry: false,
+    // An answer still waiting on a kind's first index build completes within
+    // seconds, so poll it briskly; a complete one refreshes on the normal
+    // cadence, stretched for answers that cost the server real time.
+    refetchInterval: base === false ? false : (query) => (query.state.data?.partial?.length ? 3_000 : Math.max(base, (query.state.data?.scanMs ?? 0) * 10)),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Everything one object points at, resolved to objects that exist. */
+export function useReferences(sel: { ctx: string; group: string; version: string; plural: string; kind: string; name: string; namespace?: string } | undefined) {
+  const base = useRefetchInterval(30_000);
+  return useQuery({
+    queryKey: ['references', sel],
+    queryFn: () => {
+      const params = new URLSearchParams({ group: sel!.group, version: sel!.version, plural: sel!.plural, kind: sel!.kind, name: sel!.name });
+      if (sel!.namespace) params.set('namespace', sel!.namespace);
+      return apiFetch<ReferencesResponse>(`/api/contexts/${encodeURIComponent(sel!.ctx)}/detail/references?${params}`);
+    },
+    enabled: !!sel,
+    retry: false,
+    // Selector rows for a kind still loading arrive within seconds; poll for them briskly.
+    refetchInterval: base === false ? false : (query) => (query.state.data?.partial?.length ? 3_000 : base),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Per-object warning events and restarts for the selected clusters — the
+ * marker data behind list rows and page tabs. One cache entry per context so
+ * every list page and the tab strip share a single poll loop per cluster.
+ */
+export function useClusterSignals(contexts: string[]) {
+  const interval = useRefetchInterval(15_000);
+  const contextsKey = contexts.join('\n');
+  const queries = useMemo(
+    () =>
+      (contextsKey ? contextsKey.split('\n') : []).map((ctx) => ({
+        queryKey: ['cluster-signals', ctx] as const,
+        queryFn: () => apiFetch<ClusterSignals>(`/api/contexts/${encodeURIComponent(ctx)}/overview/signals`).catch(() => ({ windowMs: 0, objects: {} }) as ClusterSignals),
+        refetchInterval: interval,
+      })),
+    [contextsKey, interval],
+  );
+  const combine = useCallback(
+    (results: Array<{ data?: ClusterSignals }>) => {
+      const ctxs = contextsKey ? contextsKey.split('\n') : [];
+      if (!ctxs.length) return { data: undefined as Map<string, ClusterSignals> | undefined };
+      const data = new Map<string, ClusterSignals>();
+      results.forEach((result, i) => {
+        if (result.data) data.set(ctxs[i]!, result.data);
+      });
+      return { data };
+    },
+    [contextsKey],
+  );
+  return useQueries({ queries, combine });
+}
 
 export function usePodEnv(sel: { ctx: string; namespace: string; name: string; reveal?: boolean } | undefined) {
   return useQuery({
@@ -1153,24 +1246,34 @@ export interface TopologyFocus {
  * Shared between useTopologyGraphs and the prefetch in TopologyGraph, which
  * starts this fetch while the heavy graph chunk is still downloading.
  */
-export function topologyGraphsOptions(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+/** Namespace scope for the topology: one list for every context, or one list per context. */
+export type TopologyNamespaces = string[] | Record<string, string[]>;
+
+function topologyNamespacesFor(namespaces: TopologyNamespaces, ctx: string): string[] {
+  return Array.isArray(namespaces) ? namespaces : (namespaces[ctx] ?? []);
+}
+
+export function topologyGraphsOptions(contexts: string[], namespaces: TopologyNamespaces, focus?: TopologyFocus) {
   return queryOptions({
     queryKey: ['topology-graphs', contexts, namespaces, focus],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (namespaces.length) params.set('namespace', namespaces.join(','));
-      if (focus) {
-        params.set('focusGroup', focus.group);
-        params.set('focusVersion', focus.version);
-        params.set('focusPlural', focus.plural);
-        params.set('focusKind', focus.kind);
-        params.set('focusName', focus.name);
-        params.set('focusNamespace', focus.namespace ?? '');
-        params.set('depth', String(focus.depth ?? 2));
-      }
-      const q = params.toString();
       const graphs = await Promise.all(
-        contexts.map((ctx) => apiFetch<RelationshipGraph>(`/api/contexts/${encodeURIComponent(ctx)}/graph${q ? `?${q}` : ''}`).catch((err) => ({ ctx, nodes: [], edges: [], warnings: [err instanceof Error ? err.message : String(err)] }) as RelationshipGraph)),
+        contexts.map((ctx) => {
+          const params = new URLSearchParams();
+          const scope = topologyNamespacesFor(namespaces, ctx);
+          if (scope.length) params.set('namespace', scope.join(','));
+          if (focus) {
+            params.set('focusGroup', focus.group);
+            params.set('focusVersion', focus.version);
+            params.set('focusPlural', focus.plural);
+            params.set('focusKind', focus.kind);
+            params.set('focusName', focus.name);
+            params.set('focusNamespace', focus.namespace ?? '');
+            params.set('depth', String(focus.depth ?? 2));
+          }
+          const q = params.toString();
+          return apiFetch<RelationshipGraph>(`/api/contexts/${encodeURIComponent(ctx)}/graph${q ? `?${q}` : ''}`).catch((err) => ({ ctx, nodes: [], edges: [], warnings: [err instanceof Error ? err.message : String(err)] }) as RelationshipGraph);
+        }),
       );
       return graphs;
     },
@@ -1178,7 +1281,7 @@ export function topologyGraphsOptions(contexts: string[], namespaces: string[], 
   });
 }
 
-export function useTopologyGraphs(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+export function useTopologyGraphs(contexts: string[], namespaces: TopologyNamespaces, focus?: TopologyFocus) {
   return useQuery({
     ...topologyGraphsOptions(contexts, namespaces, focus),
     enabled: contexts.length > 0,

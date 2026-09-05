@@ -196,6 +196,11 @@ function statusText(kind: string, obj: KubeObject): string {
 
 const UNHEALTHY_STATUSES = new Set(['failed', 'notready', 'pending', 'lost', 'released']);
 
+/** The `status:healthy` predicate, shared with the page-tab attention dot. */
+export function isResourceHealthy(kind: string, obj: KubeObject): boolean {
+  return isHealthy(kind, obj);
+}
+
 function isHealthy(kind: string, obj: KubeObject): boolean {
   if (kind === 'Pod') {
     const s = podSummary(obj);

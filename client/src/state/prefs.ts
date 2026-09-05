@@ -47,7 +47,15 @@ interface UiPrefsState {
   sortModels: Record<string, TableSortModel>;
   /** Manifest tab: the object as a tree or as YAML text. */
   manifestView: ManifestViewMode;
+  /**
+   * Where each resource list was left: its filter and scroll position, keyed
+   * by list path. Opening the kind from the nav restores them, so coming back
+   * to Pods lands on the same view you left — the filter never resets behind
+   * your back. A cleared filter clears the memory.
+   */
+  listState: Record<string, ListMemory>;
   set: (patch: Partial<Omit<UiPrefsState, 'set'>>) => void;
+  setListState: (tableId: string, patch: Partial<ListMemory>) => void;
   setColumnWidth: (tableId: string, field: string, width: number) => void;
   setColumnVisibility: (tableId: string, model: Record<string, boolean>) => void;
   setSortModel: (tableId: string, model: TableSortModel) => void;
@@ -60,6 +68,14 @@ interface UiPrefsState {
 
 export type TableSortModel = ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
 export type ManifestViewMode = 'tree' | 'yaml';
+
+export interface ListMemory {
+  /** Text / smart filter (`q`). */
+  q?: string;
+  /** Label selector (`label`). */
+  label?: string;
+  scrollTop?: number;
+}
 
 const sessionStateStorage: StateStorage = {
   getItem: (name) => sessionStorage.getItem(name),
@@ -120,7 +136,17 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       columnVisibility: {},
       sortModels: {},
       manifestView: 'tree',
+      listState: {},
       set: (patch) => set(patch),
+      setListState: (tableId, patch) =>
+        set((state) => {
+          const next = { ...state.listState[tableId], ...patch };
+          for (const key of Object.keys(next) as Array<keyof ListMemory>) if (next[key] === undefined || next[key] === '') delete next[key];
+          const listState = { ...state.listState };
+          if (Object.keys(next).length) listState[tableId] = next;
+          else delete listState[tableId];
+          return { listState };
+        }),
       setColumnWidth: (tableId, field, width) =>
         set((state) => ({
           columnWidths: { ...state.columnWidths, [tableId]: { ...state.columnWidths[tableId], [field]: width } },
@@ -161,6 +187,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
         columnVisibility: state.columnVisibility,
         sortModels: state.sortModels,
         manifestView: state.manifestView,
+        listState: state.listState,
       }),
       merge: (persisted, current) => ({
         ...current,
