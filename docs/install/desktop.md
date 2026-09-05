@@ -75,9 +75,21 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 ## Updating
 
-Download the newer installer and install over the top. Desktop state is stored in
-`kubus/desktop` under your platform’s application configuration directory and survives updates. There's no telemetry and no auto-updater phoning
-home.
+Installed macOS, Windows, and Linux archive builds check GitHub for a newer release
+at startup and every six hours. These requests fetch release metadata; Kubus has
+no telemetry and does not send your kubeconfig or cluster data with update checks.
+
+Open **Settings → About → Updates** to check manually. When an update is available,
+choose **Download update**, then **Restart and install** when ready. Restarting
+closes active terminals and port forwards. Downloads and installation require
+your action.
+
+Debian packages use manual updates: download the newer `.deb` and install it with
+`sudo apt install ./kubus-<version>-linux-x64.deb`. In-app updates are disabled for
+these installations and for development builds.
+
+Desktop state is stored in `kubus/desktop` under your platform’s application
+configuration directory and survives updates.
 
 On the first launch after upgrading from Electron, Kubus imports tabs, favorites,
 theme, and UI preferences from the previous `Kubus/client-state.json` when no state

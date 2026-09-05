@@ -40,6 +40,7 @@ const native = vi.hoisted(() => {
     requestClose() { this.handlers.get('will-close')?.(); this.handlers.get('close')?.(); }
     getPageZoom() { return this.zoom; }
     setPageZoom(value: number) { this.zoom = value; }
+    setWindowButtonPosition = vi.fn();
   }
   const quit = vi.fn();
   return { startServer: vi.fn(), updater: { onStatusChange: vi.fn(), getLocalInfo: vi.fn(async () => ({ version: '0.9.0', channel: 'stable', baseUrl: 'https://example.com' })), checkForUpdate: vi.fn(), downloadUpdate: vi.fn(), applyUpdate: vi.fn(), updateInfo: vi.fn(), clearStatusHistory: vi.fn(), getStatusHistory: vi.fn() }, packaged: false, events, requests, messages, Window, menu, close, quit, openExternal: vi.fn(), showMessageBox: vi.fn(async () => ({})), cursor: { x: 2000, y: 2000 }, legacyFile: undefined as string | undefined };
@@ -70,6 +71,7 @@ vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
   return { ...fs, readFileSync: (...args: any[]) => path.basename(String(args[0])) === 'preload.js' ? '// preload' : (fs.readFileSync as any)(...args) };
 });
+const platform = process.platform;
 let dir: string;
 let signalHandlers: Map<string, Set<(...args: any[]) => void>>;
 beforeEach(() => {
@@ -94,6 +96,7 @@ afterEach(async () => {
   native.events.get('before-quit')?.({ data: {} });
   await vi.waitFor(() => expect(native.quit).toHaveBeenCalled());
   for (const [name, original] of signalHandlers) for (const listener of process.listeners(name as NodeJS.Signals)) if (!original.has(listener)) EventEmitter.prototype.removeListener.call(process, name as NodeJS.Signals, listener);
+  Object.defineProperty(process, 'platform', { value: platform });
   vi.unstubAllEnvs(); vi.unstubAllGlobals();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -103,7 +106,22 @@ async function boot() {
   return native.Window.all[0]!;
 }
 
-it('imports legacy preferences before the first renderer bootstrap', async () => {
+it('quits after a startup failure before client state is initialized', async () => {
+  const blockedData = path.join(dir, 'not-a-directory');
+  writeFileSync(blockedData, 'keep this file');
+  vi.stubEnv('KUBUS_DESKTOP_DATA', blockedData);
+
+  await import('../../../desktop/src/main.js');
+  await vi.waitFor(() => expect(native.quit).toHaveBeenCalledOnce());
+
+  expect(native.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({ title: 'Kubus failed to start' }));
+  expect(native.startServer).not.toHaveBeenCalled();
+  expect(native.Window.all).toHaveLength(0);
+  expect(readFileSync(blockedData, 'utf8')).toBe('keep this file');
+});
+
+it.each(['linux', 'darwin', 'win32'])('imports legacy preferences before the first renderer bootstrap on %s', async (host) => {
+  Object.defineProperty(process, 'platform', { value: host });
   native.legacyFile = path.join(dir, 'legacy-client-state.json');
   const values = { tabs: '["/pods"]', favorites: '["Pods"]', theme: 'dark' };
   writeFileSync(native.legacyFile, JSON.stringify(values));

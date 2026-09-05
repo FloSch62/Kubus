@@ -237,7 +237,7 @@ function shutdown(): Promise<void> {
     } catch (error) { mainLog('error', 'embedded server shutdown failed', error); }
     finally {
       clearTimeout(timer);
-      state.flush(false);
+      state?.flush(false);
       quitReady = true;
       Utils.quit();
     }
