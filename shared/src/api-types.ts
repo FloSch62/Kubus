@@ -630,8 +630,10 @@ export interface ReferencesResponse {
   items: UsedByEntry[];
   /** Kinds that could not be consulted (RBAC-denied or not installed). */
   unavailable: string[];
-  /** Kinds whose objects were still loading when the answer was sent; selector rows for them arrive on a later refresh. */
+  /** Kinds whose objects were still loading when the answer was sent; references for them arrive on a later refresh. */
   partial?: string[];
+  /** Distinct selector matches omitted by the per-selector cap. */
+  truncated?: number;
 }
 
 export interface UsedByResponse {

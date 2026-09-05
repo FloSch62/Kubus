@@ -107,8 +107,8 @@ export function NetworkPolicyDetail({ obj, ctx }: { obj: KubeObject; ctx: string
   const denyAllEgress = isolatesEgress && egressRules.length === 0;
   const problems = useMemo(() => {
     const items = [];
-    if (denyAllIngress) items.push({ title: 'All ingress denied', message: 'The policy isolates the selected pods for ingress and lists no rules, so no traffic can reach them.' });
-    if (denyAllEgress) items.push({ title: 'All egress denied', message: 'The policy isolates the selected pods for egress and lists no rules, so they cannot open any connection — including DNS.' });
+    if (denyAllIngress) items.push({ title: 'No ingress allowed by this policy', message: 'This policy isolates the selected pods for ingress and allows no incoming traffic. Other policies selecting these pods may still allow it.' });
+    if (denyAllEgress) items.push({ title: 'No egress allowed by this policy', message: 'This policy isolates the selected pods for egress and allows no outgoing traffic, including DNS. Other policies selecting these pods may still allow it.' });
     return items;
   }, [denyAllIngress, denyAllEgress]);
 
@@ -117,12 +117,12 @@ export function NetworkPolicyDetail({ obj, ctx }: { obj: KubeObject; ctx: string
       <SummaryStrip
         items={[
           { label: 'Applies to', value: podsQuery.isLoading ? '…' : `${pods.length} pod${pods.length === 1 ? '' : 's'}`, hint: all ? 'Every pod in the namespace (empty pod selector).' : `Pods matching ${selectorText}` },
-          { label: 'Ingress', value: isolatesIngress ? (ingressRules.length ? `${ingressRules.length} rule${ingressRules.length === 1 ? '' : 's'}` : 'deny all') : 'not isolated', tone: denyAllIngress ? 'warning' : undefined },
-          { label: 'Egress', value: isolatesEgress ? (egressRules.length ? `${egressRules.length} rule${egressRules.length === 1 ? '' : 's'}` : 'deny all') : 'not isolated', tone: denyAllEgress ? 'warning' : undefined },
+          { label: 'Ingress', value: isolatesIngress ? (ingressRules.length ? `${ingressRules.length} rule${ingressRules.length === 1 ? '' : 's'}` : 'no allowed traffic') : 'not isolated', tone: denyAllIngress ? 'warning' : undefined },
+          { label: 'Egress', value: isolatesEgress ? (egressRules.length ? `${egressRules.length} rule${egressRules.length === 1 ? '' : 's'}` : 'no allowed traffic') : 'not isolated', tone: denyAllEgress ? 'warning' : undefined },
           { label: 'Policy types', value: types.join(' + ') },
         ]}
       />
-      {problems.length > 0 && <ProblemBanner severity="warning" title="This policy blocks traffic entirely" items={problems} />}
+      {problems.length > 0 && <ProblemBanner severity="warning" title="This policy allows no traffic in an isolated direction" items={problems} />}
       {isolatesIngress && ingressRules.length > 0 && <RuleTable title="Ingress rules" direction="from" rules={ingressRules} />}
       {isolatesEgress && egressRules.length > 0 && <RuleTable title="Egress rules" direction="to" rules={egressRules} />}
       <Section
@@ -138,7 +138,7 @@ export function NetworkPolicyDetail({ obj, ctx }: { obj: KubeObject; ctx: string
           <Fact label="Pod selector" mono>
             {all ? '(all pods in namespace)' : selectorText}
           </Fact>
-          <Fact label="Policy types" hint="Ingress isolates incoming traffic; Egress isolates outgoing. A type without rules denies everything for that direction.">
+          <Fact label="Policy types" hint="Ingress isolates incoming traffic; Egress isolates outgoing. A type without rules allows no traffic in that direction; other selecting policies may still allow it.">
             {types.join(', ')}
           </Fact>
         </Facts>

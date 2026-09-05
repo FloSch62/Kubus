@@ -393,8 +393,9 @@ function networkPolicyRelations(policy: KubeObject, target: UsedByTarget): Relat
 
 function hpaRelations(hpa: KubeObject, target: UsedByTarget): Relation[] {
   if (hpa.metadata.namespace !== target.namespace) return [];
-  const ref = (hpa.spec as { scaleTargetRef?: { kind?: string; name?: string } } | undefined)?.scaleTargetRef;
+  const ref = (hpa.spec as { scaleTargetRef?: { apiVersion?: string; kind?: string; name?: string } } | undefined)?.scaleTargetRef;
   if (ref?.kind !== target.kind || ref.name !== target.name) return [];
+  if (!ref.apiVersion || (ref.apiVersion.includes('/') ? ref.apiVersion.split('/')[0] : '') !== target.group) return [];
   const spec = hpa.spec as { minReplicas?: number; maxReplicas?: number } | undefined;
   return [{ relation: 'scales', detail: `${spec?.minReplicas ?? 1}–${spec?.maxReplicas ?? '?'} replicas` }];
 }

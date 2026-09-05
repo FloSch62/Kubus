@@ -33,9 +33,8 @@ export function pdbRule(spec: PdbSpec): string | undefined {
 }
 
 /**
- * Whether a drain would stall on this budget right now, and why: no
- * disruptions allowed while pods are expected means every eviction gets a
- * 429 until something becomes healthy.
+ * Whether the budget currently blocks eviction of healthy pods. Unhealthy
+ * pods may still be evictable depending on their phase and eviction policy.
  */
 export function pdbBlocksEvictions(status: PdbStatus | undefined): boolean {
   return (status?.expectedPods ?? 0) > 0 && (status?.disruptionsAllowed ?? 0) === 0;
@@ -96,12 +95,15 @@ export function PodDisruptionBudgetDetail({ obj, ctx }: { obj: KubeObject; ctx: 
       {blocked && (
         <ProblemBanner
           severity="warning"
-          title="Evictions are blocked by this budget"
+          title="Healthy pod evictions are blocked by this budget"
           items={[
             {
               title: `${healthy ?? 0} healthy of ${desired ?? 0} required`,
               message:
-                'A node drain or cluster upgrade evicting one of these pods will wait on this budget until another pod becomes healthy. Scale the workload up, fix the unhealthy pods, or relax the budget.',
+                'A drain evicting a healthy pod must wait for this budget to allow disruptions. ' +
+                (spec.unhealthyPodEvictionPolicy === 'AlwaysAllow'
+                  ? 'With AlwaysAllow, unhealthy running pods may still be evicted even when no disruptions are allowed.'
+                  : 'With IfHealthyBudget, unhealthy running pods may still be evicted when current healthy pods meet the desired count.'),
             },
           ]}
         />

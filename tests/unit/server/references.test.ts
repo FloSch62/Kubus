@@ -120,6 +120,74 @@ describe('kindsForHint', () => {
 });
 
 describe('computeReferences', () => {
+  it('uses only names from typed references, not their namespace or API metadata', async () => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      target: { apiVersion: 'apps/v1', group: 'apps', version: 'v1', kind: 'Deployment', namespace: 'team-a', name: 'api' },
+    });
+    const { handle, gets } = handleWith({ focus, custom: {}, gettable: {
+      '/apis/apps/v1/namespaces/team-a/deployments/api': cr('Deployment', 'deployments', 'api', 'team-a', {}),
+    } });
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items.map((item) => item.ref.name)).toEqual(['api']);
+    expect(gets).toHaveLength(2);
+  });
+
+  it.each(['app=x', { app: 'x' }])('preserves explicit kind, group and namespace for selector %j', async (selector) => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      target: { kind: 'Service', group: '', namespace: 'other', selector },
+      wrongGroup: { kind: 'Service', group: 'other.example', namespace: 'other', selector },
+    });
+    const service = (namespace: string) => ({ ...cr('Service', 'services', 'api', namespace, {}), metadata: { name: 'api', namespace, uid: namespace, labels: { app: 'x' } } });
+    const { handle } = handleWith({ focus, custom: {}, builtin: { services: [service('eda'), service('other')] } });
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ ref: { kind: 'Service', group: '', namespace: 'other', name: 'api' }, relation: 'selects', detail: 'spec.target.selector' });
+  });
+
+  it('verifies references past the GET cap through one shared pool, or reports them as partial', async () => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      targets: Array.from({ length: 43 }, (_, i) => ({ kind: 'TopoNode', name: `node-${i}` })),
+    });
+    const fixture = { focus, custom: { toponodes: [{ name: 'node-41', namespace: 'eda', uid: 'found' }] } };
+    const source = { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' };
+    const cold = handleWith(fixture);
+    const result = await computeReferences(cold.handle, source);
+    expect(cold.gets).toHaveLength(41); // source + 40 existence GETs
+    expect(cold.lookups).toEqual(['toponodes']);
+    expect(result.items.filter((item) => !item.missing).map((item) => item.ref.name)).toEqual(['node-41']);
+    expect(result.items.filter((item) => item.missing)).toHaveLength(42);
+
+    const pending = handleWith(fixture, { pending: ['toponodes'] });
+    const early = await computeReferences(pending.handle, source);
+    expect(early.partial).toEqual(['TopoNode']);
+    expect(early.items).toHaveLength(40);
+    expect(early.items.every((item) => item.missing)).toBe(true);
+  });
+
+  it.each([403, 500])('does not link targets when an existence GET fails with %i', async (code) => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', { target: { kind: 'TopoNode', name: 'unknown' } });
+    const { handle } = handleWith({ focus, custom: {} });
+    handle.raw.json = async (path: string) => {
+      if (path.endsWith('/topolinks/link')) return focus as never;
+      throw Object.assign(new Error('unavailable'), { code });
+    };
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items).toEqual([]);
+    expect(result.unavailable).toEqual(['TopoNode']);
+  });
+
+  it('counts distinct omitted selector matches, excluding targets shown by another reference', async () => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      target: { kind: 'TopoNode', selector: 'app=x' },
+      repeated: { kind: 'TopoNode', selector: 'app=x' },
+      named: { kind: 'TopoNode', name: 'node-104' },
+    });
+    const { handle } = handleWith({ focus, custom: { toponodes: Array.from({ length: 105 }, (_, i) => ({ name: `node-${String(i).padStart(3, '0')}`, namespace: 'eda', uid: String(i), labels: { app: 'x' } })) } }, { indexLive: true });
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items).toHaveLength(101);
+    expect(result.truncated).toBe(4);
+  });
+
   it('resolves names through the live index, flags dangling spec references, and follows labels and selectors', async () => {
     const focus = cr('TopoLink', 'topolinks', 'l001-s001', 'eda', { links: [{ local: { node: 'l001', interfaceResource: 'l001-e1', interface: 'ethernet-1-1' }, remote: { node: 'ghost', interfaceResource: 'ghost-e1' } }] }, {
       status: { members: [{ node: 'l001' }] },

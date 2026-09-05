@@ -111,6 +111,18 @@ describe('labelSelectorMatches / selectableLabels', () => {
 });
 
 describe('computeUsedBy', () => {
+  it('matches HPA scale targets by API group, kind, name and namespace', async () => {
+    const handle = handleWith({ horizontalpodautoscalers: [
+      obj('HorizontalPodAutoscaler', 'builtin', 'apps', { scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' } }),
+      obj('HorizontalPodAutoscaler', 'custom', 'apps', { scaleTargetRef: { apiVersion: 'widgets.example/v1', kind: 'Deployment', name: 'api' } }),
+      obj('HorizontalPodAutoscaler', 'other-namespace', 'other', { scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' } }),
+    ] });
+    for (const [group, expected] of [['apps', 'builtin'], ['widgets.example', 'custom']]) {
+      const result = await computeUsedBy(handle, { group: group!, kind: 'Deployment', plural: 'deployments', name: 'api', namespace: 'apps' });
+      expect(result.items.filter((item) => item.relation === 'scales').map((item) => item.ref.name)).toEqual([expected]);
+    }
+  });
+
   it('lists workloads before standalone pods, dedupes relations per object and skips other namespaces', async () => {
     const handle = handleWith({
       pods: [obj('Pod', 'web-1', 'apps', podSpec()), obj('Pod', 'other', 'elsewhere', podSpec())],

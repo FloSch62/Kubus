@@ -12,6 +12,7 @@ import {
   kindPathCoverage,
   looksLikeName,
   pathNamesKind,
+  referencePath,
   referenceScope,
   relationPathScore,
   schemaFieldDescription,
@@ -197,7 +198,8 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   // their watcher; a kind still loading past the budget is reported as such.
   const partial = new Set<string>();
   const deadline = Date.now() + SELECTOR_BUDGET_MS;
-  const labeledPool = async (spec: KindSpec): Promise<Labeled[] | undefined> => {
+  const pools = new Map<KindSpec, Promise<Labeled[] | undefined>>();
+  const loadLabeledPool = async (spec: KindSpec): Promise<Labeled[] | undefined> => {
     const cached = cachedLabeled(spec);
     if (cached) return cached;
     if (spec.custom) {
@@ -224,6 +226,14 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
       acquired.release();
     }
   };
+  const labeledPool = (spec: KindSpec): Promise<Labeled[] | undefined> => {
+    let pool = pools.get(spec);
+    if (!pool) {
+      pool = loadLabeledPool(spec);
+      pools.set(spec, pool);
+    }
+    return pool;
+  };
   const exists = async (spec: KindSpec, namespace: string | undefined, name: string): Promise<{ found: boolean; uid?: string; verified: boolean }> => {
     if (spec.custom && search.isLive(spec.group, spec.plural)) {
       const entry = search.lookup(spec.group, spec.plural, spec.namespaced ? namespace : undefined, name);
@@ -234,7 +244,12 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
       const hit = cached.find((item) => item.name === name && (!spec.namespaced || item.namespace === namespace));
       return { found: !!hit, uid: hit?.uid, verified: true };
     }
-    if (gets >= MAX_GETS) return { found: true, verified: false };
+    if (gets >= MAX_GETS) {
+      const pool = await labeledPool(spec);
+      if (!pool) return { found: false, verified: false };
+      const hit = pool.find((item) => item.name === name && (!spec.namespaced || item.namespace === namespace));
+      return { found: !!hit, uid: hit?.uid, verified: true };
+    }
     gets++;
     try {
       const got = await handle.raw.json<KubeObject>(resourcePath(spec.group, spec.version, spec.plural, { namespace: spec.namespaced ? namespace : undefined, name }));
@@ -242,14 +257,14 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
     } catch (err) {
       const code = (err as { code?: number }).code;
       if (code === 404) return { found: false, verified: true };
-      if (code === 403) unavailable.push(spec.kind);
-      return { found: true, verified: false };
+      unavailable.push(spec.kind);
+      return { found: false, verified: false };
     }
   };
 
   const nameHints: Array<{ hint: RelationHint; relation: string; detail: string; fromSpec: boolean }> = [];
   for (const hint of collectRelationHints({ spec: obj.spec, status: obj.status })) {
-    if (hint.selector || !looksLikeName(hint.value)) continue;
+    if (hint.selector || !looksLikeName(hint.value) || referencePath(hint.path) === undefined) continue;
     nameHints.push({ hint, relation: 'references', detail: hintPath(hint.path), fromSpec: hint.path.startsWith('spec') });
   }
   for (const hint of collectMetadataRelationHints(obj)) {
@@ -272,7 +287,7 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   for (const resolution of resolutions) {
     if (!resolution) continue;
     const { hint, relation, detail, fromSpec, certain, namespace, checks } = resolution;
-    const found = checks.filter((check) => check.found);
+    const found = checks.filter((check) => check.verified && check.found);
     if (found.length) {
       for (const check of found) addRow(check.spec, { name: hint.value, namespace, uid: check.uid }, relation, detail);
     } else if (fromSpec && certain && checks.length === 1 && checks[0]!.verified) {
@@ -284,21 +299,25 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   // Selectors: resolve against the labels the caches hold.
   const body = { spec: obj.spec, status: obj.status };
   const selectorHints = [
-    ...collectRelationHints(body).filter((hint) => hint.selector).map((hint) => ({ path: hint.path, selector: hint.selector! })),
-    ...collectMapSelectors(body),
+    ...collectRelationHints(body).filter((hint) => hint.selector),
+    ...collectMapSelectors(body).map((hint) => ({ ...hint, value: '' })),
   ];
-  for (const { path, selector } of selectorHints) {
+  const omitted = new Set<string>();
+  for (const hint of selectorHints) {
+    const { path, selector } = hint;
+    const namespace = hint.referenceNamespace ?? source.namespace;
     const description = schema && path.startsWith('spec') ? schemaFieldDescription(schema, path) : undefined;
-    for (const spec of kindsForHint({ path, value: '' }, kinds, source, description).kinds) {
+    for (const spec of kindsForHint(hint, kinds, source, description).kinds) {
       const pool = await labeledPool(spec);
       if (!pool) continue;
       const matches = pool
-        .filter((item) => (!spec.namespaced || item.namespace === source.namespace) && selectorMatches(selector, item.labels))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .slice(0, MAX_SELECTED);
-      for (const item of matches) addRow(spec, item, 'selects', hintPath(path));
+        .filter((item) => (!spec.namespaced || item.namespace === namespace) && selectorMatches(selector, item.labels))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      for (const item of matches.slice(0, MAX_SELECTED)) addRow(spec, item, 'selects', hintPath(path));
+      for (const item of matches.slice(MAX_SELECTED)) omitted.add(`${spec.group}|${spec.kind}|${spec.namespaced ? (item.namespace ?? '') : ''}|${item.name}`);
     }
   }
 
-  return { items: [...rows.values()], unavailable: [...new Set(unavailable)], ...(partial.size ? { partial: [...partial] } : {}) };
+  const truncated = [...omitted].filter((id) => !rows.has(id)).length;
+  return { items: [...rows.values()], unavailable: [...new Set(unavailable)], truncated, ...(partial.size ? { partial: [...partial] } : {}) };
 }

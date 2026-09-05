@@ -145,17 +145,17 @@ export function hintPath(path: string): string {
 const SELECTOR_KEY_RE = /(selector|matchLabels)$/i;
 
 /** Map-shaped selectors (`podSelector.matchLabels`, `spec.selector`) anywhere under a value. */
-export function collectMapSelectors(value: unknown, prefix = ''): Array<{ path: string; selector: Record<string, string> }> {
+export function collectMapSelectors(value: unknown, prefix = ''): Array<RelationContext & { path: string; selector: Record<string, string> }> {
   if (Array.isArray(value)) return value.flatMap((item, i) => collectMapSelectors(item, `${prefix}[${i}]`));
   if (!value || typeof value !== 'object') return [];
   const record = value as Record<string, unknown>;
-  const out: Array<{ path: string; selector: Record<string, string> }> = [];
+  const out: Array<RelationContext & { path: string; selector: Record<string, string> }> = [];
   for (const [key, item] of Object.entries(record)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (SELECTOR_KEY_RE.test(key) && item && typeof item === 'object' && !Array.isArray(item)) {
       const entries = Object.entries(item as Record<string, unknown>);
       if (entries.length && entries.every(([, v]) => typeof v === 'string')) {
-        out.push({ path, selector: Object.fromEntries(entries) as Record<string, string> });
+        out.push({ path, selector: Object.fromEntries(entries) as Record<string, string>, referenceKind: trimmedString(record.kind), referenceNamespace: trimmedString(record.namespace), referenceGroup: siblingGroup(record) });
         continue;
       }
     }
