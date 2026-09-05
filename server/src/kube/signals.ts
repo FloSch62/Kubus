@@ -18,7 +18,7 @@ interface EventShape extends KubeObject {
   lastTimestamp?: string;
   eventTime?: string;
   firstTimestamp?: string;
-  involvedObject?: { kind?: string; name?: string; namespace?: string };
+  involvedObject?: { kind?: string; name?: string; namespace?: string; uid?: string };
 }
 
 interface ContainerStatus {
@@ -51,15 +51,20 @@ export function aggregateSignals(events: KubeObject[], pods: KubeObject[], now: 
     const key = signalKey(e.involvedObject.kind, e.involvedObject.namespace || undefined, e.involvedObject.name);
     const signal = signalFor(key);
     const reason = e.reason ?? 'Warning';
-    const existing = signal.warnings.find((w) => w.reason === reason);
+    const uid = e.involvedObject.uid;
+    // An Event's counter spans the series' lifetime; only its latest
+    // occurrence is dated, so each series counts once and the counter is
+    // carried as the total. A recreated object gets its own entry.
+    const existing = signal.warnings.find((w) => w.reason === reason && w.uid === uid);
     if (existing) {
-      existing.count += e.count ?? 1;
+      existing.count += 1;
+      existing.total = (existing.total ?? 0) + (e.count ?? 1);
       if (!existing.lastTimestamp || time > existing.lastTimestamp) {
         existing.lastTimestamp = time;
         existing.message = e.message ?? existing.message;
       }
     } else {
-      signal.warnings.push({ reason, message: e.message ?? '', count: e.count ?? 1, lastTimestamp: time || undefined });
+      signal.warnings.push({ reason, message: e.message ?? '', count: 1, total: e.count ?? 1, lastTimestamp: time || undefined, ...(uid ? { uid } : {}) });
     }
   }
 

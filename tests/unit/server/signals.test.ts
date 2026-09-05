@@ -22,13 +22,28 @@ describe('aggregateSignals', () => {
     const signals = aggregateSignals(events, [], NOW);
     expect(signals.windowMs).toBe(60 * 60 * 1000);
     const pod = signals.objects[signalKey('Pod', 'apps', 'web-1')];
+    // Two FailedMount series inside the hour: two recent occurrences, five in their lifetime.
     expect(pod?.warnings).toEqual([
-      { reason: 'BackOff', message: 'crash', count: 1, lastTimestamp: minutesAgo(1) },
-      { reason: 'FailedMount', message: 'new', count: 5, lastTimestamp: minutesAgo(5) },
+      { reason: 'BackOff', message: 'crash', count: 1, total: 1, lastTimestamp: minutesAgo(1) },
+      { reason: 'FailedMount', message: 'new', count: 2, total: 5, lastTimestamp: minutesAgo(5) },
     ]);
     // Cluster-scoped objects key with an empty namespace; the event's own namespace is not used.
     expect(signals.objects['Node||worker-1']?.warnings[0]).toMatchObject({ reason: 'NodeNotReady' });
     expect(Object.keys(signals.objects)).toHaveLength(2);
+  });
+
+  it('keeps events of a recreated object apart from its predecessor by uid', () => {
+    const events = [
+      event({ type: 'Warning', reason: 'BackOff', message: 'old pod', count: 40, lastTimestamp: minutesAgo(20), involvedObject: { kind: 'Pod', name: 'db-0', namespace: 'apps', uid: 'old' } }),
+      event({ type: 'Warning', reason: 'BackOff', message: 'new pod', count: 1, lastTimestamp: minutesAgo(2), involvedObject: { kind: 'Pod', name: 'db-0', namespace: 'apps', uid: 'new' } }),
+      event({ type: 'Warning', reason: 'Unhealthy', message: 'no uid', lastTimestamp: minutesAgo(3), involvedObject: { kind: 'Pod', name: 'db-0', namespace: 'apps' } }),
+    ];
+    const pod = aggregateSignals(events, [], NOW).objects[signalKey('Pod', 'apps', 'db-0')];
+    expect(pod?.warnings).toEqual([
+      { reason: 'BackOff', message: 'new pod', count: 1, total: 1, lastTimestamp: minutesAgo(2), uid: 'new' },
+      { reason: 'Unhealthy', message: 'no uid', count: 1, total: 1, lastTimestamp: minutesAgo(3) },
+      { reason: 'BackOff', message: 'old pod', count: 1, total: 40, lastTimestamp: minutesAgo(20), uid: 'old' },
+    ]);
   });
 
   it('records recent container restarts on pods', () => {

@@ -101,7 +101,7 @@ function dedupe(rows: ClusterRow[]): EventRow[] {
 
 export function EventsPage() {
   const selected = useClustersStore((s) => s.selected);
-  const namespaces = useClustersStore((s) => s.namespaces);
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const { data: apiResources } = useApiResourcesForContexts(selected);
   const list = useWatchedList(selected, '', 'v1', 'events');
   const openDetail = useDetailStore((s) => s.open);
@@ -136,8 +136,12 @@ export function EventsPage() {
 
   const deduped = useMemo(() => {
     let filtered = list.rows;
-    if (namespaces.length > 0) {
-      filtered = filtered.filter((r) => namespaceVisible(r.obj.metadata.namespace, namespaces));
+    if (Object.values(namespacesByContext).some((list) => list.length > 0)) {
+      // Each cluster keeps its own namespace filter.
+      filtered = filtered.filter((r) => {
+        const namespaces = namespacesByContext[r.ctx] ?? [];
+        return namespaces.length === 0 || namespaceVisible(r.obj.metadata.namespace, namespaces);
+      });
     }
     if (parsedFilter?.clauses) {
       const ctx = { kind: 'Event', nowMs: Date.now() };
@@ -146,7 +150,7 @@ export function EventsPage() {
       filtered = filtered.filter((r) => matchesPlainText(r, parsedFilter.words, 'Event'));
     }
     return dedupe(filtered);
-  }, [list.rows, namespaces, parsedFilter]);
+  }, [list.rows, namespacesByContext, parsedFilter]);
 
   const rows = useMemo(() => {
     if (!warningsOnly && !kindFilter) return deduped;

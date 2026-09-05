@@ -650,8 +650,15 @@ export interface UsedByResponse {
 
 /** Recent warning events and restarts for one object, from the cluster's event and pod caches. */
 export interface ObjectSignal {
-  /** Warning events in the window, deduped by reason. */
-  warnings: Array<{ reason: string; message: string; count: number; lastTimestamp?: string }>;
+  /**
+   * Warning events in the window, one entry per reason. `count` is the number
+   * of event series seen inside the window (an Event's own counter is a
+   * lifetime total, so only its latest occurrence is known to be recent),
+   * `total` the sum of those lifetime counters. `uid` is the involved
+   * object's uid, so a recreated object does not inherit its predecessor's
+   * events.
+   */
+  warnings: Array<{ reason: string; message: string; count: number; total?: number; lastTimestamp?: string; uid?: string }>;
   /**
    * Pods only: containers that restarted inside the window. `restarts` counts
    * the restarts known to fall in the window (a container's status only dates

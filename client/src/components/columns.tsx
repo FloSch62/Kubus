@@ -22,7 +22,7 @@ import { statusTextColor } from '../theme.js';
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
 export type NodeAllocationLookup = (ctx: string, nodeName: string) => NodeAllocationSummary;
 /** Recent warning events / restarts for an object, keyed like the server's signals map. */
-export type SignalsLookup = (ctx: string, kind: string, namespace: string | undefined, name: string) => ObjectSignal | undefined;
+export type SignalsLookup = (ctx: string, kind: string, namespace: string | undefined, name: string, uid?: string) => ObjectSignal | undefined;
 
 type Col = GridColDef<ClusterRow>;
 
@@ -82,8 +82,8 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     align: 'center',
     type: 'number',
     // Sorting puts the noisiest objects first.
-    valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name)),
-    renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name)} />,
+    valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name, obj(row).metadata.uid)),
+    renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name, obj(params.row).metadata.uid)} />,
   }),
   labels: (opts) => ({
     field: 'labels',
@@ -705,7 +705,7 @@ function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
   if (!signal || (!signal.warnings.length && !signal.restarts?.length)) return null;
   const warningTotal = signal.warnings.reduce((sum, w) => sum + w.count, 0);
   const lines = [
-    ...signal.warnings.slice(0, 4).map((w) => `${w.reason}${w.count > 1 ? ` ×${w.count}` : ''}: ${w.message.length > 140 ? `${w.message.slice(0, 140)}…` : w.message}`),
+    ...signal.warnings.slice(0, 4).map((w) => `${w.reason}${w.count > 1 ? ` ×${w.count}` : ''}${w.total && w.total > w.count ? ` (${w.total} in its lifetime)` : ''}: ${w.message.length > 140 ? `${w.message.slice(0, 140)}…` : w.message}`),
     ...(signal.restarts ?? []).slice(0, 3).map((r) => `${r.container} restarted${r.reason ? ` (${r.reason})` : ''}${r.total && r.total > r.restarts ? `, ${r.total} times in its lifetime` : ''}`),
   ];
   const title = (
@@ -729,10 +729,20 @@ function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
   );
 }
 
-/** Lookup over the per-context signal maps, keyed exactly like the server builds them. */
+/**
+ * Lookup over the per-context signal maps, keyed exactly like the server
+ * builds them. Given the row's uid, warnings recorded against an earlier
+ * object of the same name (a recreated StatefulSet pod) are left out.
+ */
 export function makeSignalsLookup(signals: Map<string, ClusterSignals> | undefined): SignalsLookup | undefined {
   if (!signals || signals.size === 0) return undefined;
-  return (ctx, kind, namespace, name) => signals.get(ctx)?.objects[`${kind}|${namespace ?? ''}|${name}`];
+  return (ctx, kind, namespace, name, uid) => {
+    const signal = signals.get(ctx)?.objects[`${kind}|${namespace ?? ''}|${name}`];
+    if (!signal || !uid) return signal;
+    const warnings = signal.warnings.filter((w) => !w.uid || w.uid === uid);
+    if (warnings.length === signal.warnings.length) return signal;
+    return warnings.length || signal.restarts?.length ? { ...signal, warnings } : undefined;
+  };
 }
 
 const EMPTY_NODE_ALLOCATION: NodeAllocationSummary = {

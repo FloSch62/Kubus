@@ -253,6 +253,16 @@ describe('signals and tab attention', () => {
     expect(lookup?.('kind-a', 'Pod', 'apps', 'web-1')?.warnings[0]?.reason).toBe('BackOff');
     expect(lookup?.('kind-a', 'Pod', 'apps', 'web-2')).toBeUndefined();
     expect(makeSignalsLookup(undefined)).toBeUndefined();
+
+    // Warnings recorded against an earlier object of the same name do not follow its replacement.
+    const recreated = makeSignalsLookup(
+      new Map([['kind-a', { windowMs: 1, objects: { 'Pod|apps|db-0': { warnings: [{ reason: 'BackOff', message: 'old', count: 1, uid: 'old' }, { reason: 'Unhealthy', message: 'untagged', count: 1 }] } } }]]),
+    );
+    expect(recreated?.('kind-a', 'Pod', 'apps', 'db-0', 'new')?.warnings.map((w) => w.reason)).toEqual(['Unhealthy']);
+    expect(recreated?.('kind-a', 'Pod', 'apps', 'db-0', 'old')?.warnings.map((w) => w.reason)).toEqual(['BackOff', 'Unhealthy']);
+    expect(recreated?.('kind-a', 'Pod', 'apps', 'db-0')?.warnings).toHaveLength(2);
+    const onlyOld = makeSignalsLookup(new Map([['kind-a', { windowMs: 1, objects: { 'Pod|apps|db-0': { warnings: [{ reason: 'BackOff', message: 'old', count: 1, uid: 'old' }] } } }]]));
+    expect(onlyOld?.('kind-a', 'Pod', 'apps', 'db-0', 'new')).toBeUndefined();
   });
 
   it('parses the object a page tab shows', () => {

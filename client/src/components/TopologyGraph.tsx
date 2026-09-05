@@ -4,11 +4,12 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { topologyGraphsOptions, type TopologyFocus } from '../api/queries.js';
+import { topologyGraphsOptions, type TopologyFocus, type TopologyNamespaces } from '../api/queries.js';
 
 export interface TopologyGraphProps {
   contexts: string[];
-  namespaces: string[];
+  /** One namespace list for every context, or one per context (each cluster keeps its own filter). */
+  namespaces: TopologyNamespaces;
   focus?: TopologyFocus;
   hideDisconnected?: boolean;
   emptyTitle?: string;

@@ -573,14 +573,26 @@ describe('watched and filtered lists', () => {
   });
 
   it('filters watched rows by namespace and returns selector-query results', () => {
-    useClustersStore.setState({ selected: ['dev'], namespaces: ['team-a'] });
+    useClustersStore.setState({ selected: ['dev'], namespaces: ['team-a'], namespacesByContext: { dev: ['team-a'] } });
     const plain = renderHook(() => queries.useFilteredList('', 'v1', 'pods', true));
     const plainSub = harness.subscriptions[0]!;
     act(() => plainSub.handlers.onSnapshot([kubeObject('visible', 'team-a'), kubeObject('hidden', 'team-b')]));
     expect(plain.result.current.rows.map((item) => item.obj.metadata.name)).toEqual(['visible']);
     plain.unmount();
 
-    const selectorKey = JSON.stringify(['selector-list', ['dev'], ['team-a'], '', 'v1', 'pods', { labelSelector: ' app=web ' }]);
+    // Two clusters, two filters: each cluster's rows obey its own.
+    useClustersStore.setState({ selected: ['dev', 'prod'], namespaces: ['team-a', 'payments'], namespacesByContext: { dev: ['team-a'], prod: ['payments'] } });
+    const paired = renderHook(() => queries.useFilteredList('', 'v1', 'pods', true));
+    const subs = harness.subscriptions.slice(-2);
+    act(() => {
+      subs[0]!.handlers.onSnapshot([kubeObject('dev-visible', 'team-a'), kubeObject('dev-hidden', 'payments')]);
+      subs[1]!.handlers.onSnapshot([kubeObject('prod-visible', 'payments'), kubeObject('prod-hidden', 'team-a')]);
+    });
+    expect(paired.result.current.rows.map((item) => `${item.ctx}/${item.obj.metadata.name}`).sort()).toEqual(['dev/dev-visible', 'prod/prod-visible']);
+    paired.unmount();
+    useClustersStore.setState({ selected: ['dev'], namespaces: ['team-a'], namespacesByContext: { dev: ['team-a'] } });
+
+    const selectorKey = JSON.stringify(['selector-list', ['dev'], { dev: ['team-a'] }, '', 'v1', 'pods', { labelSelector: ' app=web ' }]);
     harness.queryResults.set(selectorKey, { data: [{ ctx: 'dev', obj: kubeObject('selected') }] });
     const selected = renderHook(() => queries.useFilteredList('', 'v1', 'pods', true, { labelSelector: ' app=web ' }));
     expect(selected.result.current.rows.map((item) => item.obj.metadata.name)).toEqual(['selected']);

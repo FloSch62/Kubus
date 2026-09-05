@@ -168,7 +168,15 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   // server's event cache), so the Events tab can carry its warning count
   // before anyone clicks it.
   const { data: events } = useResourceEvents(sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
-  const warningCount = useMemo(() => (events?.items ?? []).filter((e) => (e as { type?: string }).type === 'Warning').length, [events]);
+  // Events are matched by name; an event that names a different uid belongs
+  // to an earlier object of the same name and does not count against this one.
+  const warningCount = useMemo(() => {
+    const uid = obj?.metadata.uid;
+    return (events?.items ?? []).filter((e) => {
+      const event = e as { type?: string; involvedObject?: { uid?: string } };
+      return event.type === 'Warning' && (!uid || !event.involvedObject?.uid || event.involvedObject.uid === uid);
+    }).length;
+  }, [events, obj?.metadata.uid]);
   const apply = useApplyResource();
   const dryRun = useDryRunResource();
   // Warm the schema (fetch + yaml-worker registration) while the drawer is on

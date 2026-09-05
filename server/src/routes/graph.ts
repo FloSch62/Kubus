@@ -287,6 +287,55 @@ async function listFocusedRelatedItems(handle: ClusterHandle, focus: Item, names
   return (await Promise.all(candidates.map((spec) => listKind(handle, spec, namespaces, warnings)))).flat();
 }
 
+const MAX_ROUTE_TARGET_FETCHES = 20;
+
+/**
+ * Routes may name a parent Gateway or a backend Service in another
+ * namespace. A namespace-scoped graph never listed those, so they would be
+ * drawn as missing; fetch the explicitly named ones (bounded) so the edges
+ * land on real nodes.
+ */
+async function fetchRouteTargetsOutsideScope(handle: ClusterHandle, items: Item[], kinds: KindSpec[], warnings: string[]): Promise<Item[]> {
+  const gateway = kinds.find((spec) => spec.group === GATEWAY_GROUP && spec.kind === 'Gateway');
+  const service = kinds.find((spec) => spec.group === '' && spec.kind === 'Service');
+  const present = new Set(items.map((item) => `${item.spec.kind}|${item.obj.metadata.namespace ?? ''}|${item.obj.metadata.name}`));
+  const wanted = new Map<string, { spec: KindSpec; namespace: string; name: string }>();
+  for (const item of items) {
+    if (item.spec.group !== GATEWAY_GROUP || !item.spec.kind.endsWith('Route')) continue;
+    const routeNamespace = item.obj.metadata.namespace ?? '';
+    const spec = item.obj.spec as {
+      parentRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }>;
+      rules?: Array<{ backendRefs?: Array<{ group?: string; kind?: string; name?: string; namespace?: string }> }>;
+    } | undefined;
+    const want = (target: KindSpec | undefined, namespace: string | undefined, name: string | undefined) => {
+      if (!target || !name || !namespace || namespace === routeNamespace) return;
+      const key = `${target.kind}|${namespace}|${name}`;
+      if (!present.has(key) && wanted.size < MAX_ROUTE_TARGET_FETCHES) wanted.set(key, { spec: target, namespace, name });
+    };
+    for (const parent of spec?.parentRefs ?? []) {
+      if ((parent.kind ?? 'Gateway') === 'Gateway' && (parent.group ?? GATEWAY_GROUP) === GATEWAY_GROUP) want(gateway, parent.namespace, parent.name);
+    }
+    for (const rule of spec?.rules ?? []) {
+      for (const backend of rule.backendRefs ?? []) {
+        if ((backend.kind ?? 'Service') === 'Service' && !backend.group) want(service, backend.namespace, backend.name);
+      }
+    }
+  }
+  const fetched = await Promise.all(
+    [...wanted.values()].map(async ({ spec, namespace, name }): Promise<Item[]> => {
+      try {
+        const obj = await handle.raw.json<KubeObject>(resourcePath(spec.group, spec.version, spec.plural, { namespace, name }));
+        return [{ spec, obj }];
+      } catch (err) {
+        // A missing target is still worth a warning edge; anything else is noted.
+        if ((err as { code?: number }).code !== 404) warnings.push(`${spec.kind} ${namespace}/${name}: ${err instanceof Error ? err.message : String(err)}`);
+        return [];
+      }
+    }),
+  );
+  return fetched.flat();
+}
+
 function referenceScopeMatches(source: Item, target: Item, hint?: RelationHint): boolean {
   if (!target.spec.namespaced) return true;
   const explicitNamespace = hint?.referenceNamespace;
@@ -471,6 +520,7 @@ async function buildGraph(handle: ClusterHandle, query: FocusQuery): Promise<Rel
   const dynamicItems = focusItems[0] ? await listFocusedRelatedItems(handle, focusItems[0], namespaces, warnings) : [];
   const listedItems = (await listedItemsPromise).flat();
   const items = [...listedItems, ...focusItems, ...dynamicItems];
+  if (namespaces?.size) items.push(...(await fetchRouteTargetsOutsideScope(handle, items, staticKinds, warnings)));
 
   const nodes = new Map<string, GraphNode>(items.map(({ spec, obj }) => {
     const status = statusFor(spec.kind, obj);

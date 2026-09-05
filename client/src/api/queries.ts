@@ -472,14 +472,17 @@ export function useWatchedList(contexts: string[], group: string, version: strin
 /** Convenience: watched list filtered to the selected namespaces, or server-filtered when selectors are set. */
 export function useFilteredList(group: string, version: string, plural: string, namespaced: boolean, filters?: ResourceListFilters): WatchedListState {
   const selected = useClustersStore((s) => s.selected);
-  const namespaces = useClustersStore((s) => s.namespaces);
+  // Each cluster filters by its own namespaces: dev on team-a and prod on
+  // payments must not show each other's namespaces just because both are open.
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const list = useWatchedList(selected, group, version, plural);
   const hasSelectors = !!filters?.labelSelector?.trim();
   const selectorList = useQuery({
-    queryKey: ['selector-list', selected, namespaces, group, version, plural, filters],
+    queryKey: ['selector-list', selected, namespacesByContext, group, version, plural, filters],
     queryFn: async () => {
       const batches = await Promise.all(
         selected.map(async (ctx) => {
+          const namespaces = namespacesByContext[ctx] ?? [];
           const nsTargets = namespaced && namespaces.length ? namespaces : [undefined];
           const perNs = await Promise.all(
             nsTargets.map(async (namespace) => {
@@ -501,10 +504,13 @@ export function useFilteredList(group: string, version: string, plural: string, 
   });
 
   const watchedRows = useMemo(() => {
-    if (!namespaced || namespaces.length === 0) return list.rows;
-    const set = new Set(namespaces);
-    return list.rows.filter((r) => set.has(r.obj.metadata.namespace ?? ''));
-  }, [list.rows, namespaces, namespaced]);
+    if (!namespaced || !selected.some((ctx) => namespacesByContext[ctx]?.length)) return list.rows;
+    const sets = new Map(selected.map((ctx) => [ctx, new Set(namespacesByContext[ctx] ?? [])]));
+    return list.rows.filter((r) => {
+      const set = sets.get(r.ctx);
+      return !set?.size || set.has(r.obj.metadata.namespace ?? '');
+    });
+  }, [list.rows, namespacesByContext, namespaced, selected]);
   if (hasSelectors) {
     const state = selectorList.isLoading ? 'loading' : selectorList.error ? 'error' : 'live';
     return {
@@ -1240,24 +1246,34 @@ export interface TopologyFocus {
  * Shared between useTopologyGraphs and the prefetch in TopologyGraph, which
  * starts this fetch while the heavy graph chunk is still downloading.
  */
-export function topologyGraphsOptions(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+/** Namespace scope for the topology: one list for every context, or one list per context. */
+export type TopologyNamespaces = string[] | Record<string, string[]>;
+
+function topologyNamespacesFor(namespaces: TopologyNamespaces, ctx: string): string[] {
+  return Array.isArray(namespaces) ? namespaces : (namespaces[ctx] ?? []);
+}
+
+export function topologyGraphsOptions(contexts: string[], namespaces: TopologyNamespaces, focus?: TopologyFocus) {
   return queryOptions({
     queryKey: ['topology-graphs', contexts, namespaces, focus],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (namespaces.length) params.set('namespace', namespaces.join(','));
-      if (focus) {
-        params.set('focusGroup', focus.group);
-        params.set('focusVersion', focus.version);
-        params.set('focusPlural', focus.plural);
-        params.set('focusKind', focus.kind);
-        params.set('focusName', focus.name);
-        params.set('focusNamespace', focus.namespace ?? '');
-        params.set('depth', String(focus.depth ?? 2));
-      }
-      const q = params.toString();
       const graphs = await Promise.all(
-        contexts.map((ctx) => apiFetch<RelationshipGraph>(`/api/contexts/${encodeURIComponent(ctx)}/graph${q ? `?${q}` : ''}`).catch((err) => ({ ctx, nodes: [], edges: [], warnings: [err instanceof Error ? err.message : String(err)] }) as RelationshipGraph)),
+        contexts.map((ctx) => {
+          const params = new URLSearchParams();
+          const scope = topologyNamespacesFor(namespaces, ctx);
+          if (scope.length) params.set('namespace', scope.join(','));
+          if (focus) {
+            params.set('focusGroup', focus.group);
+            params.set('focusVersion', focus.version);
+            params.set('focusPlural', focus.plural);
+            params.set('focusKind', focus.kind);
+            params.set('focusName', focus.name);
+            params.set('focusNamespace', focus.namespace ?? '');
+            params.set('depth', String(focus.depth ?? 2));
+          }
+          const q = params.toString();
+          return apiFetch<RelationshipGraph>(`/api/contexts/${encodeURIComponent(ctx)}/graph${q ? `?${q}` : ''}`).catch((err) => ({ ctx, nodes: [], edges: [], warnings: [err instanceof Error ? err.message : String(err)] }) as RelationshipGraph);
+        }),
       );
       return graphs;
     },
@@ -1265,7 +1281,7 @@ export function topologyGraphsOptions(contexts: string[], namespaces: string[], 
   });
 }
 
-export function useTopologyGraphs(contexts: string[], namespaces: string[], focus?: TopologyFocus) {
+export function useTopologyGraphs(contexts: string[], namespaces: TopologyNamespaces, focus?: TopologyFocus) {
   return useQuery({
     ...topologyGraphsOptions(contexts, namespaces, focus),
     enabled: contexts.length > 0,
