@@ -87,6 +87,7 @@ const electron = vi.hoisted(() => {
     requestSingleInstanceLock: vi.fn(() => true),
     whenReady: vi.fn(async () => undefined),
     quit: vi.fn(),
+    exit: vi.fn(),
     on: vi.fn((name: string, handler: Handler) => {
       const handlers = appHandlers.get(name) ?? [];
       handlers.push(handler);
@@ -95,7 +96,7 @@ const electron = vi.hoisted(() => {
     }),
   };
   const state = { userDataPath: '', nextWebContentsId: 0 };
-  const serverClose = vi.fn(async () => undefined);
+  const serverClose = vi.fn(async (): Promise<void> => undefined);
   const startServer = vi.fn(async () => ({ url: 'http://127.0.0.1:41234/?token=secret-test-token', close: serverClose }));
   const appendAppLog = vi.fn();
   const fixPath = vi.fn();
@@ -580,6 +581,55 @@ describe('Electron main process', () => {
     expect(quitEvent.preventDefault).toHaveBeenCalledOnce();
     expect(electron.serverClose).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(electron.app.quit).toHaveBeenCalledOnce());
+  });
+
+  it('forces macOS to exit when server shutdown stalls, without restarting the deadline on repeated quits', async () => {
+    await withPlatform('darwin', async () => {
+      const win = await loadMain();
+      vi.useFakeTimers();
+      let finishClose!: () => void;
+      electron.serverClose.mockImplementationOnce(() => new Promise<void>((resolve) => { finishClose = resolve; }));
+      registered(electron.ipcListeners, 'kubus:state:set-item')({ sender: win.webContents }, 'quit-state', 'saved');
+
+      const quitEvent = { preventDefault: vi.fn() };
+      appHandler('before-quit')(quitEvent);
+      expect(quitEvent.preventDefault).toHaveBeenCalledOnce();
+      expect(JSON.parse(readFileSync(path.join(userDataPath, 'client-state.json'), 'utf8'))['quit-state']).toBe('saved');
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(electron.app.exit).not.toHaveBeenCalled();
+      appHandler('before-quit')({ preventDefault: vi.fn() });
+      expect(electron.serverClose).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(electron.app.exit).toHaveBeenCalledExactlyOnceWith(0);
+      expect(readFileSync(path.join(userDataPath, 'logs', 'main.log'), 'utf8')).toContain('shutdown timed out');
+      expect(readFileSync(path.join(userDataPath, 'window-state.json'), 'utf8')).toContain('1280');
+
+      // A late completion must not request another quit after forced exit.
+      finishClose();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(electron.app.quit).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['resolve', 'reject', 'throw'] as const)('cancels the shutdown deadline when close completes via %s', async (outcome) => {
+    await loadMain();
+    vi.useFakeTimers();
+    const error = new Error('shutdown failure');
+    if (outcome === 'reject') electron.serverClose.mockRejectedValueOnce(error);
+    if (outcome === 'throw') electron.serverClose.mockImplementationOnce(() => { throw error; });
+
+    appHandler('before-quit')({ preventDefault: vi.fn() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(electron.app.quit).toHaveBeenCalledOnce();
+    const resumedQuit = { preventDefault: vi.fn() };
+    appHandler('before-quit')(resumedQuit);
+    expect(resumedQuit.preventDefault).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(electron.app.exit).not.toHaveBeenCalled();
+    if (outcome !== 'resolve') {
+      expect(readFileSync(path.join(userDataPath, 'logs', 'main.log'), 'utf8')).toContain('shutdown failure');
+    }
   });
 
   it('quits immediately when another instance owns the lock', async () => {
