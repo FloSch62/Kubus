@@ -19,7 +19,8 @@ export default {
     },
     mac: { ...renderer, icons: 'assets/icon.iconset', codesign: false, notarize: false },
     linux: { ...renderer, icon: 'assets/icon.png' },
-    win: { ...renderer, icon: 'assets/icon.png' },
+    // Windows ICO generation accepts PNGs up to 256x256.
+    win: { ...renderer, icon: 'assets/icon.iconset/icon_256x256.png' },
   },
   scripts: { postBuild: 'scripts/finalize.ts' },
   runtime: { exitOnLastWindowClosed: false },

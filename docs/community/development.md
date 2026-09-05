@@ -45,6 +45,7 @@ pnpm start          # runs the compiled server and opens your browser
 
 ```bash
 make deb           # Linux: builds a .deb in desktop/artifacts/ (dpkg-deb + zstd required)
+make win           # Windows: builds the installer .zip in desktop/artifacts/ (GNU Make required)
 pnpm desktop       # builds everything, then launches Electrobun
 pnpm dist           # packages installers for the current platform → desktop/artifacts/
 ```
@@ -74,3 +75,5 @@ builds a development bundle; `pnpm test:desktop` drives its system WebKitGTK vie
 On headless Linux use `xvfb-run --auto-servernum pnpm test:desktop`.
 Desktop packaging runs on the target OS. macOS builds require arm64; Intel and
 universal macOS artifacts are not produced.
+`make win` requires a Windows host; Electrobun cannot cross-compile Windows installers
+from Linux or macOS. Without GNU Make on Windows, run `pnpm dist` directly.

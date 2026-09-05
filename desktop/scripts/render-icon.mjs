@@ -3,8 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
-// Render the app icons from the Kubus SVG: icon.png (1024px) feeds the
-// mac .icns / win .ico generation.
+// Render the app icons from the Kubus SVG: icon.png (1024px) is for Linux;
+// the iconset feeds macOS .icns and its 256px PNG feeds Windows .ico generation.
 const root = path.dirname(fileURLToPath(import.meta.url));
 const script = fileURLToPath(import.meta.url);
 const svg = path.resolve(root, '../../client/public/kubus.svg');
