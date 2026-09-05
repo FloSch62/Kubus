@@ -120,6 +120,28 @@ describe('kindsForHint', () => {
 });
 
 describe('computeReferences', () => {
+  it('resolves class, RBAC and ReplicaSet references using the correct group and scope', async () => {
+    const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
+      runtimeClassName: 'kata', ingressClassName: 'edge', replicaSetRef: { name: 'workers' },
+      roleRef: { kind: 'Role', group: 'rbac.authorization.k8s.io', name: 'reader' },
+      clusterRoleRef: { kind: 'ClusterRole', group: 'rbac.authorization.k8s.io', name: 'viewer' },
+    });
+    const targets = [
+      ['node.k8s.io', 'runtimeclasses', 'RuntimeClass', 'kata', undefined],
+      ['networking.k8s.io', 'ingressclasses', 'IngressClass', 'edge', undefined],
+      ['apps', 'replicasets', 'ReplicaSet', 'workers', 'eda'],
+      ['rbac.authorization.k8s.io', 'roles', 'Role', 'reader', 'eda'],
+      ['rbac.authorization.k8s.io', 'clusterroles', 'ClusterRole', 'viewer', undefined],
+    ] as const;
+    const gettable = Object.fromEntries(targets.map(([group, plural, kind, name, namespace]) => [
+      `/apis/${group}/v1/${namespace ? `namespaces/${namespace}/` : ''}${plural}/${name}`, cr(kind, plural, name, namespace, {}),
+    ]));
+    const { handle, gets } = handleWith({ focus, custom: {}, gettable });
+    const result = await computeReferences(handle, { group: EDA, version: 'v1', plural: 'topolinks', kind: 'TopoLink', name: 'link', namespace: 'eda' });
+    expect(result.items.map((item) => [item.ref.group, item.ref.plural, item.ref.kind, item.ref.name, item.ref.namespace])).toEqual(targets);
+    expect(gets.slice(1)).toEqual(Object.keys(gettable));
+  });
+
   it.each([true, false])('enforces structured selector expressions with matchLabels=%s', async (withLabels) => {
     const focus = cr('TopoLink', 'topolinks', 'link', 'eda', {
       target: { kind: 'TopoNode', group: EDA, namespace: 'other', selector: {

@@ -74,6 +74,26 @@ const GATEWAY_GROUP = 'gateway.networking.k8s.io';
 const POD_TEMPLATE_KINDS = [DEPLOYMENTS, STATEFULSETS, DAEMONSETS, JOBS, CRONJOBS];
 const WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job', 'CronJob']);
 
+/** API identity required by matchers whose references implicitly name a built-in kind. */
+const BUILTIN_TARGET_GROUPS: Record<string, string> = {
+  ConfigMap: '',
+  Secret: '',
+  ServiceAccount: '',
+  PersistentVolumeClaim: '',
+  PersistentVolume: '',
+  Node: '',
+  Pod: '',
+  Service: '',
+  PriorityClass: 'scheduling.k8s.io',
+  RuntimeClass: 'node.k8s.io',
+  Gateway: GATEWAY_GROUP,
+  StorageClass: 'storage.k8s.io',
+  IngressClass: 'networking.k8s.io',
+  Role: 'rbac.authorization.k8s.io',
+  ClusterRole: 'rbac.authorization.k8s.io',
+  ...Object.fromEntries([...POD_TEMPLATE_KINDS, REPLICASETS].map((spec) => [spec.kind, spec.group])),
+};
+
 /** Display order: controllers first, then the objects that wrap them, standalone pods last. */
 const KIND_RANK: Record<string, number> = {
   Deployment: 0,
@@ -424,6 +444,11 @@ type Matcher = (obj: KubeObject, target: UsedByTarget) => Relation[];
 
 /** Which cached lists to scan for a target kind, and how each candidate relates. */
 async function sourcesFor(handle: ClusterHandle, target: UsedByTarget): Promise<Array<{ spec: KindSpec; match: Matcher }>> {
+  if (target.group !== undefined && target.group !== BUILTIN_TARGET_GROUPS[target.kind]) {
+    // HPA scaleTargetRef explicitly names its API group and can legitimately
+    // target a custom workload. Pod selectors and implicit references cannot.
+    return WORKLOAD_KINDS.has(target.kind) ? [{ spec: HPAS, match: hpaRelations }] : [];
+  }
   const podSources = [PODS, ...POD_TEMPLATE_KINDS].map((spec) => ({ spec, match: (obj: KubeObject, t: UsedByTarget) => podSpecRelations(podSpecOf(spec.kind, obj), t) }));
   // ReplicaSets count only when nothing controls them: one under a Deployment
   // repeats what the Deployment row says, once per revision it keeps.

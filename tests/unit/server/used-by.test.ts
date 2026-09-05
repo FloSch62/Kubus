@@ -111,6 +111,57 @@ describe('labelSelectorMatches / selectableLabels', () => {
 });
 
 describe('computeUsedBy', () => {
+  it.each([
+    ['ConfigMap', '', 'app-config'],
+    ['Secret', '', 'db'],
+    ['ServiceAccount', '', 'app-sa'],
+    ['PersistentVolumeClaim', '', 'data-0'],
+    ['PersistentVolume', '', 'disk'],
+    ['Node', '', 'worker-1'],
+    ['Pod', '', 'api'],
+    ['Service', '', 'api'],
+    ['PriorityClass', 'scheduling.k8s.io', 'high'],
+    ['RuntimeClass', 'node.k8s.io', 'kata'],
+    ['Gateway', 'gateway.networking.k8s.io', 'edge'],
+    ['StorageClass', 'storage.k8s.io', 'fast'],
+    ['IngressClass', 'networking.k8s.io', 'edge'],
+    ['Role', 'rbac.authorization.k8s.io', 'reader'],
+    ['ClusterRole', 'rbac.authorization.k8s.io', 'reader'],
+    ['Deployment', 'apps', 'api'],
+    ['StatefulSet', 'apps', 'api'],
+    ['DaemonSet', 'apps', 'api'],
+    ['ReplicaSet', 'apps', 'api'],
+    ['Job', 'batch', 'api'],
+    ['CronJob', 'batch', 'api'],
+  ])('does not apply implicit built-in %s references to a custom kind with the same name', async (kind, group, name) => {
+    const workload = { template: { metadata: { labels: { app: 'api' } }, spec: podSpec({ runtimeClassName: 'kata' }) } };
+    const handle = handleWith({
+      pods: [obj('Pod', 'worker', 'apps', podSpec({ runtimeClassName: 'kata' }))],
+      deployments: [obj('Deployment', 'worker', 'apps', workload)],
+      services: [obj('Service', 'service', 'apps', { selector: { app: 'api' } })],
+      poddisruptionbudgets: [obj('PodDisruptionBudget', 'budget', 'apps', { selector: {} })],
+      networkpolicies: [obj('NetworkPolicy', 'policy', 'apps', { podSelector: {} })],
+      persistentvolumeclaims: [obj('PersistentVolumeClaim', 'claim', 'apps', { volumeName: 'disk', storageClassName: 'fast' })],
+      ingresses: [obj('Ingress', 'ingress', 'apps', { ingressClassName: 'edge', defaultBackend: { service: { name: 'api' } } })],
+      httproutes: [obj('HTTPRoute', 'route', 'apps', { parentRefs: [{ name: 'edge' }] })],
+      rolebindings: [obj('RoleBinding', 'role-binding', 'apps', {}, { roleRef: { kind: 'Role', name: 'reader' }, subjects: [{ kind: 'ServiceAccount', name: 'app-sa' }] })],
+      clusterrolebindings: [obj('ClusterRoleBinding', 'cluster-role-binding', undefined, {}, { roleRef: { kind: 'ClusterRole', name: 'reader' } })],
+    }, { resources: [{ group: 'gateway.networking.k8s.io', version: 'v1', kind: 'HTTPRoute', plural: 'httproutes', namespaced: true, verbs: ['list'] }] });
+    const target = { kind, name, namespace: 'apps', labels: { app: 'api' } };
+    expect((await computeUsedBy(handle, { ...target, group }, { custom: false })).items.length).toBeGreaterThan(0);
+    expect((await computeUsedBy(handle, { ...target, group: 'example.com' }, { custom: false })).items).toEqual([]);
+  });
+
+  it('still scans custom referrers when the target shares a built-in kind name', async () => {
+    const source = crd('example.com', 'App', 'apps', object({ secretRef: string }));
+    const handle = handleWith({ customresourcedefinitions: [source], pods: [obj('Pod', 'unrelated', 'apps', podSpec())] });
+    handle.referenceIndex.lookup = async () => ({ ready: true, unavailable: false, entries: [
+      { name: 'consumer', namespace: 'apps', uid: 'consumer', digest: { hints: [{ path: 'spec.target.name', value: 'db', referenceKind: 'Secret', referenceGroup: 'example.com' }], selectors: [] } },
+    ] });
+    const result = await computeUsedBy(handle, { kind: 'Secret', name: 'db', group: 'example.com', namespace: 'apps' });
+    expect(result.items.map((item) => `${item.ref.kind}/${item.ref.name}`)).toEqual(['App/consumer']);
+  });
+
   it('matches HPA scale targets by API group, kind, name and namespace', async () => {
     const handle = handleWith({ horizontalpodautoscalers: [
       obj('HorizontalPodAutoscaler', 'builtin', 'apps', { scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' } }),
