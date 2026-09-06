@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
   },
   getUpdateState() { return ipcRenderer.invoke('kubus:update:state'); },
   checkForUpdates() { return ipcRenderer.invoke('kubus:update:check'); },
+  downloadUpdate() { return ipcRenderer.invoke('kubus:update:download'); },
   installUpdate() { return ipcRenderer.invoke('kubus:update:install'); },
   onUpdateState(callback: (state: DesktopUpdateState) => void): () => void {
     const listener = (_event: unknown, state: DesktopUpdateState): void => callback(state);

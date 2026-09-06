@@ -49,6 +49,7 @@ interface DesktopBridge {
   getAppInfo(): Promise<unknown>;
   getUpdateState(): Promise<unknown>;
   checkForUpdates(): Promise<unknown>;
+  downloadUpdate(): Promise<unknown>;
   installUpdate(): Promise<unknown>;
   onUpdateState(callback: (state: unknown) => void): () => void;
   openWindow(launch: unknown): void;
@@ -121,6 +122,7 @@ describe('Electron preload bridge', () => {
     await expect(bridge.getAppInfo()).resolves.toEqual({ name: 'Kubus' });
     await expect(bridge.checkForUpdates()).resolves.toEqual({ available: false });
     await bridge.getUpdateState();
+    await bridge.downloadUpdate();
     await bridge.installUpdate();
     await expect(bridge.getPendingRoute()).resolves.toBe('/pending');
 
@@ -134,6 +136,7 @@ describe('Electron preload bridge', () => {
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-app-info');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:check');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:state');
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:download');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:install');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-pending-route');
   });

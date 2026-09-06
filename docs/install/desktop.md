@@ -34,7 +34,7 @@ Grab the installer for your platform from the **[releases page](https://github.c
     2. Open **Kubus** from Applications, Spotlight or the Dock.
 
     Choose the **`.dmg`** download. The `.zip` on the release page is used by
-    automatic updates; you do not need to download or extract it.
+    in-app updates; you do not need to download or extract it.
 
     Release builds are signed with Apple Developer ID and notarized. New releases
     require an Apple Silicon Mac (M1 or newer); Intel Macs are no longer supported.
@@ -58,10 +58,12 @@ Grab the installer for your platform from the **[releases page](https://github.c
 ## Updating
 
 The macOS app, Windows installer and Linux AppImage check GitHub Releases shortly
-after startup and every four hours, then download updates in the background. A
-notification offers **Restart to update** when the download is ready. You can also
-check progress or retry a failed check in **Settings → About**. A downloaded update
-installs when you quit normally, too.
+after startup and every four hours. A notification offers **Download update** or
+**Later**. Kubus downloads the update only when you request it. Once downloaded,
+choose **Restart to update** and confirm to install it. **Quitting normally does
+not install updates**, even after downloading one. You can check, download, follow
+progress, or retry in **Settings → About**. After reopening Kubus, a requested
+download can reuse the verified cached update.
 
 Save edits before restarting. All Kubus windows close and terminals, log streams
 and port forwards disconnect. Settings are preserved. On macOS, run the installed

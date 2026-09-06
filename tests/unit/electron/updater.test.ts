@@ -6,7 +6,7 @@ import { distributionConfig } from '../../../electron/scripts/build-config.js';
 
 vi.mock('../../../electron/src/main-log.js', () => ({ mainLog: vi.fn() }));
 
-function setup(mac = false) {
+function setup() {
   const transport = Object.assign(new EventEmitter(), {
     checkForUpdates: vi.fn(async (): Promise<unknown> => {
       transport.emit('update-available', { version: '1.0.0' });
@@ -15,25 +15,35 @@ function setup(mac = false) {
     downloadUpdate: vi.fn(async () => { transport.emit('update-downloaded', { version: '1.0.0' }); }),
     quitAndInstall: vi.fn(),
   });
-  const native = new EventEmitter();
   const broadcast = vi.fn();
   const prepareInstall = vi.fn();
   const recoverInstall = vi.fn();
   const updater = new DesktopUpdater({ version: '0.9.0', updater: transport as unknown as AppUpdater,
-    nativeMacUpdater: mac ? native : undefined, broadcast, prepareInstall, recoverInstall });
-  return { updater, transport, native, broadcast, prepareInstall, recoverInstall };
+    broadcast, prepareInstall, recoverInstall });
+  return { updater, transport, broadcast, prepareInstall, recoverInstall };
 }
 
 afterEach(() => vi.useRealTimers());
 
 describe('desktop updates', () => {
-  it('shares a check/download between windows, downloads automatically and prevents duplicate installs', async () => {
+  it('notifies without downloading and requires separate download and install actions', async () => {
     const { updater, transport, prepareInstall } = setup();
+    expect(transport).toMatchObject({ autoDownload: false, autoInstallOnAppQuit: false });
     const first = updater.check();
     expect(updater.check()).toBe(first);
     await first;
+    expect(transport.downloadUpdate).not.toHaveBeenCalled();
+    expect(updater.getState()).toMatchObject({ status: 'available', version: '1.0.0' });
+    expect(updater.requestInstall()).toBe(false);
+    updater.finishInstall();
+    expect(transport.quitAndInstall).not.toHaveBeenCalled();
+
+    const download = updater.download();
+    expect(updater.download()).toBe(download);
+    await download;
     expect(transport.downloadUpdate).toHaveBeenCalledOnce();
     expect(updater.getState()).toMatchObject({ status: 'ready', version: '1.0.0' });
+    expect(prepareInstall).not.toHaveBeenCalled();
     await updater.check();
     expect(transport.checkForUpdates).toHaveBeenCalledOnce();
     expect(updater.requestInstall()).toBe(true);
@@ -44,28 +54,57 @@ describe('desktop updates', () => {
     expect(transport.quitAndInstall).toHaveBeenCalledExactlyOnceWith(false, true);
   });
 
-  it('waits for Squirrel.Mac signature validation before enabling restart', async () => {
-    const { updater, native } = setup(true);
-    await updater.check();
-    expect(updater.getState().status).toBe('downloading');
-    expect(updater.requestInstall()).toBe(false);
-    native.emit('update-downloaded');
+  it('serializes a download request behind an in-flight check without losing consent', async () => {
+    const { updater, transport } = setup();
+    const check = updater.check();
+    const download = updater.download();
+    expect(updater.download()).toBe(download);
+    expect(updater.check()).toBe(download);
+    await Promise.all([check, download]);
+    expect(transport.checkForUpdates).toHaveBeenCalledOnce();
+    expect(transport.downloadUpdate).toHaveBeenCalledOnce();
     expect(updater.getState().status).toBe('ready');
   });
 
-  it('recovers from network and signature errors and only broadcasts whole percentage changes', async () => {
+  it('keeps macOS staging disabled after a download and recovers from a signature error during explicit installation', async () => {
+    const { updater, transport, recoverInstall } = setup();
+    await updater.check();
+    await updater.download();
+    // MacUpdater with this flag leaves the ZIP cached and only starts native
+    // signature validation/staging from quitAndInstall, after confirmation.
+    expect(transport).toMatchObject({ autoInstallOnAppQuit: false });
+    expect(transport.quitAndInstall).not.toHaveBeenCalled();
+    expect(updater.requestInstall()).toBe(true);
+    updater.finishInstall();
+    transport.emit('error', new Error('native signature validation failed'));
+    expect(updater.getState().status).toBe('error');
+    expect(recoverInstall).toHaveBeenCalledOnce();
+  });
+
+  it('recovers from check and download failures without automatically retrying downloads', async () => {
     const { updater, transport, broadcast } = setup();
     transport.checkForUpdates.mockRejectedValueOnce(new Error('offline'));
     await updater.check();
     expect(updater.getState().status).toBe('error');
+    await updater.download();
+    expect(transport.downloadUpdate).not.toHaveBeenCalled();
     await updater.check();
-    expect(updater.getState().status).toBe('ready');
-    transport.emit('error', new Error('invalid signature'));
+    expect(updater.getState().status).toBe('available');
+    transport.downloadUpdate.mockRejectedValueOnce(new Error('bad checksum'));
+    await updater.download();
+    expect(updater.getState()).toMatchObject({ status: 'error', version: '1.0.0' });
     expect(updater.requestInstall()).toBe(false);
-    transport.emit('download-progress', { percent: 10.3 });
-    const count = broadcast.mock.calls.length;
-    transport.emit('download-progress', { percent: 10.8 });
-    expect(broadcast).toHaveBeenCalledTimes(count);
+    transport.downloadUpdate.mockImplementationOnce(async () => {
+      transport.emit('download-progress', { percent: 10.3 });
+      const count = broadcast.mock.calls.length;
+      transport.emit('download-progress', { percent: 10.8 });
+      expect(broadcast).toHaveBeenCalledTimes(count);
+      transport.emit('update-downloaded', { version: '1.0.0' });
+    });
+    await updater.download();
+    expect(updater.getState().status).toBe('ready');
+    transport.emit('download-progress', { percent: 50 });
+    expect(updater.getState()).toMatchObject({ status: 'ready', percent: 100 });
   });
 
   it('shows up-to-date, handles a disabled transport and reopens after an installer error', async () => {
@@ -80,6 +119,7 @@ describe('desktop updates', () => {
     await updater.check();
     expect(updater.getState().status).toBe('error');
     await updater.check();
+    await updater.download();
     updater.requestInstall();
     transport.quitAndInstall.mockImplementationOnce(() => { throw new Error('installer failed'); });
     updater.finishInstall();
@@ -89,7 +129,6 @@ describe('desktop updates', () => {
   it('checks after startup and periodically, and stops timers on shutdown', async () => {
     vi.useFakeTimers();
     const { updater, transport } = setup();
-    transport.checkForUpdates.mockImplementation(async () => { transport.emit('update-not-available'); return {}; });
     updater.start(); updater.start();
     await vi.advanceTimersByTimeAsync(14_999);
     expect(transport.checkForUpdates).not.toHaveBeenCalled();
@@ -97,6 +136,8 @@ describe('desktop updates', () => {
     expect(transport.checkForUpdates).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
     expect(transport.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(transport.downloadUpdate).not.toHaveBeenCalled();
+    expect(updater.getState().status).toBe('available');
     updater.stop();
     await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
     expect(transport.checkForUpdates).toHaveBeenCalledTimes(2);
@@ -115,6 +156,7 @@ describe('desktop updates', () => {
     const updater = new DesktopUpdater({ version: '0.9.0', reason: 'store', broadcast, prepareInstall: vi.fn(), recoverInstall: vi.fn() });
     updater.start();
     expect((await updater.check()).status).toBe('disabled');
+    expect((await updater.download()).status).toBe('disabled');
     expect(broadcast).not.toHaveBeenCalled();
   });
 });

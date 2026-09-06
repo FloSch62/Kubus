@@ -39,6 +39,19 @@ export function RestartToUpdate({ compact = false }: { compact?: boolean }) {
   </>;
 }
 
+export function DownloadUpdate({ compact = false }: { compact?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  return <>
+    <Button color={compact ? 'inherit' : 'primary'} size={compact ? 'small' : 'medium'} disabled={busy} onClick={() => {
+      setBusy(true);
+      setError(false);
+      void window.kubusDesktop?.downloadUpdate().catch(() => setError(true)).finally(() => setBusy(false));
+    }}>Download update</Button>
+    {error && <Alert severity="error">The download could not be started. Try again from Settings → About.</Alert>}
+  </>;
+}
+
 export function DesktopUpdateControls() {
   const state = useDesktopUpdate();
   const [error, setError] = useState(false);
@@ -48,7 +61,7 @@ export function DesktopUpdateControls() {
       state.reason === 'store' ? 'Updates are managed by Microsoft Store or your organization.' :
       state.reason === 'package-manager' ? 'Install updates with your Linux package manager or download a newer package from Releases.' :
       state.reason === 'unsupported-architecture' ? 'New macOS releases require Apple Silicon.' :
-      'Automatic updates are available in installed desktop releases.'
+      'In-app updates are available in installed desktop releases.'
     }</Typography>;
   }
   return <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
@@ -57,16 +70,18 @@ export function DesktopUpdateControls() {
         setError(false);
         void window.kubusDesktop?.checkForUpdates().catch(() => setError(true));
       }}>{state?.status === 'checking' ? 'Checking…' : 'Check for updates'}</Button>
+      {(state?.status === 'available' || (state?.status === 'error' && !!state.version)) && <DownloadUpdate />}
       {state?.status === 'ready' && <RestartToUpdate />}
     </Stack>
+    {state?.status === 'available' && <Alert severity="info">Kubus {state.version} is available. Download it when you're ready.</Alert>}
     {state?.status === 'downloading' && <Stack spacing={1} sx={{ width: '100%' }}>
       <Typography variant="body2">Downloading Kubus {state.version}… {state.percent ?? 0}%</Typography>
       <LinearProgress aria-label="Update download" variant="determinate" value={state.percent ?? 0} />
     </Stack>}
-    {state?.status === 'ready' && <Alert severity="info">Kubus {state.version} is ready. Restart now, or it will install when you quit.</Alert>}
+    {state?.status === 'ready' && <Alert severity="info">Kubus {state.version} is downloaded. Choose Restart to update when you're ready to install it.</Alert>}
     {state?.status === 'installing' && <Alert severity="info">Restarting Kubus to install the update…</Alert>}
     {state?.status === 'up-to-date' && <Alert severity="success">Kubus is up to date.</Alert>}
     {(state?.status === 'error' || error) && <Alert severity="warning">{state?.error ?? 'The update check could not be completed. Try again.'}</Alert>}
-    <Typography variant="body2" color="text.secondary">Kubus checks for updates in the background and downloads them automatically.</Typography>
+    <Typography variant="body2" color="text.secondary">Kubus checks for updates in the background. Downloads and installation start only when you choose them. Quitting normally does not install updates.</Typography>
   </Stack>;
 }

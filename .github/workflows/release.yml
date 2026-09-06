@@ -180,7 +180,7 @@ jobs:
               "- **macOS (Apple Silicon):** [Download DMG]($base/kubus-$version-mac-arm64.dmg), then drag Kubus into Applications." \
               "- **Windows:** [Download installer]($base/kubus-$version-win-x64.exe)." \
               "- **Linux:** [AppImage]($base/kubus-$version-linux-x86_64.AppImage) · [Debian / Ubuntu]($base/kubus-$version-linux-amd64.deb)." '' \
-              'The ZIP, blockmap and YAML assets below are used by automatic updates.' \
+              'The ZIP, blockmap and YAML assets below are used by in-app updates.' \
               > "$RUNNER_TEMP/release-intro.md"
             gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release-intro.md" --draft
           fi

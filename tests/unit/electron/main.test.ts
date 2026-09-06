@@ -510,12 +510,15 @@ describe('Electron main process', () => {
     const win = await loadMain();
     const state = registered(electron.ipcHandlers, 'kubus:update:state');
     const check = registered(electron.ipcHandlers, 'kubus:update:check');
+    const download = registered(electron.ipcHandlers, 'kubus:update:download');
     const install = registered(electron.ipcHandlers, 'kubus:update:install');
     expect(state({ sender: {} })).toBeUndefined();
     expect(check({ sender: {} })).toBeUndefined();
+    expect(download({ sender: {} })).toBeUndefined();
     expect(install({ sender: {} })).toBe(false);
     expect(state({ sender: win.webContents })).toMatchObject({ status: 'disabled', reason: 'development' });
     await expect(check({ sender: win.webContents })).resolves.toMatchObject({ status: 'disabled' });
+    await expect(download({ sender: win.webContents })).resolves.toMatchObject({ status: 'disabled' });
     expect(install({ sender: win.webContents })).toBe(false);
   });
 
@@ -526,7 +529,12 @@ describe('Electron main process', () => {
       Object.defineProperty(process, 'resourcesPath', { value: userDataPath, configurable: true });
       if (stalled) electron.serverClose.mockImplementationOnce(() => new Promise(() => {}));
       const win = await loadMain();
+      registered(electron.updateListeners, 'update-available')({ version: '1.0.0' });
+      const download = registered(electron.ipcHandlers, 'kubus:update:download');
+      expect(download({ sender: {} })).toBeUndefined();
+      const pending = download({ sender: win.webContents });
       registered(electron.updateListeners, 'update-downloaded')({ version: '1.0.0' });
+      await pending;
       expect(win.webContents.send).toHaveBeenCalledWith('kubus:update:changed', expect.objectContaining({ status: 'ready' }));
       const install = registered(electron.ipcHandlers, 'kubus:update:install');
       expect(install({ sender: {} })).toBe(false);

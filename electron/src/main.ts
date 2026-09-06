@@ -3,7 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   app,
-  autoUpdater as nativeAutoUpdater,
   BrowserWindow,
   dialog,
   type IpcMainEvent,
@@ -532,6 +531,7 @@ ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
 
 ipcMain.handle('kubus:update:state', (event) => isManagedWindowSender(event) ? desktopUpdater?.getState() : undefined);
 ipcMain.handle('kubus:update:check', (event) => isManagedWindowSender(event) ? desktopUpdater?.check() : undefined);
+ipcMain.handle('kubus:update:download', (event) => isManagedWindowSender(event) ? desktopUpdater?.download() : undefined);
 ipcMain.handle('kubus:update:install', (event) => isManagedWindowSender(event) && desktopUpdater?.requestInstall() === true);
 
 ipcMain.on('kubus:window-launch', (event) => {
@@ -619,7 +619,6 @@ if (!app.requestSingleInstanceLock()) {
     desktopUpdater = new DesktopUpdater({
       version: app.getVersion(), reason,
       updater: reason ? undefined : electronUpdater.autoUpdater,
-      nativeMacUpdater: !reason && isMac ? nativeAutoUpdater : undefined,
       broadcast: (state) => {
         for (const win of managedWindows) {
           if (!win.isDestroyed()) win.webContents.send('kubus:update:changed', state);

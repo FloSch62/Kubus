@@ -15,7 +15,8 @@ export function updateDisabledReason({ packaged, platform, arch, store, appImage
 /** Owns one update operation for the entire app, independent of window lifetimes. */
 export class DesktopUpdater {
   private state: DesktopUpdateState;
-  private pending?: Promise<DesktopUpdateState>;
+  private pendingCheck?: Promise<DesktopUpdateState>;
+  private pendingDownload?: Promise<DesktopUpdateState>;
   private initialTimer?: NodeJS.Timeout;
   private interval?: NodeJS.Timeout;
 
@@ -23,8 +24,6 @@ export class DesktopUpdater {
     version: string;
     reason?: DesktopUpdateState['reason'];
     updater?: AppUpdater;
-    /** Squirrel.Mac validates the signature after electron-updater downloads the ZIP. */
-    nativeMacUpdater?: { on(event: 'update-downloaded', listener: () => void): unknown };
     broadcast(state: DesktopUpdateState): void;
     prepareInstall(): void;
     recoverInstall(): void;
@@ -33,7 +32,9 @@ export class DesktopUpdater {
     const updater = options.updater;
     if (!updater || options.reason) return;
     updater.autoDownload = false;
-    updater.autoInstallOnAppQuit = true;
+    // On macOS this also defers Squirrel's signature validation/staging until
+    // quitAndInstall. Staging earlier would install on quit without consent.
+    updater.autoInstallOnAppQuit = false;
     updater.allowPrerelease = false;
     updater.allowDowngrade = false;
     updater.logger = {
@@ -43,16 +44,14 @@ export class DesktopUpdater {
     };
     updater.on('error', (error) => this.fail(error));
     updater.on('update-not-available', () => this.set({ status: 'up-to-date' }));
-    updater.on('update-available', (info) => this.set({ status: 'downloading', version: info.version, percent: 0 }));
+    updater.on('update-available', (info) => this.set({ status: 'available', version: info.version }));
     updater.on('download-progress', (progress) => {
+      if (this.state.status !== 'downloading') return;
       const percent = Math.max(0, Math.min(100, Math.floor(progress.percent)));
       if (percent !== this.state.percent) this.set({ ...this.state, percent });
     });
     updater.on('update-downloaded', (info) => {
-      this.set({ status: options.nativeMacUpdater ? 'downloading' : 'ready', version: info.version, percent: 100 });
-    });
-    options.nativeMacUpdater?.on('update-downloaded', () => {
-      this.set({ status: 'ready', version: this.state.version, percent: 100 });
+      if (this.state.status === 'downloading') this.set({ status: 'ready', version: info.version, percent: 100 });
     });
   }
 
@@ -75,10 +74,17 @@ export class DesktopUpdater {
   }
 
   check(): Promise<DesktopUpdateState> {
-    if (this.pending) return this.pending;
+    if (this.pendingDownload) return this.pendingDownload;
+    if (this.pendingCheck) return this.pendingCheck;
     if (['disabled', 'ready', 'installing'].includes(this.state.status)) return Promise.resolve(this.state);
-    this.pending = this.runCheck().finally(() => { this.pending = undefined; });
-    return this.pending;
+    this.pendingCheck = this.runCheck().finally(() => { this.pendingCheck = undefined; });
+    return this.pendingCheck;
+  }
+
+  download(): Promise<DesktopUpdateState> {
+    if (this.pendingDownload) return this.pendingDownload;
+    this.pendingDownload = this.runDownload().finally(() => { this.pendingDownload = undefined; });
+    return this.pendingDownload;
   }
 
   requestInstall(): boolean {
@@ -91,6 +97,7 @@ export class DesktopUpdater {
 
   /** Called only after the embedded server and persisted state have been closed. */
   finishInstall(): void {
+    if (this.state.status !== 'installing') return;
     try {
       this.options.updater!.quitAndInstall(false, true);
     } catch (error) {
@@ -103,7 +110,19 @@ export class DesktopUpdater {
     try {
       const result = await this.options.updater!.checkForUpdates();
       if (!result) throw new Error('The update service is unavailable.');
-      if (this.getState().status === 'downloading') await this.options.updater!.downloadUpdate();
+    } catch (error) {
+      this.fail(error);
+    }
+    return this.state;
+  }
+
+  private async runDownload(): Promise<DesktopUpdateState> {
+    // A click can arrive while a check is finishing in another window.
+    if (this.pendingCheck) await this.pendingCheck;
+    if (!this.state.version || !['available', 'error'].includes(this.state.status)) return this.state;
+    this.set({ status: 'downloading', version: this.state.version, percent: 0 });
+    try {
+      await this.options.updater!.downloadUpdate();
     } catch (error) {
       this.fail(error);
     }
@@ -113,7 +132,7 @@ export class DesktopUpdater {
   private fail(error: unknown): void {
     const installing = this.state.status === 'installing';
     mainLog('error', 'desktop update failed', error);
-    this.set({ status: 'error', error: 'The update could not be completed. Check your connection and try again.' });
+    this.set({ status: 'error', version: this.state.version, error: 'The update could not be completed. Check your connection and try again.' });
     // The server has already shut down; reopen the installed version if its
     // installer fails so the user does not remain in a disconnected window.
     if (installing) this.options.recoverInstall();

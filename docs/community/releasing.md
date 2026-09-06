@@ -148,7 +148,7 @@ an organization-specific deployment step, not a preconfigured public MSIX feed.
 
 ## Update validation before the first release
 
-Unit tests cover updater progress, errors, concurrent windows, macOS validation,
+Unit tests cover explicit download/install consent, progress, errors, concurrent windows, macOS handoff,
 installation and stalled shutdown. Electron end-to-end tests exercise the actual
 shell. The Linux release job also runs a real packaged updater integration test.
 Run it locally on Linux after building:
@@ -156,25 +156,32 @@ Run it locally on Linux after building:
 ```bash
 pnpm build
 pnpm build:helm-engine
-pnpm test:updater
+xvfb-run --auto-servernum pnpm test:updater
 ```
 
-This builds two temporary AppImages with a localhost feed, checks the installed
-version, rejects an incorrect SHA-512 checksum, retries the download, verifies
-renderer progress and the restart control, installs on normal quit, and reopens
-the new version with retained desktop state. It uses an empty kubeconfig and
-isolated app/config/cache directories, then removes the test files. It does not
-publish a release or change the repository version. Reopening is driven by the
-test; this does not exercise the Restart button's automatic relaunch or a
-differential download.
+This builds two temporary AppImages with a localhost feed. It checks that update
+notifications and dismissal download nothing, rejects an incorrect SHA-512
+checksum after an explicit download, and retries only on request. It verifies
+that cancelling restart, quitting normally, and reopening keep the old version
+even after a successful download. Finally it confirms **Restart to update**, checks
+automatic relaunch into the new version, and verifies retained desktop state.
+It uses an empty kubeconfig and isolated app/config/cache directories, then removes
+the test files. It does not publish a release or change the repository version.
+The test requires a display (or Xvfb) and exercises full downloads.
+
+Both `autoDownload` and `autoInstallOnAppQuit` are disabled. On macOS, the downloaded
+ZIP is not handed to Squirrel for signature validation/staging until the user
+confirms installation. Earlier staging could schedule installation on quit.
 
 These checks do not replace a signed update test on macOS and Windows:
 
 1. Install the signed/current build in a disposable user profile.
 2. Publish a higher test version to a dedicated test feed with its generated metadata.
-3. Check download progress, disconnect/retry, and reject a modified payload.
+3. Confirm that checks only notify, then explicitly download. Check progress,
+   disconnect/retry, and reject a modified payload.
 4. Open multiple windows and a port forward, then restart to update. Verify shutdown,
-   the new version, retained preferences and the signature. Also test normal quit.
+   the new version, retained preferences and the signature. Also verify that normal
+   quit after a download leaves the installed version unchanged.
 5. On macOS, install from the DMG into Applications and verify Gatekeeper and the
    Squirrel signature check. On Windows, test both per-user and elevated installations.
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,10 +13,11 @@ import { Arch, build, Platform } from 'electron-builder';
 import { _electron as electron } from 'playwright-core';
 
 assert.equal(process.platform, 'linux', 'This integration test requires Linux and tests the AppImage updater.');
+assert(process.env.DISPLAY, 'Run with a display or xvfb-run --auto-servernum pnpm test:updater to test automatic relaunch.');
 const projectDir = path.resolve(import.meta.dirname, '..');
 const scratch = await mkdtemp(path.join(tmpdir(), 'kubus-updater-'));
 const installed = path.join(scratch, 'Kubus.AppImage');
-const userData = path.join(scratch, 'user-data');
+let userData = path.join(scratch, 'config', 'Kubus');
 const kubeconfig = path.join(scratch, 'kubeconfig');
 const { version: currentVersion } = JSON.parse(await readFile(path.join(projectDir, 'package.json'), 'utf8'));
 const [major, minor, patch] = currentVersion.split('.').map(Number);
@@ -70,7 +71,9 @@ async function packageVersion(version) {
 async function launch() {
   app = await electron.launch({
     executablePath: installed,
-    args: ['--no-sandbox', ...(process.env.DISPLAY ? [] : ['--headless', '--disable-gpu']), `--user-data-dir=${userData}`],
+    // Use the default profile inside XDG_CONFIG_HOME so the updater's automatic
+    // relaunch (which has no command-line profile override) retains this state.
+    args: ['--no-sandbox'],
     env: {
       ...process.env,
       APPIMAGE_EXTRACT_AND_RUN: '1',
@@ -84,8 +87,22 @@ async function launch() {
   });
   const page = await app.firstWindow();
   await page.waitForFunction(() => !!window.kubusDesktop);
+  userData = await app.evaluate(({ app: nativeApp }) => nativeApp.getPath('userData'));
+  assert(userData.startsWith(`${scratch}/`), 'The application profile must remain isolated');
   assert.equal(await app.evaluate(({ app: nativeApp }) => nativeApp.isPackaged), true);
   return page;
+}
+
+async function stopRelaunchedApp() {
+  // The updater starts a detached process. Only stop executables extracted
+  // beneath this test's private directory, never another running Kubus.
+  for (const pid of await readdir('/proc')) {
+    if (!/^\d+$/.test(pid)) continue;
+    const executable = await readlink(`/proc/${pid}/exe`).catch(() => '');
+    if (executable.startsWith(`${scratch}/`)) {
+      try { process.kill(Number(pid), 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+  }
 }
 
 try {
@@ -113,34 +130,75 @@ try {
   console.log('PASS: packaged app checks localhost and reports the installed version as up to date');
 
   manifest = makeManifest(nextVersion, Buffer.alloc(64).toString('base64'));
-  assert.equal((await page.evaluate(() => window.kubusDesktop.checkForUpdates())).status, 'error');
+  assert.equal((await page.evaluate(() => window.kubusDesktop.checkForUpdates())).status, 'available');
+  await page.getByRole('button', { name: 'Download update' }).first().waitFor();
+  assert.equal(payloadRequests, 0, 'Discovering an update must not download it');
+  await page.getByRole('button', { name: 'Later', exact: true }).click();
+  assert.equal(payloadRequests, 0, 'Dismissing the notification must not download it');
+  console.log('PASS: a newer version only notifies; dismissing it leaves downloads and installation untouched');
+  assert.equal((await page.evaluate(() => window.kubusDesktop.downloadUpdate())).status, 'error');
   assert.match(await readFile(path.join(userData, 'logs/main.log'), 'utf8'), /sha512 checksum mismatch/);
   assert.equal(await hash(installed), await hash(baseline), 'Invalid download must not replace the installed app');
   console.log('PASS: real electron-updater rejects a corrupted checksum and preserves the installed app');
 
   manifest = makeManifest(nextVersion, candidateHash);
-  const ready = await page.evaluate(() => window.kubusDesktop.checkForUpdates());
+  const downloadsBeforeCheck = payloadRequests;
+  assert.equal((await page.evaluate(() => window.kubusDesktop.checkForUpdates())).status, 'available');
+  assert.equal(payloadRequests, downloadsBeforeCheck, 'A new check must not retry the download automatically');
+  const ready = await page.evaluate(() => window.kubusDesktop.downloadUpdate());
   assert.equal(ready.status, 'ready');
   assert.equal(ready.version, nextVersion);
   assert.equal(ready.percent, 100);
   const states = await page.evaluate(() => window.updaterTestStates);
-  for (const status of ['checking', 'up-to-date', 'downloading', 'error', 'ready']) {
+  for (const status of ['checking', 'up-to-date', 'available', 'downloading', 'error', 'ready']) {
     assert(states.some((state) => state.status === status), `Renderer must receive ${status}`);
   }
   await page.getByRole('button', { name: 'Restart to update' }).first().waitFor();
-  console.log('PASS: retry downloads the valid update, broadcasts progress, and displays Restart to update');
+  await page.getByRole('button', { name: 'Restart to update' }).first().click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  assert.equal((await page.evaluate(() => window.kubusDesktop.getUpdateState())).status, 'ready');
+  assert.equal(await hash(installed), await hash(baseline), 'Cancelling restart must preserve the installed version');
+  console.log('PASS: manual retry downloads the update; cancelling restart does not install it');
 
   await page.evaluate(() => window.kubusDesktop.stateStorage.setItem('updater-integration', 'preserved'));
-  // A normal quit exercises autoInstallOnAppQuit without spawning an untracked
-  // GUI process. Reopen the installed file ourselves to inspect its version.
   await app.close();
   app = undefined;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (await hash(installed).catch(() => '') === candidateHash) break;
+  assert.equal(await hash(installed), await hash(baseline), 'Normal quit must not install a downloaded update');
+  const downloadsBeforeRelaunch = payloadRequests;
+  page = await launch();
+  assert.equal(await app.evaluate(({ app: nativeApp }) => nativeApp.getVersion()), currentVersion);
+  assert.equal((await page.evaluate(() => window.kubusDesktop.checkForUpdates())).status, 'available');
+  assert.equal(payloadRequests, downloadsBeforeRelaunch, 'Relaunch must not download an update');
+  console.log('PASS: normal quit and relaunch keep the old version, even with an update already downloaded');
+
+  // A dismissed availability notice stays dismissed after relaunch. The user
+  // can still choose to download from Settings → About.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'About', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Download update' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Restart to update' }).waitFor();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.equal(payloadRequests, downloadsBeforeRelaunch, 'Explicit download should reuse the verified cached payload');
+  const logLength = (await readFile(path.join(userData, 'logs/main.log'), 'utf8')).length;
+  await page.getByRole('button', { name: 'Restart to update' }).first().click();
+  // Track the original OS process: the updater exits it directly, which does
+  // not reliably emit Playwright's ElectronApplication close event.
+  const closed = once(app.process(), 'exit', { signal: AbortSignal.timeout(60_000) });
+  await page.getByRole('dialog').getByRole('button', { name: 'Restart to update' }).click();
+  await closed;
+  app = undefined;
+  let restartedLog = '';
+  for (let attempt = 0; attempt < 300; attempt++) {
+    restartedLog = (await readFile(path.join(userData, 'logs/main.log'), 'utf8')).slice(logLength);
+    if (restartedLog.includes(`Kubus ${nextVersion} starting`) && restartedLog.includes('server listening at')) break;
     await delay(100);
   }
-  assert.equal(await hash(installed), candidateHash, 'Quitting must replace the AppImage with the verified payload');
-  const downloadsBeforeRelaunch = payloadRequests;
+  assert.equal(await hash(installed), candidateHash, 'Explicit installation must replace the AppImage');
+  assert.match(restartedLog, new RegExp(`Kubus ${nextVersion.replaceAll('.', '\\.')} starting`));
+  assert.match(restartedLog, /server listening at/);
+  console.log('PASS: confirmed Restart to update installs the new version and automatically relaunches it');
+  await stopRelaunchedApp();
   page = await launch();
   assert.equal(await app.evaluate(({ app: nativeApp }) => nativeApp.getVersion()), nextVersion);
   assert.equal(await page.evaluate(() => window.kubusDesktop.stateStorage.getItem('updater-integration')), 'preserved');
@@ -155,13 +213,14 @@ try {
   console.error(log);
   throw error;
 } finally {
-  // Never perform a normal quit on failure: it could install a pending update.
+  // Force cleanup without taking any extra update action on a failed test.
   const child = app?.process();
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = once(child, 'exit');
     child.kill('SIGKILL');
     await exited;
   }
+  await stopRelaunchedApp();
   feed.closeAllConnections();
   await new Promise((resolve) => feed.close(resolve));
   await rm(scratch, { recursive: true, force: true });

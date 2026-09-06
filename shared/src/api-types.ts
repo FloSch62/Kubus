@@ -118,7 +118,7 @@ export interface AppLogSettingsInput {
 
 /** Main-process update snapshot shared by every desktop window. */
 export interface DesktopUpdateState {
-  status: 'disabled' | 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'ready' | 'installing' | 'error';
+  status: 'disabled' | 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'installing' | 'error';
   currentVersion: string;
   version?: string;
   percent?: number;
