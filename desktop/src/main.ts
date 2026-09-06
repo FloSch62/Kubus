@@ -45,10 +45,13 @@ function activate(link?: string): void {
   target?.activate();
 }
 
-function loadFrame(): { width: number; height: number; x?: number; y?: number; maximized?: boolean } {
+function loadFrame(offset = 0): { width: number; height: number; x?: number; y?: number; maximized?: boolean } {
   try {
     const frame = JSON.parse(readFileSync(windowStateFile, 'utf8'));
     if (![frame.width, frame.height].every((value) => Number.isFinite(value) && value >= 500 && value <= 16_384)) throw new Error('Invalid frame');
+    // Cascade secondary windows, then check their adjusted position is visible.
+    if (Number.isFinite(frame.x)) frame.x += offset;
+    if (Number.isFinite(frame.y)) frame.y += offset;
     const visible = Screen.getAllDisplays().some((display) => {
       const b = display.workArea;
       return frame.x < b.x + b.width && frame.x + frame.width > b.x && frame.y < b.y + b.height && frame.y + frame.height > b.y;
@@ -105,7 +108,7 @@ function createWindow(launch?: AppWindowLaunch): Window {
       },
     },
   });
-  const frame = loadFrame();
+  const frame = loadFrame(primary || !isApplicationLaunch(launch) ? 28 : 0);
   win = new BrowserWindow({
     title: launch ? `${launch.title} — Kubus` : 'Kubus',
     url: server.url,
