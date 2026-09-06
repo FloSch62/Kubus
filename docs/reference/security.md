@@ -58,9 +58,10 @@ namespaces, so can Kubus (behind the guard, if protected).
 
 ## Code signing
 
-macOS builds use ad-hoc signatures to seal the app and installer resources, but
-aren't Developer ID signed or notarised. Windows builds aren't code-signed yet.
-First launch can therefore require an extra step; see [Desktop app](../install/desktop.md).
+Published macOS releases are Developer ID signed and notarized by Apple. Local and
+pull-request builds use ad-hoc signatures and are not notarized. Windows builds
+aren't code-signed yet. Local macOS builds and Windows installations may require
+an extra first-launch step; see [Desktop app](../install/desktop.md).
 You can also [build from source](../install/from-source.md).
 
 ## See also

@@ -12,7 +12,9 @@ export async function claimInstance(userData: string, link: string | undefined, 
   const forward = () => new Promise<'forwarded' | 'absent' | 'closed'>((resolve, reject) => {
     const socket = createConnection(address);
     socket.setTimeout(2000, () => socket.destroy(new Error('The running Kubus instance did not respond.')));
-    socket.on('connect', () => socket.end(`${JSON.stringify({ link })}\n`));
+    // Keep the pipe open until the owner acknowledges the launch. Bun's Windows
+    // named pipes can close their read side on end(), losing the reply.
+    socket.on('connect', () => socket.write(`${JSON.stringify({ link })}\n`));
     socket.on('data', () => { socket.destroy(); resolve('forwarded'); });
     socket.on('close', () => resolve('closed'));
     socket.on('error', (error: NodeJS.ErrnoException) => {
@@ -26,7 +28,7 @@ export async function claimInstance(userData: string, link: string | undefined, 
   const tryLock = process.platform === 'win32' ? undefined : (await import('./instance-lock.js')).tryInstanceLock;
   let release: (() => void) | undefined;
   let claimed = false;
-  const server = createServer({ allowHalfOpen: true }, (socket) => {
+  const server = createServer((socket) => {
     let input = '';
     socket.setTimeout(2000, () => socket.destroy());
     socket.on('error', () => {});
@@ -37,7 +39,9 @@ export async function claimInstance(userData: string, link: string | undefined, 
       try {
         const message = JSON.parse(input) as { link?: unknown };
         activate(typeof message.link === 'string' ? message.link : undefined);
-        socket.end('ok');
+        // The client closes after reading this acknowledgement. Ending the pipe
+        // here can also discard a queued reply on Windows.
+        socket.write('ok');
       } catch { socket.destroy(); }
     });
   });

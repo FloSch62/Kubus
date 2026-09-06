@@ -53,6 +53,24 @@ it('claims ownership when the previous peer closes without acknowledging the lau
   } finally { peer.close(); next?.close(); rmSync(dir, { recursive: true, force: true }); }
 }, 5000);
 
+it('keeps the forwarding connection open until the owner acknowledges the launch', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kubus-instance-test-'));
+  let endedBeforeReply: boolean | undefined;
+  const peer = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.once('data', () => {
+      setTimeout(() => {
+        endedBeforeReply = socket.readableEnded;
+        socket.end('ok');
+      }, 25);
+    });
+  });
+  try {
+    await new Promise<void>((resolve) => peer.listen(socketAddress(dir), resolve));
+    expect(await claimInstance(dir, 'kubus://r/core/v1/pods', vi.fn())).toBeUndefined();
+    expect(endedBeforeReply).toBe(false);
+  } finally { peer.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 it('keeps a live socket when its peer closes connections without acknowledging them', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'kubus-instance-test-'));
   const peer = createServer({ allowHalfOpen: true }, (socket) => { socket.end(); socket.resume(); });

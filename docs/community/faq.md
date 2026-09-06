@@ -45,10 +45,14 @@ name. It's a UI guard, not RBAC. See [Production guard](../guide/production-guar
 
 ### Why does macOS say the app is damaged / unverified?
 
-The builds use ad-hoc signatures but aren't notarised yet. Use **Open Anyway** in
-**System Settings → Privacy & Security** if offered. For a download you trust,
-run `xattr -r -d com.apple.quarantine /Applications/Kubus.app`. Details on the
-[Desktop app](../install/desktop.md) page.
+Published macOS releases are Developer ID signed and notarized by Apple. If a
+release download is reported as damaged, download it again from the
+[releases page](https://github.com/FloSch62/Kubus/releases).
+
+Local and pull-request builds use ad-hoc signatures and are not notarized. For
+one of these builds that you trust, use **Open Anyway** in
+**System Settings → Privacy & Security** if offered. See the
+[Desktop app](../install/desktop.md) page for installation details.
 
 ### Can I run it on a remote/headless box?
 
