@@ -97,6 +97,17 @@ the normal `dist` command. The workflow contains the public identity values.
 [Electrobun's signing guide](https://framework.blackboard.sh/electrobun/guides/code-signing/)
 documents the underlying signing and notarization pipeline.
 
+### Check Apple's notarization status without a Mac
+
+Run the Release workflow on the desired branch with `notarization_status_only`
+enabled. It uses a macOS runner and the existing password secret to query Apple's
+submission history, showing the response in the run summary. Builds and publishing
+are skipped, and no new notarization submission is created.
+
+```bash
+gh workflow run release.yml --ref feat/electrobun-desktop -f notarization_status_only=true
+```
+
 ## Desktop updates
 
 Installed Electrobun builds use the native updater with
