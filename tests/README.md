@@ -60,6 +60,10 @@ boundary. They exercise sender validation, coalesced on-disk state, deep-link
 delivery, update-manifest validation, native accelerators, shutdown ordering,
 and the exact preload API without opening a window.
 
+The single-instance regression test also starts concurrent Bun processes and
+recovers ownership after a crash. It uses Bun from the desktop bundle or Hutch's
+prepared toolchain cache; set `KUBUS_TEST_BUN` to override the executable.
+
 ## End-to-end tests
 
 ```bash

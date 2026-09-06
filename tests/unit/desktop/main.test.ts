@@ -266,6 +266,38 @@ it('restores the server after an update helper failure so installation can be re
   expect(native.quit).not.toHaveBeenCalled();
 });
 
+it.each(['applying', 'recovering', 'recovery failure'])('quits if the last window closes during update %s', async (stage) => {
+  native.packaged = true;
+  const win = await boot();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('available'));
+  native.messages[0]!.downloadUpdate!();
+  await vi.waitFor(() => expect(native.requests[0]!.bootstrap!().update.status).toBe('ready'));
+  const pending = Promise.withResolvers<void>();
+  const recoveredClose = vi.fn(async () => {});
+  native.updater.applyUpdate.mockImplementation(async () => {
+    if (stage === 'applying') await pending.promise;
+    throw new Error('Update helper failed');
+  });
+  native.startServer.mockImplementationOnce(async () => {
+    if (stage !== 'applying') await pending.promise;
+    if (stage === 'recovery failure') throw new Error('Recovery failed');
+    return { port: 42111, token: 'unit-secret', url: 'http://127.0.0.1:42111/?token=unit-secret', close: recoveredClose };
+  });
+
+  native.messages[0]!.applyUpdate!();
+  await vi.waitFor(() => stage === 'applying'
+    ? expect(native.updater.applyUpdate).toHaveBeenCalledOnce()
+    : expect(native.startServer).toHaveBeenCalledTimes(2));
+  native.messages[0]!.stateChanged!({ name: 'theme', value: 'dark' });
+  win.requestClose();
+  expect(native.quit).not.toHaveBeenCalled();
+  pending.resolve();
+
+  await vi.waitFor(() => expect(native.quit).toHaveBeenCalledOnce());
+  if (stage !== 'recovery failure') expect(recoveredClose).toHaveBeenCalledOnce();
+  expect(JSON.parse(readFileSync(path.join(dir, 'client-state.json'), 'utf8')).theme).toBe('dark');
+});
+
 it('coalesces window geometry queries during a resize and flushes on close', async () => {
   const win = await boot();
   const frame = vi.spyOn(win, 'getFrame');

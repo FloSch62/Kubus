@@ -22,7 +22,7 @@ if (process.platform === 'linux') {
   copyFileSync('assets/icon.iconset/icon_128x128.png', path.join(bin, 'Resources/appIcon.png'));
 }
 
-await build({ entryPoints: ['src/instance-worker.ts'], outfile: path.join(resources, 'kubus-instance.js'), bundle: true, platform: 'node', format: 'esm', target: 'es2022' });
+await build({ entryPoints: ['src/instance-worker.ts'], outfile: path.join(resources, 'kubus-instance.js'), bundle: true, platform: 'node', format: 'esm', target: 'es2022', external: ['bun:ffi'] });
 const boot = path.join(resources, 'main.js');
 const runtime = readFileSync(boot, 'utf8');
 const marker = '// Kubus single-instance bootstrap';

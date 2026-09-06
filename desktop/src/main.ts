@@ -214,7 +214,10 @@ async function installUpdate(): Promise<boolean> {
       quitReady = false;
       try {
         server = await startServer({ port: previous.port, token: previous.token, openBrowser: false, prettyLogs: false, staticRoot: path.join(resources, 'client') });
-      } finally { closing = undefined; }
+      } finally {
+        closing = undefined;
+        if (!windows.size) await shutdown();
+      }
     }
   }
 }
