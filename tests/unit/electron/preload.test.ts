@@ -47,7 +47,10 @@ interface DesktopBridge {
   };
   setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
   getAppInfo(): Promise<unknown>;
-  checkForUpdate(options?: { force?: boolean }): Promise<unknown>;
+  getUpdateState(): Promise<unknown>;
+  checkForUpdates(): Promise<unknown>;
+  installUpdate(): Promise<unknown>;
+  onUpdateState(callback: (state: unknown) => void): () => void;
   openWindow(launch: unknown): void;
   detachTab(launch: unknown): Promise<boolean>;
   onCloseTab(callback: () => void): () => void;
@@ -116,7 +119,9 @@ describe('Electron preload bridge', () => {
     electron.ipcRenderer.invoke.mockResolvedValueOnce(true);
     await expect(bridge.detachTab(launch)).resolves.toBe(true);
     await expect(bridge.getAppInfo()).resolves.toEqual({ name: 'Kubus' });
-    await expect(bridge.checkForUpdate({ force: true })).resolves.toEqual({ available: false });
+    await expect(bridge.checkForUpdates()).resolves.toEqual({ available: false });
+    await bridge.getUpdateState();
+    await bridge.installUpdate();
     await expect(bridge.getPendingRoute()).resolves.toBe('/pending');
 
     expect(electron.ipcRenderer.send).toHaveBeenCalledWith('kubus:set-titlebar-overlay', {
@@ -127,7 +132,9 @@ describe('Electron preload bridge', () => {
     expect(electron.ipcRenderer.send).toHaveBeenCalledWith('kubus:open-window', launch);
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:detach-tab', launch);
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-app-info');
-    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:check-for-update', { force: true });
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:check');
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:state');
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:update:install');
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith('kubus:get-pending-route');
   });
 
@@ -136,10 +143,14 @@ describe('Electron preload bridge', () => {
     const close = vi.fn();
     const cycle = vi.fn();
     const route = vi.fn();
+    const update = vi.fn();
 
     const offClose = bridge.onCloseTab(close);
     const offCycle = bridge.onCycleTab(cycle);
     const offRoute = bridge.onOpenRoute(route);
+    const offUpdate = bridge.onUpdateState(update);
+    electron.emit('kubus:update:changed', { status: 'ready' });
+    expect(update).toHaveBeenCalledExactlyOnceWith({ status: 'ready' });
 
     electron.emit('kubus:close-tab');
     electron.emit('kubus:cycle-tab', true);
@@ -154,6 +165,9 @@ describe('Electron preload bridge', () => {
     offClose();
     offCycle();
     offRoute();
+    offUpdate();
+    electron.emit('kubus:update:changed', { status: 'error' });
+    expect(update).toHaveBeenCalledOnce();
     electron.emit('kubus:close-tab');
     electron.emit('kubus:cycle-tab', false);
     electron.emit('kubus:open-route', '/after-unsubscribe');
@@ -161,7 +175,7 @@ describe('Electron preload bridge', () => {
     expect(close).toHaveBeenCalledOnce();
     expect(cycle).toHaveBeenCalledTimes(2);
     expect(route).toHaveBeenCalledOnce();
-    expect(electron.ipcRenderer.removeListener).toHaveBeenCalledTimes(3);
+    expect(electron.ipcRenderer.removeListener).toHaveBeenCalledTimes(4);
   });
 
   it('falls back safely when the boot snapshot fails and preserves state in localStorage after a disk error', async () => {

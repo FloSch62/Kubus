@@ -4,6 +4,7 @@ import Button from '@mui/material/Button';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import type { UpdateCheckResult } from '@kubus/shared';
+import { RestartToUpdate, useDesktopUpdate } from './DesktopUpdateControls.js';
 import { checkForUpdate as checkForAppUpdate } from '../api/app.js';
 
 const DISMISSED_UPDATE_KEY = 'kubus-dismissed-update-version';
@@ -32,6 +33,23 @@ function checkForUpdate(): Promise<UpdateCheckResult> {
 }
 
 export function UpdateNotification() {
+  return window.kubusDesktop ? <DesktopUpdateNotification /> : <BrowserUpdateNotification />;
+}
+
+function DesktopUpdateNotification() {
+  const state = useDesktopUpdate();
+  const [dismissed, setDismissed] = useState(readDismissedVersion);
+  const dismiss = () => {
+    if (state?.version) { dismissVersion(state.version); setDismissed(state.version); }
+  };
+  return <Snackbar open={state?.status === 'ready' && !!state.version && state.version !== dismissed} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+    <Alert severity="info" variant="filled" onClose={dismiss} action={<RestartToUpdate compact />}>
+      Kubus {state?.version} is ready to install.
+    </Alert>
+  </Snackbar>;
+}
+
+function BrowserUpdateNotification() {
   const [update, setUpdate] = useState<Extract<UpdateCheckResult, { available: true }> | null>(null);
 
   useEffect(() => {

@@ -45,9 +45,10 @@ name. It's a UI guard, not RBAC. See [Production guard](../guide/production-guar
 
 ### Why does macOS say the app is damaged / unverified?
 
-The builds aren't notarised yet. Right-click → **Open**, or run
-`xattr -d com.apple.quarantine /Applications/Kubus.app`. Details on the
-[Desktop app](../install/desktop.md) page.
+New Apple Silicon releases are signed and notarized. Install the app from the official
+DMG into Applications. If an older unsigned build is rejected, replace it with a
+current signed release. Intel Macs are no longer supported. See
+[Desktop app](../install/desktop.md).
 
 ### Can I run it on a remote/headless box?
 

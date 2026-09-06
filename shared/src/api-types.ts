@@ -116,6 +116,16 @@ export interface AppLogSettingsInput {
   debugEnabled: boolean;
 }
 
+/** Main-process update snapshot shared by every desktop window. */
+export interface DesktopUpdateState {
+  status: 'disabled' | 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'ready' | 'installing' | 'error';
+  currentVersion: string;
+  version?: string;
+  percent?: number;
+  reason?: 'development' | 'store' | 'package-manager' | 'unsupported-architecture';
+  error?: string;
+}
+
 export type UpdateCheckResult =
   | {
       available: true;

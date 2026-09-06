@@ -11,6 +11,7 @@ import CoffeeOutlinedIcon from '@mui/icons-material/CoffeeOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
 import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
+import { DesktopUpdateControls } from '../DesktopUpdateControls.js';
 import { checkForUpdate, getAppInfo } from '../../api/app.js';
 
 const LINKS = {
@@ -109,7 +110,7 @@ export function AboutSection() {
 
       <Box>
         <SectionTitle>Updates</SectionTitle>
-        <UpdateControls currentVersion={appInfo?.version} />
+        {window.kubusDesktop ? <DesktopUpdateControls /> : <UpdateControls currentVersion={appInfo?.version} />}
       </Box>
     </Stack>
   );

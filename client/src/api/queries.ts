@@ -963,7 +963,11 @@ export function useResourceMetrics(contexts: string[], kind: 'pods' | 'nodes') {
           apiFetch<MetricsSnapshot>(`/api/contexts/${encodeURIComponent(ctx)}/metrics/${kind}`).catch(
             () => ({ available: false, probed: true, items: [] }) as MetricsSnapshot,
           ),
-        refetchInterval: interval,
+        // A new connection returns a provisional empty snapshot while its
+        // first metrics probe runs. Pick that result up promptly instead of
+        // leaving the table empty for the normal twenty-second cadence.
+        refetchInterval: (query: { state: { data?: MetricsSnapshot } }) =>
+          interval !== false && query.state.data?.probed === false ? Math.min(interval, 1000) : interval,
       })),
     [contextsKey, kind, interval],
   );

@@ -23,13 +23,8 @@ export interface YamlEditorProps {
   schema?: YamlSchemaRef;
 }
 
-/**
- * Fetch a kind's JSON schema and register it with monaco-yaml. Callers that
- * know the kind ahead of time (e.g. the detail drawer) can invoke this before
- * the editor mounts so the yaml worker is warm when the YAML tab opens. The
- * monaco bundle itself loads on demand, so registration goes through a dynamic
- * import instead of pulling monaco into the startup chunk.
- */
+/** Fetch and register the schema when a YAML editor mounts. Keep this out of
+ * overview panels: registration loads Monaco and initializes its workers. */
 export function useYamlSchema(schema: YamlSchemaRef | undefined): YamlSchemaRef | undefined {
   const { ctx, group, version, kind } = schema ?? {};
   const schemaRef = useMemo<YamlSchemaRef | undefined>(

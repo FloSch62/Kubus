@@ -1,4 +1,4 @@
-import type { AppInfo, AppWindowLaunch, UpdateCheckResult } from '@kubus/shared';
+import type { AppInfo, AppWindowLaunch, DesktopUpdateState } from '@kubus/shared';
 
 declare global {
   /** Bridge exposed by the Electron preload (absent in regular browsers). */
@@ -15,7 +15,10 @@ declare global {
       };
       setTitleBarOverlay(options: { color: string; symbolColor: string }): void;
       getAppInfo(): Promise<AppInfo | undefined>;
-      checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult>;
+      getUpdateState(): Promise<DesktopUpdateState | undefined>;
+      checkForUpdates(): Promise<DesktopUpdateState | undefined>;
+      installUpdate(): Promise<boolean>;
+      onUpdateState(callback: (state: DesktopUpdateState) => void): () => void;
       /** Open a secondary native application window. */
       openWindow(launch: AppWindowLaunch): void;
       /** Detach only if the native cursor is outside every Kubus window. */
