@@ -18,8 +18,8 @@ export default {
       'dist/preload.js': 'preload.js',
     },
     // Sign both the runtime bundle and release wrapper, including their resources.
-    // The dist script defaults to an ad-hoc identity; notarization needs Apple credentials.
-    mac: { ...renderer, icons: 'assets/icon.iconset', codesign: true, notarize: false },
+    // Release CI requires notarization; local and PR builds use ad-hoc signing.
+    mac: { ...renderer, icons: 'assets/icon.iconset', codesign: true, notarize: process.env.KUBUS_NOTARIZE === '1' },
     linux: { ...renderer, icon: 'assets/icon.png' },
     // Windows ICO generation accepts PNGs up to 256x256.
     win: { ...renderer, icon: 'assets/icon.iconset/icon_256x256.png' },

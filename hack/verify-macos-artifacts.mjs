@@ -7,6 +7,18 @@ import path from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 
 export function verifyMacOSArtifacts(dmg, archive) {
+  const notarized = process.env.KUBUS_NOTARIZE === '1';
+  const verifyApp = (app) => {
+    execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=4', app], { stdio: 'inherit' });
+    if (notarized) {
+      assert.ok(process.env.ELECTROBUN_TEAMID, 'Notarized verification requires ELECTROBUN_TEAMID');
+      const requirement = `anchor apple generic and certificate leaf[subject.OU] = "${process.env.ELECTROBUN_TEAMID}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists`;
+      execFileSync('codesign', ['--verify', '-R', requirement, app], { stdio: 'inherit' });
+      execFileSync('xcrun', ['stapler', 'validate', app], { stdio: 'inherit' });
+      execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=4', app], { stdio: 'inherit' });
+    }
+  };
+  if (notarized) execFileSync('xcrun', ['stapler', 'validate', dmg], { stdio: 'inherit' });
   const scratch = mkdtempSync(path.join(tmpdir(), 'kubus-signatures-'));
   const mount = path.join(scratch, 'dmg');
   mkdirSync(mount);
@@ -15,7 +27,7 @@ export function verifyMacOSArtifacts(dmg, archive) {
     execFileSync('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mount, dmg], { stdio: 'inherit' });
     mounted = true;
     const wrapper = path.join(mount, 'Kubus.app');
-    execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=4', wrapper], { stdio: 'inherit' });
+    verifyApp(wrapper);
 
     // The first launch replaces the wrapper with this app. Verify the exact
     // embedded payload as well as the independently published update archive.
@@ -31,7 +43,7 @@ export function verifyMacOSArtifacts(dmg, archive) {
     const expanded = path.join(scratch, 'expanded');
     mkdirSync(expanded);
     execFileSync('tar', ['-xf', tar, '-C', expanded], { stdio: 'inherit' });
-    execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=4', path.join(expanded, 'Kubus.app')], { stdio: 'inherit' });
+    verifyApp(path.join(expanded, 'Kubus.app'));
     console.log('Verified macOS installer and update app signatures');
   } finally {
     // Do not recursively remove a mount if detach fails.

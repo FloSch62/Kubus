@@ -20,8 +20,40 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      KUBUS_NOTARIZE: ${{ matrix.os == 'macos-15' && '1' || '0' }}
+      ELECTROBUN_TEAMID: DJY795VD98
+      ELECTROBUN_DEVELOPER_ID: 'Developer ID Application: Florian Schwarz (DJY795VD98)'
     steps:
       - uses: actions/checkout@v7
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret: $name. See docs/community/releasing.md."
+              exit 1
+            fi
+          done
+          umask 077
+          certificate="$RUNNER_TEMP/kubus-signing.p12"
+          keychain="$RUNNER_TEMP/kubus-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security find-identity -v -p codesigning "$keychain" | grep -F "$ELECTROBUN_DEVELOPER_ID"
       - uses: pnpm/action-setup@v6
         with:
           version: 11.24.0
@@ -50,6 +82,9 @@ jobs:
       - run: pnpm build:helm-engine
       - name: Package Electrobun installers
         run: pnpm --filter @kubus/desktop dist
+        env:
+          ELECTROBUN_APPLEID: schwarz.flori.88@googlemail.com
+          ELECTROBUN_APPLEIDPASS: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
       - name: Package Debian installer
         if: runner.os == 'Linux'
         run: pnpm --filter @kubus/desktop deb
@@ -61,6 +96,13 @@ jobs:
           name: kubus-${{ matrix.os }}-${{ runner.arch }}
           if-no-files-found: error
           path: desktop/artifacts/*
+      - name: Remove Apple signing credentials
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/kubus-signing.keychain-db"
+          if [ -f "$keychain" ]; then security delete-keychain "$keychain"; fi
+          rm -f "$RUNNER_TEMP/kubus-signing.p12"
 
   publish:
     if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '') }}

@@ -11,6 +11,8 @@ desktop/assets/
 .hutch/
 .cottontail-tmp/
 .env
+# Local Apple signing keys, certificates, and password files.
+/.local/apple-signing/
 .DS_Store
 
 # Zensical docs build output & cache

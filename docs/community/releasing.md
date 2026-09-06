@@ -28,9 +28,13 @@ That's it. The release workflow then:
 
 ## macOS signatures
 
-`pnpm --filter @kubus/desktop dist` enables Electrobun's signing pipeline and
-defaults `ELECTROBUN_DEVELOPER_ID` to `-` on macOS (ad-hoc signing, no Apple
-certificate required). An explicitly supplied identity takes precedence.
+The release workflow signs as `Developer ID Application: Florian Schwarz (DJY795VD98)`
+and requires Apple notarization. It imports an encrypted certificate into a temporary
+macOS keychain and removes the keychain after the job. Missing credentials fail the
+release before building; no release is published if macOS verification fails.
+
+Local builds and pull-request CI use ad-hoc signatures. `pnpm --filter @kubus/desktop dist`
+defaults `ELECTROBUN_DEVELOPER_ID` to `-`; an explicitly supplied identity takes precedence.
 For direct canary builds, set the identity explicitly:
 
 ```bash
@@ -45,9 +49,53 @@ report `code has no resources but signature indicates they must be present`.
 
 CI and release verification mount the finished DMG, verify its app signature,
 compare its embedded payload with the published update archive, then extract
-and verify the runtime app. Ad-hoc signatures provide integrity checks but do
-not establish an identified developer or replace Apple notarization. Browser
-downloads can still require explicit approval in macOS.
+and verify the runtime app. Release verification additionally requires the configured
+Apple team, Developer ID Application signatures, stapled notarization tickets on the
+DMG and both apps, and Gatekeeper acceptance of both apps. Ad-hoc local/PR builds
+do not establish an identified developer or replace Apple notarization.
+
+### One-time Apple account setup
+
+Kubus distributes a DMG through GitHub, outside the Mac App Store. Create a
+**Developer ID Application** certificate, using Apple's **G2 Sub-CA** if offered.
+A Developer ID Installer certificate is for `.pkg` installers and is not needed here.
+The bundle identifier is `io.github.flosch62.kubus`; this app does not currently need
+an App Store listing, device registration, or a provisioning profile.
+
+1. Run `node hack/apple-signing.mjs csr` once. It generates a 2048-bit RSA key and
+   a verified CSR in `.local/apple-signing/`. The directory is ignored by Git and
+   accessible only by its owner; the key is encrypted and its password is stored
+   alongside it in an owner-readable file. Keep a secure backup of this folder.
+2. Sign in to [Apple Developer Certificates](https://developer.apple.com/account/resources/certificates/list)
+   with `schwarz.flori.88@googlemail.com` and select team **Florian Schwarz — DJY795VD98**.
+   Click **+**, choose **Developer ID Application**, continue, and upload
+   `.local/apple-signing/Kubus.certSigningRequest`. Generate and download the `.cer`.
+   Enrollment must be active and any required agreements accepted before certificates
+   are available. See [Apple's certificate instructions](https://developer.apple.com/help/account/certificates/create-developer-id-certificates).
+3. Run `node hack/apple-signing.mjs export /path/to/developerID_application.cer`.
+   The helper checks the certificate's team, identity, dates, and matching private key,
+   then creates an encrypted `.p12` for CI. The public `.cer` alone cannot sign an app.
+4. Run `node hack/apple-signing.mjs upload` to set `APPLE_CERTIFICATE_P12_BASE64`
+   and `APPLE_CERTIFICATE_PASSWORD` in the `FloSch62/Kubus` repository's Actions secrets.
+   Requires an authenticated `gh` CLI with permission to manage repository secrets.
+5. At [Apple Account](https://account.apple.com), open **Sign-In and Security →
+   App-Specific Passwords** and generate one named `Kubus notarization`.
+   Save it as `APPLE_APP_SPECIFIC_PASSWORD` in
+   [GitHub Actions repository secrets](https://github.com/FloSch62/Kubus/settings/secrets/actions).
+   Use the app-specific password, never your normal Apple login password.
+   See [Apple's password instructions](https://support.apple.com/en-us/102654).
+
+Only upload the CSR to Apple's certificate creation form. The private key, password
+files, and `.p12` must remain private and must never be attached to a release or committed.
+The key and its password share the local directory, so encryption does not protect
+against someone who can read that whole directory.
+
+To build a notarized release locally on an Apple Silicon Mac, import the `.p12`
+into Keychain Access, then set `KUBUS_NOTARIZE=1`, `ELECTROBUN_DEVELOPER_ID`,
+`ELECTROBUN_APPLEID`, `ELECTROBUN_TEAMID`, and `ELECTROBUN_APPLEIDPASS` before running
+the normal `dist` command. The workflow contains the public identity values.
+[Electrobun's signing guide](https://framework.blackboard.sh/electrobun/guides/code-signing/)
+documents the underlying signing and notarization pipeline.
 
 ## Desktop updates
 
