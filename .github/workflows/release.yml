@@ -115,7 +115,7 @@ jobs:
           WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
       - name: Test packaged updater against localhost
         if: runner.os == 'Linux'
-        run: pnpm test:updater
+        run: xvfb-run --auto-servernum pnpm test:updater
       - name: Verify artifacts
         shell: bash
         run: |
