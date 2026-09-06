@@ -113,6 +113,9 @@ jobs:
         env:
           WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'unsigned' }}
           WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+      - name: Test packaged updater against localhost
+        if: runner.os == 'Linux'
+        run: pnpm test:updater
       - name: Verify artifacts
         shell: bash
         run: |

@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "start": "electron .",
     "pack:dir": "electron-builder --dir",
-    "dist": "node scripts/dist.mjs"
+    "dist": "node scripts/dist.mjs",
+    "test:updater": "node scripts/test-updater.mjs"
   },
   "devDependencies": {
     "@kubus/server": "workspace:*",

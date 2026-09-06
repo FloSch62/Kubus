@@ -150,7 +150,24 @@ an organization-specific deployment step, not a preconfigured public MSIX feed.
 
 Unit tests cover updater progress, errors, concurrent windows, macOS validation,
 installation and stalled shutdown. Electron end-to-end tests exercise the actual
-shell. Packaging on Linux verifies the bundled updater boots without node_modules.
+shell. The Linux release job also runs a real packaged updater integration test.
+Run it locally on Linux after building:
+
+```bash
+pnpm build
+pnpm build:helm-engine
+pnpm test:updater
+```
+
+This builds two temporary AppImages with a localhost feed, checks the installed
+version, rejects an incorrect SHA-512 checksum, retries the download, verifies
+renderer progress and the restart control, installs on normal quit, and reopens
+the new version with retained desktop state. It uses an empty kubeconfig and
+isolated app/config/cache directories, then removes the test files. It does not
+publish a release or change the repository version. Reopening is driven by the
+test; this does not exercise the Restart button's automatic relaunch or a
+differential download.
+
 These checks do not replace a signed update test on macOS and Windows:
 
 1. Install the signed/current build in a disposable user profile.
