@@ -13,7 +13,8 @@ export function verifyMacOSArtifacts(dmg, archive) {
     if (notarized) {
       assert.ok(process.env.ELECTROBUN_TEAMID, 'Notarized verification requires ELECTROBUN_TEAMID');
       const requirement = `anchor apple generic and certificate leaf[subject.OU] = "${process.env.ELECTROBUN_TEAMID}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists`;
-      execFileSync('codesign', ['--verify', '-R', requirement, app], { stdio: 'inherit' });
+      // The '=' prefix marks inline source; otherwise codesign opens a file.
+      execFileSync('codesign', ['--verify', '-R', `=${requirement}`, app], { stdio: 'inherit' });
       execFileSync('xcrun', ['stapler', 'validate', app], { stdio: 'inherit' });
       execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=4', app], { stdio: 'inherit' });
     }
