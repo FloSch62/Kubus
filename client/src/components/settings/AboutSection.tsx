@@ -153,7 +153,7 @@ function UpdateControls({ currentVersion }: { currentVersion?: string }) {
         </Alert>
       )}
       {result?.available === false && !result.latestVersion && (
-        <Alert severity="warning" variant="outlined">
+        <Alert severity={result.reason === 'store-managed' ? 'info' : 'warning'} variant="outlined">
           {updateReasonLabel(result.reason)}
         </Alert>
       )}
@@ -209,6 +209,10 @@ function platformLabel(platform?: string): string {
 
 function updateReasonLabel(reason?: string): string {
   switch (reason) {
+    case 'store-managed':
+      return 'Microsoft Store manages updates for this installation. Check the Kubus page in the Store for available updates.';
+    case 'store-unavailable':
+      return 'Microsoft Store could not be opened. Open it from the Start menu to check for Kubus updates.';
     case 'timeout':
       return 'The update check timed out.';
     case 'network':

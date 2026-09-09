@@ -37,6 +37,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const isLinux = process.platform === 'linux';
+const isWindowsStore = isWindows && process.windowsStore === true;
+const STORE_URL = 'ms-windows-store://pdp/?ProductId=9PCTHB079SK7';
 
 // Must match the client TopBar height: its toolbar doubles as the titlebar.
 const TITLEBAR_HEIGHT = 52;
@@ -90,11 +92,14 @@ function openRoute(route: string): void {
   }
 }
 
-if (app.isPackaged) {
-  app.setAsDefaultProtocolClient(PROTOCOL);
-} else if (process.argv[1]) {
-  // Dev: register with explicit args so the OS can relaunch this checkout.
-  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+// Store packages register the protocol through their AppX manifest.
+if (!isWindowsStore) {
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(PROTOCOL);
+  } else if (process.argv[1]) {
+    // Dev: register with explicit args so the OS can relaunch this checkout.
+    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+  }
 }
 
 // macOS delivers deep links via open-url (cold starts queue until the window loads).
@@ -353,6 +358,18 @@ function releaseUrl(value: unknown): string | undefined {
 
 async function checkForUpdate(force = false): Promise<UpdateCheckResult> {
   const currentVersion = app.getVersion();
+  // A GitHub release may not yet be certified for the Store. Let the Store
+  // manage updates, and only open it when the user explicitly checks.
+  if (isWindowsStore) {
+    if (force) {
+      try {
+        await shell.openExternal(STORE_URL);
+      } catch {
+        return { available: false, currentVersion, reason: 'store-unavailable' };
+      }
+    }
+    return { available: false, currentVersion, reason: 'store-managed' };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
   try {

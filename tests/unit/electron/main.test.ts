@@ -188,6 +188,21 @@ async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>)
   }
 }
 
+async function withWindowsStore(run: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(process, 'windowsStore');
+  const originalResources = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+  Object.defineProperty(process, 'windowsStore', { value: true, configurable: true });
+  Object.defineProperty(process, 'resourcesPath', { value: userDataPath, configurable: true });
+  try {
+    await withPlatform('win32', run);
+  } finally {
+    if (original) Object.defineProperty(process, 'windowsStore', original);
+    else Reflect.deleteProperty(process, 'windowsStore');
+    if (originalResources) Object.defineProperty(process, 'resourcesPath', originalResources);
+    else Reflect.deleteProperty(process, 'resourcesPath');
+  }
+}
+
 function registered(map: Map<string, Handler>, name: string): Handler {
   const callback = map.get(name);
   expect(callback, `${name} should be registered`).toBeTypeOf('function');
@@ -545,6 +560,43 @@ describe('Electron main process', () => {
       currentVersion: '0.6.1',
       latestVersion: '0.8.0',
       reason: 'missing-release-url',
+    });
+  });
+
+  it('leaves Store updates to Microsoft and only opens the Store on an explicit, trusted request', async () => {
+    await withWindowsStore(async () => {
+      electron.app.isPackaged = true;
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const win = await loadMain();
+      const checkForUpdate = registered(electron.ipcHandlers, 'kubus:check-for-update');
+      const managed = { available: false, currentVersion: '0.6.1', reason: 'store-managed' };
+
+      expect(electron.app.setAsDefaultProtocolClient).not.toHaveBeenCalled();
+      await expect(checkForUpdate({ sender: {} }, { force: true })).resolves.toMatchObject({ reason: 'invalid-sender' });
+      await expect(checkForUpdate({ sender: win.webContents })).resolves.toEqual(managed);
+      expect(electron.shell.openExternal).not.toHaveBeenCalled();
+
+      await expect(checkForUpdate({ sender: win.webContents }, { force: true })).resolves.toEqual(managed);
+      expect(electron.shell.openExternal).toHaveBeenCalledExactlyOnceWith('ms-windows-store://pdp/?ProductId=9PCTHB079SK7');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('reports a Store launch failure without falling back to GitHub downloads', async () => {
+    await withWindowsStore(async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      electron.shell.openExternal.mockRejectedValueOnce(new Error('Store unavailable'));
+      const win = await loadMain();
+      const checkForUpdate = registered(electron.ipcHandlers, 'kubus:check-for-update');
+
+      await expect(checkForUpdate({ sender: win.webContents }, { force: true })).resolves.toEqual({
+        available: false,
+        currentVersion: '0.6.1',
+        reason: 'store-unavailable',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 

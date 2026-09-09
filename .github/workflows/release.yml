@@ -22,6 +22,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.publish_tag || github.ref }}
       - uses: pnpm/action-setup@v6
         with:
           version: 11.24.0
@@ -69,6 +71,7 @@ jobs:
               ;;
             Windows)
               test -n "$(find electron/release -maxdepth 1 -name '*.exe' -print -quit)"
+              test -n "$(find electron/release -maxdepth 1 -name '*.appx' -print -quit)"
               ;;
           esac
       - name: Upload artifacts
@@ -81,6 +84,15 @@ jobs:
             electron/release/*.dmg
             electron/release/*.AppImage
             electron/release/*.deb
+      # Microsoft signs this package after certification. Keep the unsigned
+      # submission out of the public GitHub installer downloads.
+      - name: Upload Microsoft Store package
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubus-windows-store
+          if-no-files-found: error
+          path: electron/release/*.appx
 
   publish:
     if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '') }}
@@ -120,9 +132,51 @@ jobs:
 
           gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
       # The docs deploy writes site/latest.json from the latest GitHub release,
-      # which powers the in-app update check for all installed versions.
+      # which powers the in-app update check for non-Store installations.
       - name: Refresh Pages update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh workflow run docs.yml --ref main
+
+  publish-store:
+    # The first Store release is submitted in Partner Center. The script checks
+    # for a published submission before it uploads any subsequent release.
+    if: ${{ github.repository == 'FloSch62/Kubus' && !contains(inputs.publish_tag || github.ref_name, '-') }}
+    needs: publish
+    runs-on: windows-latest
+    timeout-minutes: 30
+    concurrency:
+      group: microsoft-store-kubus
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.publish_tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v8
+        with:
+          name: kubus-windows-store
+          path: store-package
+      - uses: microsoft/microsoft-store-apppublisher@v1.1
+        with:
+          version: v0.4.2
+      - name: Configure Microsoft Store credentials
+        shell: pwsh
+        env:
+          AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+        run: |
+          foreach ($name in @('AZURE_AD_TENANT_ID', 'AZURE_AD_APPLICATION_CLIENT_ID', 'AZURE_AD_APPLICATION_SECRET', 'SELLER_ID')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing GitHub Actions secret: $name"
+            }
+          }
+          msstore reconfigure --tenantId "$env:AZURE_AD_TENANT_ID" --sellerId "$env:SELLER_ID" --clientId "$env:AZURE_AD_APPLICATION_CLIENT_ID" --clientSecret "$env:AZURE_AD_APPLICATION_SECRET"
+          if ($LASTEXITCODE -ne 0) { throw 'Microsoft Store authentication configuration failed.' }
+      - name: Submit Store update for certification
+        run: node hack/publish-microsoft-store.mjs store-package

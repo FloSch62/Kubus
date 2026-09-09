@@ -66,9 +66,12 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 ## Updating
 
-Download the newer installer and install over the top. Your settings live in the
-browser/app profile and are preserved. There's no telemetry and no auto-updater phoning
-home.
+For GitHub downloads, download the newer installer and install over the top. Your settings
+live in the browser/app profile and are preserved. Kubus checks for new releases and lets
+you choose when to download them.
+
+For Microsoft Store installations, the Store manages updates. **Settings → About → Check
+for updates** opens Kubus's Store page.
 
 ## Next steps
 

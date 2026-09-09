@@ -22,10 +22,24 @@ protocols:
     schemes: [kubus]
 npmRebuild: false
 afterPack: scripts/after-pack.cjs
+appxManifestCreated: scripts/appx-manifest.cjs
 win:
   target:
     - target: nsis
       arch: [x64]
+    - target: appx
+      arch: [x64]
+appx:
+  identityName: FloSch.me.Kubus
+  publisher: CN=7F1CC962-95FE-4843-B655-1EC6FF3D190E
+  publisherDisplayName: FloSch.me
+  applicationId: Kubus
+  displayName: Kubus
+  languages: [en-US]
+  minVersion: 10.0.19041.0
+  # The Store reserves the fourth version component; it must remain zero.
+  setBuildNumber: false
+  capabilities: [runFullTrust]
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
