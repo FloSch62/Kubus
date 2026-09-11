@@ -25,6 +25,10 @@ is the hub, and almost everything is reachable through it.
 | Shortcut | Action |
 | --- | --- |
 | ++ctrl+w++ / ++cmd+w++ | Close the focused log or terminal tab |
+| ++alt+page-up++ / ++alt+page-down++ | Previous / next tab in the focused dock |
+| ++ctrl+page-up++ / ++ctrl+page-down++ | Previous / next tab in the focused dock (desktop app) |
+
+Tab-cycling shortcuts switch page tabs when focus is outside the dock.
 
 When the dock is empty, ++ctrl+w++ / ++cmd+w++ closes the Kubus window as usual.
 
