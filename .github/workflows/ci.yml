@@ -48,6 +48,7 @@ jobs:
       # from their dist/, which doesn't exist on a fresh checkout
       - run: pnpm build
       - run: pnpm build:helm-engine
+      - run: pnpm test:helm-engine
       # One platform also collects repository-wide coverage and enforces the
       # non-regression floors; every matrix job exposes the same always-running
       # test step so OS-specific behavior is visible without misleading skips.

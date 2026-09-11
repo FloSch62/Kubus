@@ -22,6 +22,7 @@
     "test:coverage": "pnpm --filter @kubus/tests test:coverage",
     "test:e2e": "pnpm --filter @kubus/tests test:e2e",
     "test:electron": "pnpm --filter @kubus/tests test:electron",
+    "test:helm-engine": "node --test helm-engine/engine.test.mjs",
     "test:updater": "pnpm --filter @kubus/electron test:updater",
     "smoke": "node hack/smoke-server.mjs",
     "lint": "oxlint . --deny-warnings",

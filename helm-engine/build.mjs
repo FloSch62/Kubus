@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds the Helm rendering engine (Go, helm.sh/helm/v3) to a WASI module and
+// Builds the Helm rendering engine (Go, helm.sh/helm/v4) to a WASI module and
 // stores it gzipped where the server expects it: server/assets/helm-engine.wasm.gz
 // Requires a Go toolchain; the artifact itself is platform-independent.
 import { execFileSync } from 'node:child_process';
