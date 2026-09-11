@@ -18,13 +18,13 @@
     "@monaco-editor/react": "^4.7.0",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
-    "@mui/x-charts": "^9.12.0",
+    "@mui/x-charts": "^9.13.0",
     "@mui/x-data-grid": "^9.12.0",
     "@tanstack/react-query": "^5.102.8",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/xterm": "^6.0.0",
-    "@xyflow/react": "^12.11.5",
+    "@xyflow/react": "^12.11.6",
     "croner": "^10.0.1",
     "cronstrue": "^3.24.0",
     "elkjs": "^0.12.0",
@@ -34,14 +34,14 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
-    "react-router": "^8.3.0",
+    "react-router": "^8.3.1",
     "remark-gfm": "^4.0.1",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
   }
