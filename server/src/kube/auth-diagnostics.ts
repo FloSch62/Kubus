@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { User } from '@kubernetes/client-node';
 import type { ClusterAuthType } from '@kubus/shared';
 import type { RawClient } from './raw-client.js';
+import { ExecCredentialError } from './exec-credentials.js';
 
 /**
  * Turns raw connection/auth failures into messages that say what to do next,
@@ -231,6 +232,7 @@ function clip(text: string): string {
  * descriptive fallback instead of a blank alert.
  */
 export async function describeProbeFailure(err: unknown, user: User | null | undefined, raw?: RawClient): Promise<string> {
+  if (err instanceof ExecCredentialError) return err.message;
   const status = statusCodeOf(err);
   if (status === 401) return describe401(user, authTypeOf(user));
   if (status === 403) {

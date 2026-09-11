@@ -76,12 +76,14 @@ export class RawClient {
   constructor(
     private kc: KubeConfig,
     h2Transport?: H2WatchTransport,
+    private releaseAuth?: () => void,
   ) {
     this.h2 = h2Transport ?? new H2WatchTransport();
   }
 
   /** Close pooled HTTP/2 watch sessions. Call when the cluster handle is torn down. */
   dispose(): void {
+    this.releaseAuth?.();
     this.h2.close();
   }
 
