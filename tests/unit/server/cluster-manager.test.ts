@@ -392,6 +392,8 @@ describe('ClusterManager context metadata and health', () => {
 
 describe('ClusterManager file watching and reloads', () => {
   it('filters directory events, debounces relevant changes, and retries missing directories', async () => {
+    // Exact debounce boundaries must not advance with elapsed wall-clock time.
+    vi.useFakeTimers({ shouldAdvanceTime: false });
     const { file } = writeFixture();
     const watch = mockFsWatch();
     const manager = createManager(file);

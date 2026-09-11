@@ -21,7 +21,7 @@ releases, and more.
 
 ## Run From Source
 
-Requires Node.js >= 24.20 and pnpm 11:
+Requires Node.js >= 24.21 and pnpm 12:
 
 ```bash
 pnpm install

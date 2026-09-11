@@ -4,7 +4,7 @@ packages:
   - client
   - electron
   - tests
-# Keep local lockfile updates aligned with pnpm 11's CI supply-chain policy.
+# Keep local lockfile updates aligned with pnpm's CI supply-chain policy.
 minimumReleaseAge: 1440
 # monaco-yaml's worker imports path-browserify, which is CJS-only; the Vite dev
 # server serves worker-graph deps as native ESM without CJS interop, so the
@@ -33,4 +33,4 @@ minimumReleaseAgeExclude:
   - fast-uri@3.1.5
   - js-yaml@4.3.1
 patchedDependencies:
-  '@mui/x-virtualizer@0.7.0': patches/@mui__x-virtualizer@0.7.0.patch
+  '@mui/x-virtualizer@0.7.1': patches/@mui__x-virtualizer@0.7.1.patch

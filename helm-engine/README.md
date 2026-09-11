@@ -20,3 +20,8 @@ Requires a Go toolchain (build-time only; the artifact is platform-independent).
 lands at `server/assets/helm-engine.wasm.gz` (~13MB gzipped) — git-ignored, packaged into
 releases, and loaded lazily by the server. Without it, all read-only Helm features keep
 working; install/upgrade report the engine as unavailable.
+
+Keep `k8s.io/kube-openapi` at `v0.0.0-20260821135717-be32def86098` while using
+`k8s.io/apimachinery` 0.37. The newer OpenAPI revision returns
+`structured-merge-diff/v7` schema types, which do not compile with apimachinery's
+v6 schema types. Upgrade these dependencies together once they are compatible.
