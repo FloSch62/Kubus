@@ -85,6 +85,7 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
       { combos: [['Alt', 'Shift', 'T']], description: 'Reopen the last closed tab' },
       { combos: [['Alt', '1–9']], description: 'Switch to tab 1–9 (9 = last tab)' },
       { combos: [['Alt', 'PgUp'], ['Alt', 'PgDn']], description: 'Previous / next tab' },
+      { combos: [['Ctrl', 'PgUp'], ['Ctrl', 'PgDn']], description: 'Previous / next tab', desktopOnly: true },
       { combos: [['Ctrl', 'Tab'], ['Ctrl', 'Shift', 'Tab']], description: 'Next / previous tab', desktopOnly: true },
       { combos: [['←'], ['→'], ['Home'], ['End']], description: 'Move focus on the tab strip' },
       { combos: [['Enter'], ['Delete']], description: 'Activate / close the focused tab' },
@@ -194,7 +195,9 @@ export function GlobalShortcuts() {
       const focusedDock = document.activeElement instanceof HTMLElement
         ? document.activeElement.closest<HTMLElement>('.kubus-bottom-dock')
         : null;
-      if (focusedDock && dock.open && dock.tabs.length > 1) {
+      if (focusedDock && dock.open) {
+        // A focused dock owns cycling even when there is no other dock tab.
+        if (dock.tabs.length < 2) return;
         const idx = Math.max(0, dock.tabs.findIndex((tab) => tab.id === dock.activeId));
         const next = dock.tabs[(idx + delta + dock.tabs.length) % dock.tabs.length]!;
         // Keep focus in the dock while the old pane is hidden and the next
@@ -311,9 +314,19 @@ export function GlobalShortcuts() {
       }
 
       // Alt is the tab namespace. Never with Ctrl/Meta (AltGr reports
-      // ctrl+alt on Windows), and never while a terminal/editor owns Alt
-      // sequences (Alt+digit is an escape sequence in shells).
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !isEditorOrTerminalTarget(e.target)) {
+      // ctrl+alt on Windows). Terminals allow the advertised tab-cycling
+      // chords but keep other Alt sequences; editors keep all of them.
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const isTabCycle = !e.shiftKey && (e.code === 'PageUp' || e.code === 'PageDown');
+        const inTerminal = e.target instanceof HTMLElement && !!e.target.closest('.xterm');
+        if (isEditorOrTerminalTarget(e.target) && !(inTerminal && isTabCycle)) return;
+        if (isTabCycle) {
+          e.preventDefault();
+          // xterm must not also send the shortcut as input to the shell.
+          e.stopPropagation();
+          cycleTab(e.code === 'PageDown' ? 1 : -1);
+          return;
+        }
         if (!e.shiftKey && e.code === 'KeyJ') {
           if (e.repeat) return;
           const eventTarget = e.target instanceof HTMLElement ? e.target : null;
@@ -336,16 +349,6 @@ export function GlobalShortcuts() {
         if (digit) {
           e.preventDefault();
           activateTab(Number(digit));
-          return;
-        }
-        if (!e.shiftKey && e.code === 'PageDown') {
-          e.preventDefault();
-          cycleTab(1);
-          return;
-        }
-        if (!e.shiftKey && e.code === 'PageUp') {
-          e.preventDefault();
-          cycleTab(-1);
           return;
         }
         if (e.code === 'KeyT') {

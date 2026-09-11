@@ -19,8 +19,8 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 /**
  * True when the target sits inside a surface that owns the whole keyboard
  * (terminals, code editors). Stricter than isTextEntryTarget: plain filter
- * inputs still allow e.g. Alt tab-switching chords, but a shell or editor
- * must receive every Alt sequence unmodified.
+ * inputs still allow e.g. Alt tab-switching chords. Shortcuts must explicitly
+ * opt in to handling keys inside a shell or editor.
  */
 export function isEditorOrTerminalTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && !!target.closest('.xterm, .monaco-editor');
