@@ -24,7 +24,11 @@ These values belong to the reserved Kubus product and must remain stable across 
 The package settings are in `electron/electron-builder.yml`. The application ID is
 `Kubus`, the architecture is x64, and the minimum Windows version is 10.0.19041.0.
 The existing `kubus://` protocol is included in the generated package manifest.
-Store tile assets are rendered from the Kubus SVG during the Electron build.
+Store tile assets are rendered from the Kubus SVG during the Electron build. The
+tile background is transparent, and `Square44x44Logo.targetsize-*` icons include
+both `altform-unplated` and `altform-lightunplated` variants so Windows does not add
+a background box in Start or the taskbar. Keep all variants even though they use
+the same artwork; see Microsoft's [app icon requirements](https://learn.microsoft.com/en-us/windows/apps/design/iconography/app-icon-construction#app-icon).
 
 ## Obtain the submission package
 
@@ -64,7 +68,9 @@ See Microsoft's [package signing guide](https://learn.microsoft.com/en-us/window
 
 Exercise the installed package before public release:
 
-1. Launch from Start, including on a profile with no kubeconfig.
+1. Launch from Start, including on a profile with no kubeconfig. Check the Start
+   and taskbar icons in both light and dark Windows themes: the Kubus glyph should
+   appear without a background box, matching the regular installer.
 2. Read and edit a test kubeconfig, including a custom `KUBECONFIG` location.
 3. Connect using any installed authentication helpers you support, such as `aws`,
    `gke-gcloud-auth-plugin` and `kubelogin`.

@@ -33,6 +33,7 @@ appx:
   publisherDisplayName: FloSch.me
   applicationId: Kubus
   displayName: Kubus
+  backgroundColor: transparent
   languages: [en-US]
   minVersion: 10.0.19041.0
   # The Store reserves the fourth version component; it must remain zero.
