@@ -199,6 +199,21 @@ async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>)
   }
 }
 
+async function withWindowsStore(run: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(process, 'windowsStore');
+  const originalResources = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+  Object.defineProperty(process, 'windowsStore', { value: true, configurable: true });
+  Object.defineProperty(process, 'resourcesPath', { value: userDataPath, configurable: true });
+  try {
+    await withPlatform('win32', run);
+  } finally {
+    if (original) Object.defineProperty(process, 'windowsStore', original);
+    else Reflect.deleteProperty(process, 'windowsStore');
+    if (originalResources) Object.defineProperty(process, 'resourcesPath', originalResources);
+    else Reflect.deleteProperty(process, 'resourcesPath');
+  }
+}
+
 function registered(map: Map<string, Handler>, name: string): Handler {
   const callback = map.get(name);
   expect(callback, `${name} should be registered`).toBeTypeOf('function');
@@ -548,6 +563,45 @@ describe('Electron main process', () => {
       await vi.advanceTimersByTimeAsync(stalled ? 5000 : 0);
       expect(electron.updater.quitAndInstall).toHaveBeenCalledExactlyOnceWith(false, true);
       expect(electron.app.exit).not.toHaveBeenCalled();
+    });
+  });
+
+  it('leaves Store updates to Microsoft and only opens the Store on an explicit, trusted request', async () => {
+    vi.useFakeTimers();
+    await withWindowsStore(async () => {
+      electron.app.isPackaged = true;
+      const win = await loadMain();
+      const state = registered(electron.ipcHandlers, 'kubus:update:state');
+      const check = registered(electron.ipcHandlers, 'kubus:update:check');
+      const download = registered(electron.ipcHandlers, 'kubus:update:download');
+      const install = registered(electron.ipcHandlers, 'kubus:update:install');
+      const managed = { status: 'disabled', currentVersion: '0.6.1', reason: 'store' };
+
+      expect(electron.app.setAsDefaultProtocolClient).not.toHaveBeenCalled();
+      expect(check({ sender: {} })).toBeUndefined();
+      expect(state({ sender: win.webContents })).toEqual(managed);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
+      expect(electron.shell.openExternal).not.toHaveBeenCalled();
+      expect(electron.updater.checkForUpdates).not.toHaveBeenCalled();
+
+      await expect(check({ sender: win.webContents })).resolves.toEqual(managed);
+      expect(electron.shell.openExternal).toHaveBeenCalledExactlyOnceWith('ms-windows-store://pdp/?ProductId=9PCTHB079SK7');
+      await expect(download({ sender: win.webContents })).resolves.toEqual(managed);
+      expect(install({ sender: win.webContents })).toBe(false);
+      expect(electron.updater.downloadUpdate).not.toHaveBeenCalled();
+      expect(electron.updater.quitAndInstall).not.toHaveBeenCalled();
+    });
+  });
+
+  it('reports a Store launch failure without falling back to GitHub downloads', async () => {
+    await withWindowsStore(async () => {
+      electron.app.isPackaged = true;
+      electron.shell.openExternal.mockRejectedValueOnce(new Error('Store unavailable'));
+      const win = await loadMain();
+      const check = registered(electron.ipcHandlers, 'kubus:update:check');
+      await expect(check({ sender: win.webContents })).rejects.toThrow('Store unavailable');
+      expect(electron.updater.checkForUpdates).not.toHaveBeenCalled();
+      expect(electron.updater.downloadUpdate).not.toHaveBeenCalled();
     });
   });
 

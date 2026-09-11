@@ -53,6 +53,8 @@ jobs:
       # test step so OS-specific behavior is visible without misleading skips.
       - name: Unit tests
         run: pnpm ${{ runner.os == 'Linux' && 'test:coverage' || 'test' }}
+      - name: Store release automation tests
+        run: node --test hack/publish-microsoft-store.test.mjs
       # The namespace selector lives inside a native draggable title bar. Run
       # the real Electron renderer on every supported desktop OS so platform
       # hit-testing differences cannot regress unnoticed.
@@ -86,6 +88,19 @@ jobs:
       - run: pnpm --filter @kubus/electron exec electron-builder --dir
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Package for Microsoft Store
+        if: runner.os == 'Windows'
+        run: pnpm --filter @kubus/electron dist:store
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Upload Microsoft Store package
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kubus-windows-store
+          if-no-files-found: error
+          path: electron/release-store/*.appx
+          retention-days: 30
       # Boot the app's server on each OS to catch runtime startup regressions
       # (won't listen, missing static assets, crash-on-boot) that packaging
       # alone misses. Headless, so it needs no display on any runner.

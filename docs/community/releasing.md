@@ -23,7 +23,16 @@ The workflow verifies versions, builds all platforms, checks signatures, and upl
 installers, ZIPs, differential `.blockmap` files and `latest*.yml` update feeds. New
 releases stay in draft until all assets are uploaded. Payloads are uploaded before
 feeds, including when using the manual `publish_tag` input to repair a release.
-Prefer a new version for an update: clients can cache the old payload for a reused version.
+Tag a commit whose CI checks have passed; the Release workflow does not rerun the
+full test suite. Prefer a new version for an update: clients can cache the old
+payload for a reused version.
+
+The workflow also builds an unsigned Windows AppX in the separate
+**kubus-windows-store** Actions artifact. After publishing a stable GitHub release,
+it submits the Store update using the configured credentials. The first Store
+release must already be live; pending submissions are left intact. Certification
+may finish later than the GitHub release. See [Publishing to Microsoft Store](microsoft-store.md)
+for initial publication, credentials, testing and retry instructions.
 
 Keep `latest.yml`, `latest-mac.yml`, `latest-linux.yml`, the macOS ZIP and blockmaps
 on the release. They are required for in-app updates. Do not sign or otherwise modify
@@ -125,21 +134,16 @@ transition should be tested separately with the installed unsigned version.
 
 ### Prepare a Microsoft Store submission
 
-The pinned electron-builder 26 supports **AppX**. Microsoft Store accepts this format
-alongside MSIX; a builder upgrade can add native MSIX output later. Reserve Kubus in
-Partner Center and copy its exact identity values into repository variables:
+The reserved Kubus identity is configured in `electron/electron-builder.yml`.
+CI, Release and the manual **Windows Store package** workflow all use
+`pnpm --filter @kubus/electron dist:store` to produce an unsigned AppX in
+`electron/release-store/`, uploaded as **kubus-windows-store**. Microsoft signs it
+after certification. It is not a public sideload installer.
 
-- `WINDOWS_STORE_IDENTITY_NAME`
-- `WINDOWS_STORE_PUBLISHER` (the full `CN=…` value)
-- `WINDOWS_STORE_PUBLISHER_DISPLAY_NAME`
-
-Run the **Windows Store package** workflow on this branch. It produces an unsigned
-Store submission in the `kubus-windows-store` workflow artifact. Submit it in Partner
-Center; Microsoft signs it after certification. It is not a public sideload installer.
-The packaged app carries `kubusUpdateMode: store`, so GitHub updates stay disabled
-regardless of the runtime's Store detection. NSIS release assets remain separate.
-The app requests the full-trust capability required by Electron; certification and
-kubeconfig/credential-plugin access still need testing on Windows.
+The Store package carries `kubusUpdateMode: store` and contains no GitHub update
+feed. NSIS installers and their updater metadata stay in `electron/release/`.
+See [Publishing to Microsoft Store](microsoft-store.md) for the reserved identity,
+version mapping, submission automation and required Windows testing.
 
 For enterprise sideloading, use the same reserved organization identity, sign the
 package using a certificate trusted by managed devices, and publish an App Installer

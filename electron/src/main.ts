@@ -39,6 +39,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 const isLinux = process.platform === 'linux';
+const isWindowsStore = isWindows && process.windowsStore === true;
+const STORE_URL = 'ms-windows-store://pdp/?ProductId=9PCTHB079SK7';
 
 // Must match the client TopBar height: its toolbar doubles as the titlebar.
 const TITLEBAR_HEIGHT = 52;
@@ -91,11 +93,14 @@ function openRoute(route: string): void {
   }
 }
 
-if (app.isPackaged) {
-  app.setAsDefaultProtocolClient(PROTOCOL);
-} else if (process.argv[1]) {
-  // Dev: register with explicit args so the OS can relaunch this checkout.
-  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+// Store packages register the protocol through their AppX manifest.
+if (!isWindowsStore) {
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(PROTOCOL);
+  } else if (process.argv[1]) {
+    // Dev: register with explicit args so the OS can relaunch this checkout.
+    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+  }
 }
 
 // macOS delivers deep links via open-url (cold starts queue until the window loads).
@@ -530,7 +535,14 @@ ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
 });
 
 ipcMain.handle('kubus:update:state', (event) => isManagedWindowSender(event) ? desktopUpdater?.getState() : undefined);
-ipcMain.handle('kubus:update:check', (event) => isManagedWindowSender(event) ? desktopUpdater?.check() : undefined);
+ipcMain.handle('kubus:update:check', (event) => {
+  if (!isManagedWindowSender(event)) return undefined;
+  // Background checks stay disabled; only an explicit user request opens the Store.
+  if (desktopUpdater?.getState().reason === 'store') {
+    return shell.openExternal(STORE_URL).then(() => desktopUpdater?.getState());
+  }
+  return desktopUpdater?.check();
+});
 ipcMain.handle('kubus:update:download', (event) => isManagedWindowSender(event) ? desktopUpdater?.download() : undefined);
 ipcMain.handle('kubus:update:install', (event) => isManagedWindowSender(event) && desktopUpdater?.requestInstall() === true);
 

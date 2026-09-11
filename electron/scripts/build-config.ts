@@ -21,10 +21,11 @@ export function distributionConfig(env: NodeJS.ProcessEnv, platform: string): Co
     config.publish = null;
     // Builder 26 emits AppX, accepted by the Store alongside MSIX. The Store
     // signs this package after certification; its identity comes from Partner Center.
-    config.win = { target: [{ target: 'appx', arch: ['x64'] }], signtoolOptions: { sign: async () => {} } };
+    // A scalar replaces the base NSIS target; builder concatenates target arrays.
+    config.win = { target: 'appx', signtoolOptions: { sign: async () => {} } };
     config.appx = {
-      identityName: required('WINDOWS_STORE_IDENTITY_NAME'), publisher: required('WINDOWS_STORE_PUBLISHER'),
-      publisherDisplayName: required('WINDOWS_STORE_PUBLISHER_DISPLAY_NAME'), applicationId: 'Kubus',
+      // Keep the reserved product identity in electron-builder.yml.
+      applicationId: 'Kubus',
     };
     return config;
   }

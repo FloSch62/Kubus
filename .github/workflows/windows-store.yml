@@ -26,12 +26,9 @@ jobs:
       - run: pnpm build
       - run: pnpm build:helm-engine
       - name: Build Store submission (AppX)
-        run: pnpm --filter @kubus/electron dist
+        run: pnpm --filter @kubus/electron dist:store
         env:
-          KUBUS_WINDOWS_TARGET: store
-          WINDOWS_STORE_IDENTITY_NAME: ${{ vars.WINDOWS_STORE_IDENTITY_NAME }}
-          WINDOWS_STORE_PUBLISHER: ${{ vars.WINDOWS_STORE_PUBLISHER }}
-          WINDOWS_STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.WINDOWS_STORE_PUBLISHER_DISPLAY_NAME }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v7
         with:
           name: kubus-windows-store

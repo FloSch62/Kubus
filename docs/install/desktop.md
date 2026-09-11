@@ -69,10 +69,12 @@ Save edits before restarting. All Kubus windows close and terminals, log streams
 and port forwards disconnect. Settings are preserved. On macOS, run the installed
 copy from Applications rather than directly from the disk image.
 
-Debian packages use your package manager or a newer `.deb` from Releases. A future
-Microsoft Store build uses Store-managed updates. Browser installs show a download
-link. Updating from older desktop versions requires installing the new release once
-manually, since they did not contain an auto-updater.
+Microsoft Store installations use Store-managed updates. **Settings → About → Check
+for updates** opens Kubus's Store page.
+
+Debian packages use your package manager or a newer `.deb` from Releases. Browser
+installs show a download link. Updating from older desktop versions requires
+installing the new release once manually, since they did not contain an auto-updater.
 
 Update requests go to GitHub and its download CDN and include the installed version
 and platform as required by the updater. They do not include kubeconfigs or cluster

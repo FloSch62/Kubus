@@ -183,10 +183,10 @@ describe('release signing configuration', () => {
     expect(() => distributionConfig({ WINDOWS_SIGNING: 'typo', WINDOWS_PUBLISHER_NAME: 'Publisher' }, 'win32')).toThrow('Unknown');
   });
 
-  it('requires the reserved Store identity and emits a separate package without a GitHub update feed', () => {
-    expect(() => distributionConfig({ KUBUS_WINDOWS_TARGET: 'store' }, 'win32')).toThrow('WINDOWS_STORE_IDENTITY_NAME');
-    const config = distributionConfig({ KUBUS_WINDOWS_TARGET: 'store', WINDOWS_STORE_IDENTITY_NAME: '123.Kubus',
-      WINDOWS_STORE_PUBLISHER: 'CN=publisher-id', WINDOWS_STORE_PUBLISHER_DISPLAY_NAME: 'Publisher' }, 'win32');
-    expect(config).toMatchObject({ publish: null, extraMetadata: { kubusUpdateMode: 'store' }, directories: { output: 'release-store' } });
+  it('emits a separate Store package without a GitHub update feed or NSIS signing', () => {
+    const config = distributionConfig({ KUBUS_WINDOWS_TARGET: 'store', WINDOWS_SIGNING: 'certificate' }, 'win32');
+    expect(config).toMatchObject({ publish: null, extraMetadata: { kubusUpdateMode: 'store' },
+      directories: { output: 'release-store' }, win: { target: 'appx' } });
+    expect(config.forceCodeSigning).toBeUndefined();
   });
 });

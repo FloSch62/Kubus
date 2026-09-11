@@ -76,6 +76,7 @@ nav = [
     { "Contributing" = "community/contributing.md" },
     { "Building from source" = "community/development.md" },
     { "Releasing" = "community/releasing.md" },
+    { "Microsoft Store" = "community/microsoft-store.md" },
     { "Test clusters" = "community/test-clusters.md" },
     { "FAQ" = "community/faq.md" },
   ] },

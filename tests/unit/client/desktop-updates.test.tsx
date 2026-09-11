@@ -65,9 +65,15 @@ it('shows shared download progress and asks to save work before restarting all w
 it('keeps Store builds on managed updates', async () => {
   const desktop = bridge({ currentVersion: '0.9.0', status: 'disabled', reason: 'store' });
   render(<DesktopUpdateControls />);
-  expect(await screen.findByText(/managed by Microsoft Store/)).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument();
+  expect(await screen.findByText(/Microsoft Store manages updates/)).toBeInTheDocument();
   expect(desktop.checkForUpdates).not.toHaveBeenCalled();
+  desktop.checkForUpdates.mockRejectedValueOnce(new Error('Store unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+  expect(await screen.findByText(/Microsoft Store could not be opened/)).toBeInTheDocument();
+  expect(desktop.checkForUpdates).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: 'Download update' })).not.toBeInTheDocument();
+  expect(desktop.downloadUpdate).not.toHaveBeenCalled();
+  expect(desktop.installUpdate).not.toHaveBeenCalled();
 });
 
 it('does not overwrite a pushed update with a stale initial snapshot', async () => {

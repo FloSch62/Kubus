@@ -57,8 +57,15 @@ export function DesktopUpdateControls() {
   const [error, setError] = useState(false);
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.status);
   if (state?.status === 'disabled') {
+    if (state.reason === 'store') return <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+      <Typography variant="body2" color="text.secondary">Microsoft Store manages updates for this installation.</Typography>
+      <Button variant="contained" onClick={() => {
+        setError(false);
+        void window.kubusDesktop?.checkForUpdates().catch(() => setError(true));
+      }}>Check for updates</Button>
+      {error && <Alert severity="warning">Microsoft Store could not be opened. Open it from the Start menu to check for Kubus updates.</Alert>}
+    </Stack>;
     return <Typography variant="body2" color="text.secondary">{
-      state.reason === 'store' ? 'Updates are managed by Microsoft Store or your organization.' :
       state.reason === 'package-manager' ? 'Install updates with your Linux package manager or download a newer package from Releases.' :
       state.reason === 'unsupported-architecture' ? 'New macOS releases require Apple Silicon.' :
       'In-app updates are available in installed desktop releases.'
