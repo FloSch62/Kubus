@@ -101,6 +101,23 @@ for (const shortcut of ['Ctrl+Tab', 'Ctrl+PgUp/PgDn', 'Alt+PgUp/PgDn']) {
       await expect(pageTabs.nth(1)).toHaveAttribute('aria-selected', 'true');
       expect(shellConnections).toBe(2);
 
+      // A focused dock still owns the shortcut when only one tab remains.
+      await dock.getByRole('button', { name: 'Close Node shell', exact: true }).click();
+      await dock.getByRole('button', { name: 'Close Pod logs', exact: true }).click();
+      await expect(dock.getByRole('tab')).toHaveCount(1);
+      await input.focus();
+      let expectedInput = 'pod input after cycling';
+      for (const backwards of [false, true]) {
+        await cycleTab(backwards);
+        const text = backwards ? ' backward' : ' forward';
+        await page.keyboard.type(text);
+        expectedInput += text;
+        await expect.poll(() => shellInput.get('web')).toBe(expectedInput);
+        await expect(pageTabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+        await expect(podTab).toHaveAttribute('aria-selected', 'true');
+        await expect(input).toBeFocused();
+      }
+
       // Once focus leaves the dock, the same chord still cycles page tabs.
       const search = page.getByRole('button', { name: 'Search', exact: true });
       await search.focus();

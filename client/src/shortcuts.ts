@@ -195,7 +195,9 @@ export function GlobalShortcuts() {
       const focusedDock = document.activeElement instanceof HTMLElement
         ? document.activeElement.closest<HTMLElement>('.kubus-bottom-dock')
         : null;
-      if (focusedDock && dock.open && dock.tabs.length > 1) {
+      if (focusedDock && dock.open) {
+        // A focused dock owns cycling even when there is no other dock tab.
+        if (dock.tabs.length < 2) return;
         const idx = Math.max(0, dock.tabs.findIndex((tab) => tab.id === dock.activeId));
         const next = dock.tabs[(idx + delta + dock.tabs.length) % dock.tabs.length]!;
         // Keep focus in the dock while the old pane is hidden and the next
