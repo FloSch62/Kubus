@@ -191,10 +191,17 @@ export function GlobalShortcuts() {
 
     const cycleTab = (delta: number) => {
       const dock = useDockStore.getState();
-      const focusedInDock = document.activeElement instanceof HTMLElement && !!document.activeElement.closest('.kubus-bottom-dock');
-      if (focusedInDock && dock.open && dock.tabs.length > 1) {
+      const focusedDock = document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest<HTMLElement>('.kubus-bottom-dock')
+        : null;
+      if (focusedDock && dock.open && dock.tabs.length > 1) {
         const idx = Math.max(0, dock.tabs.findIndex((tab) => tab.id === dock.activeId));
-        dock.setActive(dock.tabs[(idx + delta + dock.tabs.length) % dock.tabs.length]!.id);
+        const next = dock.tabs[(idx + delta + dock.tabs.length) % dock.tabs.length]!;
+        // Keep focus in the dock while the old pane is hidden and the next
+        // terminal waits for its focus request, or when landing on logs.
+        focusedDock.focus({ preventScroll: true });
+        if (isTerminalTab(next)) dock.requestTerminalFocus(next.id);
+        else dock.setActive(next.id);
         return;
       }
       const s = useTabsStore.getState();

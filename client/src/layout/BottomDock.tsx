@@ -88,6 +88,7 @@ export const BottomDock = memo(function BottomDock({
   return (
     <Box
       className="kubus-bottom-dock"
+      tabIndex={-1}
       sx={{
         height: '100%',
         display: 'flex',
