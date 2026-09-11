@@ -40,6 +40,7 @@ class Helper extends EventEmitter {
 }
 
 const children: Helper[] = [];
+const terminationProcesses: Helper[] = [];
 const managers: ExecCredentialManager[] = [];
 const clusters: ClusterManager[] = [];
 const dirs: string[] = [];
@@ -72,12 +73,24 @@ async function authenticate(kc: KubeConfig): Promise<RequestOptions> {
 const flush = () => vi.advanceTimersByTimeAsync(0);
 const expires = () => ({ token: 'short-lived', expirationTimestamp: new Date(Date.now() + 1000).toISOString() });
 
+async function withPlatform(platform: NodeJS.Platform, run: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    await run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(process, 'kill').mockReturnValue(true);
-  vi.spyOn(childProcess, 'spawn').mockImplementation(() => {
+  vi.spyOn(childProcess, 'spawn').mockImplementation((command) => {
     const child = new Helper();
-    children.push(child);
+    // Windows launches taskkill to terminate a process tree. It is not a
+    // credential attempt and must not affect helper counts or completion.
+    (command === 'taskkill' ? terminationProcesses : children).push(child);
     return child as unknown as ReturnType<typeof childProcess.spawn>;
   });
 });
@@ -86,6 +99,7 @@ afterEach(async () => {
   for (const cluster of clusters.splice(0)) cluster.dispose();
   for (const value of managers.splice(0)) value.dispose();
   for (const child of children.splice(0)) child.close();
+  for (const child of terminationProcesses.splice(0)) child.close();
   await flush();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -189,18 +203,24 @@ describe('shared exec credentials', () => {
     raw.dispose();
   });
 
-  it('terminates a timed-out helper and holds the attempt until process close before allowing an explicit retry', async () => {
+  it.each(['linux', 'win32'] as const)('terminates a timed-out helper and holds the attempt until process close before allowing an explicit retry (%s)', async (platform) => withPlatform(platform, async () => {
     const credentials = manager();
     const kc = config();
     credentials.attach(kc);
     const first = Promise.allSettled([authenticate(kc)]);
     await flush();
     await vi.advanceTimersByTimeAsync(EXEC_AUTH_TIMEOUT_MS);
-    if (process.platform !== 'win32') expect(process.kill).toHaveBeenCalledWith(-children[0]!.pid, 'SIGKILL');
+    if (platform === 'win32') {
+      expect(childProcess.spawn).toHaveBeenCalledWith('taskkill', ['/PID', String(children[0]!.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      expect(process.kill).not.toHaveBeenCalled();
+    } else {
+      expect(process.kill).toHaveBeenCalledWith(-children[0]!.pid, 'SIGKILL');
+    }
+    expect(terminationProcesses).toHaveLength(platform === 'win32' ? 1 : 0);
     credentials.retry('ctx');
     const second = Promise.allSettled([authenticate(kc)]);
     await flush();
-    expect(vi.mocked(childProcess.spawn).mock.calls.filter(([command]) => command === '/fake/cloud-cli')).toHaveLength(1);
+    expect(children).toHaveLength(1);
     children[0]!.close();
     expect((await first)[0]).toMatchObject({ status: 'rejected', reason: { message: expect.stringContaining('timed out') } });
     await second;
@@ -210,7 +230,7 @@ describe('shared exec credentials', () => {
     await flush();
     children.at(-1)!.finish();
     await expect(retry).resolves.toBeDefined();
-  });
+  }));
 
   it.each([
     ['malformed JSON', 'not json'],
@@ -297,19 +317,20 @@ describe('shared exec credentials', () => {
     expect(children).toHaveLength(0);
   });
 
-  it('retires removed sessions and prevents disposed clients from launching helpers', async () => {
+  it.each(['linux', 'win32'] as const)('retires removed sessions and prevents disposed clients from launching helpers (%s)', async (platform) => withPlatform(platform, async () => {
     const credentials = manager();
     const kc = config();
     const release = credentials.attach(kc);
     const pending = Promise.allSettled([authenticate(kc)]);
     await flush();
     credentials.retainContexts(new Set());
+    expect(terminationProcesses).toHaveLength(platform === 'win32' ? 1 : 0);
     children[0]!.close();
     await pending;
     release();
     await expect(authenticate(kc)).rejects.toMatchObject({ reason: 'NotConnected' });
     expect(children).toHaveLength(1);
-  });
+  }));
 });
 
 it('shares background probes with live handles, preserves failure on reload, and recovers through Test connection and Reconnect', async () => {
