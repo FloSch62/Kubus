@@ -65,3 +65,14 @@ for (const [name, width, height] of [
   const file = path.resolve(root, '../build/appx', name);
   if (await outdated(file)) await render(width, file, height);
 }
+
+// Windows adds a backplate in Start and the taskbar unless both unplated
+// theme variants are present, even when the PNG and tile are transparent.
+// https://learn.microsoft.com/en-us/windows/apps/design/iconography/app-icon-construction#app-icon
+const appxTargetSizes = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256];
+for (const size of appxTargetSizes) {
+  for (const variant of ['', '_altform-unplated', '_altform-lightunplated']) {
+    const file = path.resolve(root, `../build/appx/Square44x44Logo.targetsize-${size}${variant}.png`);
+    if (await outdated(file)) await render(size, file);
+  }
+}
