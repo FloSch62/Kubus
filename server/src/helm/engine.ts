@@ -9,7 +9,7 @@ import { HttpProblem } from '../util/errors.js';
 
 /**
  * Helm's chart rendering pipeline (loader → chartutil → engine → releaseutil)
- * compiled from helm.sh/helm/v3 to a WASI module — see /helm-engine. Each call
+ * compiled from helm.sh/helm/v4 to a WASI module — see /helm-engine. Each call
  * runs a fresh, fully sandboxed instance whose only filesystem access is a
  * scratch dir holding input.json/output.json. The compiled module is cached
  * in memory while helm write-actions are in use and dropped after idle.

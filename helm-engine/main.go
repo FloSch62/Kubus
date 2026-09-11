@@ -14,12 +14,14 @@ import (
 	"path"
 	"strings"
 
-	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/engine"
-	"helm.sh/helm/v3/pkg/release"
-	"helm.sh/helm/v3/pkg/releaseutil"
+	"helm.sh/helm/v4/pkg/chart/common"
+	commonutil "helm.sh/helm/v4/pkg/chart/common/util"
+	chart "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/chart/v2/loader"
+	chartutil "helm.sh/helm/v4/pkg/chart/v2/util"
+	"helm.sh/helm/v4/pkg/engine"
+	release "helm.sh/helm/v4/pkg/release/v1"
+	releaseutil "helm.sh/helm/v4/pkg/release/v1/util"
 )
 
 const notesFileSuffix = "NOTES.txt"
@@ -145,19 +147,19 @@ func renderChart(ch *chart.Chart, in *input) error {
 		return fmt.Errorf("process dependencies: %w", err)
 	}
 
-	caps := chartutil.DefaultCapabilities.Copy()
+	caps := common.DefaultCapabilities.Copy()
 	if in.KubeVersion != "" {
-		kv, err := chartutil.ParseKubeVersion(in.KubeVersion)
+		kv, err := common.ParseKubeVersion(in.KubeVersion)
 		if err != nil {
 			return fmt.Errorf("parse kube version %q: %w", in.KubeVersion, err)
 		}
 		caps.KubeVersion = *kv
 	}
 	if len(in.APIVersions) > 0 {
-		caps.APIVersions = chartutil.VersionSet(in.APIVersions)
+		caps.APIVersions = common.VersionSet(in.APIVersions)
 	}
 
-	opts := chartutil.ReleaseOptions{
+	opts := common.ReleaseOptions{
 		Name:      in.Release.Name,
 		Namespace: in.Release.Namespace,
 		Revision:  in.Release.Revision,
@@ -166,7 +168,7 @@ func renderChart(ch *chart.Chart, in *input) error {
 	}
 	// Match Helm's install/upgrade path: coalesce chart defaults and user values,
 	// then validate the result against values.schema.json when the chart ships one.
-	valuesToRender, err := chartutil.ToRenderValuesWithSchemaValidation(ch, in.Values, opts, caps, false)
+	valuesToRender, err := commonutil.ToRenderValuesWithSchemaValidation(ch, in.Values, opts, caps, false)
 	if err != nil {
 		return err
 	}

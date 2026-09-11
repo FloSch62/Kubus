@@ -116,7 +116,7 @@ strategy once it is ready. A workload that remains in `CrashLoopBackOff` for 90 
 failed early so recovery is not locked behind the full readiness timeout.
 
 Rendering happens server-side with Helm's real template engine (compiled from
-`helm.sh/helm/v3` to WASM), against your cluster's actual capabilities: the kube version
+`helm.sh/helm/v4` to WASM), against your cluster's actual capabilities: the kube version
 and the available API groups. Templates that branch on `.Capabilities` therefore render
 correctly. Helm values schema validation also runs while rendering.
 
