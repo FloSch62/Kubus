@@ -7,8 +7,12 @@ server/assets/helm-engine.wasm.gz
 helm-engine/helm-engine.wasm
 electron/build/
 electron/release/
+electron/release-store/
 .env
 .DS_Store
+
+# Local Apple signing keys, certificates, and passwords
+/.local/apple-signing/
 
 # Zensical docs build output & cache
 site/

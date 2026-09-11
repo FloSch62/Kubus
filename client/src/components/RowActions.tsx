@@ -29,7 +29,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Tooltip from '@mui/material/Tooltip';
+import { CellTooltip } from './CellTooltip.js';
 import Typography from '@mui/material/Typography';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddIcon from '@mui/icons-material/Add';
@@ -151,7 +151,7 @@ export function RowLogsButton({ target }: { target: RowActionTarget }) {
   const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === target.kind ? target.kind : undefined;
   if (!actionKind || !isLogTargetKind(actionKind)) return null;
   return (
-    <Tooltip title="Logs">
+    <CellTooltip title="Logs">
       <span>
         <IconButton
           size="small"
@@ -168,7 +168,7 @@ export function RowLogsButton({ target }: { target: RowActionTarget }) {
           <SubjectIcon fontSize="small" />
         </IconButton>
       </span>
-    </Tooltip>
+    </CellTooltip>
   );
 }
 

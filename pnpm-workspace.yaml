@@ -32,3 +32,5 @@ minimumReleaseAgeExclude:
   - undici@6.28.0
   - fast-uri@3.1.5
   - js-yaml@4.3.1
+patchedDependencies:
+  '@mui/x-virtualizer@0.7.0': patches/@mui__x-virtualizer@0.7.0.patch

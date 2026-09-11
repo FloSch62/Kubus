@@ -10,15 +10,46 @@ on:
         required: false
         type: string
 
+      notarization_status_only:
+        description: 'Query Apple notarization history without building or publishing'
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: read
 
 jobs:
+  notarization-status:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.notarization_status_only }}
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - name: Query Apple notarization history
+        shell: bash
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+            echo "::error::Missing APPLE_APP_SPECIFIC_PASSWORD repository secret."
+            exit 1
+          fi
+          xcrun notarytool history \
+            --apple-id schwarz.flori.88@googlemail.com \
+            --team-id DJY795VD98 \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --output-format json | tee "$RUNNER_TEMP/notary-history.json"
+          printf '### Apple notarization history\n\n```json\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/notary-history.json" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+
   build:
+    if: ${{ !inputs.notarization_status_only }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -52,10 +83,39 @@ jobs:
       - run: pnpm -r build
       - run: pnpm build:helm-engine
       - name: Package
-        run: pnpm --filter @kubus/electron exec electron-builder --publish never
+        run: pnpm --filter @kubus/electron dist
         env:
-          # No signing certs: skip keychain discovery so mac builds stay unsigned.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          KUBUS_RELEASE: '1'
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: schwarz.flori.88@googlemail.com
+          APPLE_TEAM_ID: DJY795VD98
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'unsigned' }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_P12_BASE64 || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          WINDOWS_CERTIFICATE_SHA1: ${{ vars.WINDOWS_CERTIFICATE_SHA1 }}
+          WINDOWS_SIGN_SCRIPT: ${{ vars.WINDOWS_SIGN_SCRIPT }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+      - name: Verify macOS signatures and notarization
+        if: runner.os == 'macOS'
+        run: node hack/verify-macos-artifacts.mjs
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./hack/verify-windows-signatures.ps1
+        env:
+          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'unsigned' }}
+          WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+      - name: Test packaged updater against localhost
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm test:updater
       - name: Verify artifacts
         shell: bash
         run: |
@@ -63,12 +123,15 @@ jobs:
             Linux)
               test -n "$(find electron/release -maxdepth 1 -name '*.AppImage' -print -quit)"
               test -n "$(find electron/release -maxdepth 1 -name '*.deb' -print -quit)"
+              test -f electron/release/latest-linux.yml
               ;;
             macOS)
-              test -n "$(find electron/release -maxdepth 1 -name '*.dmg' -print -quit)"
+              test -n "$(find electron/release -maxdepth 1 -name '*.zip' -print -quit)"
+              test -f electron/release/latest-mac.yml
               ;;
             Windows)
               test -n "$(find electron/release -maxdepth 1 -name '*.exe' -print -quit)"
+              test -f electron/release/latest.yml
               ;;
           esac
       - name: Upload artifacts
@@ -79,11 +142,14 @@ jobs:
           path: |
             electron/release/*.exe
             electron/release/*.dmg
+            electron/release/*.zip
+            electron/release/*.blockmap
+            electron/release/latest*.yml
             electron/release/*.AppImage
             electron/release/*.deb
 
   publish:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '') }}
+    if: ${{ !inputs.notarization_status_only && (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_tag != '')) }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -100,27 +166,38 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mapfile -t artifacts < <(find release-assets -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' \) -print)
+          mapfile -t artifacts < <(find release-assets -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.dmg' -o -name '*.exe' -o -name '*.zip' -o -name '*.blockmap' -o -name 'latest*.yml' \) -print)
           if [ "${#artifacts[@]}" -eq 0 ]; then
             echo "No release artifacts found" >&2
             exit 1
           fi
 
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+            base="https://github.com/$GH_REPO/releases/download/$RELEASE_TAG"
+            version="${RELEASE_TAG#v}"
+            printf '%s\n' \
+              '### Downloads' '' \
+              "- **macOS (Apple Silicon):** [Download DMG]($base/kubus-$version-mac-arm64.dmg), then drag Kubus into Applications." \
+              "- **Windows:** [Download installer]($base/kubus-$version-win-x64.exe)." \
+              "- **Linux:** [AppImage]($base/kubus-$version-linux-x86_64.AppImage) · [Debian / Ubuntu]($base/kubus-$version-linux-amd64.deb)." '' \
+              'The ZIP, blockmap and YAML assets below are used by in-app updates.' \
+              > "$RUNNER_TEMP/release-intro.md"
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release-intro.md" --draft
           fi
 
-          while IFS= read -r asset_name; do
-            case "$asset_name" in
-              kubus-*-mac-x64.*|kubus-*-mac-arm64.*|kubus-*.blockmap|latest*.yml)
-                gh release delete-asset "$RELEASE_TAG" "$asset_name" --yes
-                ;;
-            esac
-          done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
-
-          gh release upload "$RELEASE_TAG" "${artifacts[@]}" --clobber
+          # Payloads and differential blockmaps must exist before update feeds refer to them.
+          payloads=()
+          manifests=()
+          for artifact in "${artifacts[@]}"; do
+            if [[ "$artifact" == *.yml ]]; then manifests+=("$artifact"); else payloads+=("$artifact"); fi
+          done
+          gh release upload "$RELEASE_TAG" "${payloads[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${manifests[@]}" --clobber
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi
       # The docs deploy writes site/latest.json from the latest GitHub release,
-      # which powers the in-app update check for all installed versions.
+      # for browser installs and desktop versions predating electron-updater.
       - name: Refresh Pages update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

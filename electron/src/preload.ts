@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppWindowLaunch } from '@kubus/shared';
+import type { AppWindowLaunch, DesktopUpdateState } from '@kubus/shared';
 
 // Client state is mirrored here and persisted with fire-and-forget messages.
 // sendSync is deliberately avoided for the steady-state path: it parks the
@@ -69,8 +69,14 @@ contextBridge.exposeInMainWorld('kubusDesktop', {
   getAppInfo() {
     return ipcRenderer.invoke('kubus:get-app-info');
   },
-  checkForUpdate(options?: { force?: boolean }) {
-    return ipcRenderer.invoke('kubus:check-for-update', options);
+  getUpdateState() { return ipcRenderer.invoke('kubus:update:state'); },
+  checkForUpdates() { return ipcRenderer.invoke('kubus:update:check'); },
+  downloadUpdate() { return ipcRenderer.invoke('kubus:update:download'); },
+  installUpdate() { return ipcRenderer.invoke('kubus:update:install'); },
+  onUpdateState(callback: (state: DesktopUpdateState) => void): () => void {
+    const listener = (_event: unknown, state: DesktopUpdateState): void => callback(state);
+    ipcRenderer.on('kubus:update:changed', listener);
+    return () => ipcRenderer.removeListener('kubus:update:changed', listener);
   },
   openWindow(launch: AppWindowLaunch): void {
     ipcRenderer.send('kubus:open-window', launch);

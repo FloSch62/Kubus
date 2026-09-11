@@ -14,9 +14,9 @@ Grab the installer for your platform from the **[releases page](https://github.c
 
 | Platform | File |
 | --- | --- |
-| :material-microsoft-windows: Windows | `Kubus-Setup-<version>.exe` |
-| :material-apple: macOS (universal) | `Kubus-<version>.dmg` |
-| :material-linux: Linux | `Kubus-<version>.AppImage` or `.deb` |
+| :material-microsoft-windows: Windows | `kubus-<version>-win-x64.exe` |
+| :material-apple: macOS (Apple Silicon) | `kubus-<version>-mac-arm64.dmg` |
+| :material-linux: Linux | `kubus-<version>-linux-x86_64.AppImage` or `kubus-<version>-linux-amd64.deb` |
 
 ## Install & launch
 
@@ -31,44 +31,53 @@ Grab the installer for your platform from the **[releases page](https://github.c
 === ":material-apple: macOS"
 
     1. Open the `.dmg` and drag **Kubus** into **Applications**.
-    2. The builds aren't notarised yet, so the first launch needs one extra step:
+    2. Open **Kubus** from Applications, Spotlight or the Dock.
 
-        - **Right-click** the app → **Open**, then confirm in the dialog, *or*
-        - clear the quarantine flag from a terminal:
+    Choose the **`.dmg`** download. The `.zip` on the release page is used by
+    in-app updates; you do not need to download or extract it.
 
-        ```bash
-        xattr -d com.apple.quarantine /Applications/Kubus.app
-        ```
-
-    After the first launch you can open it normally from Spotlight or the Dock.
+    Release builds are signed with Apple Developer ID and notarized. New releases
+    require an Apple Silicon Mac (M1 or newer); Intel Macs are no longer supported.
 
 === ":material-linux: Linux"
 
     === "AppImage"
 
         ```bash
-        chmod +x Kubus-*.AppImage
-        ./Kubus-*.AppImage
+        chmod +x kubus-*.AppImage
+        ./kubus-*.AppImage
         ```
 
     === "Debian / Ubuntu (.deb)"
 
         ```bash
-        sudo apt install ./kubus_*_amd64.deb
+        sudo apt install ./kubus-*-linux-amd64.deb
         kubus
         ```
 
-!!! note "Why isn't it signed?"
-
-    Kubus is an open-source project without an Apple Developer or Windows code-signing
-    certificate yet. The steps above are the standard way to run unsigned apps. You can
-    always [build from source](from-source.md) if you'd rather not.
-
 ## Updating
 
-Download the newer installer and install over the top. Your settings live in the
-browser/app profile and are preserved. There's no telemetry and no auto-updater phoning
-home.
+The macOS app, Windows installer and Linux AppImage check GitHub Releases shortly
+after startup and every four hours. A notification offers **Download update** or
+**Later**. Kubus downloads the update only when you request it. Once downloaded,
+choose **Restart to update** and confirm to install it. **Quitting normally does
+not install updates**, even after downloading one. You can check, download, follow
+progress, or retry in **Settings → About**. After reopening Kubus, a requested
+download can reuse the verified cached update.
+
+Save edits before restarting. All Kubus windows close and terminals, log streams
+and port forwards disconnect. Settings are preserved. On macOS, run the installed
+copy from Applications rather than directly from the disk image.
+
+Debian packages use your package manager or a newer `.deb` from Releases. A future
+Microsoft Store build uses Store-managed updates. Browser installs show a download
+link. Updating from older desktop versions requires installing the new release once
+manually, since they did not contain an auto-updater.
+
+Update requests go to GitHub and its download CDN and include the installed version
+and platform as required by the updater. They do not include kubeconfigs or cluster
+data. There is no telemetry. See [Releasing](../community/releasing.md) for signing
+and Windows distribution options.
 
 ## Next steps
 

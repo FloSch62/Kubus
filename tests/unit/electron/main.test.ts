@@ -77,12 +77,19 @@ const electron = vi.hoisted(() => {
     }
   }
 
+  const updateListeners = new Map<string, Handler>();
+  const updater = {
+    on: vi.fn((name: string, listener: Handler) => updateListeners.set(name, listener)),
+    checkForUpdates: vi.fn(), downloadUpdate: vi.fn(), quitAndInstall: vi.fn(),
+  };
   const app = {
     isPackaged: false,
     setName: vi.fn(),
     setAsDefaultProtocolClient: vi.fn(() => true),
     getPath: vi.fn(() => state.userDataPath),
     getName: vi.fn(() => 'Kubus'),
+    getAppPath: vi.fn(() => path.resolve(import.meta.dirname, '../../../electron')),
+    relaunch: vi.fn(),
     getVersion: vi.fn(() => '0.6.1'),
     requestSingleInstanceLock: vi.fn(() => true),
     whenReady: vi.fn(async () => undefined),
@@ -110,6 +117,8 @@ const electron = vi.hoisted(() => {
   return {
     app,
     appHandlers,
+    updater,
+    updateListeners,
     BrowserWindow: MockBrowserWindow,
     fixPath,
     appendAppLog,
@@ -134,6 +143,7 @@ const electron = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: electron.app,
+  autoUpdater: {},
   BrowserWindow: electron.BrowserWindow,
   dialog: electron.dialog,
   ipcMain: electron.ipcMain,
@@ -143,6 +153,7 @@ vi.mock('electron', () => ({
   shell: electron.shell,
   webContents: electron.webContentsApi,
 }));
+vi.mock('electron-updater', () => ({ default: { autoUpdater: electron.updater } }));
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
 vi.mock('@kubus/server', () => ({ appendAppLog: electron.appendAppLog, startServer: electron.startServer }));
 
@@ -211,6 +222,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   electron.appHandlers.clear();
+  electron.updateListeners.clear();
   electron.ipcListeners.clear();
   electron.ipcHandlers.clear();
   electron.BrowserWindow.instances.length = 0;
@@ -494,57 +506,48 @@ describe('Electron main process', () => {
     });
   });
 
-  it('validates update manifests and never services a foreign renderer', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+  it('rejects foreign update IPC and disables downloads in development', async () => {
     const win = await loadMain();
-    const checkForUpdate = registered(electron.ipcHandlers, 'kubus:check-for-update');
+    const state = registered(electron.ipcHandlers, 'kubus:update:state');
+    const check = registered(electron.ipcHandlers, 'kubus:update:check');
+    const download = registered(electron.ipcHandlers, 'kubus:update:download');
+    const install = registered(electron.ipcHandlers, 'kubus:update:install');
+    expect(state({ sender: {} })).toBeUndefined();
+    expect(check({ sender: {} })).toBeUndefined();
+    expect(download({ sender: {} })).toBeUndefined();
+    expect(install({ sender: {} })).toBe(false);
+    expect(state({ sender: win.webContents })).toMatchObject({ status: 'disabled', reason: 'development' });
+    await expect(check({ sender: win.webContents })).resolves.toMatchObject({ status: 'disabled' });
+    await expect(download({ sender: win.webContents })).resolves.toMatchObject({ status: 'disabled' });
+    expect(install({ sender: win.webContents })).toBe(false);
+  });
 
-    await expect(checkForUpdate({ sender: {} }, { force: true })).resolves.toEqual({
-      available: false,
-      currentVersion: '0.6.1',
-      reason: 'invalid-sender',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          version: 'v0.7.0',
-          releaseName: 'Kubus 0.7',
-          releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v0.7.0',
-          publishedAt: '2026-07-22T08:00:00Z',
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    await expect(checkForUpdate({ sender: win.webContents }, { force: true })).resolves.toEqual({
-      available: true,
-      currentVersion: '0.6.1',
-      latestVersion: '0.7.0',
-      releaseName: 'Kubus 0.7',
-      releaseUrl: 'https://github.com/FloSch62/Kubus/releases/tag/v0.7.0',
-      publishedAt: '2026-07-22T08:00:00Z',
-    });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/^https:\/\/kubus-app\.dev\/latest\.json\?t=\d+$/);
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      headers: { Accept: 'application/json', 'User-Agent': 'Kubus/0.6.1' },
-    });
-
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          version: '0.8.0',
-          releaseUrl: 'https://attacker.example/Kubus/releases/tag/v0.8.0',
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-    await expect(checkForUpdate({ sender: win.webContents }, { force: true })).resolves.toEqual({
-      available: false,
-      currentVersion: '0.6.1',
-      latestVersion: '0.8.0',
-      reason: 'missing-release-url',
+  it.each([false, true])('hands off updates after server shutdown (stalled=%s)', async (stalled) => {
+    vi.useFakeTimers();
+    await withPlatform('win32', async () => {
+      electron.app.isPackaged = true;
+      Object.defineProperty(process, 'resourcesPath', { value: userDataPath, configurable: true });
+      if (stalled) electron.serverClose.mockImplementationOnce(() => new Promise(() => {}));
+      const win = await loadMain();
+      registered(electron.updateListeners, 'update-available')({ version: '1.0.0' });
+      const download = registered(electron.ipcHandlers, 'kubus:update:download');
+      expect(download({ sender: {} })).toBeUndefined();
+      const pending = download({ sender: win.webContents });
+      registered(electron.updateListeners, 'update-downloaded')({ version: '1.0.0' });
+      await pending;
+      expect(win.webContents.send).toHaveBeenCalledWith('kubus:update:changed', expect.objectContaining({ status: 'ready' }));
+      const install = registered(electron.ipcHandlers, 'kubus:update:install');
+      expect(install({ sender: {} })).toBe(false);
+      expect(install({ sender: win.webContents })).toBe(true);
+      expect(install({ sender: win.webContents })).toBe(false);
+      expect(electron.updater.quitAndInstall).not.toHaveBeenCalled();
+      const preventDefault = vi.fn();
+      appHandler('before-quit')({ preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(electron.serverClose).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(stalled ? 5000 : 0);
+      expect(electron.updater.quitAndInstall).toHaveBeenCalledExactlyOnceWith(false, true);
+      expect(electron.app.exit).not.toHaveBeenCalled();
     });
   });
 

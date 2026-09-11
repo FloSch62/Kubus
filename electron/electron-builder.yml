@@ -35,7 +35,10 @@ mac:
   notarize: false
   target:
     - target: dmg
-      arch: [universal]
+      arch: [arm64]
+    # Squirrel.Mac downloads the signed app from this archive.
+    - target: zip
+      arch: [arm64]
 dmg:
   sign: false
 deb:

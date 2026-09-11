@@ -1,6 +1,3 @@
-import Box from '@mui/material/Box';
-import CircleIcon from '@mui/icons-material/Circle';
-import { statusTextColor } from '../theme.js';
 
 const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'complete', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
 const BAD = new Set([
@@ -59,21 +56,9 @@ export function StatusChip({ status, label, size = 'sm' }: { status: string; lab
   const color = statusColor(status);
   const md = size === 'md';
   return (
-    <Box
-      component="span"
-      sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: md ? 0.875 : 0.75,
-        fontSize: md ? 13 : 12.5,
-        fontWeight: 550,
-        lineHeight: 1.6,
-        whiteSpace: 'nowrap',
-        color: color === 'default' ? 'text.secondary' : statusTextColor(color),
-      }}
-    >
-      <CircleIcon sx={{ fontSize: md ? 8 : 7, opacity: color === 'default' ? 0.6 : 1 }} />
+    <span className={`kubus-status kubus-status-${color}${md ? ' kubus-status-md' : ''}`}>
+      <span className="kubus-status-dot" aria-hidden="true" />
       {label ?? status}
-    </Box>
+    </span>
   );
 }

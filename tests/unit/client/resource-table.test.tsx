@@ -55,4 +55,19 @@ describe('ResourceTable selection', () => {
     await waitFor(() => expect(screen.getByText('second')).toBeInTheDocument());
     expect(screen.queryByText('first')).not.toBeInTheDocument();
   });
+
+  it('holds refreshed metric cells until scrolling settles, then shows the latest value', async () => {
+    const rows = [row('first')];
+    const columns = (usage: string) => [{ field: 'cpu', renderCell: () => usage }];
+    const { container, rerender } = render(<ResourceTable rows={rows} columns={columns('12m')} />);
+    fireEvent.wheel(container.querySelector('.MuiDataGrid-virtualScroller')!);
+    rerender(<ResourceTable rows={rows} columns={columns('18m')} />);
+    expect(screen.getByText('12m')).toBeInTheDocument();
+    expect(screen.queryByText('18m')).not.toBeInTheDocument();
+    rerender(<ResourceTable rows={rows} columns={columns('24m')} />);
+    await waitFor(() => expect(screen.getByText('24m')).toBeInTheDocument());
+    expect(screen.queryByText('12m')).not.toBeInTheDocument();
+    expect(screen.queryByText('18m')).not.toBeInTheDocument();
+  });
+
 });

@@ -1,10 +1,12 @@
+import { READ_ONLY_GRID_SLOTS } from '../components/ResourceGridCell.js';
+import { GridTooltips } from '../components/CellTooltip.js';
 import { useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
-import Tooltip from '@mui/material/Tooltip';
+import { CellTooltip as Tooltip } from '../components/CellTooltip.js';
 import StopIcon from '@mui/icons-material/Stop';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
@@ -117,27 +119,32 @@ export function PortForwardsPage() {
           subtitle="Start one from a Pod, Service or workload row menu (⋮ → Port forward…), or from the ports listed in a resource's details."
         />
       ) : (
-        <DataGrid
-          rows={data ?? []}
-          columns={grid.columns}
-          loading={isLoading}
-          getRowId={(r) => r.id}
-          density={grid.density}
-          checkboxSelection
-          disableRowSelectionOnClick
-          onRowSelectionModelChange={(model) => {
-            // The header "select all" checkbox reports an exclude-type model
-            // whose ids are the deselected rows.
-            const ids = model.ids instanceof Set ? model.ids : new Set();
-            const rows = data ?? [];
-            setSelectedIds(
-              (model.type === 'exclude' ? rows.filter((r) => !ids.has(r.id)) : rows.filter((r) => ids.has(r.id))).map((r) => r.id),
-            );
-          }}
-          onColumnWidthChange={grid.onColumnWidthChange}
-          onCellKeyDown={handleCopyCellKeyDown}
-          sx={forwardsGridSx}
-        />
+        <GridTooltips rootRef={gridRootRef}>
+          <DataGrid
+            slots={READ_ONLY_GRID_SLOTS}
+            rowBufferPx={80}
+            columnBufferPx={50}
+            rows={data ?? []}
+            columns={grid.columns}
+            loading={isLoading}
+            getRowId={(r) => r.id}
+            density={grid.density}
+            checkboxSelection
+            disableRowSelectionOnClick
+            onRowSelectionModelChange={(model) => {
+              // The header "select all" checkbox reports an exclude-type model
+              // whose ids are the deselected rows.
+              const ids = model.ids instanceof Set ? model.ids : new Set();
+              const rows = data ?? [];
+              setSelectedIds(
+                (model.type === 'exclude' ? rows.filter((r) => !ids.has(r.id)) : rows.filter((r) => ids.has(r.id))).map((r) => r.id),
+              );
+            }}
+            onColumnWidthChange={grid.onColumnWidthChange}
+            onCellKeyDown={handleCopyCellKeyDown}
+            sx={forwardsGridSx}
+          />
+        </GridTooltips>
       )}
       <CellCopyOverlay rootRef={gridRootRef} />
     </Box>
