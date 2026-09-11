@@ -29,6 +29,7 @@ import { HelmRecordWatcher } from '../helm/record-watcher.js';
 import { applyEnvProxy, applyProxyRuntimeCompatibility, overrideClusterProxyUrl } from './connection.js';
 import { clearCurrentContext, patchClusterEntry, patchUserEntry, removeKubeconfigEntry, writeKubeconfig, type ClusterEditPatch } from './kubeconfig-file.js';
 import { authTypeOf, authWarningForUser, describeProbeFailure } from './auth-diagnostics.js';
+import { ExecCredentialManager } from './exec-credentials.js';
 import { HttpProblem } from '../util/errors.js';
 import type { SshTunnelManager } from '../ssh/tunnel-manager.js';
 import { isValidSshDestination } from '../ssh/tunnel-manager.js';
@@ -68,16 +69,23 @@ export class ClusterHandle {
     public readonly contextName: string,
     log: FastifyBaseLogger,
     sshProxyUrl?: string,
+    sharedCredentials?: ExecCredentialManager,
   ) {
     // Each handle owns its own KubeConfig: setCurrentContext mutates state
-    // and exec-auth caches per-instance — never share across contexts.
+    // so never share it across contexts. Exec credentials are coordinated
+    // separately across handles and background probes.
     this.kc = new KubeConfig();
     this.kc.loadFromString(baseConfig.exportConfig());
     applyProxyRuntimeCompatibility(this.kc);
     this.kc.setCurrentContext(contextName);
     const clusterName = this.kc.getContexts().find((c) => c.name === contextName)?.cluster;
     if (sshProxyUrl && clusterName) overrideClusterProxyUrl(this.kc, clusterName, sshProxyUrl);
-    this.raw = new RawClient(this.kc);
+    const credentials = sharedCredentials ?? new ExecCredentialManager();
+    const releaseAuth = credentials.attach(this.kc);
+    this.raw = new RawClient(this.kc, undefined, () => {
+      releaseAuth();
+      if (!sharedCredentials) credentials.dispose();
+    });
     this.discovery = new DiscoveryCache(this.raw);
     this.watchers = new WatcherRegistry(this.raw, log);
     this.metricsPoller = new MetricsPoller(new Metrics(this.kc), log);
@@ -175,6 +183,7 @@ export class ClusterHandle {
 
 export class ClusterManager extends EventEmitter {
   private kc = new KubeConfig();
+  private execCredentials = new ExecCredentialManager();
   /** File that supplied each context at the last load; retained until the next load completes. */
   private contextFiles = new Map<string, string>();
   private handles = new Map<string, ClusterHandle>();
@@ -321,8 +330,10 @@ export class ClusterManager extends EventEmitter {
     this.kc = new KubeConfig();
     this.loadKubeconfig();
     this.restoreMovedSshAssociations(sshAssociations);
+    for (const client of this.probeClients.values()) client.raw.dispose();
     this.probeClients.clear();
     const after = this.contextFingerprints();
+    this.execCredentials.retainContexts(new Set([...after.keys()].filter((name) => after.get(name) === before.get(name))));
     for (const [name, handle] of this.handles) {
       // Drop sessions whose backing entries were removed or edited so clients
       // reconnect against the new definition instead of a stale clone.
@@ -395,6 +406,7 @@ export class ClusterManager extends EventEmitter {
     if (!this.kc.getContexts().some((c) => c.name === contextName)) {
       throw new HttpProblem(404, `context "${contextName}" not found in kubeconfig`, 'NotFound');
     }
+    this.execCredentials.retry(contextName);
     const result = await this.probeContext(contextName, BACKGROUND_HEALTH_TIMEOUT_MS);
     if (this.setCachedHealth(contextName, result)) this.emit('contexts-changed');
     return result;
@@ -416,13 +428,14 @@ export class ClusterManager extends EventEmitter {
     const sshProxyUrl = await this.sshProxyFor(contextName);
     const cached = this.probeClients.get(contextName);
     if (cached && cached.proxyUrl === sshProxyUrl) return cached.raw;
+    cached?.raw.dispose();
     const kc = new KubeConfig();
     kc.loadFromString(this.kc.exportConfig());
     applyProxyRuntimeCompatibility(kc);
     kc.setCurrentContext(contextName);
     const clusterName = kc.getContexts().find((c) => c.name === contextName)?.cluster;
     if (sshProxyUrl && clusterName) overrideClusterProxyUrl(kc, clusterName, sshProxyUrl);
-    const raw = new RawClient(kc);
+    const raw = new RawClient(kc, undefined, this.execCredentials.attach(kc));
     this.probeClients.set(contextName, { raw, proxyUrl: sshProxyUrl });
     return raw;
   }
@@ -734,7 +747,7 @@ export class ClusterManager extends EventEmitter {
     } catch (err) {
       throw new HttpProblem(502, err instanceof Error ? err.message : String(err), 'SshTunnelFailed');
     }
-    const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl);
+    const handle = new ClusterHandle(this.kc, contextName, this.log, sshProxyUrl, this.execCredentials);
     handle.onDiscoveryChanged = () => this.emit('discovery-changed', contextName);
     handle.onHelmRecordsChanged = (changes) => this.emit('helm-records-changed', contextName, changes);
     handle.onHelmWatchStatus = (status) => this.emit('helm-watch-status', contextName, status);
@@ -778,7 +791,9 @@ export class ClusterManager extends EventEmitter {
    * session is stuck / my credentials rotated" escape hatch.
    */
   async reconnect(contextName: string): Promise<ClusterHandle> {
+    this.execCredentials.retry(contextName);
     this.disconnect(contextName);
+    this.probeClients.get(contextName)?.raw.dispose();
     this.probeClients.delete(contextName);
     return this.connect(contextName);
   }
@@ -789,6 +804,9 @@ export class ClusterManager extends EventEmitter {
     this.closeFileWatchers();
     for (const handle of this.handles.values()) handle.dispose();
     this.handles.clear();
+    for (const client of this.probeClients.values()) client.raw.dispose();
+    this.probeClients.clear();
+    this.execCredentials.dispose();
   }
 }
 
