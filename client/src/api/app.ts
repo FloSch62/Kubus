@@ -8,7 +8,5 @@ export async function getAppInfo(): Promise<AppInfo | null> {
 }
 
 export async function checkForUpdate(options?: { force?: boolean }): Promise<UpdateCheckResult> {
-  const desktop = window.kubusDesktop;
-  if (desktop) return desktop.checkForUpdate(options);
   return apiFetch<UpdateCheckResult>(`/api/app/update-check${options?.force ? '?force=true' : ''}`);
 }

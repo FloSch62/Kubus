@@ -1,0 +1,36 @@
+name: Windows Store package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: helm-engine/go.mod
+          cache-dependency-path: helm-engine/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm build:helm-engine
+      - name: Build Store submission (AppX)
+        run: pnpm --filter @kubus/electron dist:store
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kubus-windows-store
+          if-no-files-found: error
+          path: electron/release-store/*.appx

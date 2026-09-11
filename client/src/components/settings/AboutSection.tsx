@@ -11,6 +11,7 @@ import CoffeeOutlinedIcon from '@mui/icons-material/CoffeeOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
 import type { AppInfo, UpdateCheckResult } from '@kubus/shared';
+import { DesktopUpdateControls } from '../DesktopUpdateControls.js';
 import { checkForUpdate, getAppInfo } from '../../api/app.js';
 
 const LINKS = {
@@ -109,7 +110,7 @@ export function AboutSection() {
 
       <Box>
         <SectionTitle>Updates</SectionTitle>
-        <UpdateControls currentVersion={appInfo?.version} />
+        {window.kubusDesktop ? <DesktopUpdateControls /> : <UpdateControls currentVersion={appInfo?.version} />}
       </Box>
     </Stack>
   );
@@ -153,7 +154,7 @@ function UpdateControls({ currentVersion }: { currentVersion?: string }) {
         </Alert>
       )}
       {result?.available === false && !result.latestVersion && (
-        <Alert severity={result.reason === 'store-managed' ? 'info' : 'warning'} variant="outlined">
+        <Alert severity="warning" variant="outlined">
           {updateReasonLabel(result.reason)}
         </Alert>
       )}
@@ -209,10 +210,6 @@ function platformLabel(platform?: string): string {
 
 function updateReasonLabel(reason?: string): string {
   switch (reason) {
-    case 'store-managed':
-      return 'Microsoft Store manages updates for this installation. Check the Kubus page in the Store for available updates.';
-    case 'store-unavailable':
-      return 'Microsoft Store could not be opened. Open it from the Start menu to check for Kubus updates.';
     case 'timeout':
       return 'The update check timed out.';
     case 'network':

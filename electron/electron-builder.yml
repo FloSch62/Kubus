@@ -27,8 +27,6 @@ win:
   target:
     - target: nsis
       arch: [x64]
-    - target: appx
-      arch: [x64]
 appx:
   identityName: FloSch.me.Kubus
   publisher: CN=7F1CC962-95FE-4843-B655-1EC6FF3D190E
@@ -49,7 +47,10 @@ mac:
   notarize: false
   target:
     - target: dmg
-      arch: [universal]
+      arch: [arm64]
+    # Squirrel.Mac downloads the signed app from this archive.
+    - target: zip
+      arch: [arm64]
 dmg:
   sign: false
 deb:

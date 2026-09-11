@@ -50,6 +50,14 @@ export default defineConfig({
               replacement: path.join(repoRoot, 'server/src/server.ts'),
             },
             {
+              find: 'electron-updater',
+              replacement: path.join(repoRoot, 'electron/node_modules/electron-updater/out/main.js'),
+            },
+            {
+              find: /^electron$/,
+              replacement: path.join(repoRoot, 'electron/node_modules/electron/index.js'),
+            },
+            {
               find: 'fix-path',
               replacement: path.join(repoRoot, 'electron/node_modules/fix-path/index.js'),
             },

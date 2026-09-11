@@ -22,7 +22,7 @@ const fixtures = vi.hoisted(() => ({
   rows: [] as Row[],
   status: {} as Record<string, { state: string; message?: string }>,
   auxRows: [] as Row[],
-  metrics: undefined as Map<string, { available: boolean; items: unknown[] }> | undefined,
+  metrics: undefined as Map<string, { available: boolean; probed?: boolean; items: unknown[] }> | undefined,
   printerColumns: undefined as PrinterColumn[] | undefined,
   deleteFailures: new Set<string>(),
   restartFailures: new Set<string>(),
@@ -216,6 +216,12 @@ beforeEach(() => {
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
   Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0) });
   Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: (id: number) => window.clearTimeout(id) });
+});
+
+it('does not report metrics as unreachable before the first probe completes', () => {
+  fixtures.metrics = new Map([['dev', { available: false, probed: false, items: [] }]]);
+  renderPage('/r/core/v1/pods');
+  expect(screen.queryByText(/metrics-server is not reachable/)).not.toBeInTheDocument();
 });
 
 describe('ResourceListPage', () => {

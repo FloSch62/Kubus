@@ -7,13 +7,13 @@ all: helm-engine
 	pnpm build && pnpm --filter @kubus/electron dist
 
 deb: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --linux deb --x64
+	pnpm build && pnpm --filter @kubus/electron dist --linux deb
 
 win: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --win --x64
+	pnpm build && pnpm --filter @kubus/electron dist --win
 
 dmg: helm-engine
-	pnpm build && pnpm --filter @kubus/electron exec electron-builder --mac dmg
+	pnpm build && pnpm --filter @kubus/electron dist --mac
 
 clean:
 	rm -rf electron/release

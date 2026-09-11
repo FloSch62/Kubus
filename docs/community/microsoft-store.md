@@ -44,7 +44,7 @@ pnpm install --frozen-lockfile
 pnpm dist:store
 ```
 
-The output is in `electron/release/`. The installed electron-builder version requires
+The output is in `electron/release-store/`. The installed electron-builder version requires
 Windows to create AppX packages; Linux can build the application but not this package.
 The Store requires a nonzero major version and a zero fourth component. The
 `appx-manifest.cjs` hook maps the application version to
@@ -110,8 +110,9 @@ first release is live, the **Release** workflow submits subsequent stable releas
 the same product automatically when the credentials below are configured. Microsoft
 still certifies each update before publishing it according to the submission's schedule.
 
-Kubus detects packaged Store installations at runtime. Its background update check skips
-the GitHub manifest, and the explicit **Check for updates** action opens the Store. This
+The Store package includes `kubusUpdateMode: store` and no GitHub update feed.
+Kubus also detects Store installations at runtime. Its background update check skips
+GitHub, and the explicit **Check for updates** action opens the Store. This
 avoids offering a GitHub release before that version is available in the Store.
 The separate GitHub `.exe` remains unsigned and can still show SmartScreen warnings.
 

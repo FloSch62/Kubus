@@ -44,7 +44,11 @@ test('boots the real desktop shell behind the restricted preload bridge', async 
 
     expect(surface.keys).toEqual(
       [
-        'checkForUpdate',
+        'checkForUpdates',
+        'downloadUpdate',
+        'getUpdateState',
+        'installUpdate',
+        'onUpdateState',
         'closeWindow',
         'detachTab',
         'getAppInfo',

@@ -159,10 +159,12 @@ function levelOf(l: LogLine): LogLevel | undefined {
   return level ?? undefined;
 }
 
+const localLogTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false });
+
 function fmtTs(ts: string, mode: TsMode): string {
   if (mode === 'utc') return `${ts.slice(11, 23)}Z`;
   const d = new Date(ts);
-  return `${d.toLocaleTimeString(undefined, { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  return `${Number.isNaN(d.getTime()) ? 'Invalid Date' : localLogTime.format(d)}.${String(d.getMilliseconds()).padStart(3, '0')}`;
 }
 
 function initialTimeMode(tab: LogsTab): LogTimeMode {

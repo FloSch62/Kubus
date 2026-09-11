@@ -17,7 +17,7 @@ jobs:
       # Report every OS result; don't cancel the matrix on the first failure.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -99,7 +99,7 @@ jobs:
         with:
           name: kubus-windows-store
           if-no-files-found: error
-          path: electron/release/*.appx
+          path: electron/release-store/*.appx
           retention-days: 30
       # Boot the app's server on each OS to catch runtime startup regressions
       # (won't listen, missing static assets, crash-on-boot) that packaging

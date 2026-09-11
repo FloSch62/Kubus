@@ -285,7 +285,7 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText('Pod overview pod-a')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Metrics' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Full screen')).not.toBeInTheDocument();
-    expect(effects.yamlSchema).toHaveBeenCalledWith(expect.objectContaining({ kind: 'Pod' }));
+    expect(effects.yamlSchema).not.toHaveBeenCalled();
     const podCalls = () => queries.resourceCalls.filter(({ selection: call }) => call?.name === 'pod-a');
     // Overview is live: watch-fed with the poll as fallback.
     expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: 5000, watch: true });

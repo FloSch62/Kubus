@@ -54,9 +54,17 @@ namespaces, so can Kubus (behind the guard, if protected).
 
 ## Code signing
 
-Desktop builds aren't code-signed or notarised yet, which is why the first launch needs an
-extra step on macOS and Windows. See [Desktop app](../install/desktop.md). If you'd rather
-not run unsigned binaries, [build from source](../install/from-source.md).
+macOS releases are signed with Apple Developer ID and notarized, and target Apple
+Silicon. Windows NSIS releases currently remain unsigned; the release pipeline can
+also enforce certificate, Azure or custom signing. See [Desktop app](../install/desktop.md)
+and [Releasing](../community/releasing.md).
+
+The desktop updater downloads from GitHub Releases over HTTPS and verifies payload
+hashes. macOS additionally validates the app signature; signed Windows installations
+validate the configured publisher. Hashes alone do not authenticate an unsigned
+Windows publisher. Store packages use Store-managed updates, and Debian packages
+are updated through the package manager. Updates never include cluster data in
+requests and never restart Kubus while you are working without your action.
 
 ## See also
 
