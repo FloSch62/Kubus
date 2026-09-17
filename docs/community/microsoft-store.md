@@ -50,6 +50,8 @@ pnpm dist:store
 
 The output is in `electron/release-store/`. The installed electron-builder version requires
 Windows to create AppX packages; Linux can build the application but not this package.
+Install Visual Studio C++ Build Tools (Desktop development with C++) and a Windows
+10/11 SDK for the Store update helper. GitHub's Windows runners already include them.
 The Store requires a nonzero major version and a zero fourth component. The
 `appx-manifest.cjs` hook maps the application version to
 `<major + 1>.<minor>.<patch>.0`: app version `0.9.0` produces package version `1.9.0.0`,
@@ -117,9 +119,28 @@ the same product automatically when the credentials below are configured. Micros
 still certifies each update before publishing it according to the submission's schedule.
 
 The Store package includes `kubusUpdateMode: store` and no GitHub update feed.
-Kubus also detects Store installations at runtime. Its background update check skips
-GitHub, and the explicit **Check for updates** action opens the Store. This
-avoids offering a GitHub release before that version is available in the Store.
+Kubus also detects Store installations at runtime. It checks Microsoft Store after
+startup and every four hours, and **Check for updates** runs the same Store check.
+When an update is available, the notification and Settings → About offer **Update now**.
+After the user confirms that their work is saved, Windows requests consent and
+downloads and installs the update. Windows may close Kubus during installation.
+**Open Microsoft Store** remains available as a fallback. Store checks never use
+GitHub, so a GitHub release cannot trigger a notice before the Store offers it.
+
+The Store build compiles `electron/native/store-updater.cpp` with Visual Studio C++
+Build Tools and the Windows SDK, and bundles the helper inside the AppX. No separate
+runtime is needed. It inherits Kubus's package identity and uses `StoreContext` on
+an STA thread with a message loop and a Kubus window handle for the Windows dialogs.
+The helper calls `GetAppAndOptionalStorePackageUpdatesAsync` for checks and
+`RequestDownloadAndInstallStorePackageUpdatesAsync` only after an explicit update
+request. Availability is shown without a target version because the returned
+`StorePackageUpdate.Package` describes the installed package.
+
+Validate actual delivery using a Store-installed older build with a newer package
+available to the same account (a Store package flight can be used). Verify no-update,
+available-update, consent cancellation, offline/error recovery, progress, and
+installation/reopening. A local unsigned AppX or mocked unit test cannot verify
+Store licensing, rollout availability, or Windows replacing the running package.
 The separate GitHub `.exe` remains unsigned and can still show SmartScreen warnings.
 
 Existing NSIS installations do not automatically turn into Store installations. Test

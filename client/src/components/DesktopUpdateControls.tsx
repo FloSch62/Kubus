@@ -52,19 +52,65 @@ export function DownloadUpdate({ compact = false }: { compact?: boolean }) {
   </>;
 }
 
+export function InstallStoreUpdate({ compact = false }: { compact?: boolean }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  return <>
+    <Button color={compact ? 'inherit' : 'primary'} size={compact ? 'small' : 'medium'} disabled={busy} onClick={() => setConfirm(true)}>Update now</Button>
+    <ConfirmDialog open={confirm} title="Update Kubus through Microsoft Store?" confirmLabel="Update now"
+      message="Save any edits first. Windows may close all Kubus windows to install the update. Terminals, log streams and port forwards will disconnect. Windows will ask you to confirm the download."
+      onClose={() => setConfirm(false)} onConfirm={() => {
+        setConfirm(false);
+        setBusy(true);
+        setError(false);
+        void window.kubusDesktop?.installUpdate().then((accepted) => setError(!accepted)).catch(() => setError(true)).finally(() => setBusy(false));
+      }} />
+    {error && <Alert severity="warning">The update could not be started. Check for updates again in Settings → About.</Alert>}
+  </>;
+}
+
+export function OpenMicrosoftStore({ compact = false, disabled = false }: { compact?: boolean; disabled?: boolean }) {
+  const [error, setError] = useState(false);
+  return <>
+    <Button color={compact ? 'inherit' : 'primary'} size={compact ? 'small' : 'medium'} disabled={disabled} onClick={() => {
+      setError(false);
+      void window.kubusDesktop?.openStore().catch(() => setError(true));
+    }}>Open Microsoft Store</Button>
+    {error && <Alert severity="warning">Microsoft Store could not be opened. Open it from the Start menu to check for Kubus updates.</Alert>}
+  </>;
+}
+
+function StoreUpdateControls({ state }: { state: DesktopUpdateState }) {
+  const [error, setError] = useState<string>();
+  const busy = ['checking', 'installing'].includes(state.status);
+  return <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+    <Typography variant="body2" color="text.secondary">Microsoft Store manages updates for this installation. Kubus checks in the background; choose Update now to start an available update.</Typography>
+    <Stack direction="row" spacing={1}>
+      <Button variant="contained" disabled={busy || state.status === 'updated'} onClick={() => {
+        setError(undefined);
+        void window.kubusDesktop?.checkForUpdates().catch(() => setError('The update check could not be completed. Try again.'));
+      }}>{state.status === 'checking' ? 'Checking…' : 'Check for updates'}</Button>
+      {state.status === 'available' && <InstallStoreUpdate />}
+      <OpenMicrosoftStore disabled={busy} />
+    </Stack>
+    {state.status === 'available' && <Alert severity="info">A new version of Kubus is available in Microsoft Store.</Alert>}
+    {state.status === 'installing' && <Stack spacing={1} sx={{ width: '100%' }}>
+      <Typography variant="body2">{state.percent === undefined ? 'Waiting for Microsoft Store…' : `Updating Kubus through Microsoft Store… ${state.percent}%`}</Typography>
+      <LinearProgress aria-label="Store update progress" variant={state.percent === undefined ? 'indeterminate' : 'determinate'} value={state.percent ?? 0} />
+    </Stack>}
+    {state.status === 'updated' && <Alert severity="success">Microsoft Store completed the update. Reopen Kubus to use the installed version.</Alert>}
+    {state.status === 'up-to-date' && <Alert severity="success">Microsoft Store reports no available updates.</Alert>}
+    {(state.status === 'error' || error) && <Alert severity="warning">{error ?? state.error}</Alert>}
+  </Stack>;
+}
+
 export function DesktopUpdateControls() {
   const state = useDesktopUpdate();
   const [error, setError] = useState(false);
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.status);
+  if (state?.source === 'store') return <StoreUpdateControls state={state} />;
   if (state?.status === 'disabled') {
-    if (state.reason === 'store') return <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-      <Typography variant="body2" color="text.secondary">Microsoft Store manages updates for this installation.</Typography>
-      <Button variant="contained" onClick={() => {
-        setError(false);
-        void window.kubusDesktop?.checkForUpdates().catch(() => setError(true));
-      }}>Check for updates</Button>
-      {error && <Alert severity="warning">Microsoft Store could not be opened. Open it from the Start menu to check for Kubus updates.</Alert>}
-    </Stack>;
     return <Typography variant="body2" color="text.secondary">{
       state.reason === 'package-manager' ? 'Install updates with your Linux package manager or download a newer package from Releases.' :
       state.reason === 'unsupported-architecture' ? 'New macOS releases require Apple Silicon.' :
