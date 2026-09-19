@@ -35,6 +35,8 @@ import { registerNodeShellSocket } from './ws/node-shell-socket.js';
 import { ExecSessionRegistry } from './ws/transferable-exec.js';
 import { HelmOperationManager } from './helm/operations.js';
 import { appLogPinoSink } from './logging/log-buffer.js';
+import { PluginManager } from './plugins/manager.js';
+import { registerPluginRoutes } from './routes/plugins.js';
 
 export interface AppContext {
   config: ServerConfig;
@@ -133,6 +135,12 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerAppRoutes(app, ctx);
   registerContextRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
+  const clientRoot = config.staticRoot ?? path.resolve(__dirname, '../../client/dist');
+  const builtPlugins = path.join(clientRoot, 'plugin-bundles');
+  const pluginRoot = existsSync(builtPlugins) && (config.staticRoot || !process.env.KUBUS_DEV)
+    ? builtPlugins
+    : path.resolve(__dirname, '../../client/public/plugin-bundles');
+  registerPluginRoutes(app, ctx, new PluginManager(settings, pluginRoot));
   registerSshRoutes(app, ctx);
   registerResourceRoutes(app, ctx);
   registerActionRoutes(app, ctx);
@@ -155,9 +163,14 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   // Serve the built client in production (same-origin, no CORS needed).
   const clientDist = config.staticRoot ?? path.resolve(__dirname, '../../client/dist');
   if (existsSync(clientDist)) {
-    await app.register(fastifyStatic, { root: clientDist });
+    await app.register(fastifyStatic, {
+      root: clientDist,
+      // Only the plugin asset gateway may serve these files, including requests
+      // whose URL encoding would otherwise bypass the explicit route guard.
+      allowedPath: (pathname) => !pathname.split(/[\\/]/).some((part) => part.toLowerCase() === 'plugin-bundles'),
+    });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/')) {
+      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/plugin-assets/')) {
         void reply.code(404).send({ message: 'not found' });
       } else {
         void reply.sendFile('index.html');

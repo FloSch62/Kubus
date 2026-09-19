@@ -1,0 +1,10 @@
+{
+  "apiVersion": 1,
+  "id": "hello-world",
+  "name": "Hello workspace",
+  "version": "0.1.0",
+  "description": "A zero-build example that displays the selected Kubus context. No cluster resource access.",
+  "author": "Kubus examples",
+  "entry": "index.html",
+  "permissions": { "resources": [], "actions": [] }
+}

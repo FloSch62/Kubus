@@ -47,6 +47,7 @@ import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
 import { TruncationTooltip } from '../components/truncation.js';
+import { usePlugins } from '../plugins/queries.js';
 
 const WIDTH = layout.navDrawerWidth;
 // Indent of group items so they line up under the group label (button pl 16px + icon 26px).
@@ -792,6 +793,7 @@ interface NavDrawerProps {
 }
 
 export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClose }: NavDrawerProps) {
+  const plugins = usePlugins();
   const selected = useClustersStore((s) => s.selected);
   const { data: apiResources } = useApiResourcesForContexts(selected);
   // Contexts offered by the scope menu; the picker keeps this query warm, so
@@ -1168,6 +1170,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
             <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
             <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
             <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
+            {plugins.data?.filter((plugin) => plugin.enabled).map((plugin) => <NavEntry key={plugin.manifest.id} to={`/plugins/${plugin.manifest.id}`} label={plugin.manifest.name} icon={<ExtensionOutlinedIcon />} />)}
           {visibleFavs.length > 0 && (
             <Box>
               <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
@@ -1367,7 +1370,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         />
       </Drawer>
     );
-  }, [pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
+  }, [plugins.data, pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
     favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, apiResources, contexts, selected,
     hotkeyByFavorite, activeFavoriteEntry, draggingFavoriteId, favoriteDropTarget, scopeMenu,
     addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews]);

@@ -1,0 +1,33 @@
+{
+  "name": "@kubus/plugin-clabernetes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build --configLoader runner",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@containerlab/clab-viewer": "file:vendor/clab-viewer-0.1.0.tgz",
+    "@kubus/plugin-sdk": "workspace:*",
+    "js-yaml": "^5.4.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "elkjs": "^0.12.0",
+    "@kubus/ui-theme": "workspace:*",
+    "@mui/material": "^9.4.0",
+    "@mui/icons-material": "^9.4.0",
+    "@mui/x-data-grid": "^9.13.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

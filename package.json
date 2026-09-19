@@ -9,7 +9,7 @@
     "node": ">=24.21.0"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel --stream dev",
+    "dev": "node plugins/build-bundled.mjs && pnpm -r --parallel --stream dev",
     "build": "pnpm -r build",
     "build:helm-engine": "node helm-engine/build.mjs",
     "start": "node server/dist/index.js",

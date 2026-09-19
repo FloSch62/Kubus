@@ -1,0 +1,20 @@
+{
+  "name": "@kubus/ui-theme",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "@mui/material": "^9.4.0",
+    "@mui/x-data-grid": "^9.13.0",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0"
+  }
+}

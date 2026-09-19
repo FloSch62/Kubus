@@ -32,6 +32,10 @@ pnpm start
 For development setup, release steps, architecture, security details, and test
 clusters, use the docs.
 
+## Plugins
+
+Enable the shipped Clabernetes workspace in **Settings → Plugins** to explore network labs with the local clab-viewer. Install independent local plugin bundles from the same settings page. See the [plugin architecture and authoring guide](docs/plugins.md) for the versioned SDK, permissions, and examples.
+
 ## Support
 
 <a href="https://www.buymeacoffee.com/FloSch62">

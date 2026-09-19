@@ -1,0 +1,12 @@
+body {
+  font:
+    14px system-ui,
+    sans-serif;
+  margin: 32px;
+}
+pre {
+  padding: 20px;
+  border: 1px solid #8886;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}

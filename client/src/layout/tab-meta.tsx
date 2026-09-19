@@ -14,7 +14,7 @@ import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
-import { BUILTIN_NAV_GROUPS, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
+import { BUILTIN_NAV_GROUPS, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo, type PluginInfo } from '@kubus/shared';
 
 /** Sidebar/tab icons per builtin nav group (shared by NavDrawer and TabsBar). */
 export const GROUP_ICONS: Record<string, React.ReactElement> = {
@@ -48,10 +48,14 @@ for (const navGroup of BUILTIN_NAV_GROUPS) {
  * (CRDs) resolve their label from `discovered`; until discovery lands the
  * capitalized plural is shown.
  */
-export function tabMeta(path: string, discovered?: ResourceKindInfo[]): { title: string; icon: React.ReactElement } {
+export function tabMeta(path: string, discovered?: ResourceKindInfo[], plugins?: PluginInfo[]): { title: string; icon: React.ReactElement } {
   const pathname = path.split('?')[0] ?? path;
   const staticPage = STATIC_PAGES[pathname];
   if (staticPage) return staticPage;
+  if (pathname.startsWith('/plugins/')) {
+    const id = pathname.split('/')[2] ?? 'Plugin';
+    return { title: plugins?.find((plugin) => plugin.manifest.id === id)?.manifest.name ?? id.split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' '), icon: <ExtensionOutlinedIcon /> };
+  }
   if (pathname.startsWith('/helm/')) {
     const name = decodeURIComponent(pathname.split('/').at(-1) ?? '');
     return { title: name || 'Helm Release', icon: <SailingOutlinedIcon /> };

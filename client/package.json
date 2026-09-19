@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --configLoader runner",
-    "build": "tsc --noEmit && vite build --configLoader runner",
+    "dev": "node ../plugins/build-bundled.mjs && vite --configLoader runner",
+    "build": "node ../plugins/build-bundled.mjs && tsc --noEmit && vite build --configLoader runner",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --configLoader runner"
   },
@@ -36,9 +36,12 @@
     "react-markdown": "^10.1.0",
     "react-router": "^8.3.1",
     "remark-gfm": "^4.0.1",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@kubus/ui-theme": "workspace:*",
+    "@kubus/plugin-sdk": "workspace:*"
   },
   "devDependencies": {
+    "@kubus/plugin-clabernetes": "workspace:*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

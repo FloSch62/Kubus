@@ -17,6 +17,7 @@ const MetricsPage = lazy(() => import('./pages/MetricsPage.js').then((m) => ({ d
 const NetworkMetricsPage = lazy(() => import('./pages/NetworkMetricsPage.js').then((m) => ({ default: m.NetworkMetricsPage })));
 const EventsPage = lazy(() => import('./pages/EventsPage.js').then((m) => ({ default: m.EventsPage })));
 const AuditPage = lazy(() => import('./pages/AuditPage.js').then((m) => ({ default: m.AuditPage })));
+const PluginPage = lazy(() => import('./plugins/PluginPage.js').then((m) => ({ default: m.PluginPage })));
 
 const pageLoading = (
   <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
@@ -46,6 +47,7 @@ export function PageRoutes() {
       <Route path="/helm/:ctx/:ns/:name" element={page(<HelmReleaseDetailPage />)} />
       <Route path="/forwards" element={page(<PortForwardsPage />)} />
       <Route path="/diff" element={page(<DiffPage />)} />
+      <Route path="/plugins/:id" element={page(<PluginPage />)} />
       <Route path="/topology" element={page(<TopologyPage />)} />
       <Route path="/metrics" element={page(<MetricsPage />)} />
       <Route path="/network" element={page(<NetworkMetricsPage />)} />

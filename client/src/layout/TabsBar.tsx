@@ -12,6 +12,7 @@ import { useTabsStore } from '../state/tabs.js';
 import { useClustersStore } from '../state/clusters.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { useApiResourcesForContexts } from '../api/queries.js';
+import { usePlugins } from '../plugins/queries.js';
 import { tabMeta } from './tab-meta.js';
 import { TabHealthWatchers } from './TabHealthWatcher.js';
 import { useTabAttentionStore } from '../state/tab-attention.js';
@@ -27,6 +28,7 @@ import { currentAppWindowContext } from '../window-context.js';
 let sessionRestored = false;
 
 export const TabsBar = memo(function TabsBar() {
+  const { data: plugins } = usePlugins();
   const tabs = useTabsStore((s) => s.tabs);
   const activeId = useTabsStore((s) => s.activeId);
   const selected = useClustersStore((s) => s.selected);
@@ -92,7 +94,7 @@ export const TabsBar = memo(function TabsBar() {
     if (active && active.path !== current) void navigate(active.path);
   };
 
-  const metas = useMemo(() => new Map(tabs.map((t) => [t.id, tabMeta(t.path, apiResources?.resources)])), [tabs, apiResources]);
+  const metas = useMemo(() => new Map(tabs.map((t) => [t.id, tabMeta(t.path, apiResources?.resources, plugins)])), [tabs, apiResources, plugins]);
   const attention = useTabAttentionStore((s) => s.attention);
   const closeTab = (id: string) => act(() => useTabsStore.getState().closeTab(id));
 

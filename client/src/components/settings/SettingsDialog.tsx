@@ -44,6 +44,7 @@ import { useLogPrefsStore, type TsMode } from '../../state/log-prefs.js';
 import { TAIL_LINE_OPTIONS, useUiPrefsStore, type RefreshRate, type RightClickAction, type TableDensity } from '../../state/prefs.js';
 import { AboutSection } from './AboutSection.js';
 import { KubeconfigSection } from './KubeconfigSection.js';
+import { PluginsSection } from './PluginsSection.js';
 import { isBuiltInDebugImage, mergeDebugPresets } from '../../debug-presets.js';
 import { fetchAppLogs, formatLogEntry } from '../../api/logs.js';
 import { exportFilename, saveTextFile } from '../../save-file.js';
@@ -607,7 +608,7 @@ function DebugSection() {
   );
 }
 
-const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug containers', 'Diagnostics', 'About'];
+const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug containers', 'Diagnostics', 'About', 'Plugins'];
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState(0);
@@ -634,6 +635,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           {tab === 5 && <DebugContainersSection />}
           {tab === 6 && <DebugSection />}
           {tab === 7 && <AboutSection />}
+          {tab === 8 && <PluginsSection />}
         </Box>
       </DialogContent>
       <DialogActions>

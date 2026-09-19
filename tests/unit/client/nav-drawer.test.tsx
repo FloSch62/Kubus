@@ -12,6 +12,7 @@ const queryMocks = vi.hoisted(() => ({
   contexts: [] as Array<Record<string, unknown>>,
 }));
 const scrollIntoViewMock = vi.fn();
+vi.mock('../../../client/src/plugins/queries.js', () => ({ usePlugins: () => ({ data: [] }) }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useApiResourcesForContexts: () => ({

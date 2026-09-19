@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@kubus/plugin-sdk": "workspace:*",
     "zod": "^4.6.1"
   },
   "devDependencies": {

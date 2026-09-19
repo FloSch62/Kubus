@@ -1,0 +1,46 @@
+{
+  "apiVersion": 1,
+  "id": "clabernetes",
+  "name": "Clabernetes",
+  "version": "0.1.0",
+  "description": "Operate network labs with direct device shells, application and helper logs, topology views, readiness diagnostics, services, storage and planning workers.",
+  "author": "Kubus",
+  "entry": "index.html",
+  "permissions": {
+    "resources": [
+      {
+        "group": "c9s.run",
+        "resources": [
+          "topologies",
+          "nodes",
+          "links",
+          "nodeprofiles",
+          "configs"
+        ]
+      },
+      {
+        "group": "",
+        "resources": [
+          "pods",
+          "services",
+          "events",
+          "persistentvolumeclaims",
+          "configmaps"
+        ]
+      },
+      {
+        "group": "apps",
+        "resources": [
+          "deployments"
+        ]
+      }
+    ],
+    "actions": [
+      "resource.open",
+      "pod.logs",
+      "pod.terminal",
+      "pod.interfaces",
+      "helm.open"
+    ]
+  }
+}

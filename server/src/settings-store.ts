@@ -4,6 +4,8 @@ import path from 'node:path';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface PersistedSettings {
+  /** Activation is explicit; installed bundles live beside this settings file. */
+  plugins?: Record<string, { enabled: boolean }>;
   /** Explicit kubeconfig path chosen in the UI; overrides $KUBECONFIG. */
   kubeconfigPath?: string;
   /** Kubus-managed SSH tunnels: scoped kubeconfig context key -> ssh destination (config alias or user@host). */
