@@ -7,3 +7,8 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 Optional assets are downloaded by needle/setup.mjs from revision
 b274efcb211a9eef48c9a88da4b43bd569696a39, with SHA-256 verification.
 needle.mjs is the upstream needle.js with an ES module default export appended.
+
+When installed with --model, needle-cluster.cact is a modified model fine-tuned
+locally for Kubus. cluster-model.json records its checksum and source.
+The official needle3.cact remains unchanged and is used for pod filtering.
+The local training recipe and changes are documented in needle/finetune/README.md.

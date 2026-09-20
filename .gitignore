@@ -9,6 +9,9 @@ helm-engine/helm-engine.wasm
 client/public/needle/needle.mjs
 client/public/needle/needle.wasm
 client/public/needle/needle3.cact
+client/public/needle/model.json
+client/public/needle/cluster-model.json
+client/public/needle/needle-cluster.cact
 electron/build/
 electron/release/
 electron/release-store/

@@ -2,6 +2,11 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+
+const { values } = parseArgs({ options: { model: { type: 'string' } } });
+const customWeights = values.model ? await readFile(values.model) : null;
+if (customWeights && (!values.model.endsWith('.cact') || customWeights.length < 196 || customWeights.readUInt32LE(0) !== 0x05e12a84)) throw new Error('--model must point to an exported Needle 3 .cact file.');
 
 const revision = 'b274efcb211a9eef48c9a88da4b43bd569696a39';
 const base = `https://huggingface.co/Cactus-Compute/needle3/resolve/${revision}/`;
@@ -36,5 +41,19 @@ for (const [source, name, expected] of assets) {
   } finally {
     await rm(temporary, { force: true });
   }
+}
+const weights = await readFile(new URL('needle3.cact', destination));
+await writeFile(new URL('model.json.tmp', destination), JSON.stringify({
+  bytes: weights.length, sha256: sha256(weights), confidenceCalibrated: true, source: 'needle3-base',
+}, null, 2) + '\n');
+await rename(new URL('model.json.tmp', destination), new URL('model.json', destination));
+if (customWeights) {
+  await writeFile(new URL('needle-cluster.cact.tmp', destination), customWeights);
+  await rename(new URL('needle-cluster.cact.tmp', destination), new URL('needle-cluster.cact', destination));
+  await writeFile(new URL('cluster-model.json.tmp', destination), JSON.stringify({
+    bytes: customWeights.length, sha256: sha256(customWeights), confidenceCalibrated: false, source: 'local-finetune',
+  }, null, 2) + '\n');
+  await rename(new URL('cluster-model.json.tmp', destination), new URL('cluster-model.json', destination));
+  console.log(`needle-cluster.cact: installed local question model (${customWeights.length} bytes)`);
 }
 console.log(`Needle trial ready in ${fileURLToPath(destination)}. Run pnpm dev, or rebuild to include it in the desktop app.`);

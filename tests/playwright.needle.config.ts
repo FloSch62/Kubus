@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 
-if (!existsSync(new URL('../client/public/needle/needle3.cact', import.meta.url))) {
+if (!existsSync(new URL('../client/public/needle/needle3.cact', import.meta.url)) || !existsSync(new URL('../client/public/needle/model.json', import.meta.url))) {
   throw new Error('Run pnpm setup:needle before the real WASM browser trial.');
 }
 

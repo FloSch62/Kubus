@@ -125,7 +125,7 @@ export function NeedleFilterDialog({ rows, currentFilter, onApply, onClose }: Pr
         {busy && (
           <Box component="output" aria-live="polite" sx={{ display: 'block', mb: 2 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {phase === 'loading' ? 'Loading the local model (36 MB)…' : 'Creating your filter…'}
+              {phase === 'loading' ? 'Loading the local model…' : 'Creating your filter…'}
             </Typography>
             <LinearProgress />
           </Box>
@@ -144,7 +144,7 @@ export function NeedleFilterDialog({ rows, currentFilter, onApply, onClose }: Pr
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Check the preview: this experimental model can miss conditions.
-              {result.confidence < 0.7 ? ' The model is less confident about this result.' : ''}
+              {result.confidence !== null && result.confidence < 0.7 ? ' The model is less confident about this result.' : ''}
               {currentFilter ? ' Applying replaces your current table search.' : ''}
             </Typography>
           </Box>

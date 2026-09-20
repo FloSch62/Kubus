@@ -15,6 +15,7 @@ import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SearchIcon from '@mui/icons-material/Search';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore } from '../state/dock.js';
 import { useUiStore } from '../state/ui.js';
@@ -30,6 +31,7 @@ const loadSearchDialog = () => import('./SearchDialog.js');
 const loadSettingsDialog = () => import('../components/settings/SettingsDialog.js');
 const SearchDialog = lazy(() => loadSearchDialog().then((m) => ({ default: m.SearchDialog })));
 const SettingsDialog = lazy(() => loadSettingsDialog().then((m) => ({ default: m.SettingsDialog })));
+const NeedleClusterDialog = lazy(() => import('../components/NeedleClusterDialog.js').then((m) => ({ default: m.NeedleClusterDialog })));
 
 export const TopBar = memo(function TopBar() {
   const mode = useClustersStore((s) => s.themeMode);
@@ -48,6 +50,7 @@ export const TopBar = memo(function TopBar() {
   // Mounted on first open, kept mounted after so close animations still play.
   const [searchMounted, setSearchMounted] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
+  const [clusterQuestionOpen, setClusterQuestionOpen] = useState(false);
   if (searchOpen && !searchMounted) setSearchMounted(true);
   if (settingsOpen && !settingsMounted) setSettingsMounted(true);
 
@@ -100,6 +103,11 @@ export const TopBar = memo(function TopBar() {
           <ClusterSwitcher />
           <NamespaceFilter />
           <Box sx={{ flex: 1 }} />
+          <Tooltip title="Ask your cluster">
+            <IconButton size="small" aria-label="Ask your cluster" onClick={() => setClusterQuestionOpen(true)}>
+              <AutoAwesomeOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={`Search (${HOTKEY_MOD_LABEL}K)`}>
             <IconButton size="small" aria-label="Search" onClick={() => setSearchOpen(true)} onMouseEnter={() => void loadSearchDialog()} onFocus={() => void loadSearchDialog()}>
               <SearchIcon fontSize="small" />
@@ -140,6 +148,7 @@ export const TopBar = memo(function TopBar() {
         </Suspense>
       )}
       <ShortcutHelpDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {clusterQuestionOpen && <Suspense fallback={null}><NeedleClusterDialog onClose={() => setClusterQuestionOpen(false)} /></Suspense>}
     </>
   );
 });

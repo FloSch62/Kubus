@@ -7,6 +7,12 @@ const response = (args: Record<string, unknown>) => ({
 });
 
 describe('Needle pod filter boundary', () => {
+  it('ignores uncalibrated fine-tuned scores while preserving argument validation', () => {
+    const reply = { ...response({ status: 'crash' }), confidence: null };
+    expect(readPodFilterSuggestion(reply, 'Show crashing pods', false)).toMatchObject({ filter: '/status:crash', confidence: null });
+    expect(() => readPodFilterSuggestion(reply, 'Show crashing pods')).toThrow();
+    expect(() => readPodFilterSuggestion(response({ namespace: 'invented' }), 'Show crashing pods', false)).toThrow();
+  });
   it('uses existing smart-filter semantics for a combined namespace and health request', () => {
     const result = readPodFilterSuggestion(response({ namespace: 'production', status: 'unhealthy' }), 'Show unhealthy pods in production');
     expect(result.filter).toBe('/ns:production status:unhealthy');

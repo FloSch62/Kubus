@@ -32,8 +32,10 @@ pnpm start
 For development setup, release steps, architecture, security details, and test
 clusters, use the docs.
 
-An optional [Needle WASM trial](needle/README.md) turns plain-English pod
-namespace/status requests into previewable table filters, entirely locally.
+An optional [Needle WASM trial](needle/README.md) answers cluster questions from
+live resource data and turns pod requests into previewable table filters.
+Question interpretation runs locally; [local fine-tuning](needle/finetune/README.md)
+adapts the model to Kubus's read-only reports.
 Run `pnpm setup:needle` before starting development or building the desktop app.
 
 ## Support

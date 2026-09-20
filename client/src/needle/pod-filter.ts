@@ -25,7 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
 export interface PodFilterSuggestion {
   filter: string;
   description: string;
-  confidence: number;
+  confidence: number | null;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -33,7 +33,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /** Treat the model response as untrusted data, never executable tool calls. */
-export function readPodFilterSuggestion(response: unknown, prompt: string): PodFilterSuggestion {
+export function readPodFilterSuggestion(response: unknown, prompt: string, confidenceCalibrated = true): PodFilterSuggestion {
   const unsupported = 'No supported filter found. Try a namespace and a pod status, like “Show crashing pods in production”.';
   if (!record(response) || response.success !== true || response.error ||
       !Array.isArray(response.function_calls) || response.function_calls.length !== 1 ||
@@ -44,8 +44,8 @@ export function readPodFilterSuggestion(response: unknown, prompt: string): PodF
       (Array.isArray(response.validation.ungrounded) && response.validation.ungrounded.length > 0))) {
     throw new Error(unsupported);
   }
-  const confidence = response.confidence;
-  if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0.4 || confidence > 1) {
+  const confidence = confidenceCalibrated ? response.confidence : null;
+  if (confidenceCalibrated && (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0.4 || confidence > 1)) {
     throw new Error('Needle is unsure about this filter. Try a more specific namespace or status.');
   }
   const call: unknown = response.function_calls[0];
@@ -72,7 +72,7 @@ export function readPodFilterSuggestion(response: unknown, prompt: string): PodF
     descriptions.push(`Status: ${STATUS_LABELS[args.status]}`);
   }
   if (!clauses.length) throw new Error(unsupported);
-  return { filter: `/${clauses.join(' ')}`, description: descriptions.join(' · '), confidence };
+  return { filter: `/${clauses.join(' ')}`, description: descriptions.join(' · '), confidence: typeof confidence === 'number' ? confidence : null };
 }
 
 export type NeedleWorkerResponse =
