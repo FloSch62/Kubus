@@ -3,10 +3,12 @@ import { apiFetch } from '../api/http.js';
 import { podSummary, nodeStatus } from '../kube-display.js';
 import { isResourceHealthy } from '../smart-filter.js';
 import type { ClusterQuestion } from './cluster-query.js';
+import { answerHarnessQuestion } from './harness-answer.js';
 
 export interface QuestionScope { context: string; namespaces: string[] }
-export interface AnswerSection { title: string; summary: string; columns: string[]; rows: string[][]; href?: string }
-export interface ClusterAnswer { scope: QuestionScope; question: ClusterQuestion; fetchedAt: string; sections: AnswerSection[]; notices: string[] }
+export interface AnswerSection { title: string; summary: string; columns: string[]; rows: string[][]; href?: string; rowLinks?: string[]; text?: string }
+export interface PodChoice { name: string; namespace: string; uid: string }
+export interface ClusterAnswer { scope: QuestionScope; question: ClusterQuestion; fetchedAt: string; sections: AnswerSection[]; notices: string[]; candidates?: PodChoice[]; focus?: PodChoice }
 type Reader = <T>(path: string, init?: RequestInit) => Promise<T>;
 const text = (value: unknown) => typeof value === 'string' || typeof value === 'number' ? String(value) : '—';
 const record = (value: unknown): Record<string, unknown> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
@@ -26,7 +28,9 @@ type Resource = keyof typeof RESOURCES;
 
 /** Deterministic summaries from authenticated GETs. Cluster data never enters the model. */
 export async function answerClusterQuestion(question: ClusterQuestion, inputScope: QuestionScope, signal: AbortSignal, read: Reader = apiFetch): Promise<ClusterAnswer> {
+  if (['find_pods', 'latest_deployments', 'summarize_events', 'recent_terminations', 'diagnose_pod'].includes(question.topic)) return answerHarnessQuestion(question, inputScope, signal, read);
   const scope = { context: inputScope.context, namespaces: question.namespace ? [question.namespace] : [...inputScope.namespaces] };
+  if (question.allNamespaces && !question.namespace) scope.namespaces = [];
   if (['nodes', 'namespaces'].includes(question.topic)) scope.namespaces = [];
   if (!scope.context) throw new Error('Select a connected cluster first.');
   const answer: ClusterAnswer = { scope, question, fetchedAt: new Date().toISOString(), sections: [], notices: [] };

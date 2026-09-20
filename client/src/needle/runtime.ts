@@ -17,7 +17,7 @@ async function loadAsset(name: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-export async function loadNeedle(tools: unknown, modelName: 'needle3' | 'needle-cluster' = 'needle3') {
+export async function loadNeedle(tools: unknown, modelName: 'needle3' | 'needle-cluster' = 'needle3', questionContract?: string) {
   const wasmBinary = await loadAsset('needle.wasm');
   const moduleUrl = assetUrl('needle.mjs');
   const { default: createNeedle } = await import(/* @vite-ignore */ moduleUrl) as {
@@ -30,7 +30,8 @@ export async function loadNeedle(tools: unknown, modelName: 'needle3' | 'needle-
     if (modelName === 'needle-cluster') throw new Error('The cluster question model is missing. Follow needle/finetune/README.md, then install it with pnpm setup:needle --model <path.cact>.');
     throw error;
   }
-  const metadata = JSON.parse(new TextDecoder().decode(metadataBytes)) as { bytes?: number; sha256?: string; confidenceCalibrated?: boolean };
+  const metadata = JSON.parse(new TextDecoder().decode(metadataBytes)) as { bytes?: number; sha256?: string; confidenceCalibrated?: boolean; questionContract?: string };
+  if (questionContract && metadata.questionContract !== questionContract) throw new Error('The question model uses an older tool contract. Follow needle/finetune/harness.md to train and install the harness model.');
   const weights = await loadAsset(`${modelName}.cact`);
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', weights as Uint8Array<ArrayBuffer>)), (byte) => byte.toString(16).padStart(2, '0')).join('');
   if (weights.length !== metadata.bytes || digest !== metadata.sha256 || typeof metadata.confidenceCalibrated !== 'boolean') {

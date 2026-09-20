@@ -18,6 +18,7 @@ import { registerSshRoutes } from './routes/ssh.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerActionRoutes } from './routes/actions.js';
 import { registerDetailRoutes } from './routes/detail.js';
+import { registerNeedleRoutes } from './routes/needle.js';
 import { registerSchemaRoutes } from './routes/schema.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerNetworkMetricsRoutes } from './routes/network-metrics.js';
@@ -137,6 +138,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerResourceRoutes(app, ctx);
   registerActionRoutes(app, ctx);
   registerDetailRoutes(app, ctx);
+  registerNeedleRoutes(app, ctx);
   registerSchemaRoutes(app, ctx);
   registerMetricsRoutes(app, ctx);
   registerNetworkMetricsRoutes(app, ctx);

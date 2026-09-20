@@ -1,27 +1,34 @@
 # Needle WASM concept trial
 
 A local cluster question assistant and pod filter for Kubus. Click **Ask your
-cluster** (the sparkle in the top bar) to ask about health, resource inventories,
-warnings, restart counts, CPU/memory usage or container images. Pick the cluster
-in the dialog; a namespace in the question overrides the current namespace
-selection. For example:
+cluster** (the sparkle in the top bar), choose a cluster, and try:
 
-- “What is unhealthy?”
-- “Show pod restart counts in namespace production”
-- “Show current memory usage in namespace production”
-- “Show warning events for pod api in namespace production”
-- “What Kubernetes versions do my nodes run?”
-- “Show persistent volume claims”
+- “When did the last pod die?”
+- “What is the latest deployment?”
+- “Summarize the last 10 events”
+- “Why is pod api-crash failing in namespace production?”
+- “In which namespace is my ceos pod?”
+- “What is unhealthy?” or “Show current memory usage in namespace production”
 
-Needle selects a structured read request. Kubus fetches the selected cluster's
-data and computes the answer, including counts, status tables, warnings and
-links to its resource views. The answer identifies its interpreted topic,
-scope and fetch time. Missing data and permission failures are visible; tables
-show up to 20 rows and counts follow pagination, with a 10,000-object limit per
-namespace/resource list. Each question is independent. This is a fixed catalog
-of current observations, not general chat, historical analysis or unrestricted
-root-cause diagnosis. Cluster questions require the separately trained model;
-use the [local fine-tuning workflow](finetune/README.md) for the broader trial.
+Needle selects a typed read workflow. Kubus resolves actual pod identities,
+reads cluster evidence and computes the answer. Pod search accepts partial
+names, labels and images; ambiguous diagnosis offers a choice. After selecting
+one pod, “Why is it failing?” refreshes that pod's evidence. Cluster/namespace
+selection changes clear this reference.
+
+Answers identify scope, fetch time, evidence and missing permissions. Latest
+Deployment means newest creation time, not latest rollout. Event summaries
+include Normal and Warning records. Failed terminations combine current pod
+status with a bounded in-memory journal that retains observations after deletion
+while Kubus stays connected. Diagnosis shows status, UID-matched events and
+bounded logs; it does not invent application root causes. See the
+[harness contract, limits and local training recipe](finetune/harness.md).
+
+A named namespace overrides the UI selection. Pod location searches cover all
+namespaces by default; other questions use the selected namespaces unless the
+question explicitly says “all namespaces”. New workflows cap lists at 10,000
+objects total and 40 list requests. Old inventory reports retain their
+10,000-object per namespace/resource cap. Neither silently truncates totals.
 
 For the pod filter, open **Pods**, click the sparkle beside the
 search input, and describe the pods you want. For example, **“Show crashing pods
@@ -44,7 +51,7 @@ Needle library, API key, GPU, or additional npm dependency is required.
 locally trained 4-bit question model alongside it, run:
 
 ```sh
-pnpm setup:needle --model .cache/needle-training/cluster/kubus-4bit.cact
+pnpm setup:needle --model .cache/needle-training/harness/kubus-4bit.cact --question-contract harness-v2
 ```
 
 Pod filters keep using the original 2-bit model. Repeating the default setup
@@ -60,9 +67,9 @@ Needle is intended for structured extraction/tool calls, rather than chat or
 Kubernetes troubleshooting explanations. Converting a request into a small,
 reviewable filter fits its strengths and Kubus already implements the filter
 semantics. The filter exposes one `filter_pods` schema with optional `namespace`
-and `status` fields. The question assistant separately uses `inspect_cluster`
-with a topic, optional namespace and optional resource name. Both have fixed
-validators. No model-generated operation can execute a cluster mutation.
+and `status` fields. The question assistant uses five named workflows alongside the original
+`inspect_cluster` report tool, explicitly shortlisted to at most five per turn.
+Both have fixed validators. No model-generated operation can execute a cluster mutation.
 
 Broader schemas were tested first. The base model confused pod names with
 namespaces and “more than” with “at least” for restart counts, even at high
@@ -121,7 +128,8 @@ KUBUS_NEEDLE_DEV=1 pnpm test:needle --grep 'real tuned WASM|generates, previews'
 `test:needle` builds the client and drives the actual Kubus Pods screen in
 Chromium with real WASM inference. Kubernetes responses are fixtures, so no
 cluster is required or changed. It covers filter preview/apply, scoped cluster
-answers, independent prompts, refusals, missing assets/metrics, and cancellation.
+answers, all five evidence workflows, pod follow-ups, refusals, missing
+assets/metrics, untrusted log text, and cancellation.
 Question tests run when `cluster-model.json` is installed. It records screenshots
 under `tests/e2e/.results/needle/`. The small prompt suite is a
 regression check, not a general model-quality benchmark. Native desktop

@@ -1,7 +1,9 @@
 # Local cluster-question trial — 2026-09-20
 
+These are historical results for the original report-only contract; see the
+[harness v2 recipe](harness.md) for the current assistant.
 The local LoRA run completed on an RTX 4080 SUPER inside WSL. Its exported
-4-bit model is installed as `client/public/needle/needle-cluster.cact`. The
+4-bit model was installed as `client/public/needle/needle-cluster.cact`. The
 original 2-bit pod-filter model remains separate. No account, hosted training,
 private cluster data or external text-generation service was used.
 
@@ -57,7 +59,8 @@ shell execution or cluster changes.
 ## Training and artifacts
 
 - 2,298 examples, including 310 refusals; seeded split of 2,069 training and
-  229 validation examples. Maximum example length: 237 tokens, context: 256.
+  229 validation examples. Maximum example length: 237 tokens; training length: 256.
+  Archive maximum sequence length: 8,192; sliding KV cache: 256 entries.
 - Full 20-layer checkpoint, rank-16 LoRA, alpha 32, batch 8, 10 epochs,
   learning rate 0.0001, seed 20260921. Final validation loss: 0.0026.
   Validation loss is a training diagnostic, not question accuracy.

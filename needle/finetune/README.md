@@ -1,5 +1,9 @@
 # Local Kubus fine-tuning
 
+**Current question assistant:** use the [harness v2 recipe](harness.md), which
+adds pod lookup, event summaries, termination observations and pod diagnosis.
+This page retains the environment setup and original report-only experiment.
+
 This trial teaches Needle to interpret cluster questions. It
 does not teach a model facts about a particular cluster. Kubus retrieves the
 selected cluster's current data using its existing authenticated read APIs and
@@ -57,7 +61,8 @@ without another training iteration. This is still a small synthetic sample.
 Examples use the exact runtime schemas. Refusal examples have empty answers.
 The generators reject duplicate train/test prompts and validate expected
 arguments against the application boundary. Training sequences reach 237
-tokens, within the deployed model's 256-token context window. Runtime inference
+tokens, within its 256-token training sequence. The archive supports an 8,192
+maximum sequence length with a 256-entry sliding KV cache. Runtime inference
 also keeps the existing 256 generated-token budget.
 
 ```sh

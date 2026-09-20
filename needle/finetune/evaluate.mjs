@@ -10,6 +10,7 @@ import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { POD_FILTER_TOOLS, readPodFilterSuggestion } from '../../client/src/needle/pod-filter.ts';
 import { CLUSTER_TOOLS, readClusterQuestion } from '../../client/src/needle/cluster-query.ts';
+import { readHarnessQuestion, retryToolsForQuestion, toolsForQuestion } from '../../client/src/needle/cluster-query.ts';
 
 const { values } = parseArgs({ options: {
   weights: { type: 'string', default: 'client/public/needle/needle3.cact' },
@@ -17,6 +18,7 @@ const { values } = parseArgs({ options: {
   output: { type: 'string', default: '.cache/needle-training/baseline.json' },
   cluster: { type: 'boolean', default: false },
   uncalibrated: { type: 'boolean', default: false },
+  harness: { type: 'boolean', default: false },
 } });
 const weights = await readFile(values.weights);
 const data = await readFile(values.data, 'utf8');
@@ -42,24 +44,41 @@ try {
   const capacity = 16_384;
   const output = engine._malloc(capacity);
   const rows = [];
+  let schema = JSON.stringify(tools);
   for (const [index, row] of examples.entries()) {
-    assert.deepEqual(row.tools, tools, 'Dataset schema differs from Kubus');
-    engine._needle_reset();
+    const selected = values.harness ? toolsForQuestion(row.query) : tools;
+    assert.deepEqual(row.tools, selected, 'Dataset schema differs from Kubus');
+    if (JSON.stringify(selected) !== schema) {
+      schema = JSON.stringify(selected);
+      assert(engine.ccall('needle_init', 'number', ['string', 'string', 'string'], [null, schema, null]) >= 0);
+    }
     const start = performance.now();
-    const code = engine.ccall('needle_complete', 'number', ['string', 'number', 'number', 'number'], [row.query, 256, output, capacity]);
+    const complete = () => {
+      engine._needle_reset();
+      const code = engine.ccall('needle_complete', 'number', ['string', 'number', 'number', 'number'], [row.query, 256, output, capacity]);
+      return code >= 0 ? JSON.parse(engine.UTF8ToString(output)) : { error: `needle_complete returned ${code}` };
+    };
+    let response = complete();
+    const attempts = [response];
+    const retry = values.harness ? retryToolsForQuestion(response, row.query) : [];
+    if (retry.length) {
+      schema = JSON.stringify(retry);
+      assert(engine.ccall('needle_init', 'number', ['string', 'string', 'string'], [null, schema, null]) >= 0);
+      response = complete();
+      attempts.push(response);
+    }
     const elapsedMs = Math.round(performance.now() - start);
-    const response = code >= 0 ? JSON.parse(engine.UTF8ToString(output)) : { error: `needle_complete returned ${code}` };
     const rawExact = response.success === true && isDeepStrictEqual(response.function_calls, row.answers);
-    const calls = values.cluster && response.function_calls?.length === 0 ? response.suppressed_calls ?? [] : response.function_calls;
+    const calls = (values.cluster || values.harness) && response.function_calls?.length === 0 ? response.suppressed_calls ?? [] : response.function_calls;
     const exact = response.success === true && isDeepStrictEqual(calls, row.answers);
     let accepted = false;
     let filter = null;
     let refusal = null;
     try {
-      filter = values.cluster ? readClusterQuestion(response, row.query) : readPodFilterSuggestion(response, row.query, !values.uncalibrated).filter;
+      filter = values.harness ? readHarnessQuestion(response, row.query) : values.cluster ? readClusterQuestion(response, row.query) : readPodFilterSuggestion(response, row.query, !values.uncalibrated).filter;
       accepted = true;
     } catch (error) { refusal = error.message; }
-    rows.push({ query: row.query, expected: row.answers, exact, rawExact, accepted, filter, refusal, elapsedMs, response });
+    rows.push({ query: row.query, expected: row.answers, exact, rawExact, accepted, filter, refusal, elapsedMs, response, attempts });
     if ((index + 1) % 10 === 0) console.log(`${index + 1}/${examples.length}: ${rows.filter((item) => item.exact).length} exact`);
   }
   engine._free(output);
@@ -69,7 +88,9 @@ try {
   const report = {
     model: resolve(values.weights), modelBytes: weights.length, modelSha256: sha256(weights),
     dataSha256: sha256(data), wasmSha256: sha256(wasm), tokenBudget: 256,
+    validatorSha256: sha256(await readFile(new URL(values.harness || values.cluster ? '../../client/src/needle/cluster-query.ts' : '../../client/src/needle/pod-filter.ts', import.meta.url))),
     total: rows.length, exact: rows.filter((row) => row.exact).length,
+    maxPasses: values.harness ? 2 : 1, retries: rows.filter((row) => row.attempts.length > 1).length,
     rawExact: rows.filter((row) => row.rawExact).length,
     positiveTotal: positives.length, positiveExact: positives.filter((row) => row.exact).length,
     negativeTotal: negatives.length, negativeExact: negatives.filter((row) => row.exact).length,

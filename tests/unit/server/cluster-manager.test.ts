@@ -201,7 +201,10 @@ describe('ClusterHandle', () => {
     const crdStop = vi.spyOn(CrdTracker.prototype, 'stop').mockImplementation(() => {});
     const helmStart = vi.spyOn(HelmRecordWatcher.prototype, 'start').mockImplementation(() => {});
     const helmStop = vi.spyOn(HelmRecordWatcher.prototype, 'stop').mockImplementation(() => {});
-    const acquire = vi.spyOn(WatcherRegistry.prototype, 'acquire').mockReturnValue({} as never);
+    const unsubscribeObservations = vi.fn();
+    const acquire = vi.spyOn(WatcherRegistry.prototype, 'acquire').mockReturnValue({
+      watcher: { subscribe: vi.fn(() => unsubscribeObservations), ready: async () => {}, items: () => [] }, release: vi.fn(),
+    } as never);
     const stopAll = vi.spyOn(WatcherRegistry.prototype, 'stopAll').mockImplementation(() => {});
     const warm = vi.spyOn(ResourceSearchIndex.prototype, 'warm').mockImplementation(() => {});
     const invalidateCustomEntries = vi.spyOn(ResourceSearchIndex.prototype, 'invalidateCustomEntries').mockImplementation(() => {});
@@ -272,6 +275,7 @@ describe('ClusterHandle', () => {
     expect(crdStop).toHaveBeenCalled();
     expect(helmStop).toHaveBeenCalled();
     expect(stopAll).toHaveBeenCalled();
+    expect(unsubscribeObservations).toHaveBeenCalledOnce();
     expect(disposeIndex).toHaveBeenCalled();
   });
 });

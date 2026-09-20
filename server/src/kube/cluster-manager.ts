@@ -20,6 +20,7 @@ import type { ContextInfo, HelmReleaseChange, HelmWatchStatus, TestConnectionRes
 import { RawClient } from './raw-client.js';
 import { DiscoveryCache } from './discovery.js';
 import { WatcherRegistry } from './watcher.js';
+import { PodObservations } from './pod-observations.js';
 import { MetricsPoller } from './metrics-poller.js';
 import { NetworkMetricsPoller } from './network-poller.js';
 import { ReferenceIndex } from './reference-index.js';
@@ -46,6 +47,7 @@ export class ClusterHandle {
   readonly raw: RawClient;
   readonly discovery: DiscoveryCache;
   readonly watchers: WatcherRegistry;
+  readonly podObservations = new PodObservations();
   readonly metricsPoller: MetricsPoller;
   readonly networkPoller: NetworkMetricsPoller;
   readonly searchIndex: ResourceSearchIndex;
@@ -162,7 +164,7 @@ export class ClusterHandle {
     this.crdTracker.start();
     this.helmRecords.start();
     // Pin overview watchers (never released; cheap and shared with the UI).
-    this.watchers.acquire('', 'v1', 'pods');
+    this.podObservations.start(this.watchers.acquire('', 'v1', 'pods').watcher);
     this.watchers.acquire('apps', 'v1', 'deployments');
     this.watchers.acquire('', 'v1', 'events');
     this.watchers.acquire('', 'v1', 'nodes');
@@ -175,6 +177,7 @@ export class ClusterHandle {
     this.crdTracker.stop();
     this.helmRecords.stop();
     this.watchers.stopAll();
+    this.podObservations.stop();
     this.searchIndex.dispose();
     this.referenceIndex.stopAll();
     this.raw.dispose();
