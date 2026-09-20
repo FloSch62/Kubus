@@ -12,6 +12,8 @@
     "dev": "pnpm -r --parallel --stream dev",
     "build": "pnpm -r build",
     "build:helm-engine": "node helm-engine/build.mjs",
+    "setup:needle": "node needle/setup.mjs",
+    "test:needle": "pnpm --filter @kubus/tests exec playwright test --config playwright.needle.config.ts",
     "start": "node server/dist/index.js",
     "electron": "pnpm build && pnpm build:helm-engine && pnpm --filter @kubus/electron start",
     "dist": "pnpm build && pnpm build:helm-engine && pnpm --filter @kubus/electron dist",

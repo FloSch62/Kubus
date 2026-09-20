@@ -21,10 +21,12 @@
     "unit",
     "e2e",
     "electron",
+    "needle",
     "setup",
     "vitest.config.ts",
     "playwright.config.ts",
     "playwright.electron.config.ts",
+    "playwright.needle.config.ts",
     "../client/src/desktop.d.ts"
   ]
 }

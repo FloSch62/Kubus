@@ -5,6 +5,10 @@ dist/
 # built helm rendering engine (node helm-engine/build.mjs, requires Go)
 server/assets/helm-engine.wasm.gz
 helm-engine/helm-engine.wasm
+# Optional Needle trial assets (pnpm setup:needle)
+client/public/needle/needle.mjs
+client/public/needle/needle.wasm
+client/public/needle/needle3.cact
 electron/build/
 electron/release/
 electron/release-store/

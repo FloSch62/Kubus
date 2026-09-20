@@ -32,6 +32,10 @@ pnpm start
 For development setup, release steps, architecture, security details, and test
 clusters, use the docs.
 
+An optional [Needle WASM trial](needle/README.md) turns plain-English pod
+namespace/status requests into previewable table filters, entirely locally.
+Run `pnpm setup:needle` before starting development or building the desktop app.
+
 ## Support
 
 <a href="https://www.buymeacoffee.com/FloSch62">

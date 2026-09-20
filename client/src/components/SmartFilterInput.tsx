@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent, type RefObject } from 'react';
+import { lazy, Suspense, useMemo, useState, type MouseEvent, type RefObject } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Divider from '@mui/material/Divider';
@@ -11,11 +11,13 @@ import Typography from '@mui/material/Typography';
 import ClearIcon from '@mui/icons-material/Clear';
 import SearchIcon from '@mui/icons-material/Search';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined';
+import AutoAwesomeOutlinedIcon from '@mui/icons-material/AutoAwesomeOutlined';
 import type { ClusterRow } from '../api/queries.js';
 import { smartFilterSuggestions, type FilterSuggestion } from '../smart-filter.js';
 import { podSummary } from '../kube-display.js';
 
 const HELP_PANEL_ID = 'smart-filter-help';
+const NeedleFilterDialog = lazy(() => import('./NeedleFilterDialog.js').then((module) => ({ default: module.NeedleFilterDialog })));
 
 const HELP_SECTIONS = [
   {
@@ -64,6 +66,7 @@ interface Props {
  */
 export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Props) {
   const [focused, setFocused] = useState(false);
+  const [needleOpen, setNeedleOpen] = useState(false);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const helpOpen = Boolean(helpAnchor);
 
@@ -119,7 +122,7 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
     [focused, value, kind, dynamicValues],
   );
 
-  return (
+  const searchInput = (
     <Autocomplete<FilterSuggestion, false, true, true>
       freeSolo
       disableClearable
@@ -185,6 +188,13 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
               endAdornment: (
                 <InputAdornment position="end">
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    {kind === 'Pod' && (
+                      <Tooltip title="Describe a pod filter (Needle trial)">
+                        <IconButton aria-label="Describe a pod filter" size="small" onMouseDown={(e) => e.preventDefault()} onClick={() => setNeedleOpen(true)}>
+                          <AutoAwesomeOutlinedIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     {value && (
                       <IconButton
                         aria-label="Clear table search"
@@ -241,6 +251,22 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
         />
       )}
     />
+  );
+
+  return (
+    <>
+      {searchInput}
+      <Suspense fallback={null}>
+        {needleOpen && (
+          <NeedleFilterDialog
+            rows={rows}
+            currentFilter={value}
+            onClose={() => setNeedleOpen(false)}
+            onApply={(filter) => { onChange(filter); setNeedleOpen(false); }}
+          />
+        )}
+      </Suspense>
+    </>
   );
 }
 

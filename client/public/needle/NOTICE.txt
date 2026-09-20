@@ -1,0 +1,9 @@
+Needle 3 browser engine and model weights
+Copyright 2026 Cactus Compute, Inc.
+https://github.com/cactus-compute/needle
+https://huggingface.co/Cactus-Compute/needle3
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+Optional assets are downloaded by needle/setup.mjs from revision
+b274efcb211a9eef48c9a88da4b43bd569696a39, with SHA-256 verification.
+needle.mjs is the upstream needle.js with an ES module default export appended.
