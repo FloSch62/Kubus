@@ -23,8 +23,8 @@ import { useClustersStore } from '../state/clusters.js';
 import { answerClusterQuestion, type ClusterAnswer, type PodChoice } from '../needle/cluster-answer.js';
 import type { ClusterQuestion, ClusterWorkerResponse } from '../needle/cluster-query.js';
 
-const EXAMPLES = ['When did the last pod die?', 'What is the latest deployment?', 'Summarize the last 10 events', 'In which namespace is my ceos pod?', 'What is unhealthy?', 'Which pods use the most memory?'];
-const TOPIC_LABELS: Record<string, string> = { find_pods: 'Find pods', latest_deployments: 'Latest deployments', summarize_events: 'Summarize events', recent_terminations: 'Recent failed terminations', diagnose_pod: 'Pod diagnosis' };
+const EXAMPLES = ['What is the status of the ceos pods?', 'Give me the logs of the ceos pod', 'What is my oldest pod?', 'How many secrets?', 'What is using 10.96.0.10?', 'Any 443 port open?', 'Which images are available?', 'How much free CPU and memory on my cluster?', 'Summarize the last 10 events'];
+const TOPIC_LABELS: Record<string, string> = { query_pods: 'Filtered pods', pod_logs: 'Pod logs', list_configmaps: 'ConfigMaps', list_secrets: 'Secrets', lookup_ip: 'IP references', lookup_port: 'Configured ports', list_images: 'Images', node_capacity: 'Node capacity', find_pods: 'Find pods', latest_deployments: 'Latest deployments', summarize_events: 'Summarize events', recent_terminations: 'Recent failed terminations', diagnose_pod: 'Pod diagnosis' };
 
 export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
   const contexts = useClustersStore((state) => state.selected);
@@ -60,14 +60,19 @@ export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
     setFocus(null);
   }, [context, namespaceKey, dispose]);
 
-  const ask = (selected?: PodChoice) => {
+  const ask = (selected?: PodChoice, action: 'diagnose_pod' | 'pod_logs' = 'diagnose_pod', container?: string) => {
     if (busy || !context || !prompt.trim() || prompt.length > 300) return;
-    const followup = /^(?:why is (?:it|this pod|that pod) failing\??|diagnose (?:it|this pod|that pod))$/i.test(prompt.trim());
+    const logFollowup = /^(?:show (?:its|the|this pod's|that pod's) logs|(?:show|get|give me) logs for (?:it|this pod|that pod)|give me its logs)[?.!]?$/i.test(prompt.trim());
+    const followup = logFollowup || /^(?:why is (?:it|this pod|that pod) failing\??|diagnose (?:it|this pod|that pod))$/i.test(prompt.trim());
     if (followup && !focus) { setError('Find or diagnose a pod first, then ask about it.'); return; }
     const target = selected ?? (followup ? focus : null);
-    const requestPrompt = target ? `Why is pod ${target.name} failing in namespace ${target.namespace}?` : prompt.trim();
+    const targetAction = logFollowup ? 'pod_logs' : action;
+    const previous = answer?.question.topic === 'pod_logs' && answer.question.previous;
+    const selectedContainer = container ?? (answer?.question.topic === 'pod_logs' ? answer.question.container : undefined);
+    const requestPrompt = target ? `${targetAction === 'pod_logs' ? 'Show logs for' : 'Diagnose'} pod ${target.name} in namespace ${target.namespace}` : prompt.trim();
     setAnswer(null);
     setError('');
+    if (!target) setFocus(null);
     const scope = { context, namespaces: JSON.parse(namespaceKey) as string[] };
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -91,8 +96,8 @@ export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
     try {
       timeoutRef.current = setTimeout(() => fail('The question took too long. Try a smaller namespace scope or check the cluster connection.'), 60_000);
       if (target) {
-        if (selected) setPrompt(requestPrompt.length <= 300 ? requestPrompt : `Diagnose ${selected.name}`);
-        answerQuestion({ topic: 'diagnose_pod', name: target.name, namespace: target.namespace, uid: target.uid });
+        if (selected) setPrompt(requestPrompt.length <= 300 ? requestPrompt : `${targetAction === 'pod_logs' ? 'Show logs for' : 'Diagnose'} ${selected.name}`);
+        answerQuestion({ topic: targetAction, name: target.name, namespace: target.namespace, uid: target.uid, ...(targetAction === 'pod_logs' ? { container: selectedContainer, previous: previous || undefined } : {}) });
         return;
       }
       setPhase(workerRef.current ? 'thinking' : 'loading');
@@ -127,7 +132,7 @@ export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Find pods, inspect recent failures, summarize events or check cluster health. Answers show the observations behind them. After choosing a pod, you can ask “Why is it failing?”.
+          Filter pods, read logs, find IPs and ports, inspect resources or check cluster capacity. After choosing a pod, ask “Show its logs” or “Why is it failing?”.
         </Typography>
         {!context && <Alert severity="info" sx={{ mb: 2 }}>Connect and select a cluster first.</Alert>}
         {!!context && <TextField select label="Cluster" size="small" value={context} disabled={busy} onChange={(event) => setChoice(event.target.value)} sx={{ minWidth: 240, mb: 1 }}>
@@ -140,9 +145,9 @@ export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
           value={prompt} disabled={busy} onChange={(event) => updatePrompt(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(); } }}
           slotProps={{ htmlInput: { maxLength: 300 } }}
-          helperText="Read-only questions. Pod lookup accepts part of a name, label or image; diagnosis asks you to choose if several pods match."
+          helperText="Read-only questions. Match names, labels or images, filter by node or status, and sort by age or usage. Logs and diagnosis ask you to choose if several pods match."
         />
-        {focus && <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>Selected pod: {focus.namespace}/{focus.name}. Follow-up diagnosis refreshes this pod’s data.</Typography>}
+        {focus && <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>Selected pod: {focus.namespace}/{focus.name}. Follow-up questions refresh this pod’s data.</Typography>}
         <Stack direction="row" useFlexGap spacing={0.75} sx={{ flexWrap: 'wrap', my: 2 }}>
           {EXAMPLES.map((example) => <Chip key={example} label={example} size="small" variant="outlined" disabled={busy} onClick={() => updatePrompt(example)} />)}
         </Stack>
@@ -163,13 +168,14 @@ export function NeedleClusterDialog({ onClose }: { onClose: () => void }) {
             <Typography variant="body2" sx={{ my: 1 }}>{section.summary}</Typography>
             {!!section.rows.length && <TableContainer sx={{ maxHeight: 360 }}><Table size="small" stickyHeader aria-label={section.title}>
               <TableHead><TableRow>{section.columns.map((column) => <TableCell key={column}>{column}</TableCell>)}{section.rowLinks && <TableCell>Resource</TableCell>}</TableRow></TableHead>
-              <TableBody>{section.rows.map((row, rowIndex) => <TableRow key={rowIndex}>{row.map((cell, column) => <TableCell key={column} sx={{ overflowWrap: 'anywhere', minWidth: 80 }}>{cell}</TableCell>)}{section.rowLinks && <TableCell><Button size="small" onClick={() => openPage(section.rowLinks![rowIndex]!)}>Open</Button></TableCell>}</TableRow>)}</TableBody>
+              <TableBody>{section.rows.map((row, rowIndex) => <TableRow key={rowIndex}>{row.map((cell, column) => <TableCell key={column} sx={{ overflowWrap: 'anywhere', minWidth: 80 }}>{cell}</TableCell>)}{section.rowLinks && <TableCell><Stack direction="row" spacing={.5}><Button size="small" onClick={() => openPage(section.rowLinks![rowIndex]!)}>Open</Button>{section.rowPods?.[rowIndex] && <><Button size="small" aria-label={`Diagnose ${section.rowPods[rowIndex]!.namespace}/${section.rowPods[rowIndex]!.name}`} disabled={busy} onClick={() => ask(section.rowPods![rowIndex]!)}>Diagnose</Button><Button size="small" aria-label={`Logs ${section.rowPods[rowIndex]!.namespace}/${section.rowPods[rowIndex]!.name}`} disabled={busy} onClick={() => ask(section.rowPods![rowIndex]!, 'pod_logs')}>Logs</Button></>}</Stack></TableCell>}</TableRow>)}</TableBody>
             </Table></TableContainer>}
             {section.text !== undefined && <Box component="pre" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 280, overflow: 'auto', fontSize: 12, p: 1, bgcolor: 'action.hover' }}>{section.text}</Box>}
           </Box>)}
-          {!!answer.candidates?.length && <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap', mb: 2 }}>
-            {answer.candidates.map((pod) => <Button key={pod.uid} size="small" variant="outlined" disabled={busy} onClick={() => ask(pod)}>Diagnose {pod.namespace}/{pod.name}</Button>)}
+          {!!answer.candidates?.length && !answer.sections.some((section) => section.rowPods?.length) && <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap', mb: 2 }}>
+            {answer.candidates.map((pod) => <Stack key={pod.uid} direction="row" spacing={.5}><Button size="small" variant="outlined" disabled={busy} onClick={() => ask(pod)}>Diagnose {pod.namespace}/{pod.name}</Button><Button size="small" variant="outlined" disabled={busy} onClick={() => ask(pod, 'pod_logs')}>Logs {pod.namespace}/{pod.name}</Button></Stack>)}
           </Stack>}
+          {!!answer.containers?.length && <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap', mb: 2 }}>{answer.containers.map(({ pod, name }) => <Button key={name} variant="outlined" size="small" onClick={() => ask(pod, 'pod_logs', name)}>Logs for container {name}</Button>)}</Stack>}
           {answer.notices.map((notice) => <Typography key={notice} variant="caption" color="text.secondary" sx={{ display: 'block', mb: .5 }}>{notice}</Typography>)}
         </Box>}
         <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 2 }}>

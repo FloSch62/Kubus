@@ -1,7 +1,8 @@
 # Local Kubus fine-tuning
 
-**Current question assistant:** use the [harness v2 recipe](harness.md), which
-adds pod lookup, event summaries, termination observations and pod diagnosis.
+**Current question assistant:** use the [exploration v3 recipe](exploration.md), which
+adds filtered pods, logs, resource inventories, IP/port references, images and
+node capacity alongside the v2 evidence workflows.
 This page retains the environment setup and original report-only experiment.
 
 This trial teaches Needle to interpret cluster questions. It

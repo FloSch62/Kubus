@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({ options: { model: { type: 'string' }, 'question-contract': { type: 'string', default: 'reports-v1' } } });
-if (!['reports-v1', 'harness-v2'].includes(values['question-contract'])) throw new Error('Unknown --question-contract (reports-v1 or harness-v2).');
+if (!['reports-v1', 'harness-v2', 'harness-v3'].includes(values['question-contract'])) throw new Error('Unknown --question-contract (reports-v1, harness-v2 or harness-v3).');
 const customWeights = values.model ? await readFile(values.model) : null;
 if (customWeights && (!values.model.endsWith('.cact') || customWeights.length < 196 || customWeights.readUInt32LE(0) !== 0x05e12a84)) throw new Error('--model must point to an exported Needle 3 .cact file.');
 

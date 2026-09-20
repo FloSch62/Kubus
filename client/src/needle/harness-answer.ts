@@ -14,6 +14,11 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 export function podMatch(pod: KubeObject, query: string): string[] {
   const needle = query.toLowerCase();
   const evidence: string[] = [];
+  if (query.includes('=')) {
+    const [key, ...rest] = query.split('=');
+    const value = rest.join('=');
+    return key && pod.metadata.labels?.[key] === value ? [`label: ${key}=${value}`] : [];
+  }
   if (pod.metadata.name.toLowerCase().includes(needle)) evidence.push(`name: ${pod.metadata.name}`);
   for (const [key, value] of Object.entries(pod.metadata.labels ?? {})) {
     if (`${key}=${value}`.toLowerCase().includes(needle)) evidence.push(`label: ${key}=${value}`);
@@ -111,8 +116,8 @@ export async function answerHarnessQuestion(question: ClusterQuestion, inputScop
     const candidates = question.uid ? matches.filter((pod) => pod.metadata.uid === question.uid) : matches;
     if (question.topic === 'find_pods' || candidates.length !== 1) {
       const shown = candidates.slice(0, 20);
-      answer.sections.push({ title: 'Matching pods', summary: `${candidates.length} pods match “${question.name}”.${question.topic === 'diagnose_pod' && candidates.length > 1 ? ' Choose the pod to diagnose.' : ''}`,
-        columns: ['Namespace', 'Pod', 'Status', 'Matched evidence'], rows: shown.map((pod) => [pod.metadata.namespace ?? '—', pod.metadata.name, podSummary(pod).status, podMatch(pod, question.name!).join('; ')]), rowLinks: shown.map((pod) => href('pods', pod)), href: '/r/core/v1/pods' });
+      answer.sections.push({ title: 'Matching pods', summary: `${candidates.length} pods match “${question.name}”.${['diagnose_pod', 'pod_logs'].includes(question.topic) && candidates.length > 1 ? (question.topic === 'pod_logs' ? ' Choose the pod whose logs to read.' : ' Choose the pod to diagnose.') : ''}`,
+        columns: ['Namespace', 'Pod', 'Status', 'Matched evidence'], rows: shown.map((pod) => [pod.metadata.namespace ?? '—', pod.metadata.name, podSummary(pod).status, podMatch(pod, question.name!).join('; ')]), rowLinks: shown.map((pod) => href('pods', pod)), rowPods: shown.map(identity), href: '/r/core/v1/pods' });
       answer.candidates = shown.map(identity);
       if (candidates.length === 1) answer.focus = identity(candidates[0]!);
       if (!question.namespace && question.topic === 'find_pods') answer.notices.push('Pod location searches cover all namespaces in the selected cluster. Name an explicit namespace to narrow the search.');
@@ -123,6 +128,26 @@ export async function answerHarnessQuestion(question: ClusterQuestion, inputScop
       const pod = await get<KubeObject>(`/resources/core/v1/pods/${encodeURIComponent(selected.metadata.name)}?${new URLSearchParams({ namespace: selected.metadata.namespace ?? '' })}`);
       if (pod.metadata.uid !== selected.metadata.uid) throw new Error('Pod was replaced during lookup. Ask again.');
       answer.focus = identity(pod);
+      if (question.topic === 'pod_logs') {
+        const containers = [...list(pod.spec?.containers), ...list(pod.spec?.initContainers), ...list(pod.spec?.ephemeralContainers)];
+        const regular = list(pod.spec?.containers);
+        const annotated = pod.metadata.annotations?.['kubectl.kubernetes.io/default-container'];
+        const selectedContainer = question.container ?? (regular.some((entry) => entry.name === annotated) ? annotated : regular.length === 1 ? text(regular[0]!.name) : undefined);
+        if (selectedContainer && !containers.some((entry) => entry.name === selectedContainer)) throw new Error(`Container ${selectedContainer} is not part of this pod.`);
+        if (!selectedContainer) {
+          answer.sections.push({ title: `Logs: ${pod.metadata.name}`, summary: 'Choose a container to read its logs.', columns: ['Container', 'Image'], rows: containers.map((entry) => [text(entry.name), text(entry.image)]) });
+          answer.containers = containers.map((entry) => ({ pod: identity(pod), name: text(entry.name) }));
+        } else {
+          const params = new URLSearchParams({ namespace: pod.metadata.namespace ?? '', name: pod.metadata.name, uid: pod.metadata.uid, container: selectedContainer, previous: String(question.previous === true) });
+          const logs = await get<{ uid: string; text: string; truncated: boolean }>(`/detail/pod-logs?${params}`);
+          if (logs.uid !== pod.metadata.uid) throw new Error('Log identity does not match the selected pod.');
+          answer.sections.push({ title: `${question.previous ? 'Previous' : 'Current'} logs: ${pod.metadata.name} / ${selectedContainer}`, summary: 'Last retained log excerpt, up to 80 lines / 16 KiB. Open the pod in Kubus for the full log viewer.', columns: [], rows: [], text: logs.text.slice(0, 16384) || '(No log output retained.)', href: href('pods', pod) });
+          if (logs.truncated) answer.notices.push('The log excerpt reached its byte limit.');
+        }
+        signal.throwIfAborted();
+        answer.fetchedAt = new Date().toISOString();
+        return answer;
+      }
       const statuses = [...list(pod.status?.initContainerStatuses), ...list(pod.status?.containerStatuses)];
       const findings: string[][] = [];
       if (pod.status?.reason || pod.status?.message) findings.push(['Pod status', text(pod.status.reason), text(pod.status.message)]);

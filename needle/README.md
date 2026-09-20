@@ -3,6 +3,13 @@
 A local cluster question assistant and pod filter for Kubus. Click **Ask your
 cluster** (the sparkle in the top bar), choose a cluster, and try:
 
+- “What is the status of the ceos pods?”
+- “Give me the logs of the ceos pod”
+- “What is my oldest pod?” / “What is my newest pod?”
+- “What config-maps do I have?” / “How many secrets?”
+- “What is using 10.96.0.10?” / “Any 443 port open?”
+- “Which images are available?”
+- “How much free CPU and memory on my cluster?”
 - “When did the last pod die?”
 - “What is the latest deployment?”
 - “Summarize the last 10 events”
@@ -12,8 +19,9 @@ cluster** (the sparkle in the top bar), choose a cluster, and try:
 
 Needle selects a typed read workflow. Kubus resolves actual pod identities,
 reads cluster evidence and computes the answer. Pod search accepts partial
-names, labels and images; ambiguous diagnosis offers a choice. After selecting
-one pod, “Why is it failing?” refreshes that pod's evidence. Cluster/namespace
+names, labels and images; ambiguous logs or diagnosis offer a choice. Node, status and namespace
+conditions combine with the text filter. After selecting
+one pod, “Show its logs” or “Why is it failing?” refreshes that pod's evidence. Cluster/namespace
 selection changes clear this reference.
 
 Answers identify scope, fetch time, evidence and missing permissions. Latest
@@ -22,7 +30,12 @@ include Normal and Warning records. Failed terminations combine current pod
 status with a bounded in-memory journal that retains observations after deletion
 while Kubus stays connected. Diagnosis shows status, UID-matched events and
 bounded logs; it does not invent application root causes. See the
-[harness contract, limits and local training recipe](finetune/harness.md).
+[harness contract, limits and local training recipe](finetune/exploration.md).
+
+Port answers describe declarations, not tested reachability. Image answers
+separate pod references from node caches. Capacity answers distinguish measured
+usage from configured requests, and preserve missing data as unavailable.
+ConfigMap/Secret inventories return metadata only.
 
 A named namespace overrides the UI selection. Pod location searches cover all
 namespaces by default; other questions use the selected namespaces unless the
@@ -51,7 +64,7 @@ Needle library, API key, GPU, or additional npm dependency is required.
 locally trained 4-bit question model alongside it, run:
 
 ```sh
-pnpm setup:needle --model .cache/needle-training/harness/kubus-4bit.cact --question-contract harness-v2
+pnpm setup:needle --model .cache/needle-training/exploration/kubus-4bit.cact --question-contract harness-v3
 ```
 
 Pod filters keep using the original 2-bit model. Repeating the default setup

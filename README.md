@@ -34,9 +34,10 @@ clusters, use the docs.
 
 An optional [Needle WASM trial](needle/README.md) answers cluster questions from
 live resource data and turns pod requests into previewable table filters.
-Question interpretation runs locally; the [Kubus harness](needle/finetune/harness.md)
-adds pod lookup, recent failures, deployment/event summaries and evidence-based
-pod diagnosis, with a reproducible local fine-tuning recipe.
+Question interpretation runs locally; the [Kubus harness](needle/finetune/exploration.md)
+adds filtered pod status and logs, age rankings, resource inventories, IP/port
+lookups, image inventories, capacity reports and evidence-based pod diagnosis, with
+a reproducible local fine-tuning recipe.
 Run `pnpm setup:needle` before starting development or building the desktop app.
 
 ## Support

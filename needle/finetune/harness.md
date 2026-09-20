@@ -1,4 +1,9 @@
-# Kubus question harness v2
+# Kubus question harness v2 (historical)
+
+The current application uses [exploration contract v3](exploration.md), adding
+filtered pod queries, logs, metadata inventories, network lookups and capacity.
+The commands below reproduce the v2 archive with its frozen training contract;
+install v3 for the current application.
 
 Needle chooses a small, typed read workflow. Kubus resolves resource identities,
 reads Kubernetes evidence and renders factual summaries. Neither cluster objects
@@ -89,11 +94,11 @@ JAX_PLATFORMS=cpu NEEDLE_TELEMETRY=0 \
   --adapter .cache/needle-training/harness/kubus-lora.safetensors \
   --output .cache/needle-training/harness/kubus-4bit.cact
 
-node needle/finetune/evaluate.mjs --harness \
+node needle/finetune/evaluate.mjs --harness-v2 \
   --weights .cache/needle-training/harness/kubus-4bit.cact \
   --data .cache/needle-training/harness/test.jsonl \
   --output .cache/needle-training/harness/tuned.json
-node needle/finetune/evaluate.mjs --harness \
+node needle/finetune/evaluate.mjs --harness-v2 \
   --weights .cache/needle-training/harness/kubus-4bit.cact \
   --data .cache/needle-training/harness/challenge.jsonl \
   --output .cache/needle-training/harness/challenge-tuned.json

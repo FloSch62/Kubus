@@ -1,3 +1,4 @@
+import './source-loader.mjs';
 // Runs the same WASM binary, schema, 256-token budget and reset as the UI.
 // Node timing is diagnostic; browser/Electron latency requires separate checks.
 import assert from 'node:assert/strict';
@@ -9,8 +10,8 @@ import { dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { POD_FILTER_TOOLS, readPodFilterSuggestion } from '../../client/src/needle/pod-filter.ts';
-import { CLUSTER_TOOLS, readClusterQuestion } from '../../client/src/needle/cluster-query.ts';
-import { readHarnessQuestion, retryToolsForQuestion, toolsForQuestion } from '../../client/src/needle/cluster-query.ts';
+const { CLUSTER_TOOLS, readClusterQuestion } = await import('../../client/src/needle/cluster-query.ts');
+const currentHarness = await import('../../client/src/needle/cluster-query.ts');
 
 const { values } = parseArgs({ options: {
   weights: { type: 'string', default: 'client/public/needle/needle3.cact' },
@@ -19,7 +20,10 @@ const { values } = parseArgs({ options: {
   cluster: { type: 'boolean', default: false },
   uncalibrated: { type: 'boolean', default: false },
   harness: { type: 'boolean', default: false },
+  'harness-v2': { type: 'boolean', default: false },
 } });
+const harness = values.harness || values['harness-v2'];
+const { readHarnessQuestion, retryToolsForQuestion, toolsForQuestion } = values['harness-v2'] ? await import('./harness-v2-contract.mts') : currentHarness;
 const weights = await readFile(values.weights);
 const data = await readFile(values.data, 'utf8');
 const examples = data.trim().split('\n').map((line) => JSON.parse(line));
@@ -46,7 +50,7 @@ try {
   const rows = [];
   let schema = JSON.stringify(tools);
   for (const [index, row] of examples.entries()) {
-    const selected = values.harness ? toolsForQuestion(row.query) : tools;
+    const selected = harness ? toolsForQuestion(row.query) : tools;
     assert.deepEqual(row.tools, selected, 'Dataset schema differs from Kubus');
     if (JSON.stringify(selected) !== schema) {
       schema = JSON.stringify(selected);
@@ -60,7 +64,7 @@ try {
     };
     let response = complete();
     const attempts = [response];
-    const retry = values.harness ? retryToolsForQuestion(response, row.query) : [];
+    const retry = harness ? retryToolsForQuestion(response, row.query) : [];
     if (retry.length) {
       schema = JSON.stringify(retry);
       assert(engine.ccall('needle_init', 'number', ['string', 'string', 'string'], [null, schema, null]) >= 0);
@@ -69,16 +73,26 @@ try {
     }
     const elapsedMs = Math.round(performance.now() - start);
     const rawExact = response.success === true && isDeepStrictEqual(response.function_calls, row.answers);
-    const calls = (values.cluster || values.harness) && response.function_calls?.length === 0 ? response.suppressed_calls ?? [] : response.function_calls;
+    const calls = (values.cluster || harness) && response.function_calls?.length === 0 ? response.suppressed_calls ?? [] : response.function_calls;
     const exact = response.success === true && isDeepStrictEqual(calls, row.answers);
     let accepted = false;
     let filter = null;
     let refusal = null;
     try {
-      filter = values.harness ? readHarnessQuestion(response, row.query) : values.cluster ? readClusterQuestion(response, row.query) : readPodFilterSuggestion(response, row.query, !values.uncalibrated).filter;
+      filter = harness ? readHarnessQuestion(response, row.query) : values.cluster ? readClusterQuestion(response, row.query) : readPodFilterSuggestion(response, row.query, !values.uncalibrated).filter;
       accepted = true;
     } catch (error) { refusal = error.message; }
-    rows.push({ query: row.query, expected: row.answers, exact, rawExact, accepted, filter, refusal, elapsedMs, response, attempts });
+    // Both report tools can express an unfiltered pod list, restart rank,
+    // or pod usage ranking with an aggregate usage total.
+    // Keep strict call exactness, but do not label an equivalent read as wrong.
+    const canonical = (question) => question?.topic === 'pods' && !question.name ? { ...question, topic: 'query_pods' } :
+      !question?.name && (question?.topic === 'restarts' || (/\bpods?\b/i.test(row.query) && ['cpu', 'memory'].includes(question?.topic))) ? { ...question, topic: 'query_pods', sort: question.topic } : question;
+    let equivalent = exact;
+    if (harness && accepted && row.answers.length) {
+      const expected = readHarnessQuestion({ success: true, function_calls: row.answers }, row.query);
+      equivalent = isDeepStrictEqual(canonical(filter), canonical(expected));
+    }
+    rows.push({ query: row.query, expected: row.answers, exact, rawExact, equivalent, accepted, filter, refusal, elapsedMs, response, attempts });
     if ((index + 1) % 10 === 0) console.log(`${index + 1}/${examples.length}: ${rows.filter((item) => item.exact).length} exact`);
   }
   engine._free(output);
@@ -88,14 +102,15 @@ try {
   const report = {
     model: resolve(values.weights), modelBytes: weights.length, modelSha256: sha256(weights),
     dataSha256: sha256(data), wasmSha256: sha256(wasm), tokenBudget: 256,
-    validatorSha256: sha256(await readFile(new URL(values.harness || values.cluster ? '../../client/src/needle/cluster-query.ts' : '../../client/src/needle/pod-filter.ts', import.meta.url))),
+    validatorSha256: sha256(values['harness-v2'] ? await readFile(new URL('./harness-v2-contract.mts', import.meta.url)) : Buffer.concat(await Promise.all((values.harness ? ['cluster-query.ts', 'explore-query.ts'] : [values.cluster ? 'cluster-query.ts' : 'pod-filter.ts']).map((file) => readFile(new URL(`../../client/src/needle/${file}`, import.meta.url)))))),
     total: rows.length, exact: rows.filter((row) => row.exact).length,
-    maxPasses: values.harness ? 2 : 1, retries: rows.filter((row) => row.attempts.length > 1).length,
+    maxPasses: harness ? 2 : 1, retries: rows.filter((row) => row.attempts.length > 1).length,
     rawExact: rows.filter((row) => row.rawExact).length,
     positiveTotal: positives.length, positiveExact: positives.filter((row) => row.exact).length,
     negativeTotal: negatives.length, negativeExact: negatives.filter((row) => row.exact).length,
-    acceptedCorrect: positives.filter((row) => row.exact && row.accepted).length,
-    acceptedWrong: rows.filter((row) => !row.exact && row.accepted).length,
+    acceptedCorrect: positives.filter((row) => row.equivalent && row.accepted).length,
+    acceptedEquivalent: positives.filter((row) => !row.exact && row.equivalent && row.accepted).length,
+    acceptedWrong: rows.filter((row) => !row.equivalent && row.accepted).length,
     negativeRefusedByApp: negatives.filter((row) => !row.accepted).length,
     wasmMemoryBytes: engine.HEAPU8.byteLength,
     medianMs: latencies[Math.floor(latencies.length / 2)], p95Ms: latencies[Math.ceil(latencies.length * .95) - 1],

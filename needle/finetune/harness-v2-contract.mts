@@ -1,25 +1,13 @@
-import { EXPLORE_TOOLS, explorationCandidates, explicitNamespace, readExplorationQuestion, requestedPodQuery, requestedSort, requestedState, type POD_SORTS, type POD_STATES } from './explore-query.js';
-
+// Frozen training/evaluation contract from bb3ecf7. The application uses client/src/needle/cluster-query.ts.
 export const CLUSTER_TOPICS = ['overview', 'health', 'pods', 'nodes', 'deployments', 'services', 'storage', 'namespaces', 'events', 'restarts', 'cpu', 'memory', 'images'] as const;
 export type ClusterTopic = typeof CLUSTER_TOPICS[number];
 export interface ClusterQuestion {
-  topic: ClusterTopic | 'find_pods' | 'latest_deployments' | 'summarize_events' | 'recent_terminations' | 'diagnose_pod' | 'query_pods' | 'pod_logs' | 'list_configmaps' | 'list_secrets' | 'lookup_ip' | 'lookup_port' | 'list_images' | 'node_capacity';
+  topic: ClusterTopic | 'find_pods' | 'latest_deployments' | 'summarize_events' | 'recent_terminations' | 'diagnose_pod';
   namespace?: string;
   name?: string;
   limit?: number;
   uid?: string;
   allNamespaces?: boolean;
-  node?: string;
-  status?: typeof POD_STATES[number];
-  sort?: typeof POD_SORTS[number];
-  container?: string;
-  previous?: boolean;
-  ip?: string;
-  port?: number;
-  protocol?: 'TCP' | 'UDP' | 'SCTP';
-  source?: 'workloads' | 'cached' | 'both';
-  imagePodQuery?: boolean;
-  networkKind?: 'services' | 'pods' | 'nodes' | 'ingresses' | 'endpointslices';
 }
 
 export const CLUSTER_TOOLS = [{
@@ -77,8 +65,6 @@ export function readClusterQuestion(response: unknown, prompt: string): ClusterQ
   }
   if (result.namespace && ['nodes', 'namespaces'].includes(result.topic)) throw new Error('Nodes and namespaces are cluster-wide. Ask without a namespace condition.');
   if (result.name && ['overview', 'health', 'namespaces'].includes(result.topic)) throw new Error('Ask for a specific resource using pods, nodes, deployments or services.');
-  if (result.name && (result.name === result.namespace || /^(?:pods?|nodes?|deployments?|services?|pvcs?|claims?|volumes?|warnings?|events?|status)$/i.test(result.name)) &&
-      !new RegExp(`\\b(?:pod|node|deployment|service|pvc|named)\\s+["']?${result.name.replaceAll('.', '\\.')}\\b`, 'i').test(prompt)) throw new Error('The model confused a resource type or namespace with a resource name.');
   // Grounding checks above catch invented values. Also reject dropped scope in
   // explicit forms; silently broadening a named question gives a wrong answer.
   const namespace = /\bin\s+namespace\s+["']?([a-z0-9][-a-z0-9]*)(?=$|[\s"'.,!?])/i.exec(prompt)?.[1];
@@ -95,13 +81,6 @@ export function readClusterQuestion(response: unknown, prompt: string): ClusterQ
   if (directName && result.topic !== directTopics[direct![1]!.toLowerCase()]) throw new Error(unsupported);
   if (result.topic === 'pods' && /\b(?:restart(?:s|ing|ed)?|cpu|processor|memory|ram|images?|unhealthy)\b/i.test(prompt)) {
     throw new Error('The model chose a general pod list for a more specific report. Try “Show pod restart counts”, “Show memory usage”, “Show pod images” or “Check cluster health”.');
-  }
-  // Resource names and namespaces are data, not report intent.
-  const intent = [result.namespace, result.name].filter((name): name is string => !!name).reduce((value, name) => value.replace(new RegExp(`(?<![\\w.-])${name.replaceAll('.', '\\.')}(?![\\w.-])`, 'gi'), ''), prompt);
-  if ((/\b(?:workloads|pods|deployments)\s+and\s+nodes\b|\bnodes\s+and\s+(?:workloads|pods|deployments)\b/i.test(intent) && result.topic !== 'overview') ||
-      (/\b(?:pvcs?|claims?|persistent volumes?)\b/i.test(intent) && result.topic !== 'storage') ||
-      (/\bmachines\b/i.test(intent) && !/\b(?:cpu|processor|memory|ram|usage)\b/i.test(intent) && result.topic !== 'nodes')) {
-    throw new Error('The model selected a different report from the resources you asked about. Please rephrase.');
   }
   // Fine-tuning does not calibrate the confidence head. Never use its score.
   return result;
@@ -121,7 +100,6 @@ const tool = (name: string, description: string, properties: Record<string, unkn
 });
 export const HARNESS_TOOLS = [
   ...CLUSTER_TOOLS,
-  ...EXPLORE_TOOLS,
   tool('find_pods', 'Find pods and their namespaces by name, label or container image.', { query, namespace }, ['query']),
   tool('latest_deployments', 'Show the newest created Deployments.', { namespace, limit }),
   tool('summarize_events', 'Summarize the latest Kubernetes events, including Normal and Warning.', { namespace, limit }),
@@ -137,43 +115,34 @@ export function toolsForQuestion(prompt: string) {
   if (/\b(?:events?|happened|happening)\b/i.test(prompt)) candidates.add('summarize_events');
   if (/\b(?:died|die|dead|death|killed|terminated|terminations?|crashed|crash|last.*fail)\b/i.test(prompt)) candidates.add('recent_terminations');
   if (/\b(?:why|diagnos\w*|debug|troubleshoot|failing|broken|stuck|crash\w*|not running|won't start)\b/i.test(prompt)) candidates.add('diagnose_pod');
-  const exploration = explorationCandidates(prompt);
-  // Specific exploration tools precede broad inventory tools in the bounded shortlist.
-  return [...EXPLORE_TOOLS.filter((entry) => exploration.includes(entry.name)), ...HARNESS_TOOLS.filter((entry) => candidates.has(entry.name))].slice(0, 5);
+  return HARNESS_TOOLS.filter((entry) => candidates.has(entry.name)).slice(0, 5);
 }
 
-/** One retry for an empty classification or a rejected general report,
- * with exactly one task candidate. Never retry held calls,
- * grounding/negation failures or multiple candidates.
+/** One retry for an empty classification with exactly one task candidate.
+ * Never retry held calls, grounding/negation failures or multiple candidates.
  * The second pass still selects a call normally and passes the same validator.
  */
 export function retryToolsForQuestion(response: unknown, prompt: string) {
   if (!record(response) || response.success !== true || response.error ||
-      !Array.isArray(response.function_calls) || response.function_calls.length > 1 ||
+      !Array.isArray(response.function_calls) || response.function_calls.length ||
       (Array.isArray(response.suppressed_calls) && response.suppressed_calls.length) ||
       (record(response.validation) && (response.validation.negation === true ||
         (Array.isArray(response.validation.ungrounded) && response.validation.ungrounded.length)))) return [];
   const candidates = toolsForQuestion(prompt).filter((entry) => entry.name !== 'inspect_cluster');
-  if (candidates.length !== 1) return [];
-  if (!response.function_calls.length) return candidates;
-  const call: unknown = response.function_calls[0];
-  if (!record(call) || call.name !== 'inspect_cluster') return [];
-  try { readHarnessQuestion(response, prompt); return []; } catch { return candidates; }
+  return candidates.length === 1 ? candidates : [];
 }
 
-const unsupported = 'I could not match that to a supported cluster question. Try pod status or logs, ConfigMaps, Secret counts, IPs, ports, images, capacity or recent events.';
+const unsupported = 'I could not match that to a supported cluster question. Try finding a pod, recent terminations, latest deployments, events or pod diagnosis.';
 
 export function readHarnessQuestion(response: unknown, prompt: string): ClusterQuestion {
   // These boundaries also protect against a model dropping a requested action,
   // time condition or count. They never manufacture an alternative model call.
-  if (/(?<![\w.-])(?:delete|update|change|scale|drain|cordon|uncordon|create|install|uninstall|apply|patch|upgrade|rollback|execute|passwords?|tokens?|kubeconfig|fix)(?![\w.-])/i.test(prompt) ||
+  if (/(?<![\w.-])(?:delete|scale|drain|cordon|uncordon|create|install|uninstall|apply|patch|upgrade|rollback|execute|passwords?|secrets?|tokens?|kubeconfig|fix)(?![\w.-])/i.test(prompt) ||
       /\b(?:restart|reboot)\s+(?:the\s+|all\s+|my\s+)?(?:pods?|deployments?|it|them)\b/i.test(prompt) ||
       /(?<![\w.-])(?:yesterday|today|ago|last (?:week|month|year)|tomorrow|since|between|before|after|past \d+|last \d+ (?:minutes?|hours?|days?))(?![\w.-])/i.test(prompt) ||
       /\bin\s+(?:namespace\s+)?[a-z0-9-]+\s+(?:or|and)\s+[a-z0-9-]+\b/i.test(prompt) ||
       /\benvironment\s+variables\b/i.test(prompt) ||
       /\b(?:don't|do not|never)\b/i.test(prompt)) throw new Error(unsupported);
-  if (/\blogs?\b/i.test(prompt) && /\b(?:follow|stream|tail|lines?|since|last \d+)\b/i.test(prompt)) throw new Error('Ask for current or previous pod logs. This view shows a bounded excerpt; open the pod for streaming or a custom line count.');
-  if (/\b(?:secret|config[ -]?map)s?\b/i.test(prompt) && /\b(?:values?|contents?|decode|reveal|data|keys?)\b/i.test(prompt)) throw new Error('Ask for Secret or ConfigMap names and counts. Contents are outside this workflow.');
   if (/\b(?:latest|last|newest|recent)\b.*\brollout\b|\brollout\b.*\b(?:latest|last|newest)\b/i.test(prompt) ||
       (/\bdeployments?\b/i.test(prompt) && /\b(?:updated|modified|rolled out)\b/i.test(prompt))) {
     throw new Error('Newest Deployment means creation time. The latest rollout time cannot be reliably reconstructed from retained ReplicaSets. Ask for the latest deployment or open its rollout history in Kubus.');
@@ -189,21 +158,9 @@ export function readHarnessQuestion(response: unknown, prompt: string): ClusterQ
       (response.validation.negation === true || (Array.isArray(response.validation.ungrounded) && response.validation.ungrounded.length)))) throw new Error(unsupported);
   const call = calls[0];
   if (!record(call) || !record(call.arguments) || !toolsForQuestion(prompt).some((entry) => entry.name === call.name)) throw new Error(unsupported);
-  if (call.name === 'summarize_events' && /\bwarning\s+events?\b/i.test(prompt) && !/\bnormal\b/i.test(prompt)) throw new Error('The model missed the Warning event filter. Try “Show warning events”.');
   if ((/(?<![\w.-])(?:why|diagnose|debug|troubleshoot)(?![\w.-])/i.test(prompt) && call.name !== 'diagnose_pod') ||
-      (/(?<![\w.-])(?:where|locate|which namespace)(?![\w.-])/i.test(prompt) && !['find_pods', 'lookup_ip', 'lookup_port', 'list_images'].includes(String(call.name))) ||
-      (/\b(?:on node|on the node)\b/i.test(prompt) && !['query_pods', 'list_images', 'node_capacity'].includes(String(call.name)))) throw new Error('The model missed the specific workflow or a condition. Please rephrase.');
-  const demanded = explorationCandidates(prompt);
-  const podImageFilter = /\bpods?\s+(?:with|using|matching)\s+(?:the\s+)?image\b/i.test(prompt);
-  const specific = demanded.filter((name) => name !== 'query_pods' && !(name === 'list_images' && podImageFilter));
-  if (specific.length && !specific.includes(String(call.name))) throw new Error('The model missed the specific workflow. Please rephrase.');
-  if ((/\b(?:died|die|death|killed|terminated|terminations?)\b|\blast\b.*\bcrash\b/i.test(prompt) && !/\b(?:why|diagnose|debug|troubleshoot)\b/i.test(prompt) && call.name !== 'recent_terminations') ||
-      (/\bevents\b/i.test(prompt) && !/\b(?:warning|warnings|problems)\b/i.test(prompt) && call.name !== 'summarize_events') ||
-      (/\bdeployments?\b/i.test(prompt) && /\b(?:latest|newest|most recently|last)\b/i.test(prompt) && call.name !== 'latest_deployments')) throw new Error('The model missed the specific workflow. Try one of the example questions.');
-  if (EXPLORE_TOOLS.some((entry) => entry.name === call.name)) return readExplorationQuestion(String(call.name), call.arguments, prompt);
-  const requiredQuery = call.name === 'inspect_cluster' && /\bpods?\b/i.test(prompt) ? requestedPodQuery(prompt) : undefined;
-  if (call.name === 'inspect_cluster' && requiredQuery && call.arguments.topic !== 'events') throw new Error('The model missed the pod filter. Try “Show pods matching ' + requiredQuery + '”.');
-  if (call.name === 'inspect_cluster' && /\bpods?\b/i.test(prompt) && (requestedState(prompt) || ['oldest', 'newest'].includes(requestedSort(prompt) ?? ''))) throw new Error('The model missed the pod status or ordering.');
+      (/(?<![\w.-])(?:where|locate|which namespace)(?![\w.-])/i.test(prompt) && call.name !== 'find_pods') ||
+      (/\b(?:on node|on the node)\b/i.test(prompt))) throw new Error('The model missed the specific workflow or a condition. Please rephrase.');
   const allNamespaces = /\ball namespaces\b/i.test(prompt) && !/\blist all namespaces\b/i.test(prompt);
   if (call.name === 'inspect_cluster') {
     if (/\b(?:with|have|having)\s+(?:the\s+)?label\b/i.test(prompt)) throw new Error('Use “Find pods matching app=web” to search by a label.');
@@ -211,8 +168,6 @@ export function readHarnessQuestion(response: unknown, prompt: string): ClusterQ
         (/\bevents\b/i.test(prompt) && !/\b(?:warning|warnings|problems)\b/i.test(prompt)) ||
         /\b(?:died|death|terminat\w*)\b|\b(?:why|where|locate|diagnose|troubleshoot)\b|\b(?:last|latest)\s+\d+\s+(?:warning\s+)?events\b/i.test(prompt)) throw new Error('The model missed the specific workflow. Try one of the example questions.');
     const question = readClusterQuestion(response, prompt);
-    const explicit = explicitNamespace(prompt);
-    if (explicit && explicit !== question.namespace) throw new Error('The model missed the namespace in your question.');
     return allNamespaces ? { ...question, allNamespaces: true } : question;
   }
   const args = call.arguments;
@@ -224,7 +179,7 @@ export function readHarnessQuestion(response: unknown, prompt: string): ClusterQ
     const value = args[key];
     if (value === undefined) { if (key === 'query' && named) throw new Error(unsupported); continue; }
     if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9._/=:~-]{0,252}$/i.test(value)) throw new Error(unsupported);
-    if (key === 'query' && /^(?:pods?|nodes?|namespaces?|deployments?|services?|secrets?|config-?maps?|inventory|my|it|why|failing|broken|stuck)$/i.test(value)) throw new Error('Include a pod name, label or image to search for.');
+    if (key === 'query' && /^(?:pod|pods|namespace|my|it|why|failing|broken|stuck)$/i.test(value)) throw new Error('Include a pod name, label or image to search for.');
     const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const evidence = key === 'namespace'
       ? new RegExp(`\\b(?:in|namespace)\\s+["']?${escaped}(?=$|[\\s"'.,!?])|\\b${escaped}\\s+namespace\\b`, 'i')

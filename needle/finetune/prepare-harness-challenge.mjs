@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { toolsForQuestion, readHarnessQuestion } from '../../client/src/needle/cluster-query.ts';
+const { toolsForQuestion, readHarnessQuestion } = await import('./harness-v2-contract.mts');
 const destination = new URL('../../.cache/needle-training/harness/', import.meta.url);
 const cases = [
   ['Where is the eos-device pod located?', 'find_pods', { query: 'eos-device' }],

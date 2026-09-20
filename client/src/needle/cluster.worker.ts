@@ -14,7 +14,7 @@ self.onmessage = async (event: MessageEvent<{ prompt: string }>) => {
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 300) throw new Error('Enter a question of 1–300 characters.');
     if (!runtime) {
       send({ type: 'status', status: 'loading' });
-      runtime = await loadNeedle(toolsForQuestion(prompt), 'needle-cluster', 'harness-v2');
+      runtime = await loadNeedle(toolsForQuestion(prompt), 'needle-cluster', 'harness-v3');
       schema = JSON.stringify(toolsForQuestion(prompt));
     }
     send({ type: 'status', status: 'thinking' });

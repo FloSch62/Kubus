@@ -5,3 +5,4 @@ export * from './resource-meta.js';
 export * from './jsonpath.js';
 export * from './events.js';
 export * from './pod-observations.js';
+export { parseQuantity, cpuToMilli, memToBytes } from './quantity.js';

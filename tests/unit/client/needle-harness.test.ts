@@ -9,12 +9,16 @@ const pod = (name: string, namespace: string, extra: Partial<KubeObject> = {}): 
 const response = (name: string, args: Record<string, unknown>) => ({ success: true, function_calls: [{ name, arguments: args }] });
 
 describe('harness request boundaries', () => {
-  it('narrows only empty, unambiguous classifications and preserves refusal checks', () => {
+  it('narrows empty classifications or rejected general reports and preserves refusal checks', () => {
     const empty = { success: true, function_calls: [], suppressed_calls: [] };
     expect(retryToolsForQuestion(empty, 'Summarize the last 10 events').map((tool) => tool.name)).toEqual(['summarize_events']);
     expect(retryToolsForQuestion(empty, 'Why did the pod crash?')).toEqual([]);
     expect(retryToolsForQuestion({ ...empty, validation: { negation: true } }, 'Show recent events')).toEqual([]);
     expect(retryToolsForQuestion({ ...empty, suppressed_calls: response('summarize_events', {}).function_calls }, 'Show recent events')).toEqual([]);
+    expect(retryToolsForQuestion(response('inspect_cluster', { topic: 'pods' }), 'Which pods restart most?').map((tool) => tool.name)).toEqual(['query_pods']);
+    expect(retryToolsForQuestion(response('inspect_cluster', { topic: 'pods' }), 'Show pods')).toEqual([]);
+    expect(retryToolsForQuestion(response('query_pods', {}), 'Show pending pods')).toEqual([]);
+    expect(retryToolsForQuestion({ ...response('inspect_cluster', { topic: 'pods' }), validation: { ungrounded: ['namespace'] } }, 'Which pods restart most?')).toEqual([]);
     expect(() => readHarnessQuestion(response('summarize_events', { limit: 10 }), 'Do not summarize the last 10 events')).toThrow();
   });
   it.each([

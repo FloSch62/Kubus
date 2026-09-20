@@ -1,7 +1,8 @@
+import './source-loader.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { CLUSTER_TOOLS, readClusterQuestion } from '../../client/src/needle/cluster-query.ts';
+const { CLUSTER_TOOLS, readClusterQuestion } = await import('../../client/src/needle/cluster-query.ts');
 
 const destination = new URL('../../.cache/needle-training/cluster/', import.meta.url);
 const topics = {

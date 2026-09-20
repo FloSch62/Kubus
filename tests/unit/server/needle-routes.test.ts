@@ -12,6 +12,44 @@ const pod: KubeObject = { metadata: { name: 'api', namespace: 'prod', uid: 'uid-
   status: { containerStatuses: [{ name: 'app', lastState: { terminated: { exitCode: 137, reason: 'OOMKilled', finishedAt: '2026-09-20T12:00:00Z' } } }] } };
 const url = '/api/contexts/test/detail/pod-logs?namespace=prod&name=api&uid=uid-1&container=app&previous=true';
 
+describe('metadata-only inventories', () => {
+  it('negotiates metadata, preserves pagination and strips any unexpected payload or annotations', async () => {
+    const json = vi.fn(async (_path: string, _options?: unknown) => ({ metadata: { continue: 'next-page' }, items: [{
+      metadata: { name: 'database', namespace: 'prod', uid: 'secret-1', labels: { app: 'database' }, annotations: { 'kubectl.kubernetes.io/last-applied-configuration': 'sensitive' } },
+      data: { password: 'sensitive' }, stringData: { password: 'sensitive' },
+    }] }));
+    const app = Fastify();
+    registerNeedleRoutes(app, { clusters: { get: () => ({ raw: { json } }) } } as unknown as AppContext);
+    try {
+      const response = await app.inject('/api/contexts/test/detail/resource-metadata/secrets?namespace=prod&limit=1000&continue=opaque');
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain('sensitive');
+      expect(response.json().continue).toBe('next-page');
+      expect(response.json().items[0].metadata.name).toBe('database');
+      expect(json.mock.calls[0]?.[0]).toBe('/api/v1/namespaces/prod/secrets?limit=1000&continue=opaque');
+      expect(json.mock.calls[0]?.[1]).toEqual({ headers: { Accept: 'application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1' } });
+    } finally { await app.close(); }
+  });
+  it.each([403, 406])('does not fall back to full objects on HTTP %s', async (code) => {
+    const json = vi.fn(async () => { throw new ApiException(code, 'Unavailable', {}, {}); });
+    const app = Fastify();
+    registerNeedleRoutes(app, { clusters: { get: () => ({ raw: { json } }) } } as unknown as AppContext);
+    try {
+      expect((await app.inject('/api/contexts/test/detail/resource-metadata/secrets')).statusCode).toBe(code);
+      expect(json).toHaveBeenCalledTimes(1);
+    } finally { await app.close(); }
+  });
+  it('validates resource, namespace and page size before contacting Kubernetes', async () => {
+    const get = vi.fn();
+    const app = Fastify();
+    registerNeedleRoutes(app, { clusters: { get } } as unknown as AppContext);
+    try {
+      for (const suffix of ['pods', 'secrets?namespace=..', 'secrets?limit=1001', 'configmaps?limit=0']) expect((await app.inject('/api/contexts/test/detail/resource-metadata/' + suffix)).statusCode).toBe(422);
+      expect(get).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+});
+
 describe('bounded diagnosis reads', () => {
   it('bounds log bytes, checks UID before and after reading, and never follows', async () => {
     const raw = { json: vi.fn(async () => pod), stream: vi.fn(async (_path: string) => ({ body: Readable.from(['x'.repeat(20_000)]) })) };

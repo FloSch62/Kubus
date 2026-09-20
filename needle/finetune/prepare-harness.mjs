@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { readHarnessQuestion, toolsForQuestion } from '../../client/src/needle/cluster-query.ts';
+const { readHarnessQuestion, toolsForQuestion } = await import('./harness-v2-contract.mts');
 
 const destination = new URL('../../.cache/needle-training/harness/', import.meta.url);
 const source = new URL('../../.cache/needle-training/cluster/', import.meta.url);

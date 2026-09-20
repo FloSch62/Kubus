@@ -1,5 +1,7 @@
 # Harness v2 local results — 2026-09-20
 
+Historical v2 results. The current application uses [exploration v3](exploration.md).
+
 The new adapter was trained locally on the RTX 4080 SUPER in WSL, exported to
 4-bit and installed as `needle-cluster.cact` with the `harness-v2` contract.
 The original 2-bit pod-filter model is unchanged. No Cactus account, hosted
