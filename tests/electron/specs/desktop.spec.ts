@@ -56,6 +56,7 @@ test('boots the real desktop shell behind the restricted preload bridge', async 
         'onCloseTab',
         'onCycleTab',
         'onOpenRoute',
+        'openStore',
         'openWindow',
         'platform',
         'setTitleBarOverlay',
