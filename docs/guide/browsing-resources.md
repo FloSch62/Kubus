@@ -119,7 +119,9 @@ the number of checked rows, the actions for them and **Clear selection**:
 
 - **Copy rows** puts the checked rows on the clipboard with the columns you see, header
   included. Pick **TSV** to paste into a spreadsheet or **CSV** for a file. Values are
-  the raw data behind each cell, so ages come out as timestamps and memory in bytes.
+  the raw data behind each cell, so ages come out as timestamps and memory in bytes. A
+  value that a spreadsheet would run as a formula (one starting with `=`, `+`, `-` or `@`)
+  gets a leading `'` so it pastes as text.
 - **Scale** (Deployments and StatefulSets) sets one replica count on all of them. See
   [scaling several workloads](quick-actions.md#scaling).
 - **Compare 2** appears when exactly two rows are checked and opens them side by side

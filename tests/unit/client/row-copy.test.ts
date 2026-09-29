@@ -3,7 +3,7 @@ import type { KubeObject } from '@kubus/shared';
 import { describe, expect, it } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
 import { buildColumns } from '../../../client/src/components/columns';
-import { copyColumns, serializeRows } from '../../../client/src/components/row-copy';
+import { copyColumns, neutralizeFormula, serializeRows } from '../../../client/src/components/row-copy';
 
 function pod(name: string, extra: Partial<KubeObject['metadata']> = {}): ClusterRow {
   return {
@@ -59,5 +59,26 @@ describe('serializeRows', () => {
   it('quotes TSV fields holding tabs', () => {
     const cols: GridColDef<ClusterRow>[] = [{ field: 'x', headerName: 'X', valueGetter: () => 'a\tb' }];
     expect(serializeRows([pod('a')], cols, 'tsv')).toBe('X\n"a\tb"\n');
+  });
+
+  it('pastes values a spreadsheet would run as a formula as text', () => {
+    const cols: GridColDef<ClusterRow>[] = [{ field: 'note', headerName: 'Note', valueGetter: (_v, row) => row.obj.metadata.annotations?.note ?? '' }];
+    const copy = (note: string, format: 'tsv' | 'csv' = 'csv') => serializeRows([pod('a', { annotations: { note } })], cols, format).split('\n')[1];
+    expect(copy('=HYPERLINK("http://evil","x")')).toBe(`"'=HYPERLINK(""http://evil"",""x"")"`);
+    expect(copy('+cmd')).toBe("'+cmd");
+    expect(copy('@SUM(A1)', 'tsv')).toBe("'@SUM(A1)");
+    expect(copy('-2+3')).toBe("'-2+3");
+    // Numbers stay numbers, and ordinary text is untouched.
+    expect(copy('-1')).toBe('-1');
+    expect(copy('+0.5')).toBe('+0.5');
+    expect(copy('1e-3')).toBe('1e-3');
+    expect(copy('web=ok')).toBe('web=ok');
+  });
+
+  it('neutralizes only formula-leading text', () => {
+    expect(neutralizeFormula('=1+1')).toBe("'=1+1");
+    expect(neutralizeFormula('-')).toBe("'-");
+    expect(neutralizeFormula('-12.5')).toBe('-12.5');
+    expect(neutralizeFormula('')).toBe('');
   });
 });

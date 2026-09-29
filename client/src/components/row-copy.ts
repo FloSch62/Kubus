@@ -44,7 +44,19 @@ function cellValue<R extends GridValidRowModel>(row: R, column: GridColDef<R>): 
   return cellCopyText(raw);
 }
 
-function field(value: string, delimiter: string): string {
+// Spreadsheets run a cell that starts with one of these as a formula, and
+// labels, annotations and custom printer columns hold whatever the cluster's
+// users wrote. Such cells get a leading apostrophe so they paste as text;
+// plain numbers ("-1", "+0.5") stay numbers.
+const FORMULA_START = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+export function neutralizeFormula(value: string): string {
+  return FORMULA_START.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+}
+
+function field(raw: string, delimiter: string): string {
+  const value = neutralizeFormula(raw);
   // RFC 4180 quoting; spreadsheets read the same quoting from pasted TSV.
   return value.includes(delimiter) || /["\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
