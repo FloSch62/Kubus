@@ -82,6 +82,17 @@ export const LOG_TARGET_RESOURCES: Record<LogTargetKind, { group: string; versio
 export type TargetPodMatcher = (pod: KubeObject) => Promise<boolean>;
 
 /**
+ * Why a target can never have pods, or undefined when pods may match it. A
+ * Service without a selector (the API server's own, or one backed by
+ * hand-managed EndpointSlices) selects no pods, so waiting for them is futile.
+ */
+export function targetWithoutPods(target: KubeObject, kind: LogTargetKind): string | undefined {
+  if (kind !== 'Service') return undefined;
+  const selector = (target.spec as { selector?: Record<string, string> } | undefined)?.selector;
+  return selector && Object.keys(selector).length ? undefined : 'it has no pod selector';
+}
+
+/**
  * Membership test for pods that appear after a target was resolved, with the
  * same rules as resolveTargetPods. Deployments own pods through ReplicaSets
  * that a rollout creates later, so an unknown ReplicaSet owner is looked up

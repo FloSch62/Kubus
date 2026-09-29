@@ -6,7 +6,7 @@ import { podContainers } from '../kube/actions.js';
 import { getRolloutHistory } from '../kube/rollout.js';
 import { resolvePodEnv } from '../kube/pod-env.js';
 import { resourcePath } from '../kube/raw-client.js';
-import { resolveTargetPods } from '../kube/target-pods.js';
+import { resolveTargetPods, targetWithoutPods } from '../kube/target-pods.js';
 import { computeReferences } from '../kube/references.js';
 import { computeUsedBy, selectableLabels } from '../kube/used-by.js';
 import { HttpProblem, sendError } from '../util/errors.js';
@@ -111,6 +111,8 @@ export function registerDetailRoutes(app: FastifyInstance, ctx: AppContext): voi
           }))
           .sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name)),
       };
+      const noPodsReason = targetWithoutPods(target, kind);
+      if (noPodsReason) response.noPodsReason = noPodsReason;
       return response;
     } catch (err) {
       sendError(reply, err);

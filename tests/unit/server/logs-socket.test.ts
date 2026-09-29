@@ -94,6 +94,18 @@ it('Job log targets contain only Pods directly owned by the Job', async () => {
   expect(jsonCalls[1]).toMatch(/labelSelector=batch\.kubernetes\.io%2Fcontroller-uid%3Djob-uid/);
 });
 
+it('log target resolution explains a Service that can never have pods', async () => {
+  const { app, routes } = routeCollector();
+  const selectorless = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'kubernetes', namespace: 'default', uid: 'svc-uid' }, spec: { ports: [{ port: 443 }] } };
+  const handle = { raw: { json: async () => selectorless } };
+  registerDetailRoutes(app, appContext(handle));
+  const response = await routes.get('/api/contexts/:ctx/detail/log-target-pods')?.(
+    { params: { ctx: 'dev' }, query: { group: '', version: 'v1', plural: 'services', kind: 'Service', namespace: 'default', name: 'kubernetes' } },
+    {},
+  );
+  expect(response).toEqual({ pods: [], noPodsReason: 'it has no pod selector' });
+});
+
 class FakeSocket extends EventEmitter {
   OPEN = 1;
   readyState = this.OPEN;

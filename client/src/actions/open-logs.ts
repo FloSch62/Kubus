@@ -16,12 +16,15 @@ export interface LogTargetRef {
  * Resolve a pod, workload or Service to its pods and open one logs dock tab
  * per namespace. A workload with no pods yet (scaled to zero, first rollout
  * still scheduling) still gets a tab: it follows the workload, so the pods
- * join as they start. Only a Pod that cannot be found is an error.
+ * join as they start. A Pod that cannot be found, and a target that can
+ * never have pods (a Service without a selector), are errors.
  */
 export async function openLogsForTarget(ref: LogTargetRef, addTab: (tab: DockTab) => void): Promise<void> {
-  const { pods } = await resolveLogTargetPods(ref);
+  const { pods, noPodsReason } = await resolveLogTargetPods(ref);
   if (!pods.length) {
-    if (ref.kind === 'Pod') throw new Error(`No pods found for ${ref.kind} ${ref.namespace}/${ref.name}`);
+    if (ref.kind === 'Pod' || noPodsReason) {
+      throw new Error(`No pods found for ${ref.kind} ${ref.namespace}/${ref.name}${noPodsReason ? `: ${noPodsReason}` : ''}`);
+    }
     addTab({
       kind: 'logs',
       id: dockTabId(),

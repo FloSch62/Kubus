@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { LOG_SOCKET_COMPLETE_CODE, LOG_SOCKET_NO_STREAMS_CODE, type KubeObject } from '@kubus/shared';
 import type { AppContext } from '../../../server/src/app.js';
 import type { WatcherSubscriber } from '../../../server/src/kube/watcher.js';
-import { containerRun } from '../../../server/src/ws/log-session.js';
+import { containerRun, logTimestampNanos } from '../../../server/src/ws/log-session.js';
 import { registerLogsSocket } from '../../../server/src/ws/logs-socket.js';
 
 type Handler = (a: unknown, b: unknown) => unknown;
@@ -91,8 +91,9 @@ function replicaSet(name: string): KubeObject {
 }
 
 /** A cluster at the ClusterHandle seam: a pods watcher we drive, and log streams we push lines into. */
-function fakeCluster(initialPods: KubeObject[], objects: Record<string, KubeObject> = {}) {
+function fakeCluster(initialPods: KubeObject[], objects: Record<string, KubeObject | (() => KubeObject)> = {}) {
   let items = [...initialPods];
+  const jsonCalls: string[] = [];
   const subscribers = new Set<WatcherSubscriber>();
   const streams = new Map<string, Readable>();
   const streamCalls: string[] = [];
@@ -117,9 +118,10 @@ function fakeCluster(initialPods: KubeObject[], objects: Record<string, KubeObje
     },
     raw: {
       async json(path: string) {
+        jsonCalls.push(path);
         const found = Object.entries(objects).find(([suffix]) => path.startsWith(suffix));
         if (!found) throw Object.assign(new Error(`unexpected ${path}`), { code: 404 });
-        return found[1];
+        return typeof found[1] === 'function' ? found[1]() : found[1];
       },
       async stream(path: string, options: { signal: AbortSignal }) {
         streamCalls.push(path);
@@ -137,7 +139,8 @@ function fakeCluster(initialPods: KubeObject[], objects: Record<string, KubeObje
     items = type === 'DELETED' ? items.filter((item) => item.metadata.uid !== object.metadata.uid) : [...items.filter((item) => item.metadata.uid !== object.metadata.uid), object];
     for (const sub of subscribers) sub.onDeltas([{ type, object }]);
   };
-  return { handle, emit, streams, streamCalls, release, subscribers };
+  const jobsCalls = () => jsonCalls.filter((path) => path.includes('/jobs/'));
+  return { handle, emit, streams, streamCalls, jobsCalls, release, subscribers };
 }
 
 function openSocket(handle: unknown, query: Record<string, string>): FakeSocket {
@@ -168,6 +171,16 @@ async function settle(predicate: () => boolean): Promise<void> {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('logTimestampNanos', () => {
+  it('compares RFC 3339 timestamps at nanosecond precision', () => {
+    expect(logTimestampNanos('2026-07-22T12:00:05.5Z')).toBe(logTimestampNanos('2026-07-22T12:00:05.500000000Z'));
+    expect(logTimestampNanos('2026-07-22T12:00:05Z')! < logTimestampNanos('2026-07-22T12:00:05.000000001Z')!).toBe(true);
+    expect(logTimestampNanos('2026-07-22T12:00:05.49Z')! < logTimestampNanos('2026-07-22T12:00:05.5Z')!).toBe(true);
+    expect(logTimestampNanos('2026-07-22T14:00:05+02:00')).toBe(logTimestampNanos('2026-07-22T12:00:05Z'));
+    expect(logTimestampNanos('yesterday')).toBeUndefined();
+  });
 });
 
 describe('containerRun', () => {
@@ -307,6 +320,17 @@ describe('workload log sessions', () => {
     expect(socket.closeCalls).toEqual([]);
   });
 
+  it('refuse a Service without a selector, whose pods can never be found', async () => {
+    const cluster = fakeCluster([pod('web-1-a', [{ name: 'app', state: 'running' }])], {
+      '/api/v1/namespaces/ops/services/kubernetes': { apiVersion: 'v1', kind: 'Service', metadata: { name: 'kubernetes', namespace: 'ops', uid: 'svc' }, spec: {} },
+    });
+    const socket = openSocket(cluster.handle, { target: 'Service', targetName: 'kubernetes' });
+    await settle(() => socket.closeCalls.length === 1);
+    expect(socket.closeCalls).toEqual([{ code: LOG_SOCKET_NO_STREAMS_CODE, reason: 'log target has no pods' }]);
+    expect(socket.ops('pod-status')[0]).toMatchObject({ state: 'error', message: 'No pods found for Service ops/kubernetes: it has no pod selector' });
+    expect(cluster.streamCalls).toEqual([]);
+  });
+
   it('report a missing workload without retrying', async () => {
     const cluster = fakeCluster([]);
     const socket = openSocket(cluster.handle, { target: 'Deployment', targetName: 'nope' });
@@ -316,7 +340,111 @@ describe('workload log sessions', () => {
   });
 });
 
+describe('Job log sessions', () => {
+  const job = (conditions: Array<{ type: string; status: string }> = []): KubeObject => ({
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { name: 'report', namespace: 'ops', uid: 'job-uid' },
+    spec: { selector: { matchLabels: { 'batch.kubernetes.io/controller-uid': 'job-uid' } } },
+    status: { conditions },
+  });
+  const jobPod = (state: ContainerSpec['state'], phase: string): KubeObject => {
+    const created = pod('report-a', [{ name: 'worker', state }], { phase, labels: { 'batch.kubernetes.io/controller-uid': 'job-uid' } });
+    created.metadata.ownerReferences = [{ apiVersion: 'batch/v1', kind: 'Job', name: 'report', uid: 'job-uid', controller: true }];
+    return created;
+  };
+
+  async function finishPod(cluster: ReturnType<typeof fakeCluster>) {
+    await settle(() => cluster.streams.has('report-a/worker'));
+    cluster.streams.get('report-a/worker')!.push('2026-07-22T12:00:00.000000000Z report written\n');
+    cluster.emit('MODIFIED', jobPod('terminated', 'Succeeded'));
+    cluster.streams.get('report-a/worker')!.push(null);
+    await drain();
+  }
+
+  it('complete once the Job controller marks the Job done after its last pod', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let current = job();
+    const cluster = fakeCluster([jobPod('running', 'Running')], { '/apis/batch/v1/namespaces/ops/jobs/report': () => current });
+    const socket = openSocket(cluster.handle, { target: 'Job', targetName: 'report' });
+    await finishPod(cluster);
+    // The pod is done but the Job is not marked yet, and no further pod events come.
+    expect(socket.closeCalls).toEqual([]);
+    current = job([{ type: 'Complete', status: 'True' }]);
+    vi.advanceTimersByTime(2_000);
+    await settle(() => socket.closeCalls.length === 1);
+    expect(socket.closeCalls).toEqual([{ code: LOG_SOCKET_COMPLETE_CODE, reason: 'log session complete' }]);
+    expect(socket.ops('line').map((frame) => frame.line)).toEqual(['report written']);
+  });
+
+  it('complete when the finished Job is already gone', async () => {
+    let current: () => KubeObject = () => job();
+    const cluster = fakeCluster([jobPod('running', 'Running')], { '/apis/batch/v1/namespaces/ops/jobs/report': () => current() });
+    const socket = openSocket(cluster.handle, { target: 'Job', targetName: 'report' });
+    await settle(() => cluster.streams.has('report-a/worker'));
+    // ttlSecondsAfterFinished removed the Job.
+    current = () => {
+      throw Object.assign(new Error('jobs.batch "report" not found'), { code: 404 });
+    };
+    await finishPod(cluster);
+    await settle(() => socket.closeCalls.length === 1);
+    expect(socket.closeCalls).toEqual([{ code: LOG_SOCKET_COMPLETE_CODE, reason: 'log session complete' }]);
+  });
+
+  it('stop asking after a while, and start over when the Job makes another pod', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cluster = fakeCluster([jobPod('running', 'Running')], { '/apis/batch/v1/namespaces/ops/jobs/report': job() });
+    const socket = openSocket(cluster.handle, { target: 'Job', targetName: 'report' });
+    await finishPod(cluster);
+    for (let tick = 0; tick < 40; tick++) {
+      vi.advanceTimersByTime(2_000);
+      await drain();
+    }
+    // The first looks plus 30 timed ones, then quiet.
+    const reads = cluster.jobsCalls().length;
+    expect(reads).toBeGreaterThanOrEqual(31);
+    expect(reads).toBeLessThanOrEqual(33);
+    vi.advanceTimersByTime(10_000);
+    await drain();
+    expect(cluster.jobsCalls()).toHaveLength(reads);
+
+    // A retry pod joins, finishes, and the checks begin again.
+    const retry = jobPod('running', 'Running');
+    retry.metadata.name = 'report-b';
+    retry.metadata.uid = 'uid-report-b';
+    cluster.emit('ADDED', retry);
+    await settle(() => cluster.streams.has('report-b/worker'));
+    const done = jobPod('terminated', 'Failed');
+    done.metadata.name = 'report-b';
+    done.metadata.uid = 'uid-report-b';
+    cluster.emit('MODIFIED', done);
+    cluster.streams.get('report-b/worker')!.push(null);
+    await drain();
+    vi.advanceTimersByTime(2_000);
+    await drain();
+    expect(cluster.jobsCalls().length).toBeGreaterThan(reads);
+    expect(socket.closeCalls).toEqual([]);
+  });
+});
+
 describe('fixed pod log sessions', () => {
+  it('drop the lines the kubelet replays from before the resume cursor', async () => {
+    const cluster = fakeCluster([pod('api-0', [{ name: 'app', state: 'running' }])]);
+    // Trailing zeros are trimmed: as strings ".49Z" sorts after ".5Z" nowhere near its time.
+    const socket = openSocket(cluster.handle, { pods: 'api-0', resumeAt: JSON.stringify({ 'api-0/app': '2026-07-22T12:00:05.5Z' }) });
+    await settle(() => cluster.streams.has('api-0/app'));
+    expect(cluster.streamCalls[0]).toContain('sinceTime=2026-07-22T12%3A00%3A05.5Z');
+    const upstream = cluster.streams.get('api-0/app')!;
+    upstream.push('2026-07-22T12:00:05.000000001Z replayed start of the second\n');
+    upstream.push('2026-07-22T12:00:05.49Z replayed just before\n');
+    upstream.push('2026-07-22T12:00:05.500000000Z at the cursor\n');
+    upstream.push('2026-07-22T12:00:05.500000001Z new\n');
+    upstream.push('2026-07-22T12:00:06Z newer\n');
+    await settle(() => socket.ops('line').length === 3);
+    await drain();
+    expect(socket.ops('line').map((frame) => frame.line)).toEqual(['at the cursor', 'new', 'newer']);
+  });
+
   it('wait for a container to start instead of failing', async () => {
     const cluster = fakeCluster([pod('api-0', [{ name: 'app', state: 'waiting' }])]);
     const socket = openSocket(cluster.handle, { pods: 'api-0' });

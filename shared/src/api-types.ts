@@ -753,6 +753,8 @@ export interface LogTargetPod {
 
 export interface LogTargetPodsResponse {
   pods: LogTargetPod[];
+  /** Why the target can never have pods (a Service without a selector); absent when pods may still join. */
+  noPodsReason?: string;
 }
 
 // ---- Metrics ----

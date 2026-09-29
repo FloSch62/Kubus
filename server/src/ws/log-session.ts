@@ -4,12 +4,20 @@ import type { LogSocketQuery } from '@kubus/shared/ws-protocol';
 import { podContainers } from '../kube/actions.js';
 import type { ClusterHandle } from '../kube/cluster-manager.js';
 import { resourcePath } from '../kube/raw-client.js';
-import { LOG_TARGET_RESOURCES, resolveTargetPods, targetPodMatcher, type TargetPodMatcher } from '../kube/target-pods.js';
+import { LOG_TARGET_RESOURCES, resolveTargetPods, targetPodMatcher, targetWithoutPods, type TargetPodMatcher } from '../kube/target-pods.js';
 import type { WatcherDelta } from '../kube/watcher.js';
 
 type StreamResult = 'ended' | 'error';
 
-class TargetMissingError extends Error {}
+/** A target the session cannot follow; retrying would not help. */
+class TargetError extends Error {
+  constructor(
+    message: string,
+    readonly closeReason: string,
+  ) {
+    super(message);
+  }
+}
 
 interface StreamOutcome {
   result: StreamResult;
@@ -25,6 +33,27 @@ interface StreamOutcome {
 const SETTLE_GRACE_MS = 3_000;
 /** Longest wait for the shared pods watcher before falling back to one-off reads. */
 const FEED_READY_TIMEOUT_MS = 10_000;
+/**
+ * The Job controller marks a Job Complete or Failed a moment after its last
+ * pod finished, so a followed Job whose pods are all done asks again on this
+ * beat, for about a minute. A new pod starts the count over.
+ */
+const JOB_RECHECK_MS = 2_000;
+const JOB_RECHECKS = 30;
+
+const RFC3339_RE = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)$/;
+
+/**
+ * A log timestamp as nanoseconds since the epoch. RFC 3339 timestamps with
+ * trimmed fractions do not sort as strings, and a Date keeps milliseconds.
+ */
+export function logTimestampNanos(ts: string): bigint | undefined {
+  const match = RFC3339_RE.exec(ts);
+  if (!match) return undefined;
+  const seconds = Date.parse(`${match[1]}${match[3]}`);
+  if (!Number.isFinite(seconds)) return undefined;
+  return BigInt(seconds) * 1_000_000n + BigInt((match[2] ?? '').padEnd(9, '0'));
+}
 
 interface ContainerStatusLike {
   name?: string;
@@ -196,6 +225,8 @@ export class LogSession {
   private ready = false;
   private disposed = false;
   private finishing = false;
+  private jobTimer?: NodeJS.Timeout;
+  private jobChecks = 0;
   private streamsOpened = 0;
   private streamsFailed = 0;
   private podsLeft = 0;
@@ -220,9 +251,11 @@ export class LogSession {
       if (target && targetName) {
         const { group, version, plural } = LOG_TARGET_RESOURCES[target];
         const targetObj = await handle.raw.json<KubeObject>(resourcePath(group, version, plural, { namespace, name: targetName })).catch((err: unknown) => {
-          if (errorCode(err) === 404) throw new TargetMissingError(`${target} ${namespace}/${targetName} not found`);
+          if (errorCode(err) === 404) throw new TargetError(`${target} ${namespace}/${targetName} not found`, 'log target not found');
           throw err;
         });
+        const noPods = targetWithoutPods(targetObj, target);
+        if (noPods) throw new TargetError(`No pods found for ${target} ${namespace}/${targetName}: ${noPods}`, 'log target has no pods');
         this.matcher = targetPodMatcher(handle, targetObj, target, namespace);
         if (!this.feed) {
           const pods = await resolveTargetPods(handle, targetObj, target, namespace);
@@ -239,7 +272,7 @@ export class LogSession {
       await initial;
     } catch (err) {
       this.io.send({ op: 'pod-status', pod: '', container: '', state: 'error', message: err instanceof Error ? err.message : String(err) });
-      if (err instanceof TargetMissingError) this.io.close(LOG_SOCKET_NO_STREAMS_CODE, 'log target not found');
+      if (err instanceof TargetError) this.io.close(LOG_SOCKET_NO_STREAMS_CODE, err.closeReason);
       else this.io.close(1011, 'log session failed');
     }
   }
@@ -248,6 +281,7 @@ export class LogSession {
     this.disposed = true;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    clearTimeout(this.jobTimer);
     this.feed?.release();
     for (const entry of this.pods.values()) {
       for (const source of entry.sources) {
@@ -330,7 +364,10 @@ export class LogSession {
       sources: [],
     };
     this.pods.set(name, entry);
-    if (announce) this.io.send({ op: 'pod-joined', pod: name, containers: pod ? podContainers(pod) : [] });
+    if (announce) {
+      this.io.send({ op: 'pod-joined', pod: name, containers: pod ? podContainers(pod) : [] });
+      this.jobChecks = 0;
+    }
     if (entry.excluded) return;
     const selected = this.containers ? all.filter((container) => this.containers!.has(container)) : all;
     if (!selected.length) {
@@ -556,12 +593,32 @@ export class LogSession {
   }
 
   private async finishIfJobDone(): Promise<void> {
+    if (this.finishing || this.jobTimer) return;
+    if (await this.jobDone()) {
+      this.finish();
+      return;
+    }
+    if (this.disposed || this.jobChecks >= JOB_RECHECKS) return;
+    this.jobChecks++;
+    this.jobTimer = setTimeout(() => {
+      this.jobTimer = undefined;
+      // Re-run the whole check: a pod may have joined in the meantime.
+      void this.enqueue(() => this.checkDone());
+    }, JOB_RECHECK_MS);
+  }
+
+  /** The followed Job finished (Complete or Failed), or is gone (TTL after finishing). */
+  private async jobDone(): Promise<boolean> {
     const { group, version, plural } = LOG_TARGET_RESOURCES.Job;
-    const job = await this.handle!.raw.json<KubeObject>(
-      resourcePath(group, version, plural, { namespace: this.query.namespace, name: this.query.targetName! }),
-    ).catch(() => undefined);
-    const conditions = (job?.status as { conditions?: Array<{ type?: string; status?: string }> } | undefined)?.conditions ?? [];
-    if (conditions.some((condition) => (condition.type === 'Complete' || condition.type === 'Failed') && condition.status === 'True')) this.finish();
+    try {
+      const job = await this.handle!.raw.json<KubeObject>(
+        resourcePath(group, version, plural, { namespace: this.query.namespace, name: this.query.targetName! }),
+      );
+      const conditions = (job.status as { conditions?: Array<{ type?: string; status?: string }> } | undefined)?.conditions ?? [];
+      return conditions.some((condition) => (condition.type === 'Complete' || condition.type === 'Failed') && condition.status === 'True');
+    } catch (err) {
+      return errorCode(err) === 404;
+    }
   }
 
   private finish(): void {
@@ -591,12 +648,24 @@ export class LogSession {
       settled = true;
       settle(outcome);
     };
+    // After a container restart, read the new run from where the last one stopped.
+    const sinceTime = source.lastTs ?? this.query.resumeAt[source.key];
+    // The API server passes sinceTime to the kubelet in whole seconds, so the
+    // kubelet replays the start of that second: drop lines older than the
+    // cursor. Lines at exactly the cursor pass; the client counts those off.
+    let replayFloor = sinceTime ? logTimestampNanos(sinceTime) : undefined;
     const forwardLine = (raw: string) => {
       if (!raw) return;
       // With timestamps: "2026-01-02T03:04:05.000000000Z the line"
       const space = raw.indexOf(' ');
       const ts = space > 0 ? raw.slice(0, space) : undefined;
       const line = space > 0 ? raw.slice(space + 1) : raw;
+      if (replayFloor !== undefined && ts) {
+        const at = logTimestampNanos(ts);
+        if (at !== undefined && at < replayFloor) return;
+        // One container's lines arrive in order: nothing older follows.
+        replayFloor = undefined;
+      }
       if (ts) source.lastTs = ts;
       this.io.send({ op: 'line', pod, container: containerName, ts, line });
     };
@@ -632,8 +701,6 @@ export class LogSession {
     const abort = new AbortController();
     source.abort = abort;
     try {
-      // After a container restart, read the new run from where the last one stopped.
-      const sinceTime = source.lastTs ?? this.query.resumeAt[source.key];
       const query = new URLSearchParams({
         container: containerName,
         follow: String(follow),
