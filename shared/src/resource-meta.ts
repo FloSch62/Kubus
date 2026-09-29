@@ -138,7 +138,7 @@ export const KIND_COLUMNS: Record<string, string[]> = {
   Namespace: ['name', 'cluster', 'nsStatus', 'age'],
   CustomResourceDefinition: ['name', 'cluster', 'crdKind', 'crdGroup', 'crdScope', 'crdVersions', 'crdStatus', 'age'],
   Event: ['eventType', 'eventReason', 'eventObject', 'eventMessage', 'namespace', 'cluster', 'eventCount', 'eventLastSeen'],
-  HorizontalPodAutoscaler: ['name', 'namespace', 'cluster', 'hpaTarget', 'hpaMinMax', 'hpaReplicas', 'hpaConditions', 'age'],
+  HorizontalPodAutoscaler: ['name', 'namespace', 'cluster', 'hpaTarget', 'hpaMetrics', 'hpaMinMax', 'hpaReplicas', 'hpaConditions', 'age'],
   ServiceAccount: ['name', 'namespace', 'cluster', 'age'],
 };
 

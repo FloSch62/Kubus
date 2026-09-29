@@ -174,6 +174,23 @@ describe('computeUsedBy', () => {
     }
   });
 
+  it('shows an autoscaler’s current against target per metric on its scales row', async () => {
+    const hpa = obj(
+      'HorizontalPodAutoscaler',
+      'api',
+      'apps',
+      {
+        scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' },
+        minReplicas: 2,
+        maxReplicas: 6,
+        metrics: [{ type: 'Resource', resource: { name: 'cpu', target: { type: 'Utilization', averageUtilization: 60 } } }],
+      },
+      { status: { currentMetrics: [{ type: 'Resource', resource: { name: 'cpu', current: { averageUtilization: 42 } } }] } },
+    );
+    const result = await computeUsedBy(handleWith({ horizontalpodautoscalers: [hpa] }), { group: 'apps', kind: 'Deployment', plural: 'deployments', name: 'api', namespace: 'apps' });
+    expect(result.items.map((item) => `${item.relation} [${item.detail}]`)).toEqual(['scales [2–6 replicas · cpu 42% / 60%]']);
+  });
+
   it('lists workloads before standalone pods, dedupes relations per object and skips other namespaces', async () => {
     const handle = handleWith({
       pods: [obj('Pod', 'web-1', 'apps', podSpec()), obj('Pod', 'other', 'elsewhere', podSpec())],

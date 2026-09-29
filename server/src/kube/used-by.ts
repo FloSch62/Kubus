@@ -1,4 +1,4 @@
-import type { KubeObject, ResourceKindInfo, ResourceRef, UsedByEntry, UsedByResponse } from '@kubus/shared';
+import { hpaMetricsSummary, type KubeObject, type ResourceKindInfo, type ResourceRef, type UsedByEntry, type UsedByResponse } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { installedCrds, optionalItems } from './overview.js';
 import type { DigestEntry } from './reference-index.js';
@@ -417,7 +417,10 @@ function hpaRelations(hpa: KubeObject, target: UsedByTarget): Relation[] {
   if (ref?.kind !== target.kind || ref.name !== target.name) return [];
   if (!ref.apiVersion || (ref.apiVersion.includes('/') ? ref.apiVersion.split('/')[0] : '') !== target.group) return [];
   const spec = hpa.spec as { minReplicas?: number; maxReplicas?: number } | undefined;
-  return [{ relation: 'scales', detail: `${spec?.minReplicas ?? 1}–${spec?.maxReplicas ?? '?'} replicas` }];
+  // Current against target per metric, so the workload's drawer answers
+  // "how close is it to scaling" without opening the autoscaler.
+  const metrics = hpaMetricsSummary(hpa);
+  return [{ relation: 'scales', detail: `${spec?.minReplicas ?? 1}–${spec?.maxReplicas ?? '?'} replicas${metrics ? ` · ${metrics}` : ''}` }];
 }
 
 function preferVersion(kinds: ResourceKindInfo[]): ResourceKindInfo | undefined {

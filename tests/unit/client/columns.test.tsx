@@ -82,6 +82,7 @@ const ALL_COLUMN_IDS = [
   'eventCount',
   'eventLastSeen',
   'hpaTarget',
+  'hpaMetrics',
   'hpaMinMax',
   'hpaReplicas',
   'hpaConditions',
@@ -138,6 +139,10 @@ function richObject(name = 'demo'): KubeObject {
       scaleTargetRef: { kind: 'Deployment', name: 'web' },
       minReplicas: 2,
       maxReplicas: 8,
+      metrics: [
+        { type: 'Resource', resource: { name: 'cpu', target: { type: 'Utilization', averageUtilization: 60 } } },
+        { type: 'Resource', resource: { name: 'memory', target: { type: 'AverageValue', averageValue: '64Mi' } } },
+      ],
     },
     status: {
       phase: 'Running',
@@ -155,6 +160,7 @@ function richObject(name = 'demo'): KubeObject {
       completionTime: '2024-01-01T00:01:00.000Z',
       lastScheduleTime: '2024-01-01T00:00:00.000Z',
       currentReplicas: 3,
+      currentMetrics: [{ type: 'Resource', resource: { name: 'cpu', current: { averageUtilization: 42 } } }],
       allocatable: { cpu: '4', memory: '8Gi', pods: '110' },
       capacity: { storage: '10Gi' },
       addresses: [
@@ -249,6 +255,7 @@ describe('resource table columns', () => {
       dataKeys: 2,
       secretType: 'Warning',
       hpaTarget: 'Deployment/web',
+      hpaMetrics: 'cpu 42% / 60%, memory ? / 64Mi',
       hpaMinMax: '2/8',
       hpaReplicas: '3',
     });
@@ -257,6 +264,7 @@ describe('resource table columns', () => {
     expect(screen.getByTestId('cell-nodePods')).toHaveTextContent('12 (2 ds)');
     expect(screen.getByTestId('cell-podStatus')).toHaveTextContent('Running');
     expect(screen.getByTestId('cell-hpaConditions')).toHaveTextContent('Backoff');
+    expect(screen.getByTestId('cell-hpaMetrics')).toHaveTextContent('cpu 42% / 60%, memory ? / 64Mi');
     fireEvent.click(screen.getByText('app=web'));
     expect(onLabelClick).toHaveBeenCalledWith('app=web');
     fireEvent.click(screen.getByText('*/5 * * * *'));
@@ -277,6 +285,7 @@ describe('resource table columns', () => {
     expect(screen.getByTestId('cell-labels')).toHaveTextContent('—');
     expect(screen.getByTestId('cell-cronNextRun')).toHaveTextContent('—');
     expect(screen.getByTestId('cell-hpaConditions')).toHaveTextContent('—');
+    expect(screen.getByTestId('cell-hpaMetrics')).toHaveTextContent('—');
   });
 });
 

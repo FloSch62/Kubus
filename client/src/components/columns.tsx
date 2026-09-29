@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import ReplayRoundedIcon from '@mui/icons-material/ReplayRounded';
-import { evalPrinterColumnPath, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
+import { evalPrinterColumnPath, hpaMetrics, hpaMetricText, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
@@ -657,6 +657,41 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     valueGetter: (_v, row) => {
       const spec = obj(row).spec as { minReplicas?: number; maxReplicas?: number } | undefined;
       return `${spec?.minReplicas ?? 1}/${spec?.maxReplicas ?? '?'}`;
+    },
+  }),
+  hpaMetrics: () => ({
+    field: 'hpaMetrics',
+    headerName: 'Metrics',
+    flex: 1.6,
+    // Room for the usual pair: "cpu 42% / 60%, memory 15Mi / 64Mi".
+    minWidth: 260,
+    valueGetter: (_v, row) => hpaMetrics(obj(row)).map(hpaMetricText).join(', '),
+    renderCell: (params) => {
+      const metrics = hpaMetrics(obj(params.row));
+      if (!metrics.length) {
+        return (
+          <Typography variant="body2" color="text.disabled">
+            —
+          </Typography>
+        );
+      }
+      // One line per metric in the tooltip; the cell keeps them on one row.
+      return (
+        <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{metrics.map(hpaMetricText).join('\n')}</Box>}>
+          <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>
+            {metrics.map((m, i) => (
+              <Box component="span" key={`${m.label}:${i}`}>
+                {i > 0 && ', '}
+                {m.label}{' '}
+                <Box component="span" sx={{ fontWeight: 600, color: m.current === undefined ? 'text.disabled' : 'text.primary' }}>
+                  {m.current ?? '?'}
+                </Box>
+                <Box component="span" sx={{ color: 'text.secondary' }}>{` / ${m.target}`}</Box>
+              </Box>
+            ))}
+          </Typography>
+        </Tooltip>
+      );
     },
   }),
   hpaReplicas: () => ({
