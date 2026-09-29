@@ -38,6 +38,11 @@ you're looking at, including live values (your namespaces, clusters and nodes).
 | `annotation:` | exact annotation, or key presence | `/annotation:owner=platform` |
 | `age>` / `age<` | resource age (`s`, `m`, `h`, `d`, `w`) | `/age>7d`, `/age<30m` |
 | `status:` | status text or a category alias | `/status:degraded` |
+| `uid:` | object UID contains; a prefix is enough | `/uid:3f2a9c1e` |
+
+`uid:` helps when an event, an audit log or an owner reference names an object only by
+its UID. Paste the UID (or its first few characters) into the list of that kind to find
+the object. On the Events list it also matches the UID of the object an event is about.
 
 `status:` understands aliases beyond the literal status text:
 
