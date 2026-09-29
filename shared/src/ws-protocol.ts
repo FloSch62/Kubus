@@ -12,6 +12,9 @@ export const watchClientMessageSchema = z.discriminatedUnion('op', [
     version: z.string().min(1),
     plural: z.string().min(1),
     namespace: z.string().optional(),
+    /** Host-owned plugin identity and selected namespaces; never supplied directly by the iframe. */
+    pluginId: z.string().optional(),
+    namespaceScope: z.array(z.string()).optional(),
   }),
   z.object({
     op: z.literal('unsub'),

@@ -10,6 +10,8 @@ import {
   type PluginContext,
   type PluginInfo,
   type PluginRequest,
+  type PluginWatchMessage,
+  type PluginWatchUpdate,
   type KubeObject,
   type ResourceKindInfo,
 } from '@kubus/shared';
@@ -24,6 +26,7 @@ import { usePlugins } from './queries.js';
 import { helmReleaseFor } from '@kubus/plugin-sdk';
 import { assertPluginScope } from './scope.js';
 import { resolvePluginContainer } from './pod-container.js';
+import { watchClient } from '../api/ws/watch-client.js';
 
 function PluginFrame({ plugin }: { plugin: PluginInfo }) {
   const navigate = useNavigate();
@@ -32,6 +35,7 @@ function PluginFrame({ plugin }: { plugin: PluginInfo }) {
   const iframe = useRef<HTMLIFrameElement>(null);
   const port = useRef<MessagePort | null>(null);
   const controllers = useRef(new Set<AbortController>());
+  const watches = useRef(new Map<string, () => void>());
   const selected = useClustersStore((s) => s.selected);
   const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const theme = useTheme();
@@ -52,10 +56,13 @@ function PluginFrame({ plugin }: { plugin: PluginInfo }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(0);
+  const scopeKey = JSON.stringify([context.contexts, context.namespacesByContext, active]);
 
   useEffect(() => {
     for (const controller of controllers.current) controller.abort();
-  }, [selected, namespacesByContext, active]);
+    for (const stop of watches.current.values()) stop();
+    watches.current.clear();
+  }, [scopeKey]);
   useEffect(() => {
     port.current?.postMessage({ type: 'kubus:context', context });
   }, [context]);
@@ -63,6 +70,8 @@ function PluginFrame({ plugin }: { plugin: PluginInfo }) {
   const connect = useCallback(() => {
     port.current?.close();
     for (const controller of controllers.current) controller.abort();
+    for (const stop of watches.current.values()) stop();
+    watches.current.clear();
     const channel = new MessageChannel();
     port.current = channel.port1;
     setReady(false);
@@ -72,6 +81,60 @@ function PluginFrame({ plugin }: { plugin: PluginInfo }) {
       if (!event.data || typeof event.data !== 'object') return;
       if ('type' in event.data && event.data.type === 'kubus:ready') {
         setReady(true);
+        return;
+      }
+      const watch = event.data as PluginWatchMessage;
+      if (watch.type === 'kubus:watch' || watch.type === 'kubus:unwatch') {
+        if (typeof watch.id !== 'string' || watch.id.length > 100) return;
+        if (watch.type === 'kubus:unwatch') {
+          watches.current.get(watch.id)?.();
+          watches.current.delete(watch.id);
+          return;
+        }
+        if (watches.current.has(watch.id)) return;
+        const update = (value: PluginWatchUpdate) => {
+          if (port.current === channel.port1) channel.port1.postMessage({ type: 'kubus:watch-update', id: watch.id, update: value });
+        };
+        try {
+          const { plugin: current, context: scope } = latest.current;
+          const p = watch.params;
+          if (!p || typeof p !== 'object') throw new Error('Invalid plugin watch request');
+          assertPluginScope(scope, p, false);
+          if (!current.enabled || !pluginCanRead(current.manifest, p.group, p.plural)) throw new Error('Plugin permission denied');
+          if (watches.current.size >= 500) throw new Error('Too many plugin watches');
+          const forward = (value: PluginWatchUpdate) => {
+            try {
+              assertPluginScope(latest.current.context, p, false);
+              if (JSON.stringify(latest.current.context.namespacesByContext[p.ctx]) !== JSON.stringify(scope.namespacesByContext[p.ctx]))
+                return;
+              if (!latest.current.plugin.enabled) return;
+              update(value);
+            } catch {
+              /* Scope changed before effect cleanup. */
+            }
+          };
+          watches.current.set(
+            watch.id,
+            watchClient.subscribe(
+              {
+                ctx: p.ctx,
+                group: p.group,
+                version: p.version,
+                plural: p.plural,
+                namespace: p.namespace,
+                pluginId: current.manifest.id,
+                namespaceScope: scope.namespacesByContext[p.ctx] ?? [],
+              },
+              {
+                onSnapshot: (items) => forward({ kind: 'snapshot', items }),
+                onEvents: (events) => forward({ kind: 'events', events }),
+                onStatus: (state, message) => forward({ kind: 'status', state, message }),
+              },
+            ),
+          );
+        } catch (failure) {
+          update({ kind: 'status', state: 'error', message: failure instanceof Error ? failure.message : 'Plugin watch failed' });
+        }
         return;
       }
       const request = event.data as PluginRequest;
@@ -205,6 +268,8 @@ function PluginFrame({ plugin }: { plugin: PluginInfo }) {
       port.current?.close();
       port.current = null;
       for (const controller of controllers.current) controller.abort();
+      for (const stop of watches.current.values()) stop();
+      watches.current.clear();
     },
     [],
   );

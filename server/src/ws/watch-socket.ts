@@ -1,10 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { groupFromPath, type HelmReleaseChange, type HelmWatchStatus, type KubeObject, type WatchServerMessage } from '@kubus/shared';
+import {
+  groupFromPath,
+  pluginCanRead,
+  type HelmReleaseChange,
+  type HelmWatchStatus,
+  type KubeObject,
+  type WatchServerMessage,
+} from '@kubus/shared';
 import { watchClientMessageSchema } from '@kubus/shared/ws-protocol';
 import type { AppContext } from '../app.js';
 import { isSecretGVR, redactSecretData } from '../kube/redact.js';
 import type { ResourceWatcher, WatcherDelta } from '../kube/watcher.js';
+import type { PluginManager } from '../plugins/manager.js';
+import { pluginResourceSchema } from '../plugins/manifest.js';
 
 /**
  * Per-watcher memo of serialized payload bodies, so redaction and
@@ -23,7 +32,9 @@ class SharedWatchJson {
   eventsJson(deltas: WatcherDelta[]): string {
     if (this.lastDeltas !== deltas) {
       this.lastDeltas = deltas;
-      this.lastEventsJson = JSON.stringify(deltas.map((d) => ({ type: d.type, object: this.secrets ? redactSecretData(d.object) : d.object })));
+      this.lastEventsJson = JSON.stringify(
+        deltas.map((d) => ({ type: d.type, object: this.secrets ? redactSecretData(d.object) : d.object })),
+      );
     }
     return this.lastEventsJson;
   }
@@ -61,12 +72,16 @@ export function broadcastWatchMessage(msg: WatchServerMessage): void {
   }
 }
 
-export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void {
+export function registerWatchSocket(app: FastifyInstance, ctx: AppContext, plugins: PluginManager): void {
   ctx.clusters.on('contexts-changed', () => broadcastWatchMessage({ op: 'contexts-changed' }));
   ctx.clusters.on('context-reset', (name: string) => broadcastWatchMessage({ op: 'context-reset', ctx: name }));
   ctx.clusters.on('discovery-changed', (name: string) => broadcastWatchMessage({ op: 'discovery-update', ctx: name }));
-  ctx.clusters.on('helm-records-changed', (name: string, changes: HelmReleaseChange[]) => broadcastWatchMessage({ op: 'helm-records-changed', ctx: name, changes }));
-  ctx.clusters.on('helm-watch-status', (name: string, status: HelmWatchStatus) => broadcastWatchMessage({ op: 'helm-watch-status', ctx: name, status }));
+  ctx.clusters.on('helm-records-changed', (name: string, changes: HelmReleaseChange[]) =>
+    broadcastWatchMessage({ op: 'helm-records-changed', ctx: name, changes }),
+  );
+  ctx.clusters.on('helm-watch-status', (name: string, status: HelmWatchStatus) =>
+    broadcastWatchMessage({ op: 'helm-watch-status', ctx: name, status }),
+  );
   ctx.portForwards.on('update', (forwards) => broadcastWatchMessage({ op: 'pf-update', forwards }));
 
   app.get('/ws/watch', { websocket: true }, (socket: WebSocket) => {
@@ -80,7 +95,7 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
       if (socket.readyState === socket.OPEN) socket.send(payload);
     };
 
-    socket.on('message', (data: Buffer) => {
+    socket.on('message', async (data: Buffer) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(data.toString('utf8'));
@@ -103,46 +118,77 @@ export function registerWatchSocket(app: FastifyInstance, ctx: AppContext): void
       if (subscriptions.has(msg.id)) return;
       const group = groupFromPath(msg.group);
       const secrets = isSecretGVR(group, msg.plural);
-      let handle;
-      try {
-        handle = ctx.clusters.get(msg.ctx);
-      } catch (err) {
-        send({ op: 'status', id: msg.id, state: 'error', message: err instanceof Error ? err.message : String(err) });
-        return;
-      }
-      const { watcher, release } = handle.watchers.acquire(group, msg.version, msg.plural, msg.namespace || undefined);
-      const shared = sharedJsonFor(watcher, secrets);
-      const idJson = JSON.stringify(msg.id);
-
+      let release: (() => void) | undefined;
       let unsubscribe: (() => void) | undefined;
       let stopped = false;
       const stop = () => {
         if (stopped) return;
         stopped = true;
         unsubscribe?.();
-        release();
+        release?.();
       };
       subscriptions.set(msg.id, { stop });
-
-      watcher
-        .ready()
-        .then(() => {
-          if (stopped) return;
-          const snap = watcher.snapshot();
-          sendRaw(`{"op":"snapshot","id":${idJson},"resourceVersion":${JSON.stringify(snap.resourceVersion)},"items":${shared.itemsJson(snap)}}`);
-          unsubscribe = watcher.subscribe({
-            onDeltas: (deltas) => {
-              sendRaw(`{"op":"events","id":${idJson},"events":${shared.eventsJson(deltas)}}`);
-            },
-            onStatus: (state, message) => send({ op: 'status', id: msg.id, state, message }),
-          });
-          send({ op: 'status', id: msg.id, state: watcher.currentState() });
-        })
-        .catch((err) => {
+      const allowed = () => {
+        if (stopped) return false;
+        if (!msg.pluginId) return true;
+        try {
+          const bundle = plugins.get(msg.pluginId);
+          if (!pluginCanRead(bundle.manifest, group, msg.plural)) throw new Error('Resource access was not declared by this plugin');
+          return true;
+        } catch (err) {
           send({ op: 'status', id: msg.id, state: 'error', message: err instanceof Error ? err.message : String(err) });
           stop();
           subscriptions.delete(msg.id);
+          return false;
+        }
+      };
+      try {
+        if (!allowed()) return;
+        const handle = ctx.clusters.get(msg.ctx);
+        if (msg.pluginId) {
+          const p = pluginResourceSchema.parse({
+            ctx: msg.ctx,
+            group,
+            version: msg.version,
+            plural: msg.plural,
+            namespace: msg.namespace,
+            namespaceScope: msg.namespaceScope,
+          });
+          const kind = await handle.discovery.find(group, p.version, p.plural);
+          if (stopped) return;
+          if (!kind) throw new Error(`${group || 'core'}/${p.version}/${p.plural} is not installed in this cluster`);
+          if (kind.namespaced && p.namespaceScope?.length && (!p.namespace || !p.namespaceScope.includes(p.namespace)))
+            throw new Error('Resource is outside the selected namespaces');
+          if (p.namespace && !kind.namespaced) throw new Error('This resource is cluster scoped');
+        }
+        if (!allowed()) return;
+        const acquired = handle.watchers.acquire(group, msg.version, msg.plural, msg.namespace || undefined);
+        release = acquired.release;
+        const watcher = acquired.watcher;
+        const shared = sharedJsonFor(watcher, secrets);
+        const idJson = JSON.stringify(msg.id);
+        await watcher.ready();
+        if (!allowed()) return;
+        const snap = watcher.snapshot();
+        sendRaw(
+          `{"op":"snapshot","id":${idJson},"resourceVersion":${JSON.stringify(snap.resourceVersion)},"items":${shared.itemsJson(snap)}}`,
+        );
+        unsubscribe = watcher.subscribe({
+          onDeltas: (deltas) => {
+            if (!allowed()) return;
+            sendRaw(`{"op":"events","id":${idJson},"events":${shared.eventsJson(deltas)}}`);
+          },
+          onStatus: (state, message) => {
+            if (allowed()) send({ op: 'status', id: msg.id, state, message });
+          },
         });
+        send({ op: 'status', id: msg.id, state: watcher.currentState() });
+      } catch (err) {
+        if (stopped) return;
+        send({ op: 'status', id: msg.id, state: 'error', message: err instanceof Error ? err.message : String(err) });
+        stop();
+        subscriptions.delete(msg.id);
+      }
     });
 
     socket.on('close', () => {

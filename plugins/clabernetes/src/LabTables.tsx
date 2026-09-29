@@ -34,20 +34,17 @@ export function Links({
   links,
   nodes,
   pods,
-  refresh,
   onNode,
   fleet = false,
 }: {
   links: Located[];
   nodes: Located[];
   pods: Located[];
-  refresh: number;
   onNode: (node: Located) => void;
   fleet?: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [details, setDetails] = useState(false);
-  const [inspection, setInspection] = useState(0);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const endpoints = nodes.filter((n) =>
     links.some(
@@ -57,7 +54,7 @@ export function Links({
         ['A', 'B'].some((side) => object(l.spec?.[`endpoint${side}`]).nodeName === n.metadata.name),
     ),
   );
-  const observed = useInterfaces(endpoints, pods, true, refresh + inspection);
+  const observed = useInterfaces(endpoints, pods, true);
   const states = new Map(
     links.map((l) => {
       const a = endpointState(l, 'A', nodes, observed.data),
@@ -167,9 +164,6 @@ export function Links({
         </Button>
         <Box sx={{ flex: 1 }} />
         <TextField size="small" label="Find a link" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ width: 200 }} />
-        <Button disabled={observed.loading} onClick={() => setInspection((n) => n + 1)}>
-          {observed.loading ? 'Checking interfaces…' : 'Check now'}
-        </Button>
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ px: 2, pb: 1 }}>
         Live state is sampled from each device’s Linux interface: administrative state and carrier. It does not measure packet delivery or

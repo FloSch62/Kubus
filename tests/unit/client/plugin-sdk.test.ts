@@ -62,3 +62,43 @@ describe('SDK connection lifecycle', () => {
     await expect(sdk.list(resource)).rejects.toThrow('not connected');
   });
 });
+
+it('streams updates, resubscribes after port replacement, and ignores messages after stopping', () => {
+  const sdk = connectPlugin(vi.fn());
+  const connect = (port: ReturnType<typeof fakePort>) =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: window,
+        data: { type: 'kubus:connect', apiVersion: 1, context },
+        ports: [port as unknown as MessagePort],
+      }),
+    );
+  const first = fakePort();
+  connect(first);
+  const update = vi.fn();
+  const stop = sdk.watch(resource, update);
+  const watch = first.postMessage.mock.lastCall?.[0];
+  expect(watch).toMatchObject({ type: 'kubus:watch', params: resource });
+  const deliver = (port: ReturnType<typeof fakePort>, data: unknown) =>
+    port.onmessage?.(
+      new MessageEvent('message', {
+        data: { type: 'kubus:watch-update', id: watch.id, update: data },
+      }),
+    );
+  deliver(first, { kind: 'snapshot', items: [] });
+  expect(update).toHaveBeenCalledWith({ kind: 'snapshot', items: [] });
+  const second = fakePort();
+  connect(second);
+  expect(first.close).toHaveBeenCalledOnce();
+  expect(second.postMessage).toHaveBeenCalledWith(watch);
+  deliver(first, { kind: 'snapshot', items: ['stale'] });
+  expect(update).toHaveBeenCalledTimes(1);
+  deliver(second, { kind: 'status', state: 'live' });
+  expect(update).toHaveBeenCalledTimes(2);
+  stop();
+  stop();
+  expect(second.postMessage.mock.calls.filter(([m]) => m.type === 'kubus:unwatch')).toHaveLength(1);
+  deliver(second, { kind: 'events', events: [] });
+  expect(update).toHaveBeenCalledTimes(2);
+  sdk.dispose();
+});

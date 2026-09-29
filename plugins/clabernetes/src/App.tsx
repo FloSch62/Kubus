@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Stack from '@mui/material/Stack';
@@ -9,7 +8,6 @@ import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import { useContext } from './bridge.js';
 import { catalog } from './data.js';
@@ -20,16 +18,16 @@ import { Empty, Errors, Badge } from './components.js';
 import { phase, tone } from './model.js';
 import { discoverLabs, labPhase, type Lab } from './labs.js';
 import { Workspace, type WorkspaceView } from './Workspace.js';
+import { ViewPane } from './ViewPane.js';
 
 const views = ['Labs', 'Nodes', 'Links', 'Files', 'Access', 'Storage', 'Events', 'Platform'] as const;
 export function App() {
   const context = useContext();
   const [view, setView] = useState<WorkspaceView | 'Platform'>('Labs');
   const [platform, setPlatform] = useState('Installation');
-  const [refresh, setRefresh] = useState(0);
   const [selected, setSelected] = useState<string>();
   const [attention, setAttention] = useState(false);
-  const { snapshot, loading } = useResources(catalog, undefined, refresh);
+  const { snapshot, loading } = useResources(catalog);
   const labs = discoverLabs(snapshot.items);
   const nodes = snapshot.items.filter((r) => r.plural === 'nodes');
   const profiles = snapshot.items.filter((r) => r.plural === 'nodeprofiles');
@@ -94,9 +92,6 @@ export function App() {
             )}
           />
         )}
-        <Button startIcon={<RefreshIcon />} disabled={loading || !context.contexts.length} onClick={() => setRefresh((n) => n + 1)}>
-          Refresh
-        </Button>
       </Stack>
       <Stack direction="row" sx={{ alignItems: 'center', px: 1, borderBottom: 1, borderColor: 'divider' }}>
         <Tabs
@@ -135,32 +130,36 @@ export function App() {
           <LinearProgress />
           <Empty title="Discovering your labs…" />
         </>
-      ) : view === 'Platform' ? (
-        <>
-          <Stack direction="row" sx={{ px: 2, alignItems: 'center', gap: 2 }}>
-            <Tabs value={platform} onChange={(_, v: string) => setPlatform(v)} aria-label="Platform views">
-              <Tab label="Installation & global Config" value="Installation" />
-              <Tab label="NodeProfiles" value="Profiles" />
-            </Tabs>
-            <Typography variant="caption" color="text.secondary">
-              Across selected clusters and namespaces
-            </Typography>
-          </Stack>
-          {platform === 'Profiles' ? <Profiles profiles={profiles} nodes={nodes} /> : <ControlPlane configs={configs} refresh={refresh} />}
-        </>
       ) : (
-        <Workspace
-          key={lab?.id ?? 'all'}
-          labs={scopedLabs}
-          selectedLab={lab}
-          view={view}
-          profiles={profiles}
-          configs={configs}
-          refresh={refresh}
-          attention={attention}
-          onOpenLab={openLab}
-          onPlatform={openPlatform}
-        />
+        <Box sx={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <ViewPane active={view !== 'Platform'}>
+            <Workspace
+              key={lab?.id ?? 'all'}
+              labs={scopedLabs}
+              selectedLab={lab}
+              view={view === 'Platform' ? 'Labs' : view}
+              profiles={profiles}
+              configs={configs}
+              attention={attention}
+              onOpenLab={openLab}
+              onPlatform={openPlatform}
+            />
+          </ViewPane>
+          {view === 'Platform' && (
+            <>
+              <Stack direction="row" sx={{ px: 2, alignItems: 'center', gap: 2 }}>
+                <Tabs value={platform} onChange={(_, v: string) => setPlatform(v)} aria-label="Platform views">
+                  <Tab label="Installation & global Config" value="Installation" />
+                  <Tab label="NodeProfiles" value="Profiles" />
+                </Tabs>
+                <Typography variant="caption" color="text.secondary">
+                  Across selected clusters and namespaces
+                </Typography>
+              </Stack>
+              {platform === 'Profiles' ? <Profiles profiles={profiles} nodes={nodes} /> : <ControlPlane configs={configs} />}
+            </>
+          )}
+        </Box>
       )}
     </Stack>
   );

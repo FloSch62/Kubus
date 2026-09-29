@@ -1,11 +1,10 @@
-import { PluginError, type PluginClient, type PluginContext, type PluginResourceRequest } from '@kubus/plugin-sdk';
+import type { PluginClient, PluginContext, PluginWatchRequest } from '@kubus/plugin-sdk';
 import type { Located, Resource } from './model.js';
 
 export interface Collection {
   group: string;
   plural: string;
   version?: string;
-  labelSelector?: string;
 }
 export interface Snapshot {
   items: Located[];
@@ -24,54 +23,87 @@ export const runtime: Collection[] = [
   { group: 'apps', plural: 'deployments', version: 'v1' },
 ];
 
-/** Bounded concurrency, complete pagination, and per-resource errors for mixed clusters/RBAC. */
-export async function readCollections(
+/** Each collection owns its cache; failures never discard healthy clusters or namespaces. */
+export function watchCollections(
   client: PluginClient,
   context: PluginContext,
   collections: Collection[],
-  cancelled: () => boolean,
-): Promise<Snapshot> {
-  const result: Snapshot = { items: [], errors: [], updated: 0 };
-  const tasks: PluginResourceRequest[] = context.contexts.flatMap((ctx) => {
+  publish: (snapshot: Snapshot, loading: boolean) => void,
+  previous?: Snapshot,
+): () => void {
+  const tasks: PluginWatchRequest[] = context.contexts.flatMap((ctx) => {
     const namespaces = context.namespacesByContext[ctx]?.length ? context.namespacesByContext[ctx]! : [undefined];
     return namespaces.flatMap((namespace) => collections.map((c) => ({ ctx, namespace, ...c, version: c.version ?? 'v1alpha1' })));
   });
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(6, tasks.length) }, async () => {
-      while (next < tasks.length && !cancelled()) {
-        const request = tasks[next++]!;
-        try {
-          let token: string | undefined;
-          const tokens = new Set<string>();
-          do {
-            const page = await client.list<Resource>({ ...request, continue: token });
-            if (cancelled()) return;
-            result.items.push(
-              ...page.items.map((r) => ({
-                ...r,
-                ctx: request.ctx,
-                plural: request.plural,
-                group: request.group,
-                apiVersion: r.apiVersion ?? (request.group ? `${request.group}/${request.version}` : request.version),
-              })),
-            );
-            token = page.continue;
-            if (token && tokens.has(token)) throw new Error('Cluster returned a repeated pagination token');
-            if (token) tokens.add(token);
-          } while (token && !cancelled());
-        } catch (error) {
-          result.errors.push({
-            ctx: request.ctx,
-            namespace: request.namespace,
-            plural: request.plural,
-            message: error instanceof Error ? error.message : String(error),
-            status: error instanceof PluginError ? error.status : undefined,
-          });
+  const identity = (r: Resource) => r.metadata.uid ?? `${r.metadata.namespace ?? ''}/${r.metadata.name}`;
+  // Resume each collection independently without emptying the others while their snapshots arrive.
+  const states = tasks.map((request) => ({
+    items: new Map(
+      (previous?.items ?? [])
+        .filter(
+          (r) =>
+            r.ctx === request.ctx &&
+            r.group === request.group &&
+            r.plural === request.plural &&
+            r.apiVersion === (request.group ? `${request.group}/${request.version}` : request.version) &&
+            (!request.namespace || r.metadata.namespace === request.namespace),
+        )
+        .map((r) => [identity(r), r]),
+    ),
+    pending: true,
+    error: undefined as Snapshot['errors'][number] | undefined,
+  }));
+  let disposed = false;
+  const emit = () => {
+    if (disposed) return;
+    publish(
+      {
+        items: states.flatMap((s) => [...s.items.values()]),
+        errors: states.flatMap((s) => (s.error ? [s.error] : [])),
+        updated: Date.now(),
+      },
+      states.some((s) => s.pending),
+    );
+  };
+  const stops = tasks.map((request, index) => {
+    const state = states[index]!;
+    const locate = (r: Resource): Located => ({
+      ...r,
+      ctx: request.ctx,
+      plural: request.plural,
+      group: request.group,
+      apiVersion: r.apiVersion ?? (request.group ? `${request.group}/${request.version}` : request.version),
+    });
+    return client.watch<Resource>(request, (update) => {
+      if (disposed) return;
+      if (update.kind === 'snapshot') {
+        state.items = new Map(update.items.map((r) => [identity(r), locate(r)]));
+        state.pending = false;
+      } else if (update.kind === 'events') {
+        for (const event of update.events) {
+          if (event.type === 'DELETED') state.items.delete(identity(event.object));
+          else state.items.set(identity(event.object), locate(event.object));
         }
+      } else {
+        state.error =
+          update.state === 'live'
+            ? undefined
+            : {
+                ctx: request.ctx,
+                namespace: request.namespace,
+                plural: request.plural,
+                message:
+                  update.message ?? (update.state === 'reconnecting' ? 'Reconnecting to live updates…' : 'Resource watch unavailable'),
+                status: update.state === 'unavailable' ? 404 : undefined,
+              };
+        if (update.state === 'error' || update.state === 'unavailable') state.pending = false;
       }
-    }),
-  );
-  result.updated = Date.now();
-  return result;
+      emit();
+    });
+  });
+  if (!tasks.length) emit();
+  return () => {
+    disposed = true;
+    for (const stop of stops) stop();
+  };
 }

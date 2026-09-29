@@ -13,15 +13,19 @@ import { NODE, OWNER, phase, string, type Located } from './model.js';
 import { InstallationDetails } from './Configuration.js';
 import { podTargets, records } from './runtime.js';
 const collections: Collection[] = [
-  { group: '', version: 'v1', plural: 'pods', labelSelector: 'c9s.run/component' },
-  { group: 'apps', version: 'v1', plural: 'deployments', labelSelector: 'c9s.run/component=manager' },
-  { group: '', version: 'v1', plural: 'configmaps', labelSelector: 'c9s.run/component=config' },
+  { group: '', version: 'v1', plural: 'pods' },
+  { group: 'apps', version: 'v1', plural: 'deployments' },
+  { group: '', version: 'v1', plural: 'configmaps' },
 ];
-export function ControlPlane({ configs, refresh }: { configs: Located[]; refresh: number }) {
-  const { snapshot, loading } = useResources(collections, undefined, refresh);
+export function ControlPlane({ configs }: { configs: Located[] }) {
+  const { snapshot, loading } = useResources(collections);
   const pods = snapshot.items.filter(
     (r) =>
-      r.plural === 'pods' && !r.metadata.labels?.[OWNER] && !r.metadata.labels?.[NODE] && !r.metadata.labels?.['c9s.run/direct-workload'],
+      r.plural === 'pods' &&
+      !!r.metadata.labels?.['c9s.run/component'] &&
+      !r.metadata.labels?.[OWNER] &&
+      !r.metadata.labels?.[NODE] &&
+      !r.metadata.labels?.['c9s.run/direct-workload'],
   );
   const isPlanner = (p: Located) => /planner/.test(`${p.metadata.name} ${p.metadata.labels?.['c9s.run/component'] ?? ''}`);
   const planners = pods.filter(isPlanner);
@@ -90,8 +94,8 @@ export function ControlPlane({ configs, refresh }: { configs: Located[]; refresh
       <Errors snapshot={snapshot} />
       <InstallationDetails
         configs={configs}
-        deployments={snapshot.items.filter((r) => r.plural === 'deployments')}
-        bootstrap={snapshot.items.filter((r) => r.plural === 'configmaps')}
+        deployments={snapshot.items.filter((r) => r.plural === 'deployments' && r.metadata.labels?.['c9s.run/component'] === 'manager')}
+        bootstrap={snapshot.items.filter((r) => r.plural === 'configmaps' && r.metadata.labels?.['c9s.run/component'] === 'config')}
       />
       <Typography variant="subtitle2" sx={{ px: 2, pb: 1 }}>
         Manager & planning workers

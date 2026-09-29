@@ -16,6 +16,7 @@ import { NodeInspector } from './NodeInspector.js';
 import { LabDetail } from './LabDetail.js';
 import { Links, Services, Storage, Events } from './LabTables.js';
 import { Files } from './Files.js';
+import { ViewPane } from './ViewPane.js';
 
 export type WorkspaceView = 'Labs' | 'Nodes' | 'Links' | 'Files' | 'Access' | 'Storage' | 'Events';
 const podsCollection: Collection[] = [{ group: '', version: 'v1', plural: 'pods' }];
@@ -32,7 +33,6 @@ export function Workspace({
   view,
   profiles,
   configs,
-  refresh,
   attention,
   onOpenLab,
   onPlatform,
@@ -42,7 +42,6 @@ export function Workspace({
   view: WorkspaceView;
   profiles: Located[];
   configs: Located[];
-  refresh: number;
   attention: boolean;
   onOpenLab: (lab: Lab, view?: WorkspaceView) => void;
   onPlatform: () => void;
@@ -54,10 +53,10 @@ export function Workspace({
   const nodes = labs.flatMap((l) => l.nodes);
   const links = labs.flatMap((l) => l.links);
   const current = nodes.find((n) => key(n) === selection);
-  const podState = useResources(podsCollection, scope, refresh, view !== 'Labs' || !!selectedLab || !!current);
-  const mapState = useResources(mapsCollection, scope, refresh, view === 'Files' || !!current);
-  const runtimeState = useResources(runtimeCollections, scope, refresh, ['Access', 'Storage', 'Events'].includes(view));
-  const eventState = useResources(eventCollections, scope, refresh, view === 'Events');
+  const podState = useResources(podsCollection, scope, view !== 'Labs' || !!selectedLab || !!current);
+  const mapState = useResources(mapsCollection, scope, view === 'Files' || !!current);
+  const runtimeState = useResources(runtimeCollections, scope, ['Access', 'Storage', 'Events'].includes(view));
+  const eventState = useResources(eventCollections, scope, view === 'Events');
   const pods = podState.snapshot.items.filter((p) => labs.some((l) => labPods(l, [p]).length));
   const resources = runtimeState.snapshot.items.filter((r) => labs.some((l) => labRuntime(r, l, pods)));
   const related = new Set(
@@ -78,7 +77,6 @@ export function Workspace({
       maps={mapState.snapshot.items}
       links={links}
       initialTab={inspectorView}
-      refresh={refresh}
       loading={podState.loading}
       onClose={() => setSelection(undefined)}
       onController={onPlatform}
@@ -144,7 +142,7 @@ export function Workspace({
       {(view === 'Files' || !!current) && <Errors snapshot={mapState.snapshot} />}
       {['Access', 'Storage', 'Events'].includes(view) && <Errors snapshot={runtimeState.snapshot} />}
       <Stack direction="row" sx={{ flex: 1, minHeight: 0 }}>
-        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
+        <Stack sx={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
           {view === 'Labs' &&
             (selectedLab ? (
               <LabDetail lab={selectedLab} pods={pods} loading={podState.loading} onNode={select} selected={selection} />
@@ -183,9 +181,9 @@ export function Workspace({
               }}
             />
           )}
-          {view === 'Links' && (
-            <Links links={links} nodes={nodes} pods={pods} refresh={refresh} onNode={(n) => select(n, 'Networking')} fleet={!selectedLab} />
-          )}
+          <ViewPane active={view === 'Links'}>
+            <Links links={links} nodes={nodes} pods={pods} onNode={(n) => select(n, 'Networking')} fleet={!selectedLab} />
+          </ViewPane>
           {view === 'Files' && (
             <Files
               labs={labs}

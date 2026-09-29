@@ -140,7 +140,8 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   const pluginRoot = existsSync(builtPlugins) && (config.staticRoot || !process.env.KUBUS_DEV)
     ? builtPlugins
     : path.resolve(__dirname, '../../client/public/plugin-bundles');
-  registerPluginRoutes(app, ctx, new PluginManager(settings, pluginRoot));
+  const plugins = new PluginManager(settings, pluginRoot);
+  registerPluginRoutes(app, ctx, plugins);
   registerSshRoutes(app, ctx);
   registerResourceRoutes(app, ctx);
   registerActionRoutes(app, ctx);
@@ -155,7 +156,7 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
   registerSearchRoutes(app, ctx);
   registerFileRoutes(app, ctx);
   registerLogRoutes(app);
-  registerWatchSocket(app, ctx);
+  registerWatchSocket(app, ctx, plugins);
   registerLogsSocket(app, ctx);
   registerExecSocket(app, ctx);
   registerNodeShellSocket(app, ctx);

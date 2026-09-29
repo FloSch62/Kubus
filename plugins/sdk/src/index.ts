@@ -6,8 +6,18 @@ import type {
   PluginRequest,
   PluginResourceRequest,
   PodInterfaceSnapshot,
+  PluginWatchRequest,
+  PluginWatchUpdate,
+  PluginWatchMessage,
 } from './protocol.js';
-export type { PluginManifest, PluginContext, PluginResourceRequest, PodInterfaceSnapshot } from './protocol.js';
+export type {
+  PluginManifest,
+  PluginContext,
+  PluginResourceRequest,
+  PodInterfaceSnapshot,
+  PluginWatchRequest,
+  PluginWatchUpdate,
+} from './protocol.js';
 
 export class PluginError extends Error {
   constructor(
@@ -22,6 +32,7 @@ export function connectPlugin(onContext: (context: PluginContext) => void) {
   let port: MessagePort | undefined;
   let sequence = 0;
   let disposed = false;
+  const watches = new Map<string, { params: PluginWatchRequest; update: (update: PluginWatchUpdate) => void }>();
   const pending = new Map<
     string,
     { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -44,10 +55,16 @@ export function connectPlugin(onContext: (context: PluginContext) => void) {
       return;
     port?.close();
     rejectPending();
-    port = event.ports[0];
+    const connectedPort = event.ports[0];
+    port = connectedPort;
     port.onmessage = (message: MessageEvent<PluginHostMessage>) => {
+      if (disposed || port !== connectedPort) return;
       if (message.data.type === 'kubus:context') {
         onContext(message.data.context);
+        return;
+      }
+      if (message.data.type === 'kubus:watch-update') {
+        watches.get(message.data.id)?.update(message.data.update);
         return;
       }
       if (message.data.type !== 'kubus:response') return;
@@ -61,6 +78,7 @@ export function connectPlugin(onContext: (context: PluginContext) => void) {
     port.start();
     port.postMessage({ type: 'kubus:ready' });
     onContext(event.data.context as PluginContext);
+    for (const [id, watch] of watches) port.postMessage({ type: 'kubus:watch', id, params: watch.params } satisfies PluginWatchMessage);
   };
   window.addEventListener('message', connect);
   const request = <T>(method: PluginMethod, params: PluginRequest['params']): Promise<T> =>
@@ -78,6 +96,20 @@ export function connectPlugin(onContext: (context: PluginContext) => void) {
       port.postMessage({ type: 'kubus:request', id, method, params } satisfies PluginRequest);
     });
   return {
+    /** Initial snapshot followed by batched changes; call the returned function on scope changes or teardown. */
+    watch: <T>(params: PluginWatchRequest, update: (update: PluginWatchUpdate<T>) => void): (() => void) => {
+      if (!port || disposed) {
+        update({ kind: 'status', state: 'error', message: 'Plugin is not connected to Kubus' });
+        return () => {};
+      }
+      const id = String(++sequence);
+      watches.set(id, { params, update: update as (update: PluginWatchUpdate) => void });
+      port.postMessage({ type: 'kubus:watch', id, params } satisfies PluginWatchMessage);
+      return () => {
+        if (!watches.delete(id)) return;
+        port?.postMessage({ type: 'kubus:unwatch', id } satisfies PluginWatchMessage);
+      };
+    },
     list: <T>(params: PluginResourceRequest) => request<{ items: T[]; continue?: string }>('resources.list', params),
     get: <T>(params: PluginResourceRequest & { name: string }) => request<T>('resources.get', params),
     openHelmRelease: (params: PluginResourceRequest & { name: string }) => request<void>('helm.open', params),
@@ -88,6 +120,8 @@ export function connectPlugin(onContext: (context: PluginContext) => void) {
       request<PodInterfaceSnapshot>('pod.interfaces', params),
     dispose: () => {
       disposed = true;
+      for (const id of watches.keys()) port?.postMessage({ type: 'kubus:unwatch', id } satisfies PluginWatchMessage);
+      watches.clear();
       window.removeEventListener('message', connect);
       port?.close();
       rejectPending();

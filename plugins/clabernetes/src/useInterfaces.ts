@@ -2,10 +2,12 @@ import { useEffect, useEffectEvent, useState } from 'react';
 import { client, useContext } from './bridge.js';
 import { key, ref, type Located } from './model.js';
 import { interfaceTarget, type InterfaceObservation } from './interfaces.js';
+import { usePaneActive } from './ViewPane.js';
 
-/** Inspect each running application once per refresh; scope/Pod changes invalidate observations. */
-export function useInterfaces(nodes: Located[], pods: Located[], enabled: boolean, refresh = 0) {
+/** Automatically sample running applications; scope/Pod changes invalidate observations. */
+export function useInterfaces(nodes: Located[], pods: Located[], enabled: boolean) {
   const context = useContext();
+  const active = usePaneActive() && context.active;
   const targets = nodes.map((node) => ({ node, target: interfaceTarget(node, pods) }));
   const identity = JSON.stringify(
     targets.map(({ node, target }) => [
@@ -48,7 +50,7 @@ export function useInterfaces(nodes: Located[], pods: Located[], enabled: boolea
                 .readPodInterfaces({ ...ref(target.pod), container: target.name })
                 .then((snapshot) =>
                   snapshot.podUID && target.pod.metadata.uid && snapshot.podUID !== target.pod.metadata.uid
-                    ? { error: 'Pod was replaced during inspection. Refresh to inspect its replacement.' }
+                    ? { error: 'Pod was replaced during inspection. Waiting for its replacement.' }
                     : { snapshot },
                 )
                 .catch((e: Error) => ({ error: e.message }));
@@ -65,7 +67,7 @@ export function useInterfaces(nodes: Located[], pods: Located[], enabled: boolea
     if (!cancelled()) setState({ identity, data, loading: false });
   });
   useEffect(() => {
-    if (!enabled || !context.active) return;
+    if (!enabled || !active) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -77,6 +79,6 @@ export function useInterfaces(nodes: Located[], pods: Located[], enabled: boolea
       disposed = true;
       clearTimeout(timer);
     };
-  }, [identity, enabled, context.active, context.refreshInterval, refresh]);
+  }, [identity, enabled, active, context.refreshInterval]);
   return state.identity === identity ? state : { data: {}, loading: enabled, identity };
 }

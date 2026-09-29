@@ -46,7 +46,7 @@ const FLUSH_MS = 100;
 const LINGER_MS = 30_000;
 
 function subKey(params: SubParams): string {
-  return `${params.ctx}|${params.group}/${params.version}/${params.plural}|${params.namespace ?? ''}`;
+  return JSON.stringify([params.ctx, params.group, params.version, params.plural, params.namespace, params.pluginId, params.namespaceScope]);
 }
 
 /**
@@ -117,6 +117,11 @@ class WatchClient {
     return () => {
       sub.handlers.delete(handlers);
       if (sub.handlers.size === 0 && this.byKey.get(key) === sub) {
+        // Plugin scope changes/revocation must release their server subscription immediately.
+        if (sub.params.pluginId) {
+          this.teardown(sub);
+          return;
+        }
         sub.lingerTimer ??= window.setTimeout(() => this.teardown(sub), LINGER_MS);
       }
     };

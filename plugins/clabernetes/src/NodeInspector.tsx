@@ -34,7 +34,6 @@ export function NodeInspector({
   maps,
   links,
   initialTab = 'Runtime',
-  refresh,
   onOpenLab,
 }: {
   node: Located;
@@ -47,13 +46,11 @@ export function NodeInspector({
   maps: Located[];
   links: Located[];
   initialTab?: string;
-  refresh: number;
   onOpenLab: () => void;
 }) {
   const [tab, setTab] = useState(initialTab);
-  const [inspection, setInspection] = useState(0);
   const [allInterfaces, setAllInterfaces] = useState(false);
-  const interfaces = useInterfaces([node], pods, tab === 'Networking', refresh + inspection);
+  const interfaces = useInterfaces([node], pods, tab === 'Networking');
   const observation = interfaces.data[key(node)];
   const nodeLinks = links.filter(
     (l) =>
@@ -239,9 +236,6 @@ export function NodeInspector({
             <Box>
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                 <SectionTitle>Live interfaces</SectionTitle>
-                <Button disabled={interfaces.loading} onClick={() => setInspection((v) => v + 1)}>
-                  {interfaces.loading ? 'Checking…' : 'Check now'}
-                </Button>
               </Stack>
               {observation?.error && <Alert severity="warning">{observation.error}</Alert>}
               {observation?.snapshot && (

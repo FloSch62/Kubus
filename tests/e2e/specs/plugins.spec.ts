@@ -1,9 +1,58 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 import { gotoApp } from '../helpers/app.js';
 import { repoRoot } from '../helpers/cluster.mjs';
 
 const headers = { Authorization: 'Bearer dev' };
+type ResourceQuery = { group: string; plural: string; name?: string; namespace?: string };
+type FixtureResource = { metadata: { name: string; namespace?: string; uid?: string } };
+async function mockPluginResources(page: Page, read: (query: ResourceQuery) => FixtureResource[]) {
+  const subscriptions = new Map<WebSocketRoute, Map<string, ResourceQuery>>();
+  let connections = 0;
+  const items = (query: ResourceQuery) =>
+    read(query).map((r) => ({ ...r, metadata: { ...r.metadata, uid: r.metadata.uid ?? `${r.metadata.namespace}/${r.metadata.name}` } }));
+  await page.route('**/api/plugins/clabernetes/resources', async (route) => {
+    const query = route.request().postDataJSON() as ResourceQuery;
+    const resources = items(query);
+    await route.fulfill({
+      json: { data: query.name ? resources.find((r) => r.metadata.name === query.name) : { items: resources }, kind: { namespaced: true } },
+    });
+  });
+  await page.routeWebSocket('**/ws/watch**', (socket) => {
+    connections++;
+    const upstream = socket.connectToServer();
+    const watches = new Map<string, ResourceQuery>();
+    subscriptions.set(socket, watches);
+    socket.onMessage((data) => {
+      const message = JSON.parse(String(data));
+      if (message.op === 'sub' && message.pluginId === 'clabernetes') {
+        watches.set(message.id, message);
+        socket.send(JSON.stringify({ op: 'snapshot', id: message.id, items: items(message) }));
+        socket.send(JSON.stringify({ op: 'status', id: message.id, state: 'live' }));
+      } else if (message.op !== 'unsub' || !watches.delete(message.id)) upstream.send(data);
+    });
+    socket.onClose(() => {
+      subscriptions.delete(socket);
+      void upstream.close();
+    });
+  });
+  return {
+    connections: () => connections,
+    watchCount: () => [...subscriptions.values()].reduce((count, watches) => count + watches.size, 0),
+    disconnect: async () => {
+      const sockets = [...subscriptions.keys()];
+      subscriptions.clear();
+      await Promise.all(sockets.map((socket) => socket.close({ code: 1012, reason: 'Reconnect test' })));
+    },
+    publish: () => {
+      for (const [socket, watches] of subscriptions)
+        for (const [id, query] of watches) {
+          socket.send(JSON.stringify({ op: 'events', id, events: items(query).map((object) => ({ type: 'MODIFIED', object })) }));
+        }
+    },
+  };
+}
+
 test('shipped plugin lifecycle, isolated viewer, and page reload', async ({ page, request }) => {
   let degraded = false;
   const topology = {
@@ -18,8 +67,7 @@ test('shipped plugin lifecycle, isolated viewer, and page reload', async ({ page
     },
     status: { topologyState: 'running', topologyReady: true, observedGeneration: 1, nodeCount: 2, readyNodeCount: 2, linkCount: 1 },
   };
-  await page.route('**/api/plugins/clabernetes/resources', async (route) => {
-    const query = route.request().postDataJSON() as { plural: string; name?: string };
+  const stream = await mockPluginResources(page, (query) => {
     const pods = ['leaf1', 'leaf2'].map((name) => ({
       apiVersion: 'v1',
       kind: 'Pod',
@@ -63,9 +111,7 @@ test('shipped plugin lifecycle, isolated viewer, and page reload', async ({ page
           : query.plural === 'pods'
             ? pods
             : [];
-    await route.fulfill({
-      json: { data: query.name ? items.find((r) => r.metadata.name === query.name) : { items }, kind: { namespaced: true } },
-    });
+    return items;
   });
   try {
     await gotoApp(page, '/plugins/clabernetes');
@@ -105,8 +151,8 @@ test('shipped plugin lifecycle, isolated viewer, and page reload', async ({ page
     await plugin.getByRole('button', { name: 'browser-lab', exact: true }).click();
     await expect(plugin.locator('.react-flow__node')).toHaveCount(2);
     await plugin.locator('.react-flow').evaluate((el) => el.setAttribute('data-refresh-check', 'keep'));
-    await plugin.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(plugin.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+    stream.publish();
+    await expect(plugin.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
     await expect(plugin.locator('.react-flow[data-refresh-check="keep"]')).toHaveCount(1);
     // MUI node actions resolve helpers separately from the device container.
     await plugin.getByRole('button', { name: 'leaf1', exact: true }).click();
@@ -123,13 +169,22 @@ test('shipped plugin lifecycle, isolated viewer, and page reload', async ({ page
     degraded = true;
     topology.status.topologyState = 'degraded';
     topology.status.readyNodeCount = 1;
-    await plugin.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(plugin.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+    stream.publish();
+    await expect(plugin.getByRole('button', { name: '1 need attention', exact: true }).last()).toBeVisible();
+    const connections = stream.connections();
+    await stream.disconnect();
+    await expect.poll(stream.connections).toBeGreaterThan(connections);
+    await expect.poll(stream.watchCount).toBeGreaterThan(0);
+    await expect(plugin.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
     await plugin.getByRole('button', { name: '1 need attention', exact: true }).last().click();
     await expect(plugin.getByRole('button', { name: 'leaf1', exact: true })).toHaveCount(0);
     await plugin.getByRole('button', { name: 'leaf2', exact: true }).click();
     await expect(plugin.getByText('Wiring · PeerUnavailable', { exact: true })).toBeVisible();
     await expect(plugin.getByRole('button', { name: 'Read clabwire logs', exact: true })).toBeEnabled();
+    await page.getByRole('link', { name: 'Pods', exact: true }).click();
+    await expect.poll(stream.watchCount).toBe(0);
+    await page.getByRole('link', { name: 'Clabernetes', exact: true }).click();
+    await expect.poll(stream.watchCount).toBeGreaterThan(0);
     // Another renderer changing settings must revoke this open page too.
     await request.put('/api/plugins/clabernetes', { headers, data: { enabled: false } });
     await expect(page.locator('iframe[title="Clabernetes"]')).toHaveCount(0, { timeout: 10_000 });
@@ -165,6 +220,7 @@ test('install and remove an independent local bundle without changing Kubus', as
 });
 
 test('fleet scope, live links, configuration files and Helm relationships', async ({ page, request }) => {
+  test.setTimeout(60_000);
   const metadata = (name: string, namespace = 'kubus-e2e') => ({ name, namespace, uid: `${namespace}/${name}`, generation: 1 });
   const nodes = ['kubus-e2e', 'second-lab'].flatMap((namespace) =>
     ['r1', 'r2'].map((name) => ({
@@ -222,7 +278,7 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
   const bootstrap = {
     apiVersion: 'v1',
     kind: 'ConfigMap',
-    metadata: metadata('clabernetes-config'),
+    metadata: { ...metadata('clabernetes-config'), labels: { 'c9s.run/component': 'config' } },
     data: { mergeMode: 'merge', imagePullPolicy: 'IfNotPresent' },
   };
   const maps = ['kubus-e2e', 'second-lab'].flatMap((ns) => [
@@ -241,7 +297,10 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
     spec: { deployment: { persistence: { enabled: true, reclaim: 'Retain' } } },
   };
   let down = false;
+  let inspectionsPaused: Promise<void> | undefined;
+  let resumeInspections: (() => void) | undefined;
   await page.route('**/api/plugins/clabernetes/interfaces', async (route) => {
+    await inspectionsPaused;
     const { namespace, name, container } = route.request().postDataJSON() as { namespace: string; name: string; container: string };
     const carrier = !(down && name === 'r2-pod');
     await route.fulfill({
@@ -253,8 +312,7 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
       },
     });
   });
-  await page.route('**/api/plugins/clabernetes/resources', async (route) => {
-    const { plural, name, namespace } = route.request().postDataJSON() as { plural: string; name?: string; namespace?: string };
+  await mockPluginResources(page, ({ plural, namespace }) => {
     const collections: Record<string, Array<{ metadata: { name: string; namespace: string } }>> = {
       nodes,
       links,
@@ -265,7 +323,7 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
       nodeprofiles: [profile],
     };
     const items = (collections[plural] ?? []).filter((r) => !namespace || r.metadata.namespace === namespace);
-    await route.fulfill({ json: { data: name ? items.find((r) => r.metadata.name === name) : { items }, kind: { namespaced: true } } });
+    return items;
   });
   try {
     await request.put('/api/plugins/clabernetes', { headers, data: { enabled: true } });
@@ -276,9 +334,36 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
     await expect(plugin.getByRole('grid', { name: 'Network nodes' }).getByRole('button', { name: 'r1', exact: true })).toHaveCount(2);
     await plugin.getByRole('tab', { name: 'Links', exact: true }).click();
     await expect(plugin.getByText('2/2 up', { exact: true })).toBeVisible();
+    const linkGrid = plugin.getByRole('grid', { name: 'Lab links' });
+    await linkGrid.evaluate((element) => element.setAttribute('data-retained-grid', 'links'));
+    await plugin.getByRole('textbox', { name: 'Find a link', exact: true }).fill('r1');
+    await plugin.getByRole('button', { name: 'Kubernetes details', exact: true }).click();
+    await linkGrid.getByRole('columnheader', { name: 'Endpoint A', exact: true }).click();
+    // Hold new observations: cached state must remain visible even before a resumed inspection completes.
+    inspectionsPaused = new Promise((resolve) => {
+      resumeInspections = resolve;
+    });
+    for (const tab of ['Nodes', 'Labs', 'Platform', 'Pods']) {
+      if (tab === 'Pods') {
+        await page.getByRole('link', { name: 'Pods', exact: true }).click();
+        await page.getByRole('link', { name: 'Clabernetes', exact: true }).click();
+      } else {
+        await plugin.getByRole('tab', { name: tab, exact: true }).click();
+      }
+      await plugin.getByRole('tab', { name: 'Links', exact: true }).click();
+      await expect(linkGrid).toHaveAttribute('data-retained-grid', 'links');
+      await expect(plugin.getByText('2/2 up', { exact: true })).toBeVisible();
+      await expect(linkGrid).not.toContainText(/Checking|Waiting/);
+      await expect(plugin.getByRole('textbox', { name: 'Find a link', exact: true })).toHaveValue('r1');
+      await expect(linkGrid.getByRole('columnheader', { name: /^Endpoint A/ })).toHaveAttribute('aria-sort', 'ascending');
+      await expect(linkGrid.getByRole('columnheader', { name: 'Configuration', exact: true })).toBeVisible();
+    }
+    resumeInspections?.();
+    inspectionsPaused = undefined;
+    await plugin.getByRole('textbox', { name: 'Find a link', exact: true }).clear();
     down = true;
-    await plugin.getByRole('button', { name: 'Check now', exact: true }).click();
-    await expect(plugin.getByText('0/2 up', { exact: true })).toBeVisible();
+    await expect(plugin.getByRole('button', { name: 'Check now', exact: true })).toHaveCount(0);
+    await expect(plugin.getByText('0/2 up', { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(plugin.getByRole('grid', { name: 'Lab links' })).toContainText('Down');
     await plugin.getByRole('combobox', { name: 'Workspace scope' }).click();
     await plugin.getByRole('option').filter({ hasText: 'kubus-e2e' }).click();
@@ -299,6 +384,7 @@ test('fleet scope, live links, configuration files and Helm relationships', asyn
     await plugin.getByRole('button', { name: 'Helm release · c9s', exact: true }).click();
     await expect(page).toHaveURL(/\/helm\/kind-kubus-a\/kubus-e2e\/c9s$/);
   } finally {
+    resumeInspections?.();
     await request.put('/api/plugins/clabernetes', { headers, data: { enabled: false } });
   }
 });
