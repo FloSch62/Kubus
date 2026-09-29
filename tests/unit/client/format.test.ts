@@ -36,6 +36,16 @@ describe('formatBytes', () => {
     expect(formatBytes(1.5 * 2 ** 30)).toBe('1.5Gi');
     expect(formatBytes(1.55 * 2 ** 30)).toBe('1.6Gi');
   });
+
+  it('continues past Gi into Ti and Pi', () => {
+    expect(formatBytes(2 ** 40 - 2 ** 30)).toBe('1023.0Gi');
+    expect(formatBytes(2 ** 40)).toBe('1.0Ti');
+    expect(formatBytes(2 * 2 ** 40)).toBe('2.0Ti');
+    expect(formatBytes(1.25 * 2 ** 40)).toBe('1.3Ti');
+    expect(formatBytes(2 ** 50)).toBe('1.0Pi');
+    expect(formatBytes(3.5 * 2 ** 50)).toBe('3.5Pi');
+    expect(formatBytes(2048 * 2 ** 50)).toBe('2048.0Pi');
+  });
 });
 
 describe('formatBps', () => {

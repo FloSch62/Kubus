@@ -22,6 +22,7 @@ import { SummaryStrip } from './SummaryStrip.js';
 import { UsedBySection } from './UsedBySection.js';
 import { controlledBy, useSelectorPods, useWorkloadProblems, WorkloadContainers, WorkloadPods, type PodTemplateSpec } from './WorkloadParts.js';
 import type { Condition } from './workload-problems.js';
+import { naturalCompare } from '../natural-sort.js';
 
 interface DeploymentSpec {
   replicas?: number;
@@ -80,7 +81,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
   );
   const pods = useMemo(() => {
     const replicaSetUids = new Set(replicaSets.map((rs) => rs.metadata.uid));
-    return (podsQuery.data?.items ?? []).filter((pod) => controlledBy(pod, replicaSetUids)).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
+    return (podsQuery.data?.items ?? []).filter((pod) => controlledBy(pod, replicaSetUids)).sort((a, b) => naturalCompare(a.metadata.name, b.metadata.name));
   }, [podsQuery.data?.items, replicaSets]);
 
   const openReplicaSet = (rs: KubeObject) =>

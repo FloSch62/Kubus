@@ -24,6 +24,7 @@ import { useDetailStore } from '../../state/detail.js';
 import { statusTextColor } from '../../theme.js';
 import { quotaNamesIn } from './quota-link.js';
 import { podSchedulingIssue, type SchedulingIssue } from './scheduling.js';
+import { naturalCompare } from '../natural-sort.js';
 
 /** Rows a mini list needs before it grows a filter box. */
 const FILTER_THRESHOLD = 4;
@@ -73,8 +74,13 @@ export function PodMiniList({
   const daemonCount = useMemo(() => (daemonSets ? pods.filter((p) => daemonSetOwner(p)).length : 0), [pods, daemonSets]);
   // With no DaemonSet pods left the chips vanish, so their filter must too.
   const owner: OwnerFilter = daemonCount > 0 ? ownerFilter : 'all';
+  // Natural order, like the list pages: web-2 before web-10.
+  const sorted = useMemo(
+    () => [...pods].sort((a, b) => naturalCompare(a.metadata.namespace ?? '', b.metadata.namespace ?? '') || naturalCompare(a.metadata.name, b.metadata.name)),
+    [pods],
+  );
   const shown = useMemo(() => {
-    const byOwner = owner === 'all' ? pods : pods.filter((p) => !!daemonSetOwner(p) === (owner === 'daemonset'));
+    const byOwner = owner === 'all' ? sorted : sorted.filter((p) => !!daemonSetOwner(p) === (owner === 'daemonset'));
     const query = filter.trim();
     if (!query) return byOwner;
     const rows = byOwner.map((obj) => ({ ctx, obj }));
@@ -85,7 +91,7 @@ export function PodMiniList({
     }
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return rows.filter((r) => matchesPlainText(r, words, 'Pod')).map((r) => r.obj);
-  }, [pods, filter, ctx, owner]);
+  }, [sorted, filter, ctx, owner]);
   const showFilter = pods.length >= FILTER_THRESHOLD || !!filter;
   const metricsQuery = useResourceMetrics([ctx], 'pods');
   const usageByPod = useMemo(() => {

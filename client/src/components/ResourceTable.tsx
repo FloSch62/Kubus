@@ -16,6 +16,7 @@ import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart
 import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
 import { SmartFilterInput } from './SmartFilterInput.js';
 import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
+import { withNaturalSort } from './natural-sort.js';
 import type { MetricsLookup } from './columns.js';
 import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
@@ -181,8 +182,9 @@ export function ResourceTable({
       if (!entry || entry.width !== stored) {
         // If a saved width exists, apply it on a copy of the column.
         const base = stored !== undefined ? { ...column, width: stored, flex: undefined } : column;
-        // Adds the hover copy button and sets flex display on every column.
-        entry = { width: stored, wrapped: withCellCopy(base) };
+        // Adds the hover copy button and sets flex display on every column;
+        // text columns sort naturally (worker-2 before worker-10).
+        entry = { width: stored, wrapped: withCellCopy(withNaturalSort(base)) };
         cache.set(column, entry);
       }
       return entry.wrapped;
