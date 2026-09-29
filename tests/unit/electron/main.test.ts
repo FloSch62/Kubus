@@ -62,6 +62,7 @@ const electron = vi.hoisted(() => {
     readonly setMenuBarVisibility = vi.fn();
     readonly setTitleBarOverlay = vi.fn();
     readonly getNormalBounds = vi.fn(() => this.normalBounds);
+    readonly getNativeWindowHandle = vi.fn(() => Buffer.from('7856341200000000', 'hex'));
     readonly once = vi.fn((name: string, handler: Handler) => {
       this.handlers.set(name, handler);
       return this;
@@ -154,6 +155,8 @@ vi.mock('electron', () => ({
   webContents: electron.webContentsApi,
 }));
 vi.mock('electron-updater', () => ({ default: { autoUpdater: electron.updater } }));
+const store = vi.hoisted(() => ({ run: vi.fn(), create: vi.fn() }));
+vi.mock('../../../electron/src/store-bridge.js', () => ({ createStoreBridge: store.create }));
 vi.mock('fix-path', () => ({ default: electron.fixPath }));
 vi.mock('@kubus/server', () => ({ appendAppLog: electron.appendAppLog, startServer: electron.startServer }));
 
@@ -235,6 +238,8 @@ async function loadMain() {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  store.run.mockReset().mockResolvedValue('available');
+  store.create.mockImplementation(() => ({ run: store.run }));
   vi.unstubAllGlobals();
   electron.appHandlers.clear();
   electron.updateListeners.clear();
@@ -566,7 +571,7 @@ describe('Electron main process', () => {
     });
   });
 
-  it('leaves Store updates to Microsoft and only opens the Store on an explicit, trusted request', async () => {
+  it('checks Store updates in the background and only installs or opens the Store on a trusted request', async () => {
     vi.useFakeTimers();
     await withWindowsStore(async () => {
       electron.app.isPackaged = true;
@@ -575,19 +580,31 @@ describe('Electron main process', () => {
       const check = registered(electron.ipcHandlers, 'kubus:update:check');
       const download = registered(electron.ipcHandlers, 'kubus:update:download');
       const install = registered(electron.ipcHandlers, 'kubus:update:install');
-      const managed = { status: 'disabled', currentVersion: '0.6.1', reason: 'store' };
+      const openStore = registered(electron.ipcHandlers, 'kubus:update:open-store');
+      const available = { status: 'available', currentVersion: '0.6.1', source: 'store' };
 
       expect(electron.app.setAsDefaultProtocolClient).not.toHaveBeenCalled();
       expect(check({ sender: {} })).toBeUndefined();
-      expect(state({ sender: win.webContents })).toEqual(managed);
+      expect(install({ sender: {} })).toBe(false);
+      expect(openStore({ sender: {} })).toBeUndefined();
+      expect(state({ sender: win.webContents })).toMatchObject({ status: 'idle', source: 'store' });
+      expect(store.create).toHaveBeenCalledWith(path.join(userDataPath, 'store-updater', 'kubus-store-updater.exe'), expect.any(Function));
+      expect(store.create.mock.calls[0]![1]()).toEqual(win.getNativeWindowHandle());
       await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
       expect(electron.shell.openExternal).not.toHaveBeenCalled();
       expect(electron.updater.checkForUpdates).not.toHaveBeenCalled();
 
-      await expect(check({ sender: win.webContents })).resolves.toEqual(managed);
+      expect(store.run.mock.calls.every(([command]) => command === 'check')).toBe(true);
+      await expect(check({ sender: win.webContents })).resolves.toEqual(available);
+      await openStore({ sender: win.webContents });
       expect(electron.shell.openExternal).toHaveBeenCalledExactlyOnceWith('ms-windows-store://pdp/?ProductId=9PCTHB079SK7');
-      await expect(download({ sender: win.webContents })).resolves.toEqual(managed);
-      expect(install({ sender: win.webContents })).toBe(false);
+      expect(download({ sender: win.webContents })).toBeUndefined();
+      store.run.mockResolvedValueOnce('canceled');
+      expect(install({ sender: win.webContents })).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.run).toHaveBeenLastCalledWith('install', expect.any(Function));
+      expect(state({ sender: win.webContents })).toEqual(available);
+      expect(electron.app.quit).not.toHaveBeenCalled();
       expect(electron.updater.downloadUpdate).not.toHaveBeenCalled();
       expect(electron.updater.quitAndInstall).not.toHaveBeenCalled();
     });
@@ -598,8 +615,8 @@ describe('Electron main process', () => {
       electron.app.isPackaged = true;
       electron.shell.openExternal.mockRejectedValueOnce(new Error('Store unavailable'));
       const win = await loadMain();
-      const check = registered(electron.ipcHandlers, 'kubus:update:check');
-      await expect(check({ sender: win.webContents })).rejects.toThrow('Store unavailable');
+      const openStore = registered(electron.ipcHandlers, 'kubus:update:open-store');
+      await expect(openStore({ sender: win.webContents })).rejects.toThrow('Store unavailable');
       expect(electron.updater.checkForUpdates).not.toHaveBeenCalled();
       expect(electron.updater.downloadUpdate).not.toHaveBeenCalled();
     });

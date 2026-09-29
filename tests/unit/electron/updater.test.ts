@@ -187,6 +187,7 @@ describe('release signing configuration', () => {
     const config = distributionConfig({ KUBUS_WINDOWS_TARGET: 'store', WINDOWS_SIGNING: 'certificate' }, 'win32');
     expect(config).toMatchObject({ publish: null, extraMetadata: { kubusUpdateMode: 'store' },
       directories: { output: 'release-store' }, win: { target: 'appx' } });
+    expect(config.extraResources).toContainEqual({ from: 'build/store-updater/kubus-store-updater.exe', to: 'store-updater/kubus-store-updater.exe' });
     expect(config.forceCodeSigning).toBeUndefined();
   });
 });

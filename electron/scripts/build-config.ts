@@ -19,6 +19,7 @@ export function distributionConfig(env: NodeJS.ProcessEnv, platform: string): Co
     config.directories = { output: 'release-store' };
     config.extraMetadata = { kubusUpdateMode: 'store' };
     config.publish = null;
+    config.extraResources = [{ from: 'build/store-updater/kubus-store-updater.exe', to: 'store-updater/kubus-store-updater.exe' }];
     // Builder 26 emits AppX, accepted by the Store alongside MSIX. The Store
     // signs this package after certification; its identity comes from Partner Center.
     // A scalar replaces the base NSIS target; builder concatenates target arrays.

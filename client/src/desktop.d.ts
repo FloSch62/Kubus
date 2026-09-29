@@ -17,6 +17,7 @@ declare global {
       getAppInfo(): Promise<AppInfo | undefined>;
       getUpdateState(): Promise<DesktopUpdateState | undefined>;
       checkForUpdates(): Promise<DesktopUpdateState | undefined>;
+      openStore(): Promise<void>;
       downloadUpdate(): Promise<DesktopUpdateState | undefined>;
       installUpdate(): Promise<boolean>;
       onUpdateState(callback: (state: DesktopUpdateState) => void): () => void;

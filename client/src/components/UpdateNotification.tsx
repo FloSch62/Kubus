@@ -4,7 +4,7 @@ import Button from '@mui/material/Button';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import type { UpdateCheckResult } from '@kubus/shared';
-import { DownloadUpdate, RestartToUpdate, useDesktopUpdate } from './DesktopUpdateControls.js';
+import { DownloadUpdate, InstallStoreUpdate, OpenMicrosoftStore, RestartToUpdate, useDesktopUpdate } from './DesktopUpdateControls.js';
 import { checkForUpdate as checkForAppUpdate } from '../api/app.js';
 
 const DISMISSED_UPDATE_KEY = 'kubus-dismissed-update-version';
@@ -39,22 +39,32 @@ export function UpdateNotification() {
 
 function DesktopUpdateNotification() {
   const state = useDesktopUpdate();
+  const store = state?.source === 'store';
   // Availability and a completed download are separate decisions. Dismissing
   // the first notice must not hide the later install action for the same version.
-  const notice = state?.version ? `${state.version}:${state.status}` : undefined;
+  const notice = store ? `store:${state.currentVersion}:${state.status}` : state?.version ? `${state.version}:${state.status}` : undefined;
   const [dismissed, setDismissed] = useState(() => readDismissedVersion(DISMISSED_DESKTOP_UPDATE_KEY));
   const dismiss = () => {
     if (notice) {
       setDismissed(notice);
-      dismissVersion(notice, DISMISSED_DESKTOP_UPDATE_KEY);
+      // Store doesn't expose the target version. Keep this dismissal in memory
+      // so it cannot hide a different future update for the installed version.
+      if (!store) dismissVersion(notice, DISMISSED_DESKTOP_UPDATE_KEY);
     }
   };
-  return <Snackbar open={!!state?.version && ['available', 'ready', 'error'].includes(state.status) && notice !== dismissed} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+  const visible = store ? ['available', 'updated', 'error'].includes(state.status) : !!state?.version && ['available', 'ready', 'error'].includes(state.status);
+  const message = state?.status === 'error' ? state.error : store
+    ? state.status === 'updated' ? 'Microsoft Store completed the update. Reopen Kubus to use the installed version.' : 'A new version of Kubus is available in Microsoft Store.'
+    : `Kubus ${state?.version} ${state?.status === 'available' ? 'is available.' : 'is downloaded and ready to install.'}`;
+  return <Snackbar open={visible && notice !== dismissed} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
     <Alert severity={state?.status === 'error' ? 'warning' : 'info'} variant="filled" action={<Stack direction="row" spacing={0.5}>
-      {state?.status === 'ready' ? <RestartToUpdate compact /> : <DownloadUpdate compact />}
+      {store ? <>
+        {state.status === 'available' && <InstallStoreUpdate compact />}
+        {state.status === 'error' && <OpenMicrosoftStore compact />}
+      </> : state?.status === 'ready' ? <RestartToUpdate compact /> : <DownloadUpdate compact />}
       <Button color="inherit" size="small" onClick={dismiss}>Later</Button>
     </Stack>}>
-      {state?.status === 'error' ? state.error : `Kubus ${state?.version} ${state?.status === 'available' ? 'is available.' : 'is downloaded and ready to install.'}`}
+      {message}
     </Alert>
   </Snackbar>;
 }

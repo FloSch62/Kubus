@@ -19,8 +19,10 @@ import {
 import fixPath from 'fix-path';
 import electronUpdater from 'electron-updater';
 import { DesktopUpdater, updateDisabledReason } from './updater.js';
+import { StoreUpdater } from './store-updater.js';
+import { createStoreBridge } from './store-bridge.js';
 import { startServer, type RunningServer } from '@kubus/server';
-import type { AppWindowLaunch } from '@kubus/shared';
+import type { AppWindowLaunch, DesktopUpdateState } from '@kubus/shared';
 import { initMainLog, installCrashCapture, mainLog, mainLogPath } from './main-log.js';
 
 // GUI apps on macOS/Linux don't inherit the shell PATH; kubeconfig exec
@@ -54,7 +56,7 @@ const routeReadyWindows = new Set<BrowserWindow>();
 const windowLaunches = new Map<number, AppWindowLaunch>();
 let server: RunningServer | undefined;
 let closing: Promise<void> | undefined;
-let desktopUpdater: DesktopUpdater | undefined;
+let desktopUpdater: DesktopUpdater | StoreUpdater | undefined;
 let quittingForUpdate = false;
 
 // ---- kubus:// deep links -------------------------------------------------
@@ -535,15 +537,11 @@ ipcMain.handle('kubus:get-app-info', (event): AppInfo | undefined => {
 });
 
 ipcMain.handle('kubus:update:state', (event) => isManagedWindowSender(event) ? desktopUpdater?.getState() : undefined);
-ipcMain.handle('kubus:update:check', (event) => {
-  if (!isManagedWindowSender(event)) return undefined;
-  // Background checks stay disabled; only an explicit user request opens the Store.
-  if (desktopUpdater?.getState().reason === 'store') {
-    return shell.openExternal(STORE_URL).then(() => desktopUpdater?.getState());
-  }
-  return desktopUpdater?.check();
+ipcMain.handle('kubus:update:check', (event) => isManagedWindowSender(event) ? desktopUpdater?.check() : undefined);
+ipcMain.handle('kubus:update:open-store', (event) => {
+  if (isManagedWindowSender(event) && desktopUpdater instanceof StoreUpdater) return shell.openExternal(STORE_URL);
 });
-ipcMain.handle('kubus:update:download', (event) => isManagedWindowSender(event) ? desktopUpdater?.download() : undefined);
+ipcMain.handle('kubus:update:download', (event) => isManagedWindowSender(event) && desktopUpdater instanceof DesktopUpdater ? desktopUpdater.download() : undefined);
 ipcMain.handle('kubus:update:install', (event) => isManagedWindowSender(event) && desktopUpdater?.requestInstall() === true);
 
 ipcMain.on('kubus:window-launch', (event) => {
@@ -628,14 +626,28 @@ if (!app.requestSingleInstanceLock()) {
     const metadata = JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as { kubusUpdateMode?: string };
     const reason = updateDisabledReason({ packaged: app.isPackaged, platform: process.platform, arch: process.arch,
       store: process.windowsStore === true || metadata.kubusUpdateMode === 'store', appImage: !!process.env.APPIMAGE });
-    desktopUpdater = new DesktopUpdater({
-      version: app.getVersion(), reason,
-      updater: reason ? undefined : electronUpdater.autoUpdater,
-      broadcast: (state) => {
-        for (const win of managedWindows) {
-          if (!win.isDestroyed()) win.webContents.send('kubus:update:changed', state);
-        }
+    const broadcast = (state: DesktopUpdateState) => {
+      for (const win of managedWindows) {
+        if (!win.isDestroyed()) win.webContents.send('kubus:update:changed', state);
+      }
+    };
+    desktopUpdater = reason === 'store' && isWindows ? new StoreUpdater({
+      version: app.getVersion(), broadcast,
+      bridge: createStoreBridge(path.join(process.resourcesPath, 'store-updater', 'kubus-store-updater.exe'), () => {
+        const focused = BrowserWindow.getFocusedWindow();
+        const owner = focused && managedWindows.has(focused) ? focused : primaryWindow;
+        if (!owner || owner.isDestroyed()) throw new Error('A Kubus window is required to contact Microsoft Store.');
+        return owner.getNativeWindowHandle();
+      }),
+      beforeInstall: () => {
+        // Windows can terminate the package during installation. Persist the
+        // current state before handing control to its update/consent UI.
+        flushClientState();
+        if (primaryWindow && !primaryWindow.isDestroyed()) saveWindowState(primaryWindow);
       },
+    }) : new DesktopUpdater({
+      version: app.getVersion(), reason, broadcast,
+      updater: reason ? undefined : electronUpdater.autoUpdater,
       prepareInstall: () => { quittingForUpdate = true; app.quit(); },
       recoverInstall: () => { app.relaunch(); app.exit(0); },
     });
@@ -687,7 +699,7 @@ function finishQuit(force = false): void {
   server = undefined;
   if (quittingForUpdate) {
     quittingForUpdate = false;
-    desktopUpdater!.finishInstall();
+    if (desktopUpdater instanceof DesktopUpdater) desktopUpdater.finishInstall();
   } else if (force) {
     app.exit(0);
   } else {

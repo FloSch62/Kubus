@@ -12,6 +12,7 @@ function bridge(initial: DesktopUpdateState) {
     checkForUpdates: vi.fn(async () => initial),
     downloadUpdate: vi.fn(async () => initial),
     installUpdate: vi.fn(async () => true),
+    openStore: vi.fn(async () => undefined),
     onUpdateState: vi.fn((callback: typeof listener) => { listener = callback; return unsubscribe; }),
   };
   window.kubusDesktop = desktop as unknown as NonNullable<typeof window.kubusDesktop>;
@@ -62,18 +63,79 @@ it('shows shared download progress and asks to save work before restarting all w
   expect(desktop.unsubscribe).toHaveBeenCalledOnce();
 });
 
-it('keeps Store builds on managed updates', async () => {
-  const desktop = bridge({ currentVersion: '0.9.0', status: 'disabled', reason: 'store' });
+it('checks Store availability and offers the Store as a fallback when opening it fails', async () => {
+  const desktop = bridge({ currentVersion: '0.9.0', status: 'idle', source: 'store' });
   render(<DesktopUpdateControls />);
   expect(await screen.findByText(/Microsoft Store manages updates/)).toBeInTheDocument();
   expect(desktop.checkForUpdates).not.toHaveBeenCalled();
-  desktop.checkForUpdates.mockRejectedValueOnce(new Error('Store unavailable'));
   fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
-  expect(await screen.findByText(/Microsoft Store could not be opened/)).toBeInTheDocument();
   expect(desktop.checkForUpdates).toHaveBeenCalledOnce();
+  expect(desktop.openStore).not.toHaveBeenCalled();
+  desktop.openStore.mockRejectedValueOnce(new Error('Store unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: 'Open Microsoft Store' }));
+  expect(await screen.findByText(/Microsoft Store could not be opened/)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Download update' })).not.toBeInTheDocument();
   expect(desktop.downloadUpdate).not.toHaveBeenCalled();
   expect(desktop.installUpdate).not.toHaveBeenCalled();
+});
+
+it('shows a Store notification without a target version and only installs after confirmation', async () => {
+  const desktop = bridge({ currentVersion: '0.9.0', status: 'available', source: 'store' });
+  render(<UpdateNotification />);
+  expect(await screen.findByText('A new version of Kubus is available in Microsoft Store.')).toBeInTheDocument();
+  expect(desktop.installUpdate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+  expect(screen.getByText(/Save any edits first/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(desktop.installUpdate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+  fireEvent.click(screen.getAllByRole('button', { name: 'Update now' }).at(-1)!);
+  await waitFor(() => expect(desktop.installUpdate).toHaveBeenCalledOnce());
+  expect(desktop.downloadUpdate).not.toHaveBeenCalled();
+  expect(desktop.openStore).not.toHaveBeenCalled();
+});
+
+it('dismisses a Store notification without permanently hiding future Store updates', async () => {
+  const desktop = bridge({ currentVersion: '0.9.0', status: 'available', source: 'store' });
+  const view = render(<UpdateNotification />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+  await waitFor(() => expect(screen.queryByText(/new version of Kubus/)).not.toBeInTheDocument());
+  expect(desktop.installUpdate).not.toHaveBeenCalled();
+  view.unmount();
+  render(<UpdateNotification />);
+  expect(await screen.findByText(/new version of Kubus/)).toBeInTheDocument();
+});
+
+it('keeps Store failures and completion visible after an update started from the notification', async () => {
+  const initial = { currentVersion: '0.9.0', source: 'store' as const };
+  const desktop = bridge({ ...initial, status: 'installing' });
+  render(<UpdateNotification />);
+  desktop.emit({ ...initial, status: 'error', error: 'Microsoft Store could not complete the update.' });
+  expect(await screen.findByText('Microsoft Store could not complete the update.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Open Microsoft Store' }));
+  expect(desktop.openStore).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+  desktop.emit({ ...initial, status: 'updated' });
+  expect(await screen.findByText(/Reopen Kubus/)).toBeInTheDocument();
+});
+
+it('shows Store progress, cancellation, errors, and completion without offering a GitHub download', async () => {
+  const initial = { currentVersion: '0.9.0', source: 'store' as const };
+  const desktop = bridge({ ...initial, status: 'installing' });
+  render(<DesktopUpdateControls />);
+  expect(await screen.findByText('Waiting for Microsoft Store…')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
+  desktop.emit({ ...initial, status: 'installing', percent: 50 });
+  expect(screen.getByText('Updating Kubus through Microsoft Store… 50%')).toBeInTheDocument();
+  desktop.emit({ ...initial, status: 'available' });
+  expect(screen.getByRole('button', { name: 'Update now' })).toBeEnabled();
+  desktop.emit({ ...initial, status: 'error', error: 'Store is offline.' });
+  expect(screen.getByText('Store is offline.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
+  desktop.emit({ ...initial, status: 'updated' });
+  expect(screen.getByText(/Reopen Kubus/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Download update' })).not.toBeInTheDocument();
 });
 
 it('does not overwrite a pushed update with a stale initial snapshot', async () => {
