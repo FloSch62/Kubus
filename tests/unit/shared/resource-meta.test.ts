@@ -7,6 +7,7 @@ import {
   groupFromPath,
   groupToPath,
   gvkForKind,
+  isMoreBuiltinResource,
   gvkForResource,
   KIND_COLUMNS,
   pluralLabel,
@@ -148,5 +149,25 @@ describe('groupToPath / groupFromPath', () => {
     for (const group of ['', 'apps', 'batch', 'rbac.authorization.k8s.io', 'apiextensions.k8s.io']) {
       expect(groupFromPath(groupToPath(group))).toBe(group);
     }
+  });
+});
+
+describe('isMoreBuiltinResource', () => {
+  it('accepts built-in resources the fixed nav groups leave out', () => {
+    expect(isMoreBuiltinResource('scheduling.k8s.io', 'priorityclasses')).toBe(true);
+    expect(isMoreBuiltinResource('coordination.k8s.io', 'leases')).toBe(true);
+    expect(isMoreBuiltinResource('admissionregistration.k8s.io', 'validatingadmissionpolicybindings')).toBe(true);
+    expect(isMoreBuiltinResource('', 'podtemplates')).toBe(true);
+  });
+
+  it('rejects resources that already have a nav entry, in any version', () => {
+    expect(isMoreBuiltinResource('', 'pods')).toBe(false);
+    expect(isMoreBuiltinResource('autoscaling', 'horizontalpodautoscalers')).toBe(false);
+    expect(isMoreBuiltinResource('storage.k8s.io', 'storageclasses')).toBe(false);
+    expect(isMoreBuiltinResource('apiextensions.k8s.io', 'customresourcedefinitions')).toBe(false);
+  });
+
+  it('rejects a second view of a listed kind', () => {
+    expect(isMoreBuiltinResource('events.k8s.io', 'events')).toBe(false);
   });
 });

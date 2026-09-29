@@ -36,7 +36,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import CheckIcon from '@mui/icons-material/Check';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import { NavLink, useLocation, useNavigate } from 'react-router';
-import { BUILTIN_NAV_GROUPS, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
+import { BUILTIN_NAV_GROUPS, MORE_BUILTIN_KINDS_TITLE, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts, useContexts } from '../api/queries.js';
 import { favoriteContext, favoriteScopes, resolveFavorites } from '../favorite-scope.js';
 import { preferVersion, preferredKind } from '../kind-versions.js';
@@ -46,6 +46,7 @@ import { useNavigationStore } from '../state/navigation.js';
 import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
+import { moreBuiltinKinds } from './more-builtin-kinds.js';
 import { TruncationTooltip } from '../components/truncation.js';
 
 const WIDTH = layout.navDrawerWidth;
@@ -436,7 +437,14 @@ function GroupHeader({
           </Box>
         ) : undefined
       }
-      sx={{ mt: 1.25, '&:hover .fav-star': { opacity: 1 }, '& .MuiListItemSecondaryAction-root': { right: 4 } }}
+      sx={{
+        mt: 1.25,
+        '&:hover .fav-star': { opacity: 1 },
+        '& .MuiListItemSecondaryAction-root': { right: 4 },
+        // The star alone needs less than the list's default 48px reserve;
+        // the spare width keeps longer titles on one line.
+        '& > .MuiListItemButton-root': favorite && !favoriteAction ? { pr: '36px' } : undefined,
+      }}
     >
       <ListItemButton
         dense
@@ -806,7 +814,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // Favorited categories ('fav:<title>') start collapsed so they show as a
   // single entry rather than flooding Favorites with every kind.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const set = new Set<string>(['Custom Resources']);
+    const set = new Set<string>(['Custom Resources', MORE_BUILTIN_KINDS_TITLE]);
     for (const fav of useNavigationStore.getState().favorites) {
       if (fav.id.startsWith('category:')) set.add(`fav:${fav.title}`);
     }
@@ -872,6 +880,8 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [apiResources]);
   const customNav = useMemo(() => buildCustomNav(customKinds), [customKinds]);
+  // Served built-in kinds without a fixed group (Leases, PriorityClasses, ...).
+  const moreKinds = useMemo(() => moreBuiltinKinds(apiResources?.resources ?? []), [apiResources]);
 
   // Kinds belonging to each favoritable category, used both to expand a
   // favorited category inline and to recognize its entries during tab changes.
@@ -887,8 +897,12 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       'Custom Resources',
       customKinds.flatMap(([, kinds]) => kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind }))),
     );
+    map.set(
+      MORE_BUILTIN_KINDS_TITLE,
+      moreKinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
+    );
     return map;
-  }, [customKinds]);
+  }, [customKinds, moreKinds]);
 
   // Tab switches restore pathname + search, but not the transient router state
   // attached to the original favorite click. Prefer any matching entry that is
@@ -920,6 +934,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       for (const k of group.kinds) map.set(kindPath(k.group, k.version, k.plural), [group.title]);
     }
     map.set(CRD_LIST_PATH, ['Custom Resources']);
+    for (const k of moreKinds) map.set(kindPath(k.group, k.version, k.plural), [MORE_BUILTIN_KINDS_TITLE]);
     for (const node of customNav) {
       const nodeKey = `${CUSTOM_GROUP_PREFIX}${node.label}`;
       for (const k of node.kinds) map.set(kindPath(k.group, k.version, k.plural), ['Custom Resources', nodeKey]);
@@ -930,7 +945,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       }
     }
     return map;
-  }, [customNav]);
+  }, [customNav, moreKinds]);
 
   const listRef = useRef<HTMLUListElement | null>(null);
   // Bring the active entry into view. A just-expanded Collapse animates open,
@@ -1091,6 +1106,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         children
       );
 
+    const moreVisible = moreKinds.filter((k) => matches(pluralLabel(k.kind)) || matches(k.kind));
     const railHidden = !overlay && hidden;
     return (
       <Drawer
@@ -1266,6 +1282,27 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               </Box>
             );
           })}
+          {moreVisible.length > 0 && (
+            <Box>
+              <GroupHeader
+                title={MORE_BUILTIN_KINDS_TITLE}
+                icon={GROUP_ICONS[MORE_BUILTIN_KINDS_TITLE]}
+                open={isOpen(MORE_BUILTIN_KINDS_TITLE)}
+                onClick={() => toggleGroup(MORE_BUILTIN_KINDS_TITLE)}
+                favorite={{ active: isFav(`category:${MORE_BUILTIN_KINDS_TITLE}`), onToggle: () => toggleCategory(MORE_BUILTIN_KINDS_TITLE) }}
+              />
+              <Collapse unmountOnExit in={isOpen(MORE_BUILTIN_KINDS_TITLE)}>
+                {moreVisible.map((k) => (
+                  <NavEntry
+                    key={`${k.group}/${k.plural}`}
+                    to={kindPath(k.group, k.version, k.plural)}
+                    label={pluralLabel(k.kind)}
+                    favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
+                  />
+                ))}
+              </Collapse>
+            </Box>
+          )}
           {customKinds.length > 0 && (
             <>
               <GroupHeader
@@ -1368,7 +1405,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       </Drawer>
     );
   }, [pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
-    favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, apiResources, contexts, selected,
+    favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, moreKinds, apiResources, contexts, selected,
     hotkeyByFavorite, activeFavoriteEntry, draggingFavoriteId, favoriteDropTarget, scopeMenu,
     addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews]);
 });

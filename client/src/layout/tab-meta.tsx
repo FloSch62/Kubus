@@ -14,7 +14,8 @@ import HubOutlinedIcon from '@mui/icons-material/HubOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
-import { BUILTIN_NAV_GROUPS, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
+import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
+import { BUILTIN_NAV_GROUPS, MORE_BUILTIN_KINDS_TITLE, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { parseSide } from '../diff-state.js';
 
 /** Sidebar/tab icons per builtin nav group (shared by NavDrawer and TabsBar). */
@@ -25,6 +26,7 @@ export const GROUP_ICONS: Record<string, React.ReactElement> = {
   Storage: <StorageOutlinedIcon />,
   Cluster: <HubOutlinedIcon />,
   'Access Control': <AdminPanelSettingsOutlinedIcon />,
+  [MORE_BUILTIN_KINDS_TITLE]: <CategoryOutlinedIcon />,
 };
 
 const STATIC_PAGES: Record<string, { title: string; icon: React.ReactElement }> = {
@@ -68,10 +70,12 @@ export function tabMeta(path: string, discovered?: ResourceKindInfo[]): { title:
     const [, , pathGroup = 'core', version = '', plural = ''] = pathname.split('/');
     const group = groupFromPath(pathGroup);
     const builtin = gvkForResource(group, version, plural);
-    const custom = builtin ? undefined : discovered?.find((r) => r.group === group && r.plural === plural);
-    // Match NavDrawer labels: builtins pluralized, CRDs by kind name.
-    const title = builtin ? pluralLabel(builtin.kind) : (custom?.kind ?? (plural ? plural.charAt(0).toUpperCase() + plural.slice(1) : 'Resources'));
-    const groupTitle = NAV_GROUP_BY_RESOURCE.get(`${group}/${plural}`);
+    const found = builtin ? undefined : discovered?.find((r) => r.group === group && r.plural === plural);
+    // Match NavDrawer labels: builtins pluralized (including the discovered
+    // "More built-in kinds"), CRDs by kind name.
+    const discoveredLabel = found && (found.custom ? found.kind : pluralLabel(found.kind));
+    const title = builtin ? pluralLabel(builtin.kind) : (discoveredLabel ?? (plural ? plural.charAt(0).toUpperCase() + plural.slice(1) : 'Resources'));
+    const groupTitle = NAV_GROUP_BY_RESOURCE.get(`${group}/${plural}`) ?? (found && !found.custom ? MORE_BUILTIN_KINDS_TITLE : undefined);
     const icon = (groupTitle && GROUP_ICONS[groupTitle]) || <ExtensionOutlinedIcon />;
     return { title, icon };
   }

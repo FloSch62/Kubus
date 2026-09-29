@@ -100,6 +100,29 @@ const EXTRA_BUILTIN_KINDS: GVK[] = [
   { group: 'apiextensions.k8s.io', version: 'v1', plural: 'customresourcedefinitions', kind: 'CustomResourceDefinition', namespaced: false },
 ];
 
+/** Nav group listing the served built-in kinds that have no hand-placed entry above. */
+export const MORE_BUILTIN_KINDS_TITLE = 'More built-in kinds';
+
+const NAV_BUILTIN_RESOURCES = new Set(
+  [...BUILTIN_NAV_GROUPS.flatMap((navGroup) => navGroup.kinds), ...EXTRA_BUILTIN_KINDS].map((gvk) => `${gvk.group}/${gvk.plural}`),
+);
+
+/**
+ * Built-in resources that repeat another nav entry under a different API
+ * group: events.k8s.io serves the same objects as core Events.
+ */
+const DUPLICATE_BUILTIN_RESOURCES = new Set(['events.k8s.io/events']);
+
+/**
+ * Whether a discovered built-in resource (any version) belongs in the
+ * generated "More built-in kinds" group: it has no place in the fixed groups
+ * and is not a second view of one that does.
+ */
+export function isMoreBuiltinResource(group: string, plural: string): boolean {
+  const key = `${group}/${plural}`;
+  return !NAV_BUILTIN_RESOURCES.has(key) && !DUPLICATE_BUILTIN_RESOURCES.has(key);
+}
+
 /** Semantic column ids per kind; the client maps these to renderers. */
 export const KIND_COLUMNS: Record<string, string[]> = {
   Pod: ['name', 'namespace', 'cluster', 'ready', 'podStatus', 'restarts', 'cpu', 'memory', 'node', 'age'],

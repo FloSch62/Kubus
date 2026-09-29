@@ -210,6 +210,43 @@ describe('NavDrawer', () => {
     expect(screen.getAllByText('Pods').length).toBeGreaterThan(0);
   });
 
+  it('lists served built-in kinds without a fixed group under a collapsed More built-in kinds group', async () => {
+    const watch = ['get', 'list', 'watch'];
+    queryMocks.resources = [
+      ...customResources,
+      { group: 'coordination.k8s.io', version: 'v1', plural: 'leases', kind: 'Lease', namespaced: true, verbs: watch, custom: false },
+      { group: 'scheduling.k8s.io', version: 'v1', plural: 'priorityclasses', kind: 'PriorityClass', namespaced: false, verbs: watch, custom: false },
+      { group: 'events.k8s.io', version: 'v1', plural: 'events', kind: 'Event', namespaced: true, verbs: watch, custom: false },
+      { group: 'metrics.k8s.io', version: 'v1beta1', plural: 'pods', kind: 'PodMetrics', namespaced: true, verbs: ['get', 'list'], custom: false },
+    ];
+    renderDrawer('/');
+    const header = screen.getByRole('button', { name: 'More built-in kinds' });
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Leases')).not.toBeInTheDocument();
+
+    // The nav filter finds them without opening the group first.
+    const filter = screen.getByPlaceholderText('Filter resources…');
+    fireEvent.change(filter, { target: { value: 'lease' } });
+    expect(await screen.findByRole('link', { name: 'Leases' })).toHaveAttribute('href', '/r/coordination.k8s.io/v1/leases');
+    expect(screen.queryByText('PriorityClasses')).not.toBeInTheDocument();
+    fireEvent.change(filter, { target: { value: '' } });
+
+    fireEvent.click(header);
+    expect(await screen.findByText('PriorityClasses')).toBeInTheDocument();
+    expect(screen.getByText('Leases')).toBeInTheDocument();
+    expect(screen.queryByText('PodMetrics')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Add favorite category More built-in kinds'));
+    expect(useNavigationStore.getState().favorites.some((favorite) => favorite.id === 'category:More built-in kinds')).toBe(true);
+  });
+
+  it('opens the More built-in kinds group when a kind in it is the current page', async () => {
+    queryMocks.resources = [
+      { group: 'coordination.k8s.io', version: 'v1', plural: 'leases', kind: 'Lease', namespaced: true, verbs: ['list', 'watch'], custom: false },
+    ];
+    renderDrawer('/r/coordination.k8s.io/v1/leases');
+    expect(await screen.findByRole('link', { name: 'Leases' })).toHaveAttribute('aria-current', 'page');
+  });
+
   it('supports overlay close behavior and the hidden permanent rail', async () => {
     const overlay = renderDrawer('/events', { overlay: true, open: true });
     await waitFor(() => expect(overlay.onClose).toHaveBeenCalled());
