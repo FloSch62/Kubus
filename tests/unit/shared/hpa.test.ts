@@ -51,11 +51,79 @@ describe('hpaMetrics', () => {
     expect(inTargetUnit('14360Ki', '64Mi')).toBe('14Mi');
     expect(inTargetUnit('0', '64Mi')).toBe('0Mi');
     expect(inTargetUnit('n/a', '64Mi')).toBe('n/a');
+    expect(inTargetUnit('1e999', '1Gi')).toBe('1e999');
     const external = hpa(
       { metrics: [{ type: 'External', external: { metric: { name: 'queue_depth' }, target: { type: 'Value', value: '10' } } }] },
       { currentMetrics: [{ type: 'External', external: { metric: { name: 'queue_depth' }, current: { value: '4m' } } }] },
     );
     expect(hpaMetricsSummary(external)).toBe('queue_depth 4m / 10');
+  });
+
+  it('matches Object metrics by the object they describe', () => {
+    const described = { kind: 'Ingress', name: 'main' };
+    const autoscaler = hpa(
+      { metrics: [{ type: 'Object', object: { metric: { name: 'hits' }, describedObject: described, target: { type: 'Value', value: '2k' } } }] },
+      {
+        currentMetrics: [
+          { type: 'Object', object: { metric: { name: 'hits' }, describedObject: { kind: 'Ingress', name: 'other' }, current: { value: '9k' } } },
+          { type: 'Object', object: { metric: { name: 'hits' }, describedObject: described, current: { value: '1500' } } },
+        ],
+      },
+    );
+    expect(hpaMetricsSummary(autoscaler)).toBe('hits 1.5k / 2k');
+  });
+
+  it('reads the current field that fits the target type', () => {
+    const autoscaler = hpa(
+      {
+        metrics: [
+          { type: 'External', external: { metric: { name: 'queue' }, target: { type: 'Value', averageValue: '5' } } },
+          { type: 'External', external: { metric: { name: 'lag' }, target: { type: 'Value', value: '10' } } },
+          { type: 'Pods', pods: { metric: { name: 'rps' }, target: { type: 'AverageValue', averageValue: '10' } } },
+          { type: 'Resource', resource: { name: 'cpu', target: { type: 'Utilization', averageUtilization: 60 } } },
+        ],
+      },
+      {
+        currentMetrics: [
+          { type: 'External', external: { metric: { name: 'queue' }, current: { averageValue: '3' } } },
+          { type: 'External', external: { metric: { name: 'lag' }, current: {} } },
+          { type: 'Pods', pods: { metric: { name: 'rps' }, current: { value: '8' } } },
+          // A utilization target has nothing to compare against a raw value.
+          { type: 'Resource', resource: { name: 'cpu', current: { averageValue: '100m' } } },
+        ],
+      },
+    );
+    expect(hpaMetrics(autoscaler)).toEqual([
+      { label: 'queue', current: '3', target: '5' },
+      { label: 'lag', current: undefined, target: '10' },
+      { label: 'rps', current: '8', target: '10' },
+      { label: 'cpu', current: undefined, target: '60%' },
+    ]);
+  });
+
+  it('fills gaps in incomplete entries and skips unknown metric types', () => {
+    const autoscaler = hpa(
+      {
+        metrics: [
+          { type: 'Resource', resource: {} },
+          { type: 'ContainerResource', containerResource: { target: { averageUtilization: 70 } } },
+          { type: 'Pods', pods: { target: { averageValue: '1Gi' } } },
+          { type: 'Object', object: { target: { type: 'Utilization' } } },
+          { type: 'External', external: { target: { type: 'AverageValue' } } },
+          { type: 'External', external: { target: { type: 'Value' } } },
+          { type: 'Custom' },
+        ],
+      },
+      { currentMetrics: [{ type: 'Custom' }] },
+    );
+    expect(hpaMetrics(autoscaler)).toEqual([
+      { label: 'resource', current: undefined, target: '?' },
+      { label: 'resource (?)', current: undefined, target: '70%' },
+      { label: 'pods metric', current: undefined, target: '1Gi' },
+      { label: 'object metric', current: undefined, target: '?%' },
+      { label: 'external metric', current: undefined, target: '?' },
+      { label: 'external metric', current: undefined, target: '?' },
+    ]);
   });
 
   it('reads the single CPU target of autoscaling/v1 objects', () => {
