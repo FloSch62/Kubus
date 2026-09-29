@@ -16,6 +16,7 @@ import { crdStatus, crdVersions, dataKeyCount, eventFields, hasRunningDebugConta
 import { cronHumanText, cronNextRun } from '../cron.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
+import { withoutCellCopy } from './CellCopy.js';
 import { statusTextColor } from '../theme.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
@@ -69,7 +70,8 @@ export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col
 }
 
 const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
-  signals: (opts) => ({
+  // The marker is an indicator, not a value: no copy button over it.
+  signals: (opts) => withoutCellCopy({
     field: SIGNALS_COLUMN_ID,
     headerName: '',
     description: 'Warning events and restarts in the last hour',
@@ -83,7 +85,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     // Sorting puts the noisiest objects first.
     valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name, obj(row).metadata.uid)),
     renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name, obj(params.row).metadata.uid)} />,
-  }),
+  } satisfies Col),
   labels: (opts) => ({
     field: 'labels',
     headerName: 'Labels',

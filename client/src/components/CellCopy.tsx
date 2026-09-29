@@ -207,6 +207,18 @@ function updateTruncationTitle(event: ReactMouseEvent<HTMLSpanElement>) {
   else element.removeAttribute('title');
 }
 
+// Travels with the column through spreads (withNaturalSort, stored widths),
+// unlike a WeakSet keyed on one column object.
+const NO_CELL_COPY = Symbol('kubus.noCellCopy');
+
+/**
+ * Opt a column out of the hover copy button and Ctrl/Cmd+C: its cells show an
+ * indicator (the warning marker), and the value behind it only sorts.
+ */
+export function withoutCellCopy<C extends object>(column: C): C {
+  return Object.assign(column, { [NO_CELL_COPY]: true });
+}
+
 /**
  * Wrap a column so every non-empty cell gets a hover copy button overlaid at
  * its right edge. Columns without a custom renderCell keep their default
@@ -214,6 +226,7 @@ function updateTruncationTitle(event: ReactMouseEvent<HTMLSpanElement>) {
  * copyCellGridSx). Requires copyCellGridSx on the grid's `sx`.
  */
 export function withCellCopy<R extends GridValidRowModel>(column: GridColDef<R>): GridColDef<R> {
+  if ((column as { [NO_CELL_COPY]?: boolean })[NO_CELL_COPY]) return { ...column, display: column.display ?? 'flex' };
   const original = column.renderCell;
   const align = column.align ?? (column.type === 'number' ? 'right' : 'left');
   return {
