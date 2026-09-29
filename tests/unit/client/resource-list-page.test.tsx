@@ -38,7 +38,7 @@ const fixtures = vi.hoisted(() => ({
   }) },
 }));
 
-const effects = vi.hoisted(() => ({ toast: vi.fn() }));
+const effects = vi.hoisted(() => ({ toast: vi.fn(), copy: vi.fn(async (_text: string) => true) }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useClusterSignals: () => ({ data: undefined }),
@@ -54,6 +54,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
 }));
 
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: effects.toast }));
+vi.mock('../../../client/src/clipboard.js', () => ({ copyToClipboard: effects.copy }));
 vi.mock('../../../client/src/components/RowActions.js', () => ({
   isLogTargetKind: (kind: string) => ['Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Service'].includes(kind),
   RowLogsButton: ({ target }: { target: { obj: KubeObject } }) => <button>Quick logs {target.obj.metadata.name}</button>,
@@ -210,7 +211,9 @@ beforeEach(() => {
     sortModels: {},
     columnVisibility: {},
     columnWidths: {},
+    labelColumns: {},
   });
+  effects.copy.mockClear();
   useNavigationStore.setState({ favorites: [], savedViews: [] });
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
@@ -331,6 +334,37 @@ describe('ResourceListPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument();
     expect(screen.getByTestId('table-state')).toHaveTextContent('"selected":["web-b"]');
+  });
+
+  it('offers Scale and Copy rows for checked Deployments, with label columns in the copy', async () => {
+    const deployment = resource('apps', 'v1', 'deployments', 'Deployment');
+    fixtures.resources = [deployment];
+    fixtures.byContext = { dev: [deployment], prod: [deployment] };
+    fixtures.rows = [row('web-10', 'dev', 'team-a', 'Deployment'), row('web-2', 'prod', 'team-b', 'Deployment')];
+    useUiPrefsStore.setState({ labelColumns: { '/r/apps/v1/deployments': [{ source: 'label', key: 'tier' }] } });
+    renderPage('/r/apps/v1/deployments');
+    expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a column for any label or annotation key' })).toHaveTextContent('Columns (1)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.getByRole('button', { name: 'Scale (2)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy rows (2)' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As CSV/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalled());
+    const [header, first] = effects.copy.mock.calls[0]![0].split('\n');
+    expect(header).toBe('Name,Namespace,Cluster,Ready,Up-to-date,Available,tier,Labels,CPU,Memory,Age');
+    expect(first).toMatch(/^web-10,team-a,dev,.*,frontend,app=web tier=frontend,/);
+    expect(effects.toast).toHaveBeenCalledWith('success', 'Copied 2 rows × 11 columns as CSV');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+    expect(useNavigationStore.getState().savedViews[0]?.grid?.labelColumns).toEqual([{ source: 'label', key: 'tier' }]);
+  });
+
+  it('keeps bulk scale to Deployments and StatefulSets', () => {
+    renderPage('/r/core/v1/pods');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy rows (2)' })).toBeInTheDocument();
   });
 
   it('builds custom printer columns and links the API drawer to its CRD', () => {

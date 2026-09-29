@@ -15,6 +15,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
@@ -41,6 +42,11 @@ import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
 import { diffSideFor, openCompare } from '../compare-link.js';
+import { BulkScaleDialog } from '../components/BulkScaleDialog.js';
+import { BULK_SCALE_KINDS } from '../components/bulk-scale.js';
+import { CopyRowsButton } from '../components/CopyRowsButton.js';
+import { LabelColumnsButton } from '../components/LabelColumnsButton.js';
+import { buildLabelColumns, insertLabelColumns } from '../components/label-columns.js';
 
 // Wide, rarely-needed builtin columns start hidden; the column menu re-enables
 // them. Labels carry no signal on CRDs, so the Kind/Group/Scope columns take
@@ -442,7 +448,7 @@ export function ResourceListPage() {
   const addSavedView = useNavigationStore((s) => s.addSavedView);
   const del = useDeleteResource();
   const rolloutRestart = useRolloutRestart();
-  const [bulkDialog, setBulkDialog] = useState<'delete' | 'restart' | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<'delete' | 'restart' | 'scale' | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
@@ -451,6 +457,7 @@ export function ResourceListPage() {
   useEffect(() => setSelectedRows([]), [group, version, plural]);
 
   const bulkRestartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
+  const bulkScalable = !!behaviorKind && BULK_SCALE_KINDS.has(behaviorKind);
   const bulkProtected = selectedRows.some((r) => contextSettings[r.ctx]?.protected ?? protectByDefault);
   const runBulk = async (
     verb: string,
@@ -617,7 +624,11 @@ export function ResourceListPage() {
     [signalsLookup, behaviorKind],
   );
 
-  const columns = useMemo(() => {
+  // Label and annotation columns the user added to this list.
+  const labelColumnSpecs = useUiPrefsStore((s) => s.labelColumns[kindPath]);
+  const labelColumns = useMemo(() => buildLabelColumns(labelColumnSpecs ?? []), [labelColumnSpecs]);
+
+  const gridColumns = useMemo(() => {
     if (!metricColumns.length && !signalColumn) return staticColumns;
     const merged = [...staticColumns];
     if (signalColumn) {
@@ -642,6 +653,7 @@ export function ResourceListPage() {
     }
     return merged;
   }, [staticColumns, metricColumns, columnIds, signalColumn]);
+  const columns = useMemo(() => insertLabelColumns(gridColumns, labelColumns), [gridColumns, labelColumns]);
   const hiddenFields = useMemo(
     () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
     [isCustomKind, printerCols, behaviorKind],
@@ -705,6 +717,7 @@ export function ResourceListPage() {
         sort: prefs.sortModels[kindPath],
         columnVisibility: prefs.columnVisibility[kindPath],
         columnWidths: prefs.columnWidths[kindPath],
+        labelColumns: prefs.labelColumns[kindPath] ?? [],
       },
     });
   };
@@ -778,6 +791,7 @@ export function ResourceListPage() {
         activeRowId={activeRowId}
         toolbar={
           <>
+            <LabelColumnsButton tableId={kindPath} rows={list.rows} />
             <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>
               Save view
             </Button>
@@ -823,11 +837,17 @@ export function ResourceListPage() {
                 Compare 2
               </Button>
             )}
+            {selectedRows.length > 0 && bulkScalable && (
+              <Button startIcon={<OpenInFullIcon />} variant="outlined" onClick={() => setBulkDialog('scale')}>
+                Scale ({selectedRows.length})
+              </Button>
+            )}
             {selectedRows.length > 0 && bulkRestartable && (
               <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
                 Restart ({selectedRows.length})
               </Button>
             )}
+            {selectedRows.length > 0 && <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} />}
             {selectedRows.length > 0 && (
               <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
                 Delete ({selectedRows.length})
@@ -884,6 +904,9 @@ export function ResourceListPage() {
           )
         }
       />
+      {bulkDialog === 'scale' && (
+        <BulkScaleDialog rows={selectedRows} kind={kind} group={group} version={version} plural={plural} title={resourceTitle} onClose={() => setBulkDialog(null)} />
+      )}
       {contextAction && (
         <RowActionMenu
           key={contextAction.target.obj.metadata.uid}

@@ -27,12 +27,24 @@ Each built-in kind has hand-picked columns. Pods show readiness, status, restart
 memory, node and age; Deployments show ready/up-to-date/available; Services show type and
 ports. When several clusters are selected, a **Cluster** column is added automatically.
 
-- **Sort** by clicking a column header.
+- **Sort** by clicking a column header. Names sort the way you read them: `worker-2`
+  comes before `worker-10`, and a StatefulSet's pods line up as `web-1`, `web-2`, ...,
+  `web-12`.
 - **Filter** with the search box. Plain text works, or start with `/` for
   [smart filters](smart-filters.md): structured clauses like
   `/status:crash ns:prod restarts>3`, with autocomplete.
 - **Labels** get their own column. Each row shows its first labels as chips with a
   `+N` overflow; hover to see them all, or click a chip to filter by that label.
+- **Add a column for any label or annotation.** Click **Columns** in the toolbar, pick
+  Label or Annotation, and choose a key. The picker suggests the keys present in the
+  list and shows how many rows carry each one, and you can type any other key too. The
+  new column shows that key's value per row, and you sort and filter it like any other
+  column. Kubus keeps it with the list's other column settings (widths, visibility, sort),
+  so it is still there after a reload, and a saved view brings it back. Remove it from
+  the same **Columns** menu.
+- **Copy a value** with the copy button that appears when you hover a cell, or focus a
+  cell and press ++ctrl+c++ (++cmd+c++ on macOS). The shortcut always copies that one
+  cell, even while rows are checked. To copy whole rows, use **Copy rows** (below).
 - **Secret values are redacted** by default. Kubus never shows secret data in a list.
   [Reveal them deliberately](production-guard.md#secrets-are-redacted-by-default) in the
   details drawer.
@@ -89,6 +101,17 @@ Every row has a **⋮ menu** with the actions that make sense for that kind: log
 scale, restart, port-forward, delete and more. That's covered in
 [Quick actions](quick-actions.md). To inspect instead, click the resource's **name** to
 open the [details drawer](resource-details.md).
+
+Tick the checkboxes to act on several rows at once. The toolbar then offers actions for
+the checked rows:
+
+- **Copy rows** puts the checked rows on the clipboard with the columns you see, header
+  included. Pick **TSV** to paste into a spreadsheet or **CSV** for a file. Values are
+  the raw data behind each cell, so ages come out as timestamps and memory in bytes.
+- **Scale** (Deployments and StatefulSets) sets one replica count on all of them. See
+  [scaling several workloads](quick-actions.md#scaling).
+- **Restart** (Deployments, StatefulSets, DaemonSets), **Logs** (Pods) and **Delete**
+  work the same way.
 
 ## See also
 

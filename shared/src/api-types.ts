@@ -376,6 +376,12 @@ export interface FavoriteItem {
   scopes?: string[];
 }
 
+/** A list column showing one label or annotation value per row. */
+export interface LabelColumnSpec {
+  source: 'label' | 'annotation';
+  key: string;
+}
+
 /** Grid state snapshotted with a saved view so restoring brings back the exact table. */
 export interface SavedViewGridState {
   /** Global namespace filter at save time (empty = all namespaces). */
@@ -383,6 +389,8 @@ export interface SavedViewGridState {
   sort?: ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
   columnVisibility?: Record<string, boolean>;
   columnWidths?: Record<string, number>;
+  /** Label and annotation columns; absent on views saved before they existed (those keep the current ones). */
+  labelColumns?: LabelColumnSpec[];
 }
 
 export interface SavedView {
