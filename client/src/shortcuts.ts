@@ -153,7 +153,7 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
   {
     title: 'Manifest & YAML',
     shortcuts: [
-      { combos: [[MOD, 'S']], description: 'Review & apply the staged edits (Manifest tab)' },
+      { combos: [[MOD, 'S']], description: 'Review & apply the staged edits (Manifest tab) · in the review: apply' },
       { combos: [[MOD, 'Enter']], description: 'Create (in a create dialog, after its dry-run)' },
     ],
   },

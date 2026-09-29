@@ -27,6 +27,7 @@ import { AddFieldPopover, ManifestTree, type EditRequest, type ExpandCommand } f
 import { ReviewApplyDialog, type ReviewTarget } from './ReviewApplyDialog.js';
 import { LiveChangeAlert } from './LiveChangeAlert.js';
 import { isSaveChord } from '../../editor-keys.js';
+import { isTextEntryTarget } from '../../text-entry.js';
 import { HOTKEY_MOD_LABEL } from '../../platform.js';
 import { CountPill, Section } from './Section.js';
 import {
@@ -44,10 +45,13 @@ import {
   lockReason,
   manifestGroups,
   pointerOf,
+  deepEqual,
   rebaseEdits,
   resolvePathByIdentity,
+  sameBeyondStatus,
   setAt,
   splitApiVersion,
+  withLatestVersion,
   type FilterResult,
   type JsonPath,
   type ResourceLink,
@@ -188,7 +192,11 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const [forcedOpen, setForcedOpen] = useState<Record<string, number>>({});
   const [confirmReset, setConfirmReset] = useState(false);
   const [review, setReview] = useState(false);
-  const [rebaseOnRefresh, setRebaseOnRefresh] = useState(false);
+  // Mod+S while an inline value editor is open: review once its edit is in.
+  const [reviewRequested, setReviewRequested] = useState(false);
+  // The rv the live object had when an apply hit a 409 (null: none pending).
+  const [conflictRv, setConflictRv] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const flash = useFlash(current, !draft);
   const reference = useOpenReference(sel.ctx);
   const lock = useCallback((path: JsonPath) => lockReason(path, { secretRedacted }), [secretRedacted]);
@@ -225,22 +233,54 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   );
 
   // The server moved on while a draft is open: offer to replay the edits onto
-  // the latest snapshot (automatically after a 409 refreshed it).
-  const serverMoved = !!draft && live.metadata.resourceVersion !== draft.base.metadata.resourceVersion;
-  const rebase = useCallback(() => {
-    if (!draft) return;
+  // the latest snapshot (automatically after a 409 refreshed it). Status-only
+  // drift does not count: the apply writes with the latest resourceVersion.
+  const serverMoved = !!draft && !sameBeyondStatus(draft.base, liveBase);
+  // Returns whether any edit is left after the replay.
+  const rebase = useCallback((): boolean => {
+    if (!draft) return false;
     const { value, skipped } = rebaseEdits(draft.base, draft.obj, liveBase);
     onDraftChange(value, liveBase);
     if (skipped.length) {
       showToast('warning', `${skipped.length} ${skipped.length === 1 ? 'edit' : 'edits'} could not be replayed: the list item no longer exists (${skipped.map((c) => displayPath(c.path)).join(', ')}).`);
     }
+    return !deepEqual(value, liveBase);
   }, [draft, liveBase, onDraftChange]);
+  // While the review is open, or after an apply hit a 409, edits are replayed
+  // as soon as the object moves beyond status, so the review always shows
+  // what Apply writes. Status drift needs nothing: the review writes with the
+  // latest resourceVersion.
+  const liveRv = live.metadata.resourceVersion;
+  const reviewing = review && !!draft && !readOnly;
   useEffect(() => {
-    if (!rebaseOnRefresh || !serverMoved) return;
-    setRebaseOnRefresh(false);
-    rebase();
-    showToast('info', 'Your edits were replayed onto the latest version — review and apply again.');
-  }, [rebaseOnRefresh, serverMoved, rebase]);
+    const conflicted = conflictRv !== null;
+    if (!conflicted && !reviewing) return;
+    if (serverMoved) {
+      setConflictRv(null);
+      showToast(
+        'info',
+        rebase()
+          ? 'The object changed on the server. Your edits were replayed onto the latest version; review and apply again.'
+          : 'The object changed on the server and already holds your edits. Nothing is left to apply.',
+      );
+    } else if (conflicted && (liveRv ?? '') !== conflictRv) {
+      setConflictRv(null);
+    }
+  }, [conflictRv, reviewing, serverMoved, liveRv, rebase]);
+  // The review follows the draft: once the draft is gone (applied, reset, or
+  // rebased back onto its base) the flag goes too, so the dialog cannot
+  // reopen on the next edit.
+  useEffect(() => {
+    if (review && (!draft || readOnly)) setReview(false);
+  }, [review, draft, readOnly]);
+  useEffect(() => {
+    if (!reviewRequested) return;
+    setReviewRequested(false);
+    // A value that did not parse keeps its editor open, showing the error.
+    const invalid = rootRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    if (invalid) invalid.focus();
+    else if (draft) setReview(true);
+  }, [reviewRequested, draft]);
 
   const groups = useMemo(() => manifestGroups(current), [current]);
   const sections = groups.filter((group) => isContainer(current[group.key]) && (!filter || hasMatchUnder(filter, group.key)));
@@ -248,7 +288,7 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   const scalars = useMemo(() => pick(shown, scalarKeys), [shown, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
   const scalarBase = useMemo(() => pick(shownBase, scalarKeys), [shownBase, scalarKeys.join('\0')]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the joined key list
   const showScalars = scalarKeys.length > 0 && (!filter || scalarKeys.some((key) => hasMatchUnder(filter, key)));
-  const yamlBody = useMemo(() => (draft ? dumpManifest(current) : ''), [draft, current]);
+  const yamlBody = useMemo(() => (draft ? dumpManifest(withLatestVersion(current, base, liveBase)) : ''), [draft, current, base, liveBase]);
   const diffSides = useMemo(
     () => (draft ? { left: dumpManifest(shownBase), right: dumpManifest(shown) } : undefined),
     [draft, shownBase, shown],
@@ -285,12 +325,22 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
 
   return (
     <Box
+      ref={rootRef}
       sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       onKeyDown={(e) => {
         // Mod+S reviews the staged edits, the same step as in the YAML view.
         if (!isSaveChord(e)) return;
         e.preventDefault();
-        if (draft && !readOnly) setReview(true);
+        if (readOnly) return;
+        // An open inline value editor commits on blur: commit it first, and
+        // review once its edit has reached the draft.
+        const target = e.target as HTMLElement;
+        if (isTextEntryTarget(target) && rootRef.current?.contains(target)) {
+          target.blur();
+          setReviewRequested(true);
+        } else if (draft) {
+          setReview(true);
+        }
       }}
     >
       <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', rowGap: 0.5 }}>
@@ -478,7 +528,7 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
             onApplied(updated);
           }}
           onConflict={() => {
-            setRebaseOnRefresh(true);
+            setConflictRv(liveRv ?? '');
             onConflict();
           }}
         />

@@ -263,8 +263,11 @@ The editor works on a copy of the object taken when you opened it, so it never r
 under your cursor. Kubus keeps watching the live object, though. When it changes on the
 server, a banner says so right away: **Reload** loads the new version into a clean editor,
 and **Rebase edits** replays your edits onto it. The rebased text is serialized fresh, so
-it keeps every edit but not your formatting or comments. Status updates alone don't
-interrupt a clean editor, since controllers rewrite status all the time.
+it keeps every edit but not your formatting or comments.
+
+Status updates don't count as changes, with or without edits, since controllers rewrite
+status all the time. Kubus writes your edits against the latest version in that case, so
+a Deployment in the middle of a rollout never makes you rebase.
 
 ### Conflict detection
 
@@ -273,7 +276,9 @@ it. The apply is rejected, you're shown the conflict, the view refreshes to the 
 state, and you can re-apply your change against it. No silent overwrites. In the tree and
 the YAML view alike, a banner offers to **rebase** your edits onto the refreshed object as
 soon as it changes, so you keep them instead of starting over, usually before you ever
-reach **Apply**.
+reach **Apply**. While **Review & apply** is open, the replay happens on its own and the
+diff and dry-run follow. If the server already holds your edits, the review closes and
+tells you nothing is left to apply.
 
 !!! warning "Edits are real"
 

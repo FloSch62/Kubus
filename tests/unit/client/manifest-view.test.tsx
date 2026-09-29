@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import { ManifestView } from '../../../client/src/components/detail/ManifestView';
@@ -233,6 +234,114 @@ describe('ManifestView', () => {
     renderView(live, { draft: draftFor(live, obj) });
     fireEvent.keyDown(screen.getByRole('button', { name: 'Expand all' }), { key: 's', metaKey: true });
     expect(within(screen.getByRole('dialog')).getByTestId('diff-right')).toHaveTextContent('replicas: 3');
+  });
+
+  it('commits an open inline edit on Mod+S and reviews it, but not a value that does not parse', async () => {
+    const live = deployment();
+    function Stateful() {
+      const [draft, setDraft] = useState<ReturnType<typeof draftFor>>();
+      return (
+        <ManifestView
+          sel={sel}
+          live={live}
+          draft={draft}
+          onDraftChange={(obj, base) => setDraft(obj ? { selKey: 'k', base, baseText: dumpManifest(base), obj, text: '', mode: 'tree' } : undefined)}
+          onApplied={vi.fn()}
+          onConflict={vi.fn()}
+        />
+      );
+    }
+    render(<Stateful />);
+    fireEvent.click(within(row('replicas')).getByText('2'));
+    const input = screen.getByRole('textbox', { name: 'Value' });
+    fireEvent.change(input, { target: { value: 'many' } });
+    act(() => input.focus());
+    expect(fireEvent.keyDown(input, { key: 's', ctrlKey: true })).toBe(false);
+    expect(screen.getByText('Enter a whole number.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(input));
+
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.keyDown(input, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByTestId('diff-right')).toHaveTextContent('replicas: 5'));
+  });
+
+  it('treats status-only drift as no conflict and writes with the latest resourceVersion', () => {
+    const live = deployment();
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as Record<string, unknown>).replicas = 3;
+    const drifted = deployment({ metadata: { ...live.metadata, resourceVersion: '7' }, status: { readyReplicas: 1 } });
+    renderView(drifted, { draft: draftFor(live, obj) });
+    expect(screen.queryByText(/changed on the server while you were editing/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+    const body = (queries.dryRunMutate.mock.lastCall![0] as { yamlBody: string }).yamlBody;
+    expect(body).toContain("resourceVersion: '7'");
+    expect(body).toContain('replicas: 3');
+    expect(body).toContain('readyReplicas: 1');
+    // The diff still shows only the edit.
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('diff-left')).toHaveTextContent("resourceVersion: '1'");
+    expect(within(dialog).getByTestId('diff-right')).toHaveTextContent("resourceVersion: '1'");
+  });
+
+  it('drops the review with its draft, so it cannot reopen on the next edit', () => {
+    const live = deployment();
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as Record<string, unknown>).replicas = 3;
+    const draft = draftFor(live, obj);
+    const props = { sel, live, onDraftChange: vi.fn(), onApplied: vi.fn(), onConflict: vi.fn() };
+    const view = render(<ManifestView {...props} draft={draft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    view.rerender(<ManifestView {...props} draft={undefined} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    view.rerender(<ManifestView {...props} draft={draft} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('replays the edits in an open review once the object moves beyond status', () => {
+    const live = deployment();
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as Record<string, unknown>).replicas = 3;
+    const draft = draftFor(live, obj);
+    const props = { sel, onDraftChange: vi.fn(), onApplied: vi.fn(), onConflict: vi.fn() };
+    const view = render(<ManifestView {...props} live={live} draft={draft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+
+    // Status churn alone leaves the draft alone.
+    const churned = deployment({ metadata: { ...live.metadata, resourceVersion: '5' }, status: { readyReplicas: 1 } });
+    view.rerender(<ManifestView {...props} live={churned} draft={draft} />);
+    expect(props.onDraftChange).not.toHaveBeenCalled();
+
+    const moved = deployment({ metadata: { ...live.metadata, resourceVersion: '6' }, spec: { ...(live.spec as object), paused: true } });
+    view.rerender(<ManifestView {...props} live={moved} draft={draft} />);
+    const [rebased, base] = props.onDraftChange.mock.lastCall!;
+    expect(rebased.spec).toMatchObject({ replicas: 3, paused: true });
+    expect(base.metadata.resourceVersion).toBe('6');
+    expect(effects.toast).toHaveBeenCalledWith('info', expect.stringContaining('replayed onto the latest version'));
+  });
+
+  it('applies from the review with Mod+S once the dry-run passes, and swallows it before', async () => {
+    const live = deployment();
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as Record<string, unknown>).replicas = 3;
+    queries.dryRunData = { ok: false, findings: [{ severity: 'error', message: 'rejected' }] };
+    const blocked = renderView(live, { draft: draftFor(live, obj) });
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+    expect(fireEvent.keyDown(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }), { key: 's', ctrlKey: true })).toBe(false);
+    expect(queries.applyMutateAsync).not.toHaveBeenCalled();
+    blocked.view.unmount();
+
+    queries.dryRunData = { ok: true, findings: [] };
+    const { onApplied } = renderView(live, { draft: draftFor(live, obj) });
+    fireEvent.click(screen.getByRole('button', { name: 'Review & apply' }));
+    expect(fireEvent.keyDown(within(screen.getByRole('dialog')).getByTestId('diff-right'), { key: 's', metaKey: true })).toBe(false);
+    await waitFor(() => expect(onApplied).toHaveBeenCalledOnce());
+    expect(queries.applyMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ yamlBody: expect.stringContaining('replicas: 3') }));
   });
 
   it('filters rows, expands and collapses everything, and copies values and paths', async () => {

@@ -47,7 +47,7 @@ import { customKindEntry } from './detail/kinds/registry.js';
 import { CountPill } from './detail/Section.js';
 import { openNamespaceOverview } from '../namespace-link.js';
 import { ManifestView } from './detail/ManifestView.js';
-import { displayPath, dumpManifest, parseYamlMapping } from './detail/manifest-tree.js';
+import { displayPath, dumpManifest, parseYamlMapping, yamlWithLatestVersion } from './detail/manifest-tree.js';
 import { LiveChangeAlert } from './detail/LiveChangeAlert.js';
 import { ReviewApplyDialog } from './detail/ReviewApplyDialog.js';
 import { rebaseYamlDraft, useYamlSnapshot } from './detail/yaml-live.js';
@@ -203,7 +203,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   // text, read-only, so nothing can be typed over placeholders.
   const yamlText = useMemo(() => (yamlBase && showYaml ? dumpManifest(secretMasked ? maskAll(yamlBase) : yamlBase) : ''), [yamlBase, showYaml, secretMasked]);
   const [yamlReview, setYamlReview] = useState(false);
-  const [yamlRebaseOnRefresh, setYamlRebaseOnRefresh] = useState(false);
+  // The rv the live object had when an apply hit a 409 (null: none pending).
+  const [yamlConflictRv, setYamlConflictRv] = useState<string | null>(null);
   // The editor measures dirtiness against the draft's base, and starts from
   // the carried-over text when the draft came from the tree.
   const yamlValue = draft ? (secretMasked ? dumpManifest(maskAll(draft.base)) : draft.baseText) : yamlText;
@@ -288,15 +289,16 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
 
   const refetchManifest = () => void (isSecret ? refetchRevealed() : refetch());
   // Replay YAML edits onto the object that moved on the server; a clean
-  // editor just loads the latest version.
-  const rebaseYaml = () => {
-    if (!liveBase) return;
+  // editor just loads the latest version. Returns false when the text does
+  // not parse and nothing was replayed.
+  const rebaseYaml = (): boolean => {
+    if (!liveBase) return false;
     const current = useDetailStore.getState().drafts[selKey];
     if (current?.mode === 'yaml') {
       const result = rebaseYamlDraft(current, liveBase);
       if (!result.ok) {
         setTabError(`The YAML does not parse, so your edits cannot be replayed yet. Fix it, then rebase again. ${result.error}`);
-        return;
+        return false;
       }
       setDraft(result.draft);
       if (result.skipped.length) {
@@ -304,16 +306,43 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
       }
     }
     yamlLive.pinTo(liveBase);
+    return true;
   };
   const rebaseYamlRef = useRef(rebaseYaml);
   rebaseYamlRef.current = rebaseYaml;
-  // An apply that hit a 409 refreshed the object: replay the edits as soon as it lands.
+  // The review follows the YAML draft: a draft that disappears (applied,
+  // reset, or rebased back onto its base) takes the review flag with it, so
+  // it cannot reopen on the next keystroke.
+  const yamlReviewOpen = yamlReview && showYaml && draft?.mode === 'yaml' && !secretMasked;
   useEffect(() => {
-    if (!yamlRebaseOnRefresh || !yamlLive.moved) return;
-    setYamlRebaseOnRefresh(false);
-    rebaseYamlRef.current();
-    showToast('info', 'Your edits were replayed onto the latest version. Review and apply again.');
-  }, [yamlRebaseOnRefresh, yamlLive.moved]);
+    if (yamlReview && !yamlReviewOpen) setYamlReview(false);
+  }, [yamlReview, yamlReviewOpen]);
+  // While the review is open, or after an apply hit a 409, edits are replayed
+  // as soon as the object moves beyond status, so the review always shows
+  // what Apply writes. Status drift needs nothing: the review writes with the
+  // latest resourceVersion.
+  const liveRv = liveBase?.metadata.resourceVersion;
+  useEffect(() => {
+    const conflicted = yamlConflictRv !== null;
+    if (!conflicted && !yamlReviewOpen) return;
+    if (yamlLive.moved) {
+      setYamlConflictRv(null);
+      const draftBefore = useDetailStore.getState().drafts[selKey];
+      if (!rebaseYamlRef.current() || !draftBefore) return;
+      showToast(
+        'info',
+        useDetailStore.getState().drafts[selKey]
+          ? 'The object changed on the server. Your edits were replayed onto the latest version; review and apply again.'
+          : 'The object changed on the server and already holds your edits. Nothing is left to apply.',
+      );
+    } else if (conflicted && (liveRv ?? '') !== yamlConflictRv) {
+      setYamlConflictRv(null);
+    }
+  }, [yamlConflictRv, yamlReviewOpen, yamlLive.moved, liveRv, selKey]);
+  const yamlReviewBody = useMemo(
+    () => (yamlReviewOpen && draft ? yamlWithLatestVersion(draft.text, draft.base, liveBase) : ''),
+    [yamlReviewOpen, draft, liveBase],
+  );
   const revealToggle = isSecret ? (
     <FormControlLabel
       control={<Switch size="small" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />}
@@ -546,7 +575,13 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                   if (!yamlBase || secretMasked) return;
                   setDraft({ selKey, base: draft?.base ?? yamlBase, baseText: draft?.baseText ?? yamlText, obj: draft?.obj ?? yamlBase, text, mode: 'yaml' });
                 }}
-                onReview={secretMasked ? undefined : () => setYamlReview(true)}
+                onReview={
+                  secretMasked
+                    ? undefined
+                    : () => {
+                        if (useDetailStore.getState().drafts[selKey]?.mode === 'yaml') setYamlReview(true);
+                      }
+                }
                 notice={yamlLive.moved && !objGone ? <LiveChangeAlert editing={!!draft} onAction={rebaseYaml} /> : undefined}
                 schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
                 toolbar={
@@ -562,22 +597,23 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 }
               />
             )}
-            {showYaml && yamlReview && draft?.mode === 'yaml' && !secretMasked && (
+            {yamlReviewOpen && draft && (
               <ReviewApplyDialog
                 sel={sel}
-                yamlBody={draft.text}
+                yamlBody={yamlReviewBody}
                 left={draft.baseText}
                 right={draft.text}
                 onClose={() => setYamlReview(false)}
-                onApplied={() => {
+                onApplied={(updated) => {
                   setYamlReview(false);
-                  yamlLive.afterApply(draft.base.metadata.resourceVersion);
+                  // The editor continues from the version the apply stored.
+                  yamlLive.afterApply(updated);
                   setDraft(undefined);
                   showToast('success', `${sel.kind} ${sel.name} updated`);
                   refetchManifest();
                 }}
                 onConflict={() => {
-                  setYamlRebaseOnRefresh(true);
+                  setYamlConflictRv(liveRv ?? '');
                   refetchManifest();
                 }}
               />

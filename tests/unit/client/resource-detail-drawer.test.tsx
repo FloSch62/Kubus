@@ -73,6 +73,7 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
       <textarea aria-label="YAML draft" value={draft ?? ''} readOnly />
       <button disabled={!onReview} onClick={() => onReview?.(draft ?? value)}>Review YAML mock</button>
       <button onClick={() => onChange?.('kind: [')}>Type broken YAML</button>
+      <button onClick={() => onChange?.(value.replace('hostname: orig', 'hostname: edited'))}>Edit hostname</button>
       <button onClick={() => onChange?.('kind: Pod\nmetadata:\n  name: pod-a\nspec:\n  hostname: edited\n')}>Type valid YAML</button>
     </div>
   ),
@@ -116,7 +117,7 @@ vi.mock('../../../client/src/components/detail/ReviewApplyDialog.js', () => ({
     <div>
       <output data-testid="review-body">{yamlBody}</output>
       <output data-testid="review-left">{left}</output>
-      <button onClick={() => onApplied({} as KubeObject)}>Applied review mock</button>
+      <button onClick={() => onApplied({ ...queries.current!, metadata: { ...queries.current!.metadata, resourceVersion: 'applied' } })}>Applied review mock</button>
       <button onClick={onConflict}>Conflict review mock</button>
       <button onClick={onClose}>Close review mock</button>
     </div>
@@ -457,6 +458,50 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText(/does not parse, so your edits cannot be replayed yet/)).toBeInTheDocument();
     expect(useDetailStore.getState().drafts[podKey]?.text).toBe('kind: [');
     expect(screen.getByRole('button', { name: 'Rebase edits' })).toBeInTheDocument();
+  });
+
+  it('never turns status-only drift into a conflict, and drops a review whose draft is gone', async () => {
+    const sel = selection('Pod');
+    const podKey = selKeyOf(sel);
+    const version = (rv: string, spec: Record<string, unknown>, status: Record<string, unknown>) =>
+      objectFor(sel, { spec, status, metadata: { ...objectFor(sel).metadata, resourceVersion: rv } });
+    const rerender = (view: ReturnType<typeof render>) => view.rerender(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    queries.current = version('1', { hostname: 'orig' }, { phase: 'Pending' });
+    const view = render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    showYaml();
+
+    // Review without a YAML draft (nothing typed, or the object still loading) stays closed, also later.
+    fireEvent.click(screen.getByRole('button', { name: 'Review YAML mock' }));
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+
+    // Status churns under the clean editor; the first edit starts from the
+    // older snapshot, yet nothing reads as a conflict and the review writes
+    // with the latest resourceVersion and status.
+    queries.current = version('2', { hostname: 'orig' }, { phase: 'Running' });
+    rerender(view);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit hostname' }));
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+    expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('1');
+    expect(screen.queryByText(/changed on the server/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review YAML mock' }));
+    const body = screen.getByTestId('review-body').textContent ?? '';
+    expect(body).toContain('hostname: edited');
+    expect(body).toContain("resourceVersion: '2'");
+    expect(body).toContain('phase: Running');
+    // The typed text itself is left alone.
+    expect(useDetailStore.getState().drafts[podKey]?.text).toContain("resourceVersion: '1'");
+
+    // A 409 whose rebase lands back on the base (the server already holds the
+    // edit) drops the draft, and the review goes with it: the next edit does
+    // not bring the dialog back by itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Conflict review mock' }));
+    queries.current = version('3', { hostname: 'edited' }, { phase: 'Running' });
+    rerender(view);
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]).toBeUndefined());
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    expect(useDetailStore.getState().drafts[podKey]).toBeDefined();
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
   });
 
   it('opens the Manifest tab with E and applies tab requests for its selection', () => {

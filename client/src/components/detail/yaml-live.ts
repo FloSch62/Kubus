@@ -1,28 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { KubeObject } from '@kubus/shared';
 import type { ManifestDraft } from '../../state/detail.js';
-import { deepEqual, dumpManifest, parseYamlMapping, rebaseEdits, type Change } from './manifest-tree.js';
-
-interface Pin {
-  selKey: string;
-  obj?: KubeObject;
-  /** After an apply: follow the live object until it moves past this version, then pin that. */
-  afterRv?: string;
-}
+import { dumpManifest, parseYamlMapping, rebaseEdits, sameBeyondStatus, type Change } from './manifest-tree.js';
 
 /**
  * The YAML view edits a frozen snapshot of the live object: an editor that
  * reloads under the cursor is unusable, and an undo would bring back stale
  * text. The object itself stays live, so a change on the server raises a
  * notice instead. The snapshot is taken when the view opens and moves on
- * Reload, on Rebase, and once an apply comes back from the server.
+ * Reload, on Rebase, and to the first live version after an apply (the
+ * apply's own response is not comparable: the server re-encodes it).
  *
- * With edits staged any new version counts (the apply would hit a 409); a
- * clean editor only flags changes beyond status, which controllers rewrite
- * all the time.
+ * Only drift beyond status counts, with or without edits: controllers
+ * rewrite status all the time, and the write carries the latest
+ * resourceVersion for such drift (yamlWithLatestVersion), so it never
+ * becomes a conflict.
  */
 export function useYamlSnapshot(selKey: string, active: boolean, live: KubeObject | undefined, draft: ManifestDraft | undefined) {
-  const [pin, setPin] = useState<Pin>();
+  const [pin, setPin] = useState<{ selKey: string; obj?: KubeObject; after?: { applied?: string; before?: string } }>();
   const own = pin?.selKey === selKey ? pin : undefined;
   useEffect(() => {
     if (!active) {
@@ -30,25 +25,22 @@ export function useYamlSnapshot(selKey: string, active: boolean, live: KubeObjec
       return;
     }
     if (!live || own?.obj) return;
-    if (own?.afterRv !== undefined && live.metadata.resourceVersion === own.afterRv) return;
+    // After an apply, wait for the applied version (or anything newer than
+    // what was live when it returned) instead of pinning the old one.
+    const rv = live.metadata.resourceVersion;
+    if (own?.after && rv !== own.after.applied && rv === own.after.before) return;
     setPin({ selKey, obj: live });
   }, [active, live, own, selKey]);
 
-  const moved =
-    active && !!live && (draft ? live.metadata.resourceVersion !== draft.base.metadata.resourceVersion : !!own?.obj && !sameBeyondStatus(own.obj, live));
+  const reference = draft?.base ?? own?.obj;
+  const moved = active && !!live && !!reference && !sameBeyondStatus(reference, live);
   const pinTo = useCallback((obj: KubeObject) => setPin({ selKey, obj }), [selKey]);
-  const afterApply = useCallback((appliedFrom: string | undefined) => setPin({ selKey, afterRv: appliedFrom }), [selKey]);
+  const liveRv = live?.metadata.resourceVersion;
+  const afterApply = useCallback(
+    (applied: KubeObject) => setPin({ selKey, after: { applied: applied.metadata.resourceVersion, before: liveRv } }),
+    [selKey, liveRv],
+  );
   return { snapshot: own?.obj ?? live, moved, pinTo, afterApply };
-}
-
-/** Equal apart from status and the bookkeeping that changes with every write. */
-function sameBeyondStatus(a: KubeObject, b: KubeObject): boolean {
-  if (a.metadata.resourceVersion === b.metadata.resourceVersion) return true;
-  const strip = ({ status: _status, metadata, ...rest }: KubeObject) => {
-    const { resourceVersion: _rv, generation: _generation, managedFields: _managed, ...meta } = metadata as KubeObject['metadata'] & { generation?: number; managedFields?: unknown };
-    return { ...rest, metadata: meta };
-  };
-  return deepEqual(strip(a), strip(b));
 }
 
 export type YamlRebase = { ok: true; draft: ManifestDraft; skipped: Change[] } | { ok: false; error: string };

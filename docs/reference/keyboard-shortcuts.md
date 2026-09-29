@@ -56,7 +56,7 @@ restart, node shell and scale to zero ask you to type the resource name first.
 
 | Shortcut | Action |
 | --- | --- |
-| ++ctrl+s++ / ++cmd+s++ | Open **Review & apply** for your staged edits, in the tree and the YAML view |
+| ++ctrl+s++ / ++cmd+s++ | Open **Review & apply** for your staged edits, in the tree and the YAML view. Inside the review, apply once the dry-run passes. An inline value you are still editing is committed first. |
 | ++ctrl+enter++ / ++cmd+enter++ | Create, in a create dialog. Edited YAML gets its server dry-run first, and any findings stop it so you can read them. |
 
 ## Bottom dock (logs & terminals)

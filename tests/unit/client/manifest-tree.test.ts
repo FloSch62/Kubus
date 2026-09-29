@@ -28,6 +28,10 @@ import {
   collapsedPreview,
   compactType,
   normalizeDescription,
+  dumpManifest,
+  sameBeyondStatus,
+  withLatestVersion,
+  yamlWithLatestVersion,
 } from '../../../client/src/components/detail/manifest-tree';
 import { schemaAt, schemaDefinitions } from '../../../client/src/components/detail/schema-walk';
 
@@ -352,5 +356,52 @@ describe('references', () => {
     expect(referenceAt(['spec', 'template'], { kind: 'X' }, 'team-a')).toBeUndefined();
     expect(referenceAt(['spec', 'nodeName'], '', 'team-a')).toBeUndefined();
     expect(referenceAt(['spec', 0], 'x', undefined)).toBeUndefined();
+  });
+});
+
+describe('status-only drift', () => {
+  const base = {
+    apiVersion: 'apps/v1',
+    kind: 'Deployment',
+    metadata: { name: 'web', resourceVersion: '1', generation: 1 },
+    spec: { replicas: 2 },
+    status: { readyReplicas: 2 },
+  };
+  const statusMoved = { ...base, metadata: { ...base.metadata, resourceVersion: '5', generation: 1 }, status: { readyReplicas: 1 } };
+  const specMoved = { ...base, metadata: { ...base.metadata, resourceVersion: '6', generation: 2 }, spec: { replicas: 4 } };
+  const edited = { ...base, spec: { replicas: 3 } };
+
+  it('tells status churn from real changes', () => {
+    expect(sameBeyondStatus(base, base)).toBe(true);
+    expect(sameBeyondStatus(base, statusMoved)).toBe(true);
+    const withManagedFields = { ...statusMoved, metadata: { ...statusMoved.metadata, managedFields: [{ manager: 'x' }] } };
+    const relabeled = { ...statusMoved, metadata: { ...statusMoved.metadata, labels: { a: 'b' } } };
+    expect(sameBeyondStatus(base, withManagedFields)).toBe(true);
+    expect(sameBeyondStatus(base, specMoved)).toBe(false);
+    expect(sameBeyondStatus(base, relabeled)).toBe(false);
+  });
+
+  it('writes edits with the latest resourceVersion and status only across status drift', () => {
+    expect(withLatestVersion(edited, base, statusMoved)).toEqual({ ...edited, metadata: { ...base.metadata, resourceVersion: '5' }, status: { readyReplicas: 1 } });
+    // Real drift stays a conflict; so does a resourceVersion the edits changed.
+    expect(withLatestVersion(edited, base, specMoved)).toBe(edited);
+    const ownRv = { ...edited, metadata: { ...base.metadata, resourceVersion: '9' } };
+    expect(withLatestVersion(ownRv, base, statusMoved)).toBe(ownRv);
+    // Edited status is kept, and nothing changes without drift.
+    const ownStatus = { ...edited, status: { readyReplicas: 0 } };
+    expect(withLatestVersion(ownStatus, base, statusMoved).status).toEqual({ readyReplicas: 0 });
+    expect(withLatestVersion(edited, base, base)).toBe(edited);
+    expect(withLatestVersion(edited, base, undefined)).toBe(edited);
+  });
+
+  it('patches YAML text the same way and leaves unparsable text alone', () => {
+    const text = dumpManifest(edited);
+    expect(yamlWithLatestVersion(text, base, base)).toBe(text);
+    expect(yamlWithLatestVersion(text, base, specMoved)).toBe(text);
+    const patched = yamlWithLatestVersion(text, base, statusMoved);
+    expect(patched).toContain("resourceVersion: '5'");
+    expect(patched).toContain('replicas: 3');
+    expect(patched).toContain('readyReplicas: 1');
+    expect(yamlWithLatestVersion('spec: [', base, statusMoved)).toBe('spec: [');
   });
 });
