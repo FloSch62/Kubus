@@ -13,6 +13,7 @@ import { useWatchedList } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
 import { statusTextColor } from '../../theme.js';
 import { MiniFilterInput, matchesMiniFilter } from '../MiniFilterInput.js';
+import { naturalCompare } from '../natural-sort.js';
 import { StatusChip } from '../StatusChip.js';
 import { ControllerRevisions } from './ControllerRevisions.js';
 import { nodeCoverage, type DaemonPodSpec, type NodeCoverage, type Toleration } from './daemon-placement.js';
@@ -65,7 +66,7 @@ export function DaemonSetDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
   const pods = useMemo(() => {
     const owned = (podsQuery.data?.items ?? []).filter((pod) => controlledBy(pod, new Set([obj.metadata.uid])));
     const nodeOf = (pod: KubeObject) => (pod.spec as { nodeName?: string } | undefined)?.nodeName ?? '';
-    return owned.sort((a, b) => nodeOf(a).localeCompare(nodeOf(b)) || a.metadata.name.localeCompare(b.metadata.name));
+    return owned.sort((a, b) => naturalCompare(nodeOf(a), nodeOf(b)) || naturalCompare(a.metadata.name, b.metadata.name));
   }, [podsQuery.data?.items, obj.metadata.uid]);
 
   const desired = status?.desiredNumberScheduled ?? 0;

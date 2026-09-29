@@ -1,5 +1,6 @@
 import type { KubeObject } from '@kubus/shared';
 import { podSummary } from '../../kube-display.js';
+import { naturalCompare } from '../natural-sort.js';
 import { pinnedNode, podSchedulingIssue, type SchedulingIssue } from './scheduling.js';
 
 /**
@@ -169,5 +170,5 @@ export function nodeCoverage(nodes: KubeObject[], pods: KubeObject[], spec: Daem
     const isReady = summary.status === 'Running' && ready === total && total !== '0';
     return { node: name, state: isReady ? 'running' : 'not-ready', pod, podStatus: summary.status, exclusions };
   });
-  return out.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.node.localeCompare(b.node));
+  return out.sort((a, b) => ORDER[a.state] - ORDER[b.state] || naturalCompare(a.node, b.node));
 }
