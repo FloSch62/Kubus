@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from '../../../server/src/kube/cluster-manager.js';
-import { resolveTargetPods, selectorToString } from '../../../server/src/kube/target-pods.js';
+import { resolveTargetPods, selectorToString, targetPodMatcher } from '../../../server/src/kube/target-pods.js';
 
 /** Routes raw.json calls by path prefix; unmatched paths fail the test. */
 function fakeHandle(responses: Record<string, unknown>) {
@@ -224,5 +224,82 @@ describe('resolveTargetPods', () => {
 
     expect(await resolveTargetPods(handle, ds, 'DaemonSet', 'ops')).toEqual([]);
     expect(labelSelectorOf(calls[0])).toBe('env in (prod,staging),!canary');
+  });
+});
+
+describe('targetPodMatcher', () => {
+  function labelled(name: string, labels: Record<string, string>, owners?: Array<{ kind: string; uid: string; controller?: boolean; name?: string }>): KubeObject {
+    const base = pod(name, owners);
+    return {
+      ...base,
+      metadata: {
+        ...base.metadata,
+        labels,
+        ownerReferences: owners?.map((o) => ({ apiVersion: 'apps/v1', kind: o.kind, name: o.name ?? 'owner', uid: o.uid, controller: o.controller })),
+      },
+    };
+  }
+
+  it('recognises pods of a ReplicaSet a rollout creates later, asking about each ReplicaSet once', async () => {
+    const deployment: KubeObject = {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'web', namespace: 'ops', uid: 'deploy-uid' },
+      spec: { selector: { matchLabels: { app: 'web' } } },
+    };
+    const { calls, handle } = fakeHandle({
+      '/apis/apps/v1/namespaces/ops/replicasets/web-new': replicaSet('web-new', 'deploy-uid'),
+      '/apis/apps/v1/namespaces/ops/replicasets/other-1': replicaSet('other-1', 'other-deploy-uid'),
+    });
+    const matches = targetPodMatcher(handle, deployment, 'Deployment', 'ops');
+
+    const fresh = labelled('web-new-a', { app: 'web' }, [{ kind: 'ReplicaSet', uid: 'uid-web-new', name: 'web-new', controller: true }]);
+    expect(await matches(fresh)).toBe(true);
+    expect(await matches(labelled('web-new-b', { app: 'web' }, [{ kind: 'ReplicaSet', uid: 'uid-web-new', name: 'web-new', controller: true }]))).toBe(true);
+    expect(calls).toEqual(['/apis/apps/v1/namespaces/ops/replicasets/web-new']);
+
+    // Same labels, foreign owner; right owner, wrong labels; no controller.
+    expect(await matches(labelled('other-1-a', { app: 'web' }, [{ kind: 'ReplicaSet', uid: 'uid-other-1', name: 'other-1', controller: true }]))).toBe(false);
+    expect(await matches(labelled('web-new-c', { app: 'api' }, [{ kind: 'ReplicaSet', uid: 'uid-web-new', name: 'web-new', controller: true }]))).toBe(false);
+    expect(await matches(labelled('stray', { app: 'web' }))).toBe(false);
+    expect(await matches({ ...fresh, metadata: { ...fresh.metadata, namespace: 'elsewhere' } })).toBe(false);
+  });
+
+  it('asks again about a ReplicaSet whose lookup failed', async () => {
+    const deployment: KubeObject = { apiVersion: 'apps/v1', kind: 'Deployment', metadata: { name: 'web', namespace: 'ops', uid: 'deploy-uid' }, spec: { selector: { matchLabels: { app: 'web' } } } };
+    const { calls, handle } = fakeHandle({});
+    const matches = targetPodMatcher(handle, deployment, 'Deployment', 'ops');
+    const candidate = labelled('web-x-a', { app: 'web' }, [{ kind: 'ReplicaSet', uid: 'uid-web-x', name: 'web-x', controller: true }]);
+    expect(await matches(candidate)).toBe(false);
+    expect(await matches(candidate)).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('matches directly owned pods of StatefulSets, DaemonSets, ReplicaSets and Jobs', async () => {
+    const { handle } = fakeHandle({});
+    const sts: KubeObject = { apiVersion: 'apps/v1', kind: 'StatefulSet', metadata: { name: 'db', namespace: 'ops', uid: 'sts-uid' }, spec: { selector: { matchLabels: { app: 'db' } } } };
+    const matches = targetPodMatcher(handle, sts, 'StatefulSet', 'ops');
+    expect(await matches(labelled('db-0', { app: 'db' }, [{ kind: 'StatefulSet', uid: 'sts-uid', controller: true }]))).toBe(true);
+    expect(await matches(labelled('db-imposter', { app: 'db' }, [{ kind: 'StatefulSet', uid: 'other', controller: true }]))).toBe(false);
+
+    const job: KubeObject = { apiVersion: 'batch/v1', kind: 'Job', metadata: { name: 'report', namespace: 'ops', uid: 'job-uid' } };
+    const jobMatches = targetPodMatcher(handle, job, 'Job', 'ops');
+    expect(await jobMatches(labelled('report-a', {}, [{ kind: 'Job', uid: 'job-uid', controller: true }]))).toBe(true);
+    expect(await jobMatches(labelled('report-b', {}, [{ kind: 'Job', uid: 'job-uid', controller: false }]))).toBe(false);
+
+    const unselective: KubeObject = { apiVersion: 'apps/v1', kind: 'DaemonSet', metadata: { name: 'agent', namespace: 'ops', uid: 'ds-uid' }, spec: {} };
+    expect(await targetPodMatcher(handle, unselective, 'DaemonSet', 'ops')(labelled('agent-a', {}, [{ kind: 'DaemonSet', uid: 'ds-uid', controller: true }]))).toBe(false);
+  });
+
+  it('matches Service pods by selector alone, and a Pod by name', async () => {
+    const { handle } = fakeHandle({});
+    const service: KubeObject = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'web', namespace: 'ops', uid: 'svc-uid' }, spec: { selector: { app: 'web' } } };
+    const matches = targetPodMatcher(handle, service, 'Service', 'ops');
+    expect(await matches(labelled('anything', { app: 'web', extra: 'x' }))).toBe(true);
+    expect(await matches(labelled('api', { app: 'api' }))).toBe(false);
+    const headless: KubeObject = { ...service, spec: {} };
+    expect(await targetPodMatcher(handle, headless, 'Service', 'ops')(labelled('anything', { app: 'web' }))).toBe(false);
+    expect(await targetPodMatcher(handle, pod('api-0'), 'Pod', 'ops')(pod('api-0'))).toBe(true);
+    expect(await targetPodMatcher(handle, pod('api-0'), 'Pod', 'ops')(pod('api-1'))).toBe(false);
   });
 });
