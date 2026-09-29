@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
-import { PodMiniList } from '../../../client/src/components/detail/PodMiniList';
+import { POD_ROW_LIMIT, PodMiniList } from '../../../client/src/components/detail/PodMiniList';
 import { useDetailStore } from '../../../client/src/state/detail';
 
 vi.mock('../../../client/src/api/queries.js', () => ({ useResourceMetrics: () => ({ data: undefined }) }));
@@ -41,6 +41,30 @@ describe('PodMiniList', () => {
     render(<PodMiniList ctx="dev" pods={[pod('web-1', { kind: 'ReplicaSet', name: 'web' })]} daemonSets />);
     expect(screen.queryByRole('button', { name: /^All/ })).not.toBeInTheDocument();
     expect(screen.queryByText('DS')).not.toBeInTheDocument();
+  });
+
+  it('caps a long list, leading with the pods that need attention, and shows all on request', () => {
+    const healthy = Array.from({ length: POD_ROW_LIMIT + 10 }, (_, i) => pod(`web-${i}`, { kind: 'ReplicaSet', name: 'web' }));
+    const crashing = pod('web-99', { kind: 'ReplicaSet', name: 'web' }, { phase: 'Running', containerStatuses: [{ name: 'c', ready: false, state: { waiting: { reason: 'CrashLoopBackOff' } } }] });
+    render(<PodMiniList ctx="dev" pods={[...healthy, crashing]} hideNamespace />);
+
+    const names = () => screen.getAllByRole('row').slice(1).map((row) => row.querySelector('td')!.textContent);
+    expect(names()).toHaveLength(POD_ROW_LIMIT);
+    // The crashlooping pod sorts last by name but leads the cut-down list.
+    expect(names()[0]).toBe('web-99');
+    expect(screen.getByText(`Showing ${POD_ROW_LIMIT} of ${POD_ROW_LIMIT + 11} pods, those needing attention first.`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: `Show all ${POD_ROW_LIMIT + 11}` }));
+    // Everything shown: back to natural order.
+    expect(names()).toHaveLength(POD_ROW_LIMIT + 11);
+    expect(names().slice(0, 3)).toEqual(['web-0', 'web-1', 'web-2']);
+    expect(names().at(-1)).toBe('web-99');
+  });
+
+  it('keeps short lists in natural order without a cap', () => {
+    const pods = ['web-10', 'web-2', 'web-1'].map((name) => pod(name, { kind: 'ReplicaSet', name: 'web' }));
+    render(<PodMiniList ctx="dev" pods={pods} hideNamespace />);
+    expect(screen.getAllByRole('row').slice(1).map((row) => row.querySelector('td')!.textContent)).toEqual(['web-1', 'web-2', 'web-10']);
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
   });
 
   it('puts the scheduler’s short reason under a Pending pod and links the node it waits for', () => {

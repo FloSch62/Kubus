@@ -172,3 +172,31 @@ export function nodeCoverage(nodes: KubeObject[], pods: KubeObject[], spec: Daem
   });
   return out.sort((a, b) => ORDER[a.state] - ORDER[b.state] || naturalCompare(a.node, b.node));
 }
+
+export interface ExclusionGroup {
+  /** The reasons these nodes share, e.g. ["nodeSelector gpu=true not matched"]. */
+  reasons: string[];
+  nodes: string[];
+}
+
+/**
+ * Excluded nodes folded by their reasons, largest group first. A GPU
+ * DaemonSet on a thousand-node cluster is one line, "990 nodes · nodeSelector
+ * gpu=true not matched", not 990 rows.
+ */
+export function groupExclusions(coverage: NodeCoverage[]): ExclusionGroup[] {
+  const groups = new Map<string, ExclusionGroup>();
+  for (const c of coverage) {
+    if (c.state !== 'excluded') continue;
+    const key = c.exclusions.join('\n');
+    const group = groups.get(key) ?? { reasons: c.exclusions, nodes: [] };
+    group.nodes.push(c.node);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => b.nodes.length - a.nodes.length || naturalCompare(a.reasons.join(), b.reasons.join()));
+}
+
+/** Everything a node row shows, as one string: rows render again only when it changes. */
+export function coverageKey(c: NodeCoverage): string {
+  return [c.node, c.state, c.podStatus ?? '', c.pod?.metadata.uid ?? '', c.pod?.metadata.name ?? '', c.issue?.short ?? '', ...c.exclusions].join('\u0000');
+}

@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
@@ -11,7 +12,7 @@ import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { KubeObject, MetricsSnapshotEntry } from '@kubus/shared';
-import { useMemo, useState, type MouseEvent } from 'react';
+import { memo, useMemo, useState, type MouseEvent } from 'react';
 import { MiniFilterInput } from '../MiniFilterInput.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../../smart-filter.js';
 import { ReadyCounter } from '../ReadyCounter.js';
@@ -28,6 +29,22 @@ import { naturalCompare } from '../natural-sort.js';
 
 /** Rows a mini list needs before it grows a filter box. */
 const FILTER_THRESHOLD = 4;
+
+/**
+ * Rows rendered before "Show all": a node-exporter DaemonSet on a thousand
+ * nodes would otherwise lay out a thousand rows on every poll.
+ */
+export const POD_ROW_LIMIT = 50;
+
+const HEALTHY_STATES = new Set(['Running', 'Succeeded', 'Completed']);
+
+/** Pods worth seeing first when the list is cut short: not running, or not ready. */
+function needsAttention(pod: KubeObject): boolean {
+  const summary = podSummary(pod);
+  if (!HEALTHY_STATES.has(summary.status)) return true;
+  const [ready, total] = summary.ready.split('/');
+  return summary.status === 'Running' && ready !== total;
+}
 
 type OwnerFilter = 'all' | 'daemonset' | 'other';
 
@@ -68,8 +85,8 @@ export function PodMiniList({
   /** Mark DaemonSet pods and offer a filter between them and the rest (a node's pods). */
   daemonSets?: boolean;
 }) {
-  const push = useDetailStore((s) => s.push);
   const [filter, setFilter] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
   const daemonCount = useMemo(() => (daemonSets ? pods.filter((p) => daemonSetOwner(p)).length : 0), [pods, daemonSets]);
   // With no DaemonSet pods left the chips vanish, so their filter must too.
@@ -100,14 +117,15 @@ export function PodMiniList({
     return new Map<string, MetricsSnapshotEntry>(snap.items.map((i) => [`${i.namespace ?? ''}/${i.name}`, i]));
   }, [metricsQuery.data, ctx]);
 
-  const openNode = (e: MouseEvent, name: string) => {
-    e.stopPropagation();
-    push({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name });
-  };
-  const openQuota = (e: MouseEvent, name: string, namespace: string | undefined) => {
-    e.stopPropagation();
-    push({ ctx, group: '', version: 'v1', plural: 'resourcequotas', kind: 'ResourceQuota', name, namespace });
-  };
+  // Cut short, the list leads with the pods that need attention so none of
+  // them hides behind "Show all"; otherwise it keeps its natural order.
+  const truncated = !showAll && shown.length > POD_ROW_LIMIT;
+  const visible = useMemo(() => {
+    if (!truncated) return shown;
+    const attention = shown.filter(needsAttention);
+    const rest = shown.filter((p) => !needsAttention(p));
+    return [...attention, ...rest].slice(0, POD_ROW_LIMIT);
+  }, [shown, truncated]);
   const ownerChips: Array<{ value: OwnerFilter; label: string }> = [
     { value: 'all', label: `All ${pods.length}` },
     { value: 'daemonset', label: `DaemonSet ${daemonCount}` },
@@ -168,89 +186,141 @@ export function PodMiniList({
             </TableRow>
           </TableHead>
           <TableBody>
-            {shown.map((pod) => {
-              const summary = podSummary(pod);
-              const usage = usageByPod?.get(`${pod.metadata.namespace ?? ''}/${pod.metadata.name}`);
-              const requests = usage ? podRequestTotals(pod) : undefined;
-              const issue = issues ? issues.get(pod.metadata.uid) : podSchedulingIssue(pod);
-              const daemonSet = daemonSets ? daemonSetOwner(pod) : undefined;
-              const node = summary.node ?? (showNode ? issue?.node : undefined);
-              return (
-                <TableRow
-                  key={pod.metadata.uid}
-                  hover
-                  sx={{ cursor: 'pointer' }}
-                  onClick={() => push({ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: pod.metadata.name, namespace: pod.metadata.namespace })}
-                >
-                  <TableCell sx={{ minWidth: 140, wordBreak: 'break-word' }} title={pod.metadata.name}>
-                    {pod.metadata.name}
-                    {daemonSet && (
-                      <Tooltip title={`Managed by DaemonSet ${daemonSet}`}>
-                        <Box
-                          component="span"
-                          sx={{ ml: 0.75, px: 0.5, py: 0.125, borderRadius: 0.75, fontSize: 10.5, fontWeight: 600, lineHeight: 1.5, bgcolor: 'action.hover', color: 'text.secondary', whiteSpace: 'nowrap' }}
-                        >
-                          DS
-                        </Box>
-                      </Tooltip>
-                    )}
-                    {!hideNamespace && pod.metadata.namespace && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {pod.metadata.namespace}
-                      </Typography>
-                    )}
-                    {showNode && node && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {'on '}
-                        <Link component="button" variant="caption" underline="hover" onClick={(e) => openNode(e, node)} sx={{ textAlign: 'left', verticalAlign: 'baseline', wordBreak: 'break-all' }}>
-                          {node}
-                        </Link>
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <ReadyCounter value={summary.ready} />
-                  </TableCell>
-                  <TableCell sx={issue ? { minWidth: 130 } : undefined}>
-                    <StatusChip status={summary.status} />
-                    {issue && (
-                      <Tooltip title={issue.message}>
-                        <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: statusTextColor('warning'), lineHeight: 1.35, wordBreak: 'break-word' }}>
-                          {issue.short}
-                          {issue.node && !showNode && (
-                            <>
-                              {' on '}
-                              <Link component="button" variant="caption" onClick={(e) => openNode(e, issue.node!)} sx={{ verticalAlign: 'baseline', color: 'inherit' }}>
-                                {issue.node}
-                              </Link>
-                            </>
-                          )}
-                          {quotaNamesIn(issue.message).map((quota) => (
-                            <Link key={quota} component="button" variant="caption" onClick={(e) => openQuota(e, quota, pod.metadata.namespace)} sx={{ ml: 0.75, verticalAlign: 'baseline', color: 'inherit' }}>
-                              quota {quota}
-                            </Link>
-                          ))}
-                        </Typography>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  {usageByPod && (
-                    <TableCell>
-                      {usage ? <UsageMeter value={usage.cpuMilli} max={requests?.cpuMilli || undefined} format={formatCpu} placeholder emptyHint="no CPU requests set" /> : '—'}
-                    </TableCell>
-                  )}
-                  {usageByPod && (
-                    <TableCell>
-                      {usage ? <UsageMeter value={usage.memBytes} max={requests?.memoryBytes || undefined} format={formatBytes} placeholder emptyHint="no memory requests set" /> : '—'}
-                    </TableCell>
-                  )}
-                  <TableCell>{summary.restarts}</TableCell>
-                </TableRow>
-              );
-            })}
+            {visible.map((pod) => (
+              <PodRow
+                key={pod.metadata.uid}
+                ctx={ctx}
+                pod={pod}
+                showUsage={!!usageByPod}
+                usage={usageByPod?.get(`${pod.metadata.namespace ?? ''}/${pod.metadata.name}`)}
+                issue={issues ? issues.get(pod.metadata.uid) : undefined}
+                ownIssue={!issues}
+                daemonSet={daemonSets ? daemonSetOwner(pod) : undefined}
+                hideNamespace={hideNamespace}
+                showNode={showNode}
+              />
+            ))}
           </TableBody>
         </Table>
+      )}
+      {!loading && truncated && (
+        <Stack direction="row" sx={{ px: 2, py: 1, gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary">
+            {`Showing ${POD_ROW_LIMIT} of ${shown.length} pods, those needing attention first.`}
+          </Typography>
+          <Button size="small" onClick={() => setShowAll(true)} sx={{ py: 0, minWidth: 0 }}>
+            {`Show all ${shown.length}`}
+          </Button>
+        </Stack>
       )}
     </Box>
   );
 }
+
+/**
+ * One pod row. Memoized: list polls keep unchanged pods' object identity,
+ * so only the rows whose pod, usage or issue changed render again.
+ */
+const PodRow = memo(function PodRow({
+  ctx,
+  pod,
+  showUsage,
+  usage,
+  issue: givenIssue,
+  ownIssue,
+  daemonSet,
+  hideNamespace,
+  showNode,
+}: {
+  ctx: string;
+  pod: KubeObject;
+  showUsage: boolean;
+  usage?: MetricsSnapshotEntry;
+  issue?: SchedulingIssue;
+  /** No caller-supplied issues: read the pod's own scheduling condition. */
+  ownIssue: boolean;
+  daemonSet?: string;
+  hideNamespace?: boolean;
+  showNode?: boolean;
+}) {
+  const push = useDetailStore((s) => s.push);
+  const summary = podSummary(pod);
+  const requests = usage ? podRequestTotals(pod) : undefined;
+  const issue = ownIssue ? podSchedulingIssue(pod) : givenIssue;
+  const node = summary.node ?? (showNode ? issue?.node : undefined);
+  const openNode = (e: MouseEvent, name: string) => {
+    e.stopPropagation();
+    push({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name });
+  };
+  const openQuota = (e: MouseEvent, name: string) => {
+    e.stopPropagation();
+    push({ ctx, group: '', version: 'v1', plural: 'resourcequotas', kind: 'ResourceQuota', name, namespace: pod.metadata.namespace });
+  };
+  return (
+    <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => push({ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: pod.metadata.name, namespace: pod.metadata.namespace })}>
+      <TableCell sx={{ minWidth: 140, wordBreak: 'break-word' }} title={pod.metadata.name}>
+        {pod.metadata.name}
+        {daemonSet && (
+          <Tooltip title={`Managed by DaemonSet ${daemonSet}`}>
+            <Box
+              component="span"
+              sx={{ ml: 0.75, px: 0.5, py: 0.125, borderRadius: 0.75, fontSize: 10.5, fontWeight: 600, lineHeight: 1.5, bgcolor: 'action.hover', color: 'text.secondary', whiteSpace: 'nowrap' }}
+            >
+              DS
+            </Box>
+          </Tooltip>
+        )}
+        {!hideNamespace && pod.metadata.namespace && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {pod.metadata.namespace}
+          </Typography>
+        )}
+        {showNode && node && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {'on '}
+            <Link component="button" variant="caption" underline="hover" onClick={(e) => openNode(e, node)} sx={{ textAlign: 'left', verticalAlign: 'baseline', wordBreak: 'break-all' }}>
+              {node}
+            </Link>
+          </Typography>
+        )}
+      </TableCell>
+      <TableCell>
+        <ReadyCounter value={summary.ready} />
+      </TableCell>
+      <TableCell sx={issue ? { minWidth: 130 } : undefined}>
+        <StatusChip status={summary.status} />
+        {issue && (
+          <Tooltip title={issue.message}>
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: statusTextColor('warning'), lineHeight: 1.35, wordBreak: 'break-word' }}>
+              {issue.short}
+              {issue.node && !showNode && (
+                <>
+                  {' on '}
+                  <Link component="button" variant="caption" onClick={(e) => openNode(e, issue.node!)} sx={{ verticalAlign: 'baseline', color: 'inherit' }}>
+                    {issue.node}
+                  </Link>
+                </>
+              )}
+              {quotaNamesIn(issue.message).map((quota) => (
+                <Link key={quota} component="button" variant="caption" onClick={(e) => openQuota(e, quota)} sx={{ ml: 0.75, verticalAlign: 'baseline', color: 'inherit' }}>
+                  quota {quota}
+                </Link>
+              ))}
+            </Typography>
+          </Tooltip>
+        )}
+      </TableCell>
+      {showUsage && (
+        <TableCell>
+          {usage ? <UsageMeter value={usage.cpuMilli} max={requests?.cpuMilli || undefined} format={formatCpu} placeholder emptyHint="no CPU requests set" /> : '—'}
+        </TableCell>
+      )}
+      {showUsage && (
+        <TableCell>
+          {usage ? <UsageMeter value={usage.memBytes} max={requests?.memoryBytes || undefined} format={formatBytes} placeholder emptyHint="no memory requests set" /> : '—'}
+        </TableCell>
+      )}
+      <TableCell>{summary.restarts}</TableCell>
+    </TableRow>
+  );
+});

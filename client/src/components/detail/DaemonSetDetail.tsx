@@ -1,14 +1,18 @@
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
+import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import type { KubeObject } from '@kubus/shared';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { useWatchedList } from '../../api/queries.js';
 import { useDetailStore } from '../../state/detail.js';
 import { statusTextColor } from '../../theme.js';
@@ -16,7 +20,7 @@ import { MiniFilterInput, matchesMiniFilter } from '../MiniFilterInput.js';
 import { naturalCompare } from '../natural-sort.js';
 import { StatusChip } from '../StatusChip.js';
 import { ControllerRevisions } from './ControllerRevisions.js';
-import { nodeCoverage, type DaemonPodSpec, type NodeCoverage, type Toleration } from './daemon-placement.js';
+import { coverageKey, groupExclusions, nodeCoverage, type DaemonPodSpec, type ExclusionGroup, type NodeCoverage, type Toleration } from './daemon-placement.js';
 import { Fact, Facts } from './Facts.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
 import { ProblemBanner } from './ProblemBanner.js';
@@ -102,7 +106,7 @@ export function DaemonSetDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
         issues={issues}
         showNode
       />
-      <NodesSection ctx={ctx} pods={pods} spec={template} issues={issues} desired={desired} />
+      <NodesSection ctx={ctx} pods={pods} podsLoading={podsQuery.isLoading} podsError={podsQuery.error} spec={template} issues={issues} desired={desired} />
       <ControllerRevisions ctx={ctx} obj={obj} pods={pods} labelSelector={labelSelector} />
       <UsedBySection
         target={{ ctx, group: 'apps', version: 'v1', plural: 'daemonsets', kind: 'DaemonSet', name: obj.metadata.name, namespace }}
@@ -160,142 +164,304 @@ const STATE_CHIP: Record<Exclude<NodeCoverage['state'], 'running' | 'not-ready'>
   excluded: { status: 'excluded', label: 'Excluded' },
 };
 
+/** Node rows rendered before "Show all", and node names listed per excluded group. */
+export const NODE_ROW_LIMIT = 50;
+const GROUP_NODE_LIMIT = 100;
+
+const TABLE_SX = { '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } };
+
 /**
  * Every node that is not running a ready pod of this DaemonSet, and why: the
- * scheduler's answer for a pod stuck Pending there, the selector, affinity
- * or taint that leaves the node out, or a pod on a node it no longer fits.
+ * scheduler's answer for a pod stuck Pending there, a pod on a node it no
+ * longer fits, or (folded into one row per reason) the selector, affinity or
+ * taint that leaves nodes out. Nothing is claimed until both the nodes and
+ * the pods are known.
  */
-function NodesSection({ ctx, pods, spec, issues, desired }: { ctx: string; pods: KubeObject[]; spec: DaemonPodSpec | undefined; issues: Map<string, SchedulingIssue>; desired: number }) {
-  const push = useDetailStore((s) => s.push);
+function NodesSection({
+  ctx,
+  pods,
+  podsLoading,
+  podsError,
+  spec,
+  issues,
+  desired,
+}: {
+  ctx: string;
+  pods: KubeObject[];
+  podsLoading: boolean;
+  podsError: unknown;
+  spec: DaemonPodSpec | undefined;
+  issues: Map<string, SchedulingIssue>;
+  desired: number;
+}) {
   const [filter, setFilter] = useState('');
+  const [showAll, setShowAll] = useState(false);
   // The shared watch the Nodes list uses: no extra polling of big node objects.
   const nodesList = useWatchedList([ctx], '', 'v1', 'nodes');
-  const loading = !nodesList.rows.length && nodesList.status[ctx]?.state === 'loading';
-  const coverage = useMemo(() => nodeCoverage(nodesList.rows.map((r) => r.obj), pods, spec, issues), [nodesList.rows, pods, spec, issues]);
+  const watch = nodesList.status[ctx];
+  const haveNodes = nodesList.rows.length > 0;
+  const nodesLoading = !haveNodes && (!watch || watch.state === 'loading');
+  // A watch that isn't live and never delivered (no RBAC to list nodes, a
+  // dropped connection) says so instead of pretending every node is fine.
+  const nodesDown = !haveNodes && !nodesLoading && watch?.state !== 'live';
+  const known = !nodesLoading && !nodesDown && !podsLoading && !podsError;
+  const coverage = useMemo(() => (known ? nodeCoverage(nodesList.rows.map((r) => r.obj), pods, spec, issues) : []), [known, nodesList.rows, pods, spec, issues]);
+  const attention = useMemo(() => coverage.filter((c) => c.state !== 'running' && c.state !== 'excluded'), [coverage]);
+  const groups = useMemo(() => groupExclusions(coverage), [coverage]);
   const running = coverage.filter((c) => c.state === 'running').length;
-  const needsAttention = coverage.filter((c) => c.state === 'pending' || c.state === 'missing' || c.state === 'not-ready' || c.state === 'misscheduled').length;
-  const excluded = coverage.filter((c) => c.state === 'excluded').length;
-  const rows = coverage.filter((c) => c.state !== 'running');
-  const shown = rows.filter((c) => matchesMiniFilter(filter, [c.node, c.state, c.pod?.metadata.name ?? '', c.issue?.short ?? '', ...c.exclusions]));
-  const openNode = (name: string) => push({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name });
-  const openPod = (pod: KubeObject) => push({ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: pod.metadata.name, namespace: pod.metadata.namespace });
-  const description = loading
-    ? undefined
-    : [`${running} of ${coverage.length} running a ready pod`, needsAttention ? `${needsAttention} need attention` : '', excluded ? `${excluded} excluded` : ''].filter(Boolean).join(' · ');
+  const excluded = groups.reduce((n, g) => n + g.nodes.length, 0);
 
-  const podLink = (pod: KubeObject, variant: 'body2' | 'caption' = 'body2') => (
+  const query = filter.trim();
+  const shownAttention = query ? attention.filter((c) => matchesMiniFilter(query, [c.node, c.state, c.pod?.metadata.name ?? '', c.issue?.short ?? '', ...c.exclusions])) : attention;
+  const shownGroups = query
+    ? groups.flatMap((g) => {
+        const nodes = matchesMiniFilter(query, g.reasons) ? g.nodes : g.nodes.filter((n) => matchesMiniFilter(query, [n]));
+        return nodes.length ? [{ ...g, nodes }] : [];
+      })
+    : groups;
+  const truncated = !showAll && shownAttention.length > NODE_ROW_LIMIT;
+  const visibleAttention = truncated ? shownAttention.slice(0, NODE_ROW_LIMIT) : shownAttention;
+
+  const description = known
+    ? [`${running} of ${coverage.length} running a ready pod`, attention.length ? `${attention.length} need attention` : '', excluded ? `${excluded} excluded` : ''].filter(Boolean).join(' · ')
+    : undefined;
+
+  let body: ReactNode;
+  if (nodesLoading || (podsLoading && !nodesDown)) {
+    body = (
+      <Box sx={{ p: 1.5 }}>
+        <CircularProgress size={18} />
+      </Box>
+    );
+  } else if (nodesDown || podsError) {
+    const message = nodesDown ? `Nodes unavailable: ${watch?.message ?? watch?.state ?? 'no connection'}` : `Pods unavailable: ${podsError instanceof Error ? podsError.message : String(podsError)}`;
+    body = (
+      <Typography variant="body2" sx={{ p: 1.5, color: statusTextColor('warning'), wordBreak: 'break-word' }}>
+        {message}
+      </Typography>
+    );
+  } else if (!coverage.length) {
+    body = (
+      <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+        The cluster reports no nodes.
+      </Typography>
+    );
+  } else if (!attention.length && !groups.length) {
+    body = (
+      <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+        Every node runs a ready pod of this DaemonSet.
+      </Typography>
+    );
+  } else {
+    body = (
+      <>
+        <Table size="small" sx={TABLE_SX}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Node</TableCell>
+              <TableCell>State</TableCell>
+              <TableCell>Why</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {visibleAttention.map((c) => (
+              <NodeRow key={c.node} ctx={ctx} coverage={c} />
+            ))}
+            {shownGroups.map((g) =>
+              g.nodes.length === 1 ? (
+                <NodeRow key={g.nodes[0]} ctx={ctx} coverage={{ node: g.nodes[0]!, state: 'excluded', exclusions: g.reasons }} />
+              ) : (
+                <ExclusionGroupRow key={g.reasons.join('\n')} ctx={ctx} group={g} />
+              ),
+            )}
+          </TableBody>
+        </Table>
+        {!shownAttention.length && !shownGroups.length && (
+          <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+            No nodes match the filter.
+          </Typography>
+        )}
+        {truncated && (
+          <Stack direction="row" sx={{ px: 2, py: 1, gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="caption" color="text.secondary">
+              {`Showing ${NODE_ROW_LIMIT} of ${shownAttention.length} nodes that need attention.`}
+            </Typography>
+            <Button size="small" onClick={() => setShowAll(true)} sx={{ py: 0, minWidth: 0 }}>
+              {`Show all ${shownAttention.length}`}
+            </Button>
+          </Stack>
+        )}
+        {running > 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 2, py: 1 }}>
+            {`${running} node${running === 1 ? '' : 's'} running a ready pod ${running === 1 ? 'is' : 'are'} listed under Pods.`}
+          </Typography>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <Section
+      title="Nodes"
+      count={known ? coverage.length : undefined}
+      flush
+      description={description}
+      defaultOpen={(known && attention.length > 0) || desired === 0 || nodesDown || !!podsError}
+      actions={attention.length + excluded > NODE_FILTER_THRESHOLD ? <MiniFilterInput value={filter} onChange={setFilter} placeholder="Filter nodes" /> : undefined}
+    >
+      {body}
+    </Section>
+  );
+}
+
+function NodeLink({ ctx, name, variant = 'body2' }: { ctx: string; name: string; variant?: 'body2' | 'caption' }) {
+  const push = useDetailStore((s) => s.push);
+  return (
     <Link
       component="button"
       variant={variant}
       underline="hover"
+      sx={{ textAlign: 'left', verticalAlign: 'baseline', wordBreak: 'break-word' }}
+      onClick={(e) => {
+        e.stopPropagation();
+        push({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name });
+      }}
+    >
+      {name}
+    </Link>
+  );
+}
+
+function PodLink({ ctx, pod }: { ctx: string; pod: KubeObject }) {
+  const push = useDetailStore((s) => s.push);
+  return (
+    <Link
+      component="button"
+      variant="caption"
+      underline="hover"
       sx={{ textAlign: 'left', verticalAlign: 'baseline' }}
       onClick={(e) => {
         e.stopPropagation();
-        openPod(pod);
+        push({ ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: pod.metadata.name, namespace: pod.metadata.namespace });
       }}
     >
       {pod.metadata.name}
     </Link>
   );
-
-  return (
-    <Section
-      title="Nodes"
-      count={loading ? undefined : coverage.length}
-      flush
-      description={description}
-      defaultOpen={needsAttention > 0 || desired === 0}
-      actions={rows.length > NODE_FILTER_THRESHOLD ? <MiniFilterInput value={filter} onChange={setFilter} placeholder="Filter nodes" /> : undefined}
-    >
-      {loading ? (
-        <Box sx={{ p: 1.5 }}>
-          <CircularProgress size={18} />
-        </Box>
-      ) : rows.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
-          Every node runs a ready pod of this DaemonSet.
-        </Typography>
-      ) : (
-        <>
-          <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Node</TableCell>
-                <TableCell>State</TableCell>
-                <TableCell>Why</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {shown.map((c) => {
-                const chip = c.state === 'not-ready' ? { status: c.podStatus ?? 'Unknown', label: c.podStatus ?? 'Unknown' } : STATE_CHIP[c.state as keyof typeof STATE_CHIP];
-                return (
-                  <TableRow key={c.node} hover sx={{ cursor: 'pointer' }} onClick={() => openNode(c.node)}>
-                    <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>
-                      <Link
-                        component="button"
-                        variant="body2"
-                        underline="hover"
-                        sx={{ textAlign: 'left', verticalAlign: 'baseline' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openNode(c.node);
-                        }}
-                      >
-                        {c.node}
-                      </Link>
-                    </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
-                      <StatusChip status={chip.status} label={chip.label} />
-                    </TableCell>
-                    <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>
-                      {c.state === 'pending' && c.pod && (
-                        <>
-                          <Typography component="span" variant="body2" sx={{ color: statusTextColor('warning'), fontWeight: 550 }}>
-                            {c.issue?.short}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                            {podLink(c.pod, 'caption')} can’t be scheduled
-                          </Typography>
-                        </>
-                      )}
-                      {c.state === 'not-ready' && c.pod && <>{podLink(c.pod)} isn’t ready</>}
-                      {c.state === 'missing' && (
-                        <Typography component="span" variant="body2">
-                          Should run a pod but has none yet
-                        </Typography>
-                      )}
-                      {(c.state === 'excluded' || c.state === 'misscheduled') && (
-                        <>
-                          {c.exclusions.map((reason) => (
-                            <Typography key={reason} variant="body2" sx={{ display: 'block' }}>
-                              {reason}
-                            </Typography>
-                          ))}
-                          {c.state === 'misscheduled' && c.pod && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                              {podLink(c.pod, 'caption')} runs here anyway
-                            </Typography>
-                          )}
-                        </>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          {shown.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
-              No nodes match the filter.
-            </Typography>
-          )}
-          {running > 0 && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 2, py: 1 }}>
-              {`${running} node${running === 1 ? '' : 's'} running a ready pod ${running === 1 ? 'is' : 'are'} listed under Pods.`}
-            </Typography>
-          )}
-        </>
-      )}
-    </Section>
-  );
 }
+
+/**
+ * One node that needs a word of explanation. Coverage is recomputed on every
+ * pod poll; the row only renders again when what it shows has changed.
+ */
+const NodeRow = memo(
+  function NodeRow({ ctx, coverage: c }: { ctx: string; coverage: NodeCoverage }) {
+    const push = useDetailStore((s) => s.push);
+    const chip = c.state === 'not-ready' ? { status: c.podStatus ?? 'Unknown', label: c.podStatus ?? 'Unknown' } : STATE_CHIP[c.state as keyof typeof STATE_CHIP];
+    return (
+      <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => push({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name: c.node })}>
+        <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>
+          <NodeLink ctx={ctx} name={c.node} />
+        </TableCell>
+        <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+          <StatusChip status={chip.status} label={chip.label} />
+        </TableCell>
+        <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>
+          {c.state === 'pending' && c.pod && (
+            <>
+              <Typography component="span" variant="body2" sx={{ color: statusTextColor('warning'), fontWeight: 550 }}>
+                {c.issue?.short}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                <PodLink ctx={ctx} pod={c.pod} /> can’t be scheduled
+              </Typography>
+            </>
+          )}
+          {c.state === 'not-ready' && c.pod && (
+            <Typography variant="caption" color="text.secondary">
+              <PodLink ctx={ctx} pod={c.pod} /> isn’t ready
+            </Typography>
+          )}
+          {c.state === 'missing' && (
+            <Typography component="span" variant="body2">
+              Should run a pod but has none yet
+            </Typography>
+          )}
+          {(c.state === 'excluded' || c.state === 'misscheduled') && (
+            <>
+              {c.exclusions.map((reason) => (
+                <Typography key={reason} variant="body2" sx={{ display: 'block' }}>
+                  {reason}
+                </Typography>
+              ))}
+              {c.state === 'misscheduled' && c.pod && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  <PodLink ctx={ctx} pod={c.pod} /> runs here anyway
+                </Typography>
+              )}
+            </>
+          )}
+        </TableCell>
+      </TableRow>
+    );
+  },
+  (prev, next) => prev.ctx === next.ctx && coverageKey(prev.coverage) === coverageKey(next.coverage),
+);
+
+/**
+ * Nodes left out for the same reasons, as one row with the count; the names
+ * are a click away, listed up to a limit.
+ */
+const ExclusionGroupRow = memo(
+  function ExclusionGroupRow({ ctx, group }: { ctx: string; group: ExclusionGroup }) {
+    const [open, setOpen] = useState(false);
+    const [all, setAll] = useState(false);
+    const names = all ? group.nodes : group.nodes.slice(0, GROUP_NODE_LIMIT);
+    return (
+      <>
+        <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => setOpen((v) => !v)}>
+          <TableCell sx={{ verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+            <ButtonBase
+              aria-expanded={open}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((v) => !v);
+              }}
+              sx={{ gap: 0.25, typography: 'body2', fontWeight: 550, borderRadius: 0.5 }}
+            >
+              <KeyboardArrowRightIcon sx={{ fontSize: 16, color: 'text.secondary', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
+              {`${group.nodes.length} nodes`}
+            </ButtonBase>
+          </TableCell>
+          <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+            <StatusChip status="excluded" label="Excluded" />
+          </TableCell>
+          <TableCell sx={{ wordBreak: 'break-word', verticalAlign: 'top' }}>
+            {group.reasons.map((reason) => (
+              <Typography key={reason} variant="body2" sx={{ display: 'block' }}>
+                {reason}
+              </Typography>
+            ))}
+          </TableCell>
+        </TableRow>
+        {open && (
+          <TableRow>
+            <TableCell colSpan={3} sx={{ pt: 0.5, pb: 1 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1.5, rowGap: 0.25, pl: 2.5 }}>
+                {names.map((name) => (
+                  <NodeLink key={name} ctx={ctx} name={name} variant="caption" />
+                ))}
+                {!all && group.nodes.length > GROUP_NODE_LIMIT && (
+                  <Link component="button" variant="caption" onClick={() => setAll(true)} sx={{ fontWeight: 600 }}>
+                    {`Show all ${group.nodes.length}`}
+                  </Link>
+                )}
+              </Box>
+            </TableCell>
+          </TableRow>
+        )}
+      </>
+    );
+  },
+  (prev, next) => prev.ctx === next.ctx && prev.group.reasons.join('\n') === next.group.reasons.join('\n') && prev.group.nodes.join('\n') === next.group.nodes.join('\n'),
+);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
-import { daemonNodeExclusions, nodeCoverage, tolerates, type DaemonPodSpec } from '../../../client/src/components/detail/daemon-placement';
+import { coverageKey, daemonNodeExclusions, groupExclusions, nodeCoverage, tolerates, type DaemonPodSpec } from '../../../client/src/components/detail/daemon-placement';
 
 function node(name: string, labels: Record<string, string> = {}, taints: Array<{ key: string; value?: string; effect: string }> = []): KubeObject {
   return { apiVersion: 'v1', kind: 'Node', metadata: { name, uid: `node-${name}`, labels: { 'kubernetes.io/hostname': name, ...labels } }, spec: { taints } } as KubeObject;
@@ -96,5 +96,34 @@ describe('nodeCoverage', () => {
     expect(coverage[2]!.podStatus).toBe('CrashLoopBackOff');
     expect(coverage[3]!.exclusions).toEqual(['taint dedicated:NoExecute not tolerated']);
     expect(coverage[4]!.exclusions).toEqual(['taint dedicated:NoSchedule not tolerated']);
+  });
+});
+
+describe('groupExclusions', () => {
+  it('folds excluded nodes by their shared reasons, largest group first', () => {
+    const nodes = [
+      ...Array.from({ length: 5 }, (_, i) => node(`cpu-${i}`)),
+      node('infra-0', { gpu: 'true' }, [{ key: 'dedicated', value: 'infra', effect: 'NoSchedule' }]),
+      node('gpu-0', { gpu: 'true' }),
+    ];
+    const coverage = nodeCoverage(nodes, [daemonPod('agent-g', 'gpu-0', running)], { nodeSelector: { gpu: 'true' } });
+    expect(groupExclusions(coverage)).toEqual([
+      { reasons: ['nodeSelector gpu=true not matched'], nodes: ['cpu-0', 'cpu-1', 'cpu-2', 'cpu-3', 'cpu-4'] },
+      { reasons: ['taint dedicated=infra:NoSchedule not tolerated'], nodes: ['infra-0'] },
+    ]);
+  });
+});
+
+describe('coverageKey', () => {
+  it('changes only when what the row shows changes', () => {
+    const nodes = [node('n1')];
+    const pending = { phase: 'Pending', conditions: [{ type: 'PodScheduled', status: 'False', message: '0/1 nodes are available: 1 Insufficient cpu.' }] };
+    const first = nodeCoverage(nodes, [daemonPod('agent-1', undefined, pending, 'n1')], {})[0]!;
+    // A later poll: fresh objects, same content.
+    const again = nodeCoverage(nodes, [daemonPod('agent-1', undefined, { ...pending }, 'n1')], {})[0]!;
+    expect(again).not.toBe(first);
+    expect(coverageKey(again)).toBe(coverageKey(first));
+    const scheduled = nodeCoverage(nodes, [daemonPod('agent-1', 'n1', running)], {})[0]!;
+    expect(coverageKey(scheduled)).not.toBe(coverageKey(first));
   });
 });

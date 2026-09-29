@@ -11,18 +11,23 @@ const queries = vi.hoisted(() => ({
   service: undefined as KubeObject | undefined,
   serviceError: undefined as unknown,
   nodes: [] as KubeObject[],
+  nodesStatus: {} as Record<string, { state: string; message?: string }>,
+  loadingPlurals: new Set<string>(),
   signals: { windowMs: 3_600_000, objects: {} } as ClusterSignals,
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   DETAIL_LIST_LIVE_MS: 5000,
-  useResourceList: (selection: { plural?: string } | undefined) => ({ data: selection ? { items: queries.lists[selection.plural ?? ''] ?? [] } : undefined, isLoading: false }),
+  useResourceList: (selection: { plural?: string } | undefined) => {
+    const loading = !!selection && queries.loadingPlurals.has(selection.plural ?? '');
+    return { data: selection && !loading ? { items: queries.lists[selection.plural ?? ''] ?? [] } : undefined, isLoading: loading, error: undefined };
+  },
   useResource: (selection: unknown) => ({ data: selection ? queries.service : undefined, error: selection ? queries.serviceError : undefined }),
   isResourceGone: (error: unknown) => (error as { status?: number } | undefined)?.status === 404,
   useResourceMetrics: () => ({ data: undefined }),
   useClusterSignals: (contexts: string[]) => ({ data: contexts.length ? new Map([[contexts[0], queries.signals]]) : undefined }),
   useUsedBy: () => ({ data: { items: [], unavailable: [], truncated: 0 }, isLoading: false, isError: false }),
-  useWatchedList: (contexts: string[]) => ({ rows: queries.nodes.map((obj) => ({ ctx: contexts[0], obj })), status: {} }),
+  useWatchedList: (contexts: string[]) => ({ rows: queries.nodes.map((obj) => ({ ctx: contexts[0], obj })), status: queries.nodesStatus }),
 }));
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: vi.fn() }));
 vi.mock('../../../client/src/components/PortForwardDialog.js', () => ({ PortForwardDialog: ({ kind }: { kind: string }) => <div>Forward dialog {kind}</div> }));
@@ -106,6 +111,8 @@ beforeEach(() => {
   queries.service = undefined;
   queries.serviceError = undefined;
   queries.nodes = [];
+  queries.nodesStatus = { dev: { state: 'live' } };
+  queries.loadingPlurals = new Set();
   queries.signals = { windowMs: 3_600_000, objects: {} };
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
@@ -197,7 +204,7 @@ describe('StatefulSetDetail', () => {
       windowMs: 3_600_000,
       objects: {
         'StatefulSet|jobs|worker': {
-          warnings: [{ reason: 'FailedCreate', message: 'create Pod worker-0 in StatefulSet worker failed error: pods "worker-0" is forbidden: exceeded quota: gpu-quota', count: 1, total: 14 }],
+          warnings: [{ reason: 'FailedCreate', message: 'create Pod worker-0 in StatefulSet worker failed error: pods "worker-0" is forbidden: exceeded quota: gpu-quota', count: 1, total: 14, uid: 'sts-uid' }],
         },
       },
     };
@@ -207,6 +214,20 @@ describe('StatefulSetDetail', () => {
     expect(within(banner).getByText('FailedCreate ×14')).toBeInTheDocument();
     fireEvent.click(within(banner).getByRole('button', { name: 'Open ResourceQuota gpu-quota' }));
     expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'ResourceQuota', name: 'gpu-quota', namespace: 'jobs' });
+  });
+
+  it('does not inherit a deleted predecessor’s create failures', () => {
+    const recreated = statefulSet();
+    recreated.status = { replicas: 1, readyReplicas: 0 };
+    queries.lists.pods = [pod('worker-0', 'sts-uid', { pending: '0/1 nodes are available: 1 Insufficient memory.' })];
+    queries.signals = {
+      windowMs: 3_600_000,
+      objects: { 'StatefulSet|jobs|worker': { warnings: [{ reason: 'FailedCreate', message: 'exceeded quota: old-quota', count: 1, total: 3, uid: 'old-sts-uid' }] } },
+    };
+    render(<StatefulSetDetail obj={recreated} ctx="dev" />);
+    const banner = screen.getByRole('alert');
+    expect(within(banner).queryByText(/FailedCreate/)).not.toBeInTheDocument();
+    expect(within(banner).getByText('1 pod Pending: 0/1 nodes available, Insufficient memory')).toBeInTheDocument();
   });
 });
 
@@ -267,6 +288,52 @@ describe('DaemonSetDetail', () => {
     fireEvent.click(nodes.getByRole('button', { name: 'node-c' }));
     expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'Node', name: 'node-c' });
   });
+
+  it('says the nodes can’t be listed instead of claiming every node is fine', () => {
+    queries.nodes = [];
+    queries.nodesStatus = { dev: { state: 'error', message: 'nodes is forbidden: User "dev" cannot list resource "nodes"' } };
+    render(<DaemonSetDetail obj={daemonSet()} ctx="dev" />);
+    expect(screen.getByText('Nodes unavailable: nodes is forbidden: User "dev" cannot list resource "nodes"')).toBeInTheDocument();
+    expect(screen.queryByText('Every node runs a ready pod of this DaemonSet.')).not.toBeInTheDocument();
+  });
+
+  it('waits for the pods before judging any node', () => {
+    queries.loadingPlurals = new Set(['pods']);
+    render(<DaemonSetDetail obj={daemonSet()} ctx="dev" />);
+    // Nodes are known, pods aren't: no node is called out as missing its pod.
+    expect(screen.queryByText('No pod')).not.toBeInTheDocument();
+    expect(screen.queryByText('Should run a pod but has none yet')).not.toBeInTheDocument();
+    expect(screen.queryByText(/running a ready pod/)).not.toBeInTheDocument();
+  });
+
+  it('folds excluded nodes into one row per reason and caps long lists', () => {
+    const gpu = daemonSet();
+    (gpu.spec as { template: { spec: Record<string, unknown> } }).template.spec = { nodeSelector: { gpu: 'true' }, containers: [{ name: 'agent', image: 'agent:1' }] };
+    gpu.status = { desiredNumberScheduled: 55, currentNumberScheduled: 55, numberReady: 0, updatedNumberScheduled: 55, numberMisscheduled: 0 };
+    const general = Array.from({ length: 12 }, (_, i) => node(`cpu-${i}`, { pool: 'general' }));
+    const gpus = Array.from({ length: 55 }, (_, i) => node(`gpu-${i}`, { gpu: 'true' }));
+    queries.nodes = [...general, ...gpus];
+    // Every GPU node has a Pending pod, more than the row limit.
+    queries.lists = { pods: gpus.map((n, i) => pod(`agent-${i}`, 'ds-uid', { pending: cpu, pinned: n.metadata.name })) };
+    render(<DaemonSetDetail obj={gpu} ctx="dev" />);
+
+    const section = screen.getByRole('button', { name: /^Nodes/ }).closest('div')!.parentElement!;
+    const nodes = within(section);
+    expect(nodes.getByText('0 of 67 running a ready pod · 55 need attention · 12 excluded')).toBeInTheDocument();
+    // The excluded nodes are one row until opened.
+    expect(nodes.getByText('nodeSelector gpu=true not matched')).toBeInTheDocument();
+    expect(nodes.queryByText('cpu-7')).not.toBeInTheDocument();
+    fireEvent.click(nodes.getByText('12 nodes'));
+    expect(nodes.getByText('cpu-7')).toBeInTheDocument();
+    // 55 pending nodes: the first 50, then "Show all".
+    expect(nodes.getByText('Showing 50 of 55 nodes that need attention.')).toBeInTheDocument();
+    expect(nodes.queryByText('gpu-54')).not.toBeInTheDocument();
+    fireEvent.click(nodes.getByText('Show all 55'));
+    expect(nodes.getByText('gpu-54')).toBeInTheDocument();
+
+    // The pod list is capped the same way.
+    expect(screen.getByText('Showing 50 of 55 pods, those needing attention first.')).toBeInTheDocument();
+  }, 15_000);
 
   it('shows each pod’s node and the template’s placement rules', () => {
     render(<DaemonSetDetail obj={daemonSet()} ctx="dev" />);
