@@ -20,7 +20,7 @@ import { safeHref } from '../GenericDetail.js';
 import { ProblemBanner } from '../ProblemBanner.js';
 import { DetailStack, Section } from '../Section.js';
 import { SummaryStrip } from '../SummaryStrip.js';
-import { HEALTH_TONE, SYNC_TONE, appProblems, appSources, appSyncPolicy, shortRevision, sortedResources, type AppSpec, type AppStatus } from './argo-cd.js';
+import { HEALTH_TONE, SYNC_TONE, appDeploysInCluster, appProblems, appSources, appSyncPolicy, shortRevision, sortedResources, type AppSpec, type AppStatus } from './argo-cd.js';
 import { useObjectOpener } from './links.js';
 import { OperatorActionButtons } from './OperatorActionButtons.js';
 import type { CustomKindActionProps, CustomKindViewProps } from './registry.js';
@@ -54,6 +54,9 @@ export function ArgoApplicationDetail({ obj, ctx, crd, version }: CustomKindView
   const op = status.operationState;
   const projectOpener = spec.project ? open({ group: 'argoproj.io', kind: 'AppProject', name: spec.project, namespace: obj.metadata.namespace }) : undefined;
   const destination = spec.destination;
+  // Managed resources link into this cluster only when the app deploys here.
+  const inCluster = appDeploysInCluster(obj);
+  const destinationLabel = destination?.name ?? destination?.server;
 
   return (
     <DetailStack>
@@ -140,7 +143,7 @@ export function ArgoApplicationDetail({ obj, ctx, crd, version }: CustomKindView
           </Facts>
         </Section>
       )}
-      <Section title="Resources" count={resources.length} flush>
+      <Section title="Resources" count={resources.length} flush description={inCluster || !destinationLabel ? undefined : `in ${destinationLabel}`}>
         {resources.length === 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1 }}>
             Argo CD has not reported any managed resources yet.
@@ -156,7 +159,7 @@ export function ArgoApplicationDetail({ obj, ctx, crd, version }: CustomKindView
             </TableHead>
             <TableBody>
               {resources.map((r) => {
-                const opener = open({ group: r.group ?? '', kind: r.kind, name: r.name, namespace: r.namespace });
+                const opener = inCluster ? open({ group: r.group ?? '', kind: r.kind, name: r.name, namespace: r.namespace }) : undefined;
                 const label = `${r.namespace ? `${r.namespace}/` : ''}${r.name}`;
                 return (
                   <TableRow key={`${r.group}/${r.kind}/${r.namespace}/${r.name}`} sx={{ verticalAlign: 'top' }}>

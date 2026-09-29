@@ -42,6 +42,20 @@ const GATEWAY = 'gateway.networking.k8s.io';
 const route: CustomKindEntry = { view: RouteDetail, status: routeHeaderStatus };
 const fluxSource: CustomKindEntry = { actions: FluxActions, status: fluxHeaderStatus };
 
+/** Flux kinds without a view of their own that still reconcile and suspend (the server allows the same set). */
+const FLUX_ACTION_KINDS = new Set([
+  'source.toolkit.fluxcd.io/GitRepository',
+  'source.toolkit.fluxcd.io/OCIRepository',
+  'source.toolkit.fluxcd.io/HelmRepository',
+  'source.toolkit.fluxcd.io/HelmChart',
+  'source.toolkit.fluxcd.io/Bucket',
+  'notification.toolkit.fluxcd.io/Alert',
+  'notification.toolkit.fluxcd.io/Provider',
+  'notification.toolkit.fluxcd.io/Receiver',
+  'image.toolkit.fluxcd.io/ImageRepository',
+  'image.toolkit.fluxcd.io/ImageUpdateAutomation',
+]);
+
 /**
  * Dedicated views for well-known custom resources, keyed by `group/Kind`.
  * Everything else gets the generic overview driven by the CRD's printer
@@ -63,10 +77,11 @@ const KIND_VIEWS: Record<string, CustomKindEntry> = {
   'helm.toolkit.fluxcd.io/HelmRelease': { view: HelmReleaseDetail, actions: FluxActions, status: fluxHeaderStatus },
 };
 
-/** The dedicated entry for an object's group and kind, if there is one. Every Flux kind at least gets its actions. */
+/** The dedicated entry for an object's group and kind, if there is one. The other Flux kinds at least get their actions. */
 export function customKindEntry(apiVersion: string | undefined, kind: string | undefined): CustomKindEntry | undefined {
   if (!apiVersion || !kind) return undefined;
   const slash = apiVersion.indexOf('/');
   const group = slash === -1 ? '' : apiVersion.slice(0, slash);
-  return KIND_VIEWS[`${group}/${kind}`] ?? (group.endsWith('.toolkit.fluxcd.io') ? fluxSource : undefined);
+  const key = `${group}/${kind}`;
+  return KIND_VIEWS[key] ?? (FLUX_ACTION_KINDS.has(key) ? fluxSource : undefined);
 }

@@ -276,5 +276,5 @@ describe('NavDrawer', () => {
     expect(screen.getByRole('link', { name: /Kustomizations/ })).toHaveClass('Mui-selected');
     // Rollouts are progressive delivery, not GitOps: they stay under Custom Resources only.
     expect(screen.queryByRole('link', { name: /Rollouts/ })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 });

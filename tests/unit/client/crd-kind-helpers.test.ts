@@ -12,8 +12,8 @@ import {
   ruleMatches,
 } from '../../../client/src/components/detail/kinds/gateway-api';
 import { canaryWeight, describeStep, imageRows, rolloutActions, rolloutHeaderStatus, stepState } from '../../../client/src/components/detail/kinds/argo-rollouts';
-import { appProblems, appSyncPolicy, shortRevision, sortedResources } from '../../../client/src/components/detail/kinds/argo-cd';
-import { fluxHeaderStatus, inventory, parseInventoryEntry } from '../../../client/src/components/detail/kinds/flux';
+import { appDeploysInCluster, appProblems, appSyncPolicy, shortRevision, sortedResources } from '../../../client/src/components/detail/kinds/argo-cd';
+import { fluxHeaderStatus, helmReleaseState, inventory, parseInventoryEntry } from '../../../client/src/components/detail/kinds/flux';
 import { customKindEntry } from '../../../client/src/components/detail/kinds/registry';
 import { resolveKind } from '../../../client/src/components/detail/kinds/links';
 import { gitopsNavKinds } from '../../../client/src/layout/gitops-nav';
@@ -184,6 +184,11 @@ describe('Argo CD reading', () => {
     expect(sortedResources(app).map((r) => r.kind)).toEqual(['Deployment', 'ConfigMap', 'Service']);
     expect(shortRevision('4f3c2a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a')).toBe('4f3c2a9');
     expect(shortRevision('v1.2.3')).toBe('v1.2.3');
+    // Only an in-cluster destination makes the managed resources objects of this cluster.
+    expect(appDeploysInCluster(obj({ spec: { destination: { server: 'https://kubernetes.default.svc/', namespace: 'x' } } }))).toBe(true);
+    expect(appDeploysInCluster(obj({ spec: { destination: { name: 'in-cluster' } } }))).toBe(true);
+    expect(appDeploysInCluster(obj({ spec: { destination: { server: 'https://prod.example.com:6443' } } }))).toBe(false);
+    expect(appDeploysInCluster(obj({ spec: { destination: { name: 'prod' } } }))).toBe(false);
   });
 });
 
@@ -192,7 +197,35 @@ describe('Flux reading', () => {
     expect(parseInventoryEntry('apps_web_apps_Deployment', 'v1')).toEqual({ namespace: 'apps', name: 'web', group: 'apps', kind: 'Deployment', version: 'v1' });
     expect(parseInventoryEntry('_apps__Namespace')).toEqual({ namespace: undefined, name: 'apps', group: '', kind: 'Namespace', version: undefined });
     expect(parseInventoryEntry('garbage')).toBeUndefined();
+    // cli-utils writes a name's colons as `__`.
+    expect(parseInventoryEntry('_metrics-server__system__auth-delegator_rbac.authorization.k8s.io_ClusterRoleBinding', 'v1')).toEqual({
+      namespace: undefined,
+      name: 'metrics-server:system:auth-delegator',
+      group: 'rbac.authorization.k8s.io',
+      kind: 'ClusterRoleBinding',
+      version: 'v1',
+    });
+    expect(parseInventoryEntry('kube-system_system__auth__Role')).toEqual({ namespace: 'kube-system', name: 'system:auth', group: '', kind: 'Role', version: undefined });
     expect(inventory(obj({ status: { inventory: { entries: [{ id: 'a_z__Service', v: 'v1' }, { id: 'a_b_apps_Deployment', v: 'v1' }] } } })).map((e) => e.kind)).toEqual(['Deployment', 'Service']);
+  });
+
+  it('finds the Helm release in the storage namespace on v2, and the latest release on v2beta1', () => {
+    const hr = (spec: Record<string, unknown>, status: Record<string, unknown>) =>
+      ({ apiVersion: 'helm.toolkit.fluxcd.io/v2', kind: 'HelmRelease', metadata: { name: 'kube-prometheus', namespace: 'flux-system', uid: 'hr' }, spec, status }) as unknown as KubeObject;
+    const v2 = helmReleaseState(
+      hr(
+        { targetNamespace: 'monitoring', chart: { spec: { chart: 'kube-prometheus-stack' } } },
+        { history: [{ name: 'monitoring-kube-prometheus', namespace: 'monitoring', version: 4, chartName: 'kube-prometheus-stack', chartVersion: '58.1.0', appVersion: 'v0.73.0' }] },
+      ),
+    );
+    // Helm keeps the release where the HelmRelease lives, not in its target namespace.
+    expect(v2).toMatchObject({ installed: true, revision: 4, releaseName: 'monitoring-kube-prometheus', storageNamespace: 'flux-system', chartVersion: '58.1.0', latestOnly: false });
+    expect(helmReleaseState(hr({}, { storageNamespace: 'helm-store', history: [{ version: 1 }] })).storageNamespace).toBe('helm-store');
+
+    const v2beta1 = helmReleaseState(hr({ targetNamespace: 'monitoring', chart: { spec: { chart: 'kube-prometheus-stack' } } }, { lastReleaseRevision: 7, lastAppliedRevision: '57.0.0' }));
+    expect(v2beta1).toMatchObject({ installed: true, revision: 7, chartName: 'kube-prometheus-stack', chartVersion: '57.0.0', releaseName: 'monitoring-kube-prometheus', latestOnly: true });
+    expect(v2beta1.history).toHaveLength(1);
+    expect(helmReleaseState(hr({}, {}))).toMatchObject({ installed: false, history: [] });
   });
 
   it('puts suspension and stalls ahead of the Ready condition in the header word', () => {
@@ -213,6 +246,8 @@ describe('custom kind registry', () => {
     expect(source?.view).toBeUndefined();
     expect(source?.actions).toBeDefined();
     expect(customKindEntry('example.io/v1', 'HTTPRoute')).toBeUndefined();
+    // ImagePolicy has no spec.suspend, so no Flux actions.
+    expect(customKindEntry('image.toolkit.fluxcd.io/v1beta2', 'ImagePolicy')).toBeUndefined();
     expect(customKindEntry('v1', 'Service')).toBeUndefined();
   });
 });

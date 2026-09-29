@@ -124,3 +124,17 @@ export function sortedResources(app: KubeObject): AppResource[] {
 export function appHeaderStatus(app: KubeObject): string | undefined {
   return ((app.status ?? {}) as AppStatus).health?.status;
 }
+
+const IN_CLUSTER_SERVER = 'https://kubernetes.default.svc';
+
+/**
+ * Whether the Application deploys into the cluster it lives in, so its
+ * managed resources are objects of the cluster being viewed. Anything
+ * else (another server, a named remote cluster) is only named, not linked.
+ */
+export function appDeploysInCluster(app: KubeObject): boolean {
+  const destination = (app.spec as AppSpec | undefined)?.destination;
+  if (!destination) return false;
+  if (destination.server) return destination.server.replace(/\/+$/, '') === IN_CLUSTER_SERVER;
+  return destination.name === 'in-cluster';
+}

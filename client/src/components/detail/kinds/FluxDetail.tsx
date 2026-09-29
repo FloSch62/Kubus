@@ -19,7 +19,7 @@ import { conditionHealthy } from '../nested-conditions.js';
 import { ProblemBanner, type ProblemItem } from '../ProblemBanner.js';
 import { DetailStack, Section } from '../Section.js';
 import { SummaryStrip, type SummaryItem } from '../SummaryStrip.js';
-import { fluxConditions, fluxGoodWhen, fluxSuspended, inventory } from './flux.js';
+import { fluxConditions, fluxGoodWhen, fluxSuspended, helmReleaseState, inventory } from './flux.js';
 import { useObjectOpener } from './links.js';
 import { conditionTile } from './tiles.js';
 import { OperatorActionButtons } from './OperatorActionButtons.js';
@@ -198,20 +198,7 @@ interface HelmReleaseSpec {
   chartRef?: SourceRef;
 }
 
-interface HelmHistoryEntry {
-  name?: string;
-  namespace?: string;
-  version?: number;
-  status?: string;
-  chartName?: string;
-  chartVersion?: string;
-  appVersion?: string;
-  firstDeployed?: string;
-  lastDeployed?: string;
-}
-
 interface HelmReleaseStatus {
-  history?: HelmHistoryEntry[];
   lastAttemptedRevision?: string;
   lastAttemptedReleaseAction?: string;
   installFailures?: number;
@@ -228,13 +215,11 @@ export function HelmReleaseDetail({ obj, ctx, crd, version }: CustomKindViewProp
   const namespace = obj.metadata.namespace;
   const spec = (obj.spec ?? {}) as HelmReleaseSpec;
   const status = (obj.status ?? {}) as HelmReleaseStatus;
-  const history = status.history ?? [];
-  const latest = history[0];
+  const release = helmReleaseState(obj);
+  const { history, releaseName, storageNamespace } = release;
   const chartSpec = spec.chart?.spec;
   const source = useSourceLink(ctx, chartSpec?.sourceRef ?? spec.chartRef, namespace);
-  const releaseName = latest?.name ?? spec.releaseName ?? (spec.targetNamespace ? `${spec.targetNamespace}-${obj.metadata.name}` : obj.metadata.name);
-  const storageNamespace = latest?.namespace ?? status.storageNamespace ?? spec.storageNamespace ?? namespace;
-  const chart = latest?.chartName ?? chartSpec?.chart;
+  const chart = release.chartName;
   const failures = (status.installFailures ?? 0) + (status.upgradeFailures ?? 0);
 
   return (
@@ -242,9 +227,9 @@ export function HelmReleaseDetail({ obj, ctx, crd, version }: CustomKindViewProp
       <SummaryStrip
         items={[
           readyItem(obj),
-          { label: 'Chart', value: chart ? `${chart}${latest?.chartVersion ? `@${latest.chartVersion}` : ''}` : '—', mono: true, span: 2 },
-          { label: 'Release', value: latest?.version !== undefined ? `v${latest.version}` : '—', hint: 'Helm release revision.' },
-          !!latest?.appVersion && { label: 'App version', value: latest.appVersion, mono: true },
+          { label: 'Chart', value: chart ? `${chart}${release.chartVersion ? `@${release.chartVersion}` : ''}` : '—', mono: true, span: 2 },
+          { label: 'Release', value: release.revision !== undefined ? `v${release.revision}` : '—', hint: 'Helm release revision.' },
+          !!release.appVersion && { label: 'App version', value: release.appVersion, mono: true },
         ]}
       />
       <FluxStatus obj={obj} kind="HelmRelease" />
@@ -258,7 +243,7 @@ export function HelmReleaseDetail({ obj, ctx, crd, version }: CustomKindViewProp
           </Fact>
           <Fact label="Source">{source}</Fact>
           <Fact label="Helm release">
-            {latest && storageNamespace ? (
+            {release.installed && storageNamespace ? (
               <FactLink onClick={() => appNavigate(`/helm/${encodeURIComponent(ctx)}/${encodeURIComponent(storageNamespace)}/${encodeURIComponent(releaseName)}`)}>
                 {`${storageNamespace}/${releaseName}`}
               </FactLink>
@@ -277,7 +262,7 @@ export function HelmReleaseDetail({ obj, ctx, crd, version }: CustomKindViewProp
           <Fact label="Suspended">{fluxSuspended(obj) && <WarnValue>Yes</WarnValue>}</Fact>
         </Facts>
       </Section>
-      <Section title="History" count={history.length} flush defaultOpen={history.length > 0}>
+      <Section title="History" count={history.length} flush defaultOpen={history.length > 0} description={release.latestOnly ? 'this API version reports the latest release only' : undefined}>
         {history.length === 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1 }}>
             Not installed yet.

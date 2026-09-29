@@ -195,3 +195,27 @@ describe('operator actions', () => {
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Reconcile', 'Resume']);
   });
 });
+
+describe('ArgoApplicationDetail', () => {
+  it('links managed resources only when the app deploys into this cluster', async () => {
+    const { ArgoApplicationDetail } = await import('../../../client/src/components/detail/kinds/ArgoApplicationDetail');
+    mocks.resources = [{ group: 'apps', version: 'v1', plural: 'deployments', kind: 'Deployment', namespaced: true, verbs: ['list'] }];
+    const app = (server: string) =>
+      ({
+        apiVersion: 'argoproj.io/v1alpha1',
+        kind: 'Application',
+        metadata: { name: 'guestbook', namespace: 'argocd', uid: `app-${server}` },
+        spec: { destination: { server, namespace: 'web' } },
+        status: { resources: [{ group: 'apps', version: 'v1', kind: 'Deployment', namespace: 'web', name: 'ui', status: 'Synced', health: { status: 'Healthy' } }] },
+      }) as unknown as KubeObject;
+    const appCrd = { ...crd, spec: { group: 'argoproj.io', names: { plural: 'applications', kind: 'Application' } } } as unknown as KubeObject;
+    const local = render(<ArgoApplicationDetail obj={app('https://kubernetes.default.svc')} ctx="dev" crd={appCrd} version="v1alpha1" />);
+    expect(screen.getByRole('button', { name: 'web/ui' })).toBeInTheDocument();
+    local.unmount();
+    render(<ArgoApplicationDetail obj={app('https://prod.example.com:6443')} ctx="dev" crd={appCrd} version="v1alpha1" />);
+    expect(screen.queryByRole('button', { name: 'web/ui' })).not.toBeInTheDocument();
+    expect(screen.getByText('web/ui')).toBeInTheDocument();
+    expect(screen.getByText('in https://prod.example.com:6443')).toBeInTheDocument();
+  });
+});
+
