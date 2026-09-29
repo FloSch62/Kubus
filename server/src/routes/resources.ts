@@ -5,6 +5,7 @@ import type { AppContext } from '../app.js';
 import { getPrinterColumns } from '../kube/printer-columns.js';
 import { KUBE_LARGE_RESPONSE_DEADLINE_MS, resourcePath } from '../kube/raw-client.js';
 import { fingerprintSecretData, isSecretGVR, maybeRedact } from '../kube/redact.js';
+import { listResourceNames } from '../kube/resource-names.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { dumpYaml, loadYaml } from '../util/yaml.js';
 
@@ -103,6 +104,18 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
         continue: list.metadata?.continue,
       };
       return response;
+    } catch (err) {
+      sendError(reply, err);
+      return reply;
+    }
+  });
+
+  // Names only, for pickers (the Diff page): no object bodies, all pages.
+  app.get<{ Params: GvrParams; Querystring: { namespace?: string } }>('/api/contexts/:ctx/resource-names/:group/:version/:plural', async (req, reply) => {
+    try {
+      const handle = ctx.clusters.get(req.params.ctx);
+      const { version, plural } = req.params;
+      return await listResourceNames(handle.raw, { group: groupFromPath(req.params.group), version, plural }, req.query.namespace || undefined);
     } catch (err) {
       sendError(reply, err);
       return reply;

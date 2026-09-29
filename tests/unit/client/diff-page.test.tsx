@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, ResourceKindInfo } from '@kubus/shared';
@@ -85,7 +85,12 @@ function renderAt(search: string) {
 
 function setObject(ctx: string, result: { data?: KubeObject; error?: unknown }) {
   harness.queryResults.set(JSON.stringify(['diff-object', ctx, 'apps', 'v1', 'deployments', 'shop', 'web']), result);
-  harness.queryResults.set(JSON.stringify(['diff-names', ctx, 'apps', 'v1', 'deployments', 'shop']), { data: result.data ? ['web', 'api'] : ['api'] });
+  harness.queryResults.set(JSON.stringify(['diff-names', ctx, 'apps', 'v1', 'deployments', 'shop']), { data: { names: result.data ? ['api', 'web'] : ['api'] } });
+}
+
+/** Whether the name-list query for a cluster's side was ever allowed to run. */
+function namesRequested(ctx: string): boolean {
+  return (harness.queryConfigs as Array<{ queryKey: unknown[]; enabled?: boolean }>).some((c) => c.queryKey[0] === 'diff-names' && c.queryKey[1] === ctx && c.enabled);
 }
 
 const left = 'kind-a|apps/v1/deployments|shop|web';
@@ -94,6 +99,7 @@ const right = 'kind-b|apps/v1/deployments|shop|web';
 beforeEach(() => {
   fixtures.viewer.mockClear();
   harness.queryResults.clear();
+  harness.queryConfigs.length = 0;
   setObject('kind-a', { data: deployment(1) });
   setObject('kind-b', { data: deployment(2) });
   useClustersStore.setState({ selected: ['kind-a'], namespaces: [], namespacesByContext: {} });
@@ -138,6 +144,26 @@ describe('DiffPage', () => {
     renderAt(`?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`);
     expect(await screen.findByText('kind-b · Deployment shop/web does not exist. Pick another object on the right.')).toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(screen.getAllByRole('combobox', { name: 'Name' })[1]));
+    // The picker opened, so its names were fetched; the missing name is
+    // flagged from the object's own 404, not from the list.
+    await waitFor(() => expect(namesRequested('kind-b')).toBe(true));
+    expect(namesRequested('kind-a')).toBe(false);
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).getByRole('option', { name: 'api' })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: 'web not found here' })).toBeInTheDocument();
+  });
+
+  it('lists no names until a picker is opened', async () => {
+    renderAt(`?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`);
+    await waitFor(() => expect(screen.getByTestId('diff')).toBeInTheDocument());
+    expect(harness.queryConfigs.some((c) => (c as { queryKey: unknown[] }).queryKey[0] === 'diff-names')).toBe(true);
+    expect(namesRequested('kind-a')).toBe(false);
+    expect(namesRequested('kind-b')).toBe(false);
+
+    fireEvent.mouseDown(screen.getAllByRole('combobox', { name: 'Name' })[0]!);
+    await waitFor(() => expect(namesRequested('kind-a')).toBe(true));
+    expect(namesRequested('kind-b')).toBe(false);
+    expect(within(await screen.findByRole('listbox')).queryByText('not found here')).not.toBeInTheDocument();
   });
 
   it('swaps the two sides', async () => {

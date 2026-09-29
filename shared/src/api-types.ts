@@ -336,6 +336,14 @@ export interface ListResponse {
   continue?: string;
 }
 
+/** Object names of one kind (in one namespace), for pickers. */
+export interface ResourceNamesResponse {
+  /** Sorted. */
+  names: string[];
+  /** More exist than the server returns; the picker shows the first ones. */
+  truncated?: boolean;
+}
+
 export interface ResourceRef {
   ctx: string;
   group: string;

@@ -19,7 +19,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router';
 import { dump as dumpYaml } from 'js-yaml';
-import { groupToPath, gvkForResource, type KubeObject, type ListResponse, type ResourceKindInfo } from '@kubus/shared';
+import { groupToPath, gvkForResource, type KubeObject, type ResourceKindInfo, type ResourceNamesResponse } from '@kubus/shared';
 import { apiFetch } from '../api/http.js';
 import { isResourceGone, resourceUrl, useApiResources, useContexts, useNamespaces } from '../api/queries.js';
 import { DiffViewer } from '../components/DiffViewer.js';
@@ -76,15 +76,26 @@ function useSideObject(side: DiffSide, namespaced: boolean | undefined) {
   });
 }
 
-function useNames(side: DiffSide, namespaced: boolean | undefined) {
+/** Identity of the name list a side's picker would show. */
+function namesKey(side: DiffSide, namespaced: boolean | undefined): string | undefined {
+  if (!side.ctx || !side.plural || namespaced === undefined || (namespaced && !side.namespace)) return undefined;
+  return [side.ctx, side.group ?? '', side.version, side.plural, namespaced ? side.namespace : ''].join('|');
+}
+
+/**
+ * Names for a side's picker, fetched only once the picker is opened: a
+ * compare usually arrives with both sides filled in, and the names are only
+ * for choosing another object. The server sends names alone, never objects.
+ */
+function useNames(side: DiffSide, namespaced: boolean | undefined, wanted: boolean) {
   return useQuery({
-    queryKey: ['diff-names', side.ctx, side.group, side.version, side.plural, side.namespace],
-    queryFn: async () => {
+    queryKey: ['diff-names', side.ctx, side.group, side.version, side.plural, namespaced ? side.namespace : undefined],
+    queryFn: () => {
       const params = namespaced && side.namespace ? `?namespace=${encodeURIComponent(side.namespace)}` : '';
-      const list = await apiFetch<ListResponse>(`/api/contexts/${encodeURIComponent(side.ctx!)}/resources/${groupToPath(side.group ?? '')}/${side.version}/${side.plural}${params}`);
-      return list.items.map((i) => i.metadata.name).sort();
+      return apiFetch<ResourceNamesResponse>(`/api/contexts/${encodeURIComponent(side.ctx!)}/resource-names/${groupToPath(side.group ?? '')}/${side.version}/${side.plural}${params}`);
     },
-    enabled: !!side.ctx && !!side.plural && namespaced !== undefined && (!namespaced || !!side.namespace),
+    enabled: wanted && namesKey(side, namespaced) !== undefined,
+    staleTime: 30_000,
   });
 }
 
@@ -179,10 +190,10 @@ export function DiffPage() {
       </PageHeader>
       <Grid container spacing={2} sx={{ mb: 1 }}>
         <Grid size={6}>
-          <SidePicker label="Left" side={left} onChange={(next) => update({ left: next })} />
+          <SidePicker label="Left" side={left} onChange={(next) => update({ left: next })} missing={isResourceGone(leftObj.error)} />
         </Grid>
         <Grid size={6}>
-          <SidePicker label="Right" side={right} onChange={(next) => update({ right: next })} nameInputRef={rightNameRef} />
+          <SidePicker label="Right" side={right} onChange={(next) => update({ right: next })} missing={rightMissing} nameInputRef={rightNameRef} />
         </Grid>
       </Grid>
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: 1, borderColor: 'divider', borderRadius: 1.5, overflow: 'hidden' }}>
@@ -334,12 +345,30 @@ function EmptyState({
   );
 }
 
-function SidePicker({ label, side, onChange, nameInputRef }: { label: string; side: DiffSide; onChange: (s: DiffSide) => void; nameInputRef?: RefObject<HTMLInputElement | null> }) {
+function SidePicker({
+  label,
+  side,
+  onChange,
+  missing,
+  nameInputRef,
+}: {
+  label: string;
+  side: DiffSide;
+  onChange: (s: DiffSide) => void;
+  /** The picked object does not exist (its GET answered 404). */
+  missing?: boolean;
+  nameInputRef?: RefObject<HTMLInputElement | null>;
+}) {
   const { data: contexts } = useContexts({ poll: false });
   const activeContexts = (contexts ?? []).filter((c) => c.active).map((c) => c.name);
   const { info, kinds, unserved } = useSideKind(side);
   const { data: namespaces } = useNamespaces(side.ctx ? [side.ctx] : []);
-  const { data: names } = useNames(side, info?.namespaced);
+  // The list the user last opened the picker for; another cluster, kind or
+  // namespace waits for its own open.
+  const listKey = namesKey(side, info?.namespaced);
+  const [wantedKey, setWantedKey] = useState<string>();
+  const namesQuery = useNames(side, info?.namespaced, !!listKey && wantedKey === listKey);
+  const names = namesQuery.data?.names;
 
   const listableKinds = useMemo(() => (kinds ?? []).filter((k) => k.verbs.includes('get')).sort((a, b) => a.kind.localeCompare(b.kind) || a.group.localeCompare(b.group)), [kinds]);
   const kindValue = listableKinds.find((k) => k.group === (side.group ?? '') && k.version === side.version && k.plural === side.plural) ?? null;
@@ -404,18 +433,31 @@ function SidePicker({ label, side, onChange, nameInputRef }: { label: string; si
         options={nameOptions}
         value={side.name ?? null}
         openOnFocus
+        onOpen={() => setWantedKey(listKey)}
+        loading={namesQuery.isFetching && !names}
+        loadingText="Loading names…"
         onChange={(_e, name) => onChange({ ...side, name: name ?? undefined })}
         renderOption={({ key, ...props }, option) => (
           <li key={key} {...props}>
             {option}
-            {names && !names.includes(option) && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                not found here
-              </Typography>
+            {missing && option === side.name && (
+              <>
+                {' '}
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                  not found here
+                </Typography>
+              </>
             )}
           </li>
         )}
-        renderInput={(p) => <TextField {...p} label="Name" inputRef={nameInputRef} />}
+        renderInput={(p) => (
+          <TextField
+            {...p}
+            label="Name"
+            inputRef={nameInputRef}
+            helperText={namesQuery.data?.truncated ? `Showing the first ${names?.length ?? 0} names` : undefined}
+          />
+        )}
         disabled={!side.plural || (namespaced && !side.namespace)}
       />
     </Stack>
