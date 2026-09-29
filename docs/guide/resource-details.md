@@ -21,6 +21,7 @@ you're on.
 | **Overview** | A kind-aware summary (see below). | Every kind |
 | **Manifest** | The object as a [browsable tree](#the-manifest-tab) or as [YAML](#editing-yaml), editable either way. | Every kind |
 | **Schema** | The CRD's OpenAPI schema, with a picker for the served versions. | CustomResourceDefinitions |
+| **Data** | Each key with its value, editable one key at a time. **Copy all** copies every key as `KEY=value` lines or as YAML ready to paste into a manifest. | ConfigMaps, Secrets |
 | **Events** | Events involving this object, newest first, Warnings highlighted. The tab carries a count of recent warnings before you open it. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
 | **Metrics** | Live CPU/memory [history charts](metrics.md). | Pods, Nodes |

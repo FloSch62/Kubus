@@ -52,6 +52,10 @@ To see a value, open the Secret's [details drawer](resource-details.md) and **re
 explicitly. Revealing is a deliberate, per-resource action. There's no global "show all
 secrets" switch to leave on by accident.
 
+**Copy all** on a Secret's Data tab follows the same rule. With the values revealed it
+copies them straight away; while any value is still hidden, Kubus first asks whether to
+put the decoded values on the clipboard, and they stay hidden on screen either way.
+
 !!! tip "Safe to screen-share"
 
     Because redaction is the default and reveal is explicit, you can demo Kubus or share
