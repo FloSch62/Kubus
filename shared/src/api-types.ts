@@ -37,6 +37,8 @@ export type AppWindowDockTab =
       title: string;
       ctx: string;
       node: string;
+      image?: string;
+      profile?: DebugProfile;
       pinned?: boolean;
       color?: string;
     }

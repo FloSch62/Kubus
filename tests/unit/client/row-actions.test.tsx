@@ -596,4 +596,35 @@ describe('controller and node actions', () => {
     await waitFor(() => expect(screen.getByText(/Done — evicted 2\/2 pods/)).toBeInTheDocument());
     view.unmount();
   });
+
+  it('starts a node debug pod from the image catalog after confirming a protected node', () => {
+    const view = clickMenuAction(target('Node'), 'Debug container…');
+    expect(screen.getByText('Debug container — node-a')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('DebugBox power'));
+    const start = screen.getByRole('button', { name: 'Start' });
+    expect(start).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText('node-a'), { target: { value: 'node-a' } });
+    fireEvent.click(start);
+    expect(queryMocks.debug.mutate).not.toHaveBeenCalled();
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({
+      kind: 'node-shell',
+      node: 'node-a',
+      title: 'debug: node-a',
+      image: 'ghcr.io/ibtisam-iq/debugbox:power-1.2.0',
+      profile: 'netadmin',
+    });
+    view.unmount();
+  });
+
+  it('falls back to the general profile for node presets saved as restricted', () => {
+    queryMocks.debugImages = [{ name: 'Busybox', image: 'busybox:1.37', profile: 'restricted' }];
+    const view = clickMenuAction(target('Node'), 'Debug container…');
+    fireEvent.mouseDown(screen.getByLabelText('Profile'));
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['General', 'Network admin', 'System admin']);
+    fireEvent.click(screen.getByRole('option', { name: 'General' }));
+    fireEvent.change(screen.getByPlaceholderText('node-a'), { target: { value: 'node-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'node-shell', image: 'busybox:1.37', profile: 'general' });
+    view.unmount();
+  });
 });

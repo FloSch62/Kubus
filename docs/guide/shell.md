@@ -4,7 +4,7 @@ icon: lucide/square-terminal
 
 # Shell, debug & node shell
 
-When logs aren't enough, get a real terminal. Kubus gives you three kinds of shell, each
+When logs aren't enough, get a real terminal. Kubus gives you four kinds of shell, each
 opening as a tab in the [bottom dock](the-window.md#bottom-dock). Every tab is a full
 [xterm.js](https://xtermjs.org/) terminal with colours, cursor control and automatic
 resize.
@@ -77,6 +77,33 @@ root namespace, giving you a root shell on the machine.
     you before starting one, and on a [protected cluster](production-guard.md) you must
     type the node name to confirm. The helper pod is **deleted when you close the
     terminal**.
+
+## Node debug containers { #node-debug-containers }
+
+The node shell only has the host's own binaries, and a minimal node OS (Talos,
+Bottlerocket, Flatcar) may not ship `tcpdump`, `dig` or even `bash`. A **node debug
+container** brings the tools with it: Kubus starts a pod on the node with a debug image
+of your choice, the same idea as `kubectl debug node/<name>`.
+
+- **Node** ⋮ menu → **Debug container…**
+
+The dialog offers the same [image catalog](#debug-containers) as pod debugging, including
+your own entries from [Settings → Debug containers](settings.md#debug-containers). The pod
+shares the node's process, network and IPC namespaces, so `ps`, `ss` and `tcpdump` see the
+host, and the node's root filesystem is mounted at **`/host`**. Run `chroot /host` when you
+need the node's own tools after all.
+
+The **profile** decides what the container may do on the node:
+
+| Profile | Access |
+| --- | --- |
+| **General** | The container runtime's default capabilities. Enough to read `/host`, list processes and inspect sockets. |
+| **Network admin** | Adds `NET_ADMIN` and `NET_RAW` for packet capture and iptables on the node's interfaces. |
+| **System admin** | A privileged container with full control of the node, like the node shell. |
+
+The pod runs in the `kubus-debug` namespace and is **deleted when you close the terminal**,
+or right away if the image fails to pull. On a [protected cluster](production-guard.md) you
+type the node name to confirm, as with the node shell.
 
 ## See also
 
