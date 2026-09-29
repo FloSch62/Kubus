@@ -9,6 +9,7 @@ import { useTabsStore } from './state/tabs.js';
 import { useDockStore, type DockTab } from './state/dock.js';
 import { useDetailStore } from './state/detail.js';
 import { registerAppNavigate } from './app-navigate.js';
+import { ROW_KEYS } from './row-keys.js';
 
 /** How long a pending `g` waits for its second key (the which-key panel shows meanwhile). */
 export const GO_TIMEOUT_MS = 3000;
@@ -133,10 +134,27 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
     ],
   },
   {
+    // Wired in components/grid-row-keys.ts; the row menu and the palette
+    // print the same keys from ROW_KEYS.
+    title: 'Focused list row',
+    shortcuts: [
+      { combos: [['J'], ['K']], description: 'Move the row cursor down / up (also ↓ ↑)' },
+      ...ROW_KEYS.map((def) => ({ combos: [[def.label]], description: def.description })),
+    ],
+  },
+  {
     title: 'Details panel',
     shortcuts: [
       { combos: [['Esc']], description: 'Close the panel (focus returns to the list)' },
       { combos: [['Alt', '←']], description: 'Back to the previous resource in the panel' },
+      { combos: [['E']], description: 'Open the Manifest tab' },
+    ],
+  },
+  {
+    title: 'Manifest & YAML',
+    shortcuts: [
+      { combos: [[MOD, 'S']], description: 'Review & apply the staged edits (Manifest tab)' },
+      { combos: [[MOD, 'Enter']], description: 'Create (in a create dialog, after its dry-run)' },
     ],
   },
   {

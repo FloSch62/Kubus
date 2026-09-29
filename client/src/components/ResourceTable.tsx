@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTheme } from '@mui/material/styles';
 import { layout, statusTextColor } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
@@ -22,6 +23,8 @@ import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useQuickSearchShortcut } from './quick-search.js';
 import { countLabel } from './format.js';
+import { handleGridRowKey } from './grid-row-keys.js';
+import type { RowKeyAction } from '../row-keys.js';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
 
@@ -45,6 +48,8 @@ interface Props {
   onRowActivate?: (row: ClusterRow) => void;
   /** Opened by right-click or the ContextMenu / Shift+F10 keys. */
   onRowContextMenu?: (row: ClusterRow, position: { clientX: number; clientY: number }) => void;
+  /** A single-key action on the focused row (L, X, F, S, R, E, Del); returns whether the row has it. */
+  onRowKey?: (row: ClusterRow, action: RowKeyAction) => boolean;
   /** Extra toolbar elements (e.g. create button). */
   toolbar?: ReactNode;
   /** Enable checkbox selection; returns selected rows. */
@@ -100,6 +105,7 @@ export function ResourceTable({
   onRowClick,
   onRowActivate,
   onRowContextMenu,
+  onRowKey,
   toolbar,
   checkboxSelection,
   onSelectionChange,
@@ -288,8 +294,8 @@ export function ResourceTable({
   rowsByIdRef.current = rowsById;
   const filteredRef = useRef(filtered);
   filteredRef.current = filtered;
-  const callbacksRef = useRef({ onRowClick, onRowActivate, onRowContextMenu, onSelectionChange });
-  callbacksRef.current = { onRowClick, onRowActivate, onRowContextMenu, onSelectionChange };
+  const callbacksRef = useRef({ onRowClick, onRowActivate, onRowContextMenu, onRowKey, onSelectionChange });
+  callbacksRef.current = { onRowClick, onRowActivate, onRowContextMenu, onRowKey, onSelectionChange };
   const rowSelectionModel = useMemo<GridRowSelectionModel | undefined>(
     () => selectedRows && { type: 'include', ids: new Set(selectedRows.map((row) => row.obj.metadata.uid)) },
     [selectedRows],
@@ -302,6 +308,7 @@ export function ResourceTable({
 
   // The grid re-renders on every watch flush; keep the sx object stable so
   // emotion doesn't re-serialize it each time.
+  const cursorColor = useTheme().palette.primary.main;
   const gridSx = useMemo(
     () => ({
       border: 0,
@@ -310,9 +317,12 @@ export function ResourceTable({
       '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
       '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
       '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
+      // The row cursor: the row holding the focused cell (arrow keys, j/k)
+      // is marked, so single-key row actions have a visible target.
+      '& .MuiDataGrid-row:focus-within': { boxShadow: `inset 3px 0 0 ${cursorColor}` },
       ...copyCellGridSx,
     }),
-    [!!onRowClick], // eslint-disable-line react-hooks/exhaustive-deps
+    [!!onRowClick, cursorColor], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const setTextFilter = (value: string) => {
@@ -430,6 +440,7 @@ export function ResourceTable({
       const row = rowsByIdRef.current.get(String(params.id));
       if (!row) return;
       const callbacks = callbacksRef.current;
+      if (handleGridRowKey(details.apiRef, params, event, row, callbacks.onRowKey)) return;
       // Keyboard equivalents of clicking and right-clicking a row.
       if (event.key === 'Enter' && (callbacks.onRowActivate || callbacks.onRowClick)) {
         event.preventDefault();

@@ -45,6 +45,9 @@ ports. When several clusters are selected, a **Cluster** column is added automat
 - **Copy a value** with the copy button that appears when you hover a cell, or focus a
   cell and press ++ctrl+c++ (++cmd+c++ on macOS). The shortcut always copies that one
   cell, even while rows are checked. To copy whole rows, use **Copy rows** (below).
+- **Drive it from the keyboard.** Arrow keys or `j` / `k` move between rows, ++enter++
+  opens one, and single keys act on the focused row: `l` logs, `x` shell, `s` scale,
+  `e` manifest and [more](../reference/keyboard-shortcuts.md#single-key-row-actions).
 - **Secret values are redacted** by default. Kubus never shows secret data in a list.
   [Reveal them deliberately](production-guard.md#secrets-are-redacted-by-default) in the
   details drawer.

@@ -25,6 +25,9 @@ import { ConfirmDialog } from '../ConfirmDialog.js';
 import { REDACTED, maskSecretValues } from './data-editor.js';
 import { AddFieldPopover, ManifestTree, type EditRequest, type ExpandCommand } from './ManifestTree.js';
 import { ReviewApplyDialog, type ReviewTarget } from './ReviewApplyDialog.js';
+import { LiveChangeAlert } from './LiveChangeAlert.js';
+import { isSaveChord } from '../../editor-keys.js';
+import { HOTKEY_MOD_LABEL } from '../../platform.js';
 import { CountPill, Section } from './Section.js';
 import {
   deleteAt,
@@ -281,7 +284,15 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <Box
+      sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
+      onKeyDown={(e) => {
+        // Mod+S reviews the staged edits, the same step as in the YAML view.
+        if (!isSaveChord(e)) return;
+        e.preventDefault();
+        if (draft && !readOnly) setReview(true);
+      }}
+    >
       <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', rowGap: 0.5 }}>
         {toolbarStart}
         {toolbar}
@@ -345,25 +356,17 @@ export function ManifestView({ sel, live, draft, onDraftChange, readOnly = false
             <Button disabled={!draft} onClick={() => setConfirmReset(true)}>
               Reset
             </Button>
-            <Button variant="contained" disabled={!draft} onClick={() => setReview(true)}>
-              Review & apply
-            </Button>
+            <Tooltip title={`${HOTKEY_MOD_LABEL}S`} describeChild>
+              <span>
+                <Button variant="contained" disabled={!draft} onClick={() => setReview(true)}>
+                  Review & apply
+                </Button>
+              </span>
+            </Tooltip>
           </>
         )}
       </Stack>
-      {serverMoved && (
-        <Alert
-          severity="warning"
-          sx={{ borderRadius: 0, flexShrink: 0 }}
-          action={
-            <Button color="inherit" size="small" onClick={rebase}>
-              Rebase edits
-            </Button>
-          }
-        >
-          This object changed on the server while you were editing. Rebase replays your edits onto the latest version.
-        </Alert>
-      )}
+      {serverMoved && <LiveChangeAlert editing onAction={rebase} />}
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <Stack spacing={1.5} sx={{ p: 2 }}>
           {sections.map((group) => {

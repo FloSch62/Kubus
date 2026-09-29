@@ -29,8 +29,10 @@ import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
 import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
-import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
+import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, selKeyOf, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
+import { rowKeyActionsFor } from '../components/row-key-actions.js';
+import type { RowKeyAction } from '../row-keys.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { BatchCreateDialog } from '../components/BatchCreateDialog.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -267,6 +269,14 @@ function EmbeddedResourceDetail() {
         aria-label="Resource details"
         tabIndex={-1}
         onKeyDown={(e) => {
+          // E opens the Manifest tab. Focus inside the panel reaches the
+          // drawer's own handler; this covers the panel itself, where
+          // keyboard row activation puts it.
+          if (e.target === e.currentTarget && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            useDetailStore.getState().requestTab(selKeyOf(sel), 'manifest', { remember: true });
+            return;
+          }
           // Escape closes the panel and hands focus back to the grid — but
           // never while typing (inputs, Monaco), where Escape has meaning.
           if (e.key !== 'Escape' || isTextEntryTarget(e.target)) return;
@@ -440,7 +450,12 @@ export function ResourceListPage() {
   const nsFilter = useClustersStore((s) => s.namespaces);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
   const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
-  const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number } | null>(null);
+  // The row menu, opened by right-click, or mounted closed to run a row key
+  // (`run`) through its dialogs; `seq` remounts it for every key press.
+  const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number; run?: RowKeyAction; seq?: number } | null>(null);
+  const rowKeySeq = useRef(0);
+  // Stable entry point for the row menus' "Edit manifest" (the columns are memoized).
+  const openManifestRef = useRef<(row: ClusterRow) => void>(() => {});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
   const create = useCreateResource();
@@ -606,7 +621,7 @@ export function ResourceListPage() {
       renderCell: (p) => (
         <>
           {quickLogs && <RowLogsButton target={rowActionTarget(p.row)} />}
-          <RowActions target={rowActionTarget(p.row)} />
+          <RowActions target={rowActionTarget(p.row)} keyHints onOpenManifest={() => openManifestRef.current(p.row)} />
         </>
       ),
     });
@@ -682,20 +697,40 @@ export function ResourceListPage() {
 
   const multiLogs = kind === 'Pod' && selectedRows.length > 0;
 
-  const openRow = (row: ClusterRow) => {
+  const openRow = (row: ClusterRow, tab?: string) => {
     // Update immediately so the embedded panel responds in the same render
     // cycle; the URL remains the deep-link source of truth. Picking a row is
     // an explicit ask for details, so also undo a collapse.
-    openDetail(
-      { ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind },
-      { embedded: true },
-    );
+    const rowSel = { ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind };
+    if (tab) useDetailStore.getState().requestTab(selKeyOf(rowSel), tab);
+    openDetail(rowSel, { embedded: true });
     setDetailCollapsed(false);
     const next = new URLSearchParams(searchParams);
     next.delete('field');
-    next.delete('dt');
+    if (tab) next.set('dt', tab);
+    else next.delete('dt');
     next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
     setSearchParams(next);
+  };
+  openManifestRef.current = (row) => {
+    openRow(row, 'manifest');
+    requestDetailFocus();
+  };
+
+  // Single keys on the focused row run the row menu's flows (dialogs,
+  // confirmations and the production guard included), only where the row
+  // has that action.
+  const handleRowKey = (row: ClusterRow, action: RowKeyAction): boolean => {
+    const target = rowActionTarget(row);
+    if (!rowKeyActionsFor(target).has(action)) return false;
+    if (action === 'manifest') {
+      openManifestRef.current(row);
+      return true;
+    }
+    rowKeySeq.current += 1;
+    setContextMenuOpen(false);
+    setContextAction({ target, mouseX: 0, mouseY: 0, run: action, seq: rowKeySeq.current });
+    return true;
   };
 
   const saveCurrentView = () => {
@@ -784,6 +819,7 @@ export function ResourceListPage() {
           setContextAction({ target: rowActionTarget(row), mouseX: position.clientX + 2, mouseY: position.clientY - 6 });
           setContextMenuOpen(true);
         }}
+        onRowKey={handleRowKey}
         checkboxSelection
         selectedRows={selectedRows}
         onSelectionChange={setSelectedRows}
@@ -909,11 +945,14 @@ export function ResourceListPage() {
       )}
       {contextAction && (
         <RowActionMenu
-          key={contextAction.target.obj.metadata.uid}
+          key={`${contextAction.target.obj.metadata.uid}:${contextAction.seq ?? 'menu'}`}
           target={contextAction.target}
           anchorPosition={{ top: contextAction.mouseY, left: contextAction.mouseX }}
           open={contextMenuOpen}
           onClose={() => setContextMenuOpen(false)}
+          keyHints
+          runAction={contextAction.run}
+          onOpenManifest={() => openManifestRef.current({ ctx: contextAction.target.ctx, obj: contextAction.target.obj })}
         />
       )}
       <ApiResourceDrawer

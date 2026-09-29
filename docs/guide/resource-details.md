@@ -148,6 +148,9 @@ accept the same `/` [smart filter](smart-filters.md) syntax as the list pages.
     The tab you were on (Events, Manifest, Metrics) rides along in the page tab's URL,
     so reopening a closed tab or restarting Kubus brings back the object *and* the tab.
 
+Press `e` anywhere in the drawer (outside a text field) to jump to the Manifest tab. In a
+list, `e` on a focused row opens that row straight on its Manifest tab.
+
 ## The Manifest tab
 
 The **Manifest** tab shows the whole object as a tree, one section per top-level key:
@@ -188,8 +191,8 @@ Editing works in place:
    other top-level key.
 3. Changed rows are marked and counted. Each one can be reset on its own, and **Reset**
    drops everything.
-4. **Review & apply** shows the YAML diff, runs a server dry-run and only then enables
-   **Apply**.
+4. **Review & apply** (or ++ctrl+s++ / ++cmd+s++) shows the YAML diff, runs a server
+   dry-run and only then enables **Apply**.
 
 Some rows are locked with a padlock: the status block belongs to the controller, identity
 fields (name, namespace, UID, resource version) belong to the API server, and a Secret's
@@ -214,16 +217,25 @@ object's API schema for completion and hover help.
 
 1. Switch the Manifest tab to **YAML**.
 2. Make your changes.
-3. **Dry run** to have the server validate them, then **Replace** to write the object, or
-   **Reset** to reload from the server.
+3. Press **Review & apply** (or ++ctrl+s++ / ++cmd+s++). You get the same diff and server
+   dry-run as in the tree, and **Apply** writes the object once the server accepts it.
+   **Reset** drops your edits.
+
+The editor works on a copy of the object taken when you opened it, so it never reloads
+under your cursor. Kubus keeps watching the live object, though. When it changes on the
+server, a banner says so right away: **Reload** loads the new version into a clean editor,
+and **Rebase edits** replays your edits onto it. The rebased text is serialized fresh, so
+it keeps every edit but not your formatting or comments. Status updates alone don't
+interrupt a clean editor, since controllers rewrite status all the time.
 
 ### Conflict detection
 
 If the object changed on the server while you were editing, Kubus won't blindly clobber
 it. The apply is rejected, you're shown the conflict, the view refreshes to the latest
-state, and you can re-apply your change against it. No silent overwrites. In the Manifest
-tab a banner offers to **rebase** your edits onto the refreshed object, so you keep them
-instead of starting over.
+state, and you can re-apply your change against it. No silent overwrites. In the tree and
+the YAML view alike, a banner offers to **rebase** your edits onto the refreshed object as
+soon as it changes, so you keep them instead of starting over, usually before you ever
+reach **Apply**.
 
 !!! warning "Edits are real"
 
@@ -235,7 +247,9 @@ instead of starting over.
 
 You don't need an existing object to use the editor. Kubus can open a blank YAML buffer
 so you can paste or write a manifest and apply it to create the resource, the same way
-`kubectl apply -f` would.
+`kubectl apply -f` would. Press ++ctrl+enter++ / ++cmd+enter++ to create without reaching
+for the mouse: when you edited the template, the server dry-run runs first, and any
+findings stop the create so you can read them.
 
 ## See also
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
 import { ResourceTable } from '../../../client/src/components/ResourceTable';
@@ -70,4 +70,48 @@ describe('ResourceTable selection', () => {
     expect(screen.queryByText('18m')).not.toBeInTheDocument();
   });
 
+});
+
+describe('ResourceTable row keys', () => {
+  const columns = [{ field: 'name', valueGetter: (_value: unknown, current: ClusterRow) => current.obj.metadata.name }];
+  const nameCell = (name: string) => screen.getByText(name).closest<HTMLElement>('.MuiDataGrid-cell')!;
+
+  it('moves the row cursor with j and k', async () => {
+    render(<ResourceTable rows={[row('a'), row('b'), row('c')]} columns={columns} />);
+    // Keys act on the focused cell, as in the app (Tab or a click puts focus there).
+    act(() => nameCell('a').focus());
+    fireEvent.keyDown(nameCell('a'), { key: 'j' });
+    await waitFor(() => expect(document.activeElement).toBe(nameCell('b')));
+    fireEvent.keyDown(nameCell('b'), { key: 'j' });
+    await waitFor(() => expect(document.activeElement).toBe(nameCell('c')));
+    // The last row stays put, like the arrow keys at the end of a page.
+    fireEvent.keyDown(nameCell('c'), { key: 'j' });
+    fireEvent.keyDown(nameCell('c'), { key: 'k' });
+    await waitFor(() => expect(document.activeElement).toBe(nameCell('b')));
+  });
+
+  it('hands action keys to the page and claims only the ones the row has', () => {
+    const onRowKey = vi.fn((current: ClusterRow, action: string) => action !== 'scale');
+    render(<ResourceTable rows={[row('a'), row('b')]} columns={columns} onRowKey={onRowKey} />);
+
+    const logs = new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true });
+    nameCell('b').dispatchEvent(logs);
+    expect(onRowKey).toHaveBeenLastCalledWith(expect.objectContaining({ obj: expect.objectContaining({ metadata: expect.objectContaining({ name: 'b' }) }) }), 'logs');
+    expect(logs.defaultPrevented).toBe(true);
+
+    // No such action on the row: the key stays free for the filter shortcut.
+    const scale = new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true });
+    nameCell('a').dispatchEvent(scale);
+    expect(onRowKey).toHaveBeenLastCalledWith(expect.anything(), 'scale');
+    expect(scale.defaultPrevented).toBe(false);
+
+    // Chords, held keys and other keys never reach the page.
+    onRowKey.mockClear();
+    fireEvent.keyDown(nameCell('a'), { key: 'l', ctrlKey: true });
+    fireEvent.keyDown(nameCell('a'), { key: 'l', repeat: true });
+    fireEvent.keyDown(nameCell('a'), { key: 'q' });
+    expect(onRowKey).not.toHaveBeenCalled();
+    fireEvent.keyDown(nameCell('a'), { key: 'Delete' });
+    expect(onRowKey).toHaveBeenLastCalledWith(expect.anything(), 'delete');
+  });
 });

@@ -13,6 +13,7 @@ import { resourceUrl } from '../api/queries.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { podContainerNames } from '../kube-display.js';
 import { manualJobYaml } from '../manual-job.js';
+import type { RowKeyAction } from '../row-keys.js';
 
 /**
  * Palette actions for a resource. `run` actions execute immediately and
@@ -26,11 +27,13 @@ export interface PaletteAction {
   title: string;
   kind: 'run' | 'detail';
   danger?: boolean;
+  /** The same action's single key on a focused list row, shown as a hint. */
+  rowKey?: RowKeyAction;
 }
 
-const LOGS: PaletteAction = { id: 'logs', title: 'Logs', kind: 'run' };
-const SHELL: PaletteAction = { id: 'shell', title: 'Shell', kind: 'run' };
-const RESTART: PaletteAction = { id: 'restart', title: 'Rollout restart', kind: 'run' };
+const LOGS: PaletteAction = { id: 'logs', title: 'Logs', kind: 'run', rowKey: 'logs' };
+const SHELL: PaletteAction = { id: 'shell', title: 'Shell', kind: 'run', rowKey: 'shell' };
+const RESTART: PaletteAction = { id: 'restart', title: 'Rollout restart', kind: 'run', rowKey: 'restart' };
 const TRIGGER: PaletteAction = { id: 'trigger', title: 'Trigger now', kind: 'run' };
 const RERUN: PaletteAction = { id: 'rerun', title: 'Re-run', kind: 'run' };
 const SUSPEND: PaletteAction = { id: 'suspend-toggle', title: 'Suspend / Resume', kind: 'run' };

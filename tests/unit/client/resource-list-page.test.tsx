@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, PrinterColumn, ResourceKindInfo } from '@kubus/shared';
@@ -38,7 +38,7 @@ const fixtures = vi.hoisted(() => ({
   }) },
 }));
 
-const effects = vi.hoisted(() => ({ toast: vi.fn(), copy: vi.fn(async (_text: string) => true) }));
+const effects = vi.hoisted(() => ({ toast: vi.fn(), copy: vi.fn(async (_text: string) => true), rowKeyResults: [] as Array<boolean | undefined> }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useClusterSignals: () => ({ data: undefined }),
@@ -58,9 +58,18 @@ vi.mock('../../../client/src/clipboard.js', () => ({ copyToClipboard: effects.co
 vi.mock('../../../client/src/components/RowActions.js', () => ({
   isLogTargetKind: (kind: string) => ['Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Service'].includes(kind),
   RowLogsButton: ({ target }: { target: { obj: KubeObject } }) => <button>Quick logs {target.obj.metadata.name}</button>,
-  RowActions: ({ target }: { target: { obj: KubeObject } }) => <button>Actions {target.obj.metadata.name}</button>,
-  RowActionMenu: ({ target, open, onClose }: { target: { obj: KubeObject }; open: boolean; onClose: () => void }) =>
-    open ? <button onClick={onClose}>Context actions {target.obj.metadata.name}</button> : null,
+  RowActions: ({ target, onOpenManifest }: { target: { obj: KubeObject }; onOpenManifest?: () => void }) => (
+    <>
+      <button>Actions {target.obj.metadata.name}</button>
+      {onOpenManifest && <button onClick={onOpenManifest}>Edit manifest {target.obj.metadata.name}</button>}
+    </>
+  ),
+  RowActionMenu: ({ target, open, onClose, runAction }: { target: { obj: KubeObject }; open: boolean; onClose: () => void; runAction?: string }) => (
+    <>
+      {open && <button onClick={onClose}>Context actions {target.obj.metadata.name}</button>}
+      {runAction && <output>Row key {runAction} on {target.obj.metadata.name}</output>}
+    </>
+  ),
 }));
 vi.mock('../../../client/src/components/ResourceTable.js', () => ({
   ResourceTable: (props: {
@@ -74,6 +83,7 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
     onRowClick?: (row: Row) => void;
     onRowActivate?: (row: Row) => void;
     onRowContextMenu?: (row: Row, position: { clientX: number; clientY: number }) => void;
+    onRowKey?: (row: Row, action: 'delete' | 'scale' | 'manifest') => boolean;
     hiddenFields?: string[];
     activeRowId?: string;
     loading?: boolean;
@@ -91,6 +101,11 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
       <button onClick={() => props.onRowClick?.(props.rows[0]!)}>Mock open row</button>
       <button onClick={() => props.onRowActivate?.(props.rows[0]!)}>Mock activate row</button>
       <button onClick={() => props.onRowContextMenu?.(props.rows[0]!, { clientX: 20, clientY: 30 })}>Mock context row</button>
+      {(['delete', 'scale', 'manifest'] as const).map((action) => (
+        <button key={action} onClick={() => effects.rowKeyResults.push(props.onRowKey?.(props.rows[0]!, action))}>
+          Mock key {action}
+        </button>
+      ))}
       {props.rows[0] && props.columns.flatMap((column) => {
         if (!column.renderCell) return [];
         const value = column.valueGetter?.(undefined, props.rows[0], column, {});
@@ -201,6 +216,7 @@ beforeEach(() => {
   fixtures.del.mutateAsync.mockClear();
   fixtures.restart.mutateAsync.mockClear();
   effects.toast.mockClear();
+  effects.rowKeyResults = [];
   useClustersStore.setState({
     selected: ['dev', 'prod'],
     namespaces: ['team-a'],
@@ -216,7 +232,7 @@ beforeEach(() => {
   effects.copy.mockClear();
   useNavigationStore.setState({ favorites: [], savedViews: [] });
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined, tabRequest: undefined });
   Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0) });
   Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: (id: number) => window.clearTimeout(id) });
 });
@@ -422,5 +438,34 @@ describe('ResourceListPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close batch mock' }));
       view.unmount();
     }
+  });
+});
+
+describe('ResourceListPage row keys', () => {
+  it('runs row keys through the row menu, only where the row has the action', () => {
+    renderPage('/r/core/v1/pods');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key delete' }));
+    expect(effects.rowKeyResults).toEqual([true]);
+    expect(screen.getByText('Row key delete on pod-a')).toBeInTheDocument();
+    // Pods do not scale: the key is refused and stays free for the filter shortcut.
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key scale' }));
+    expect(effects.rowKeyResults).toEqual([true, false]);
+    expect(screen.queryByText('Row key scale on pod-a')).not.toBeInTheDocument();
+  });
+
+  it('opens the focused row on its Manifest tab with E, from the key and from the menu item', async () => {
+    renderPage('/r/core/v1/pods?q=pod');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key manifest' }));
+    expect(effects.rowKeyResults).toEqual([true]);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('dt=manifest'));
+    expect(screen.getByTestId('location')).toHaveTextContent('sel=dev%7Cteam-a%7Cpod-a');
+    expect(screen.getByTestId('location')).toHaveTextContent('q=pod');
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ name: 'pod-a', kind: 'Pod' });
+    expect(useDetailStore.getState().tabRequest).toMatchObject({ selKey: 'dev||v1|pods|team-a|pod-a', tab: 'manifest' });
+    expect(useDetailStore.getState().focusSeq).toBe(1);
+
+    act(() => useDetailStore.setState({ tabRequest: undefined }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit manifest pod-a' }));
+    expect(useDetailStore.getState().tabRequest).toMatchObject({ tab: 'manifest' });
   });
 });

@@ -35,6 +35,10 @@ Press ++ctrl+k++ (++cmd+k++ on macOS), or click the search box in the top bar.
     kind: logs, shell, scale, restart, port-forward, delete and the rest. Type to filter
     them, ++enter++ to run. Press ++esc++ to step back to the search.
 
+    An action that also works as a single key on a focused list row shows that key on
+    the right, so the palette teaches you the
+    [row shortcuts](../reference/keyboard-shortcuts.md#single-key-row-actions).
+
 === "Commands (`>`)"
 
     Type `>` to run **app commands**:

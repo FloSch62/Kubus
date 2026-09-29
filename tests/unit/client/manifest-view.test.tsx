@@ -220,6 +220,21 @@ describe('ManifestView', () => {
     expect(onDraftChange).toHaveBeenLastCalledWith(undefined, draft.base);
   }, 15_000);
 
+  it('opens Review & apply with Mod+S while edits are staged', () => {
+    const live = deployment();
+    const clean = renderView(live);
+    expect(fireEvent.keyDown(screen.getByRole('textbox', { name: 'Filter manifest' }), { key: 's', ctrlKey: true })).toBe(false);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    clean.view.unmount();
+
+    const obj = structuredClone(live);
+    delete (obj.metadata as unknown as Record<string, unknown>).managedFields;
+    (obj.spec as Record<string, unknown>).replicas = 3;
+    renderView(live, { draft: draftFor(live, obj) });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Expand all' }), { key: 's', metaKey: true });
+    expect(within(screen.getByRole('dialog')).getByTestId('diff-right')).toHaveTextContent('replicas: 3');
+  });
+
   it('filters rows, expands and collapses everything, and copies values and paths', async () => {
     renderView(deployment());
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter manifest' }), { target: { value: 'nginx' } });

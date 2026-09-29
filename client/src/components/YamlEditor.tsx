@@ -21,6 +21,13 @@ export interface YamlEditorProps {
   toolbar?: React.ReactNode;
   /** Kind being edited; enables schema-based hover docs, completion and validation. */
   schema?: YamlSchemaRef;
+  /**
+   * Replace Dry run and Apply with one Review & apply step (also Mod+S): the
+   * caller shows the diff, the server dry-run and the apply for the edited text.
+   */
+  onReview?: (yamlText: string) => void;
+  /** Banner between the toolbar and the editor (e.g. the object changed on the server). */
+  notice?: React.ReactNode;
 }
 
 /** Fetch and register the schema when a YAML editor mounts. Keep this out of

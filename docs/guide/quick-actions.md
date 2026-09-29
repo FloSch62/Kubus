@@ -80,6 +80,10 @@ first, so a stray click can't take something down.
 - **Details drawer**: the same actions while you're inspecting an object.
 - **Command palette**: press ++ctrl+k++, find a resource, press ++tab++ and pick an
   action. [More →](command-palette.md)
+- **Keyboard**: focus a row in any list and press one key, for example `l` for logs, `s`
+  to scale or `e` to open the manifest. The row menu prints each key next to its action,
+  and you can press the key while the menu is open too. Restart and delete ask you to
+  confirm first. [All keys →](../reference/keyboard-shortcuts.md#single-key-row-actions)
 
 ## See also
 
