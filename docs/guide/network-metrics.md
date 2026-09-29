@@ -27,7 +27,7 @@ The **Network Metrics** sidebar entry (below Metrics) renders, per selected clus
 - **Tiles** show cluster-wide throughput, active traffic links, pods with traffic, and
   how many node agents are reporting.
 - **Cluster traffic** plots a rolling ~30-minute throughput trend (each flow counted once).
-- **Top pods by traffic** ranks the busiest pods, sent + received stacked.
+- **Top pods by traffic** ranks the busiest pods: the pod name with its namespace underneath, a bar with sent and received stacked, and the combined rate.
 - **Busiest links** is a table of endpoint pairs with per-second rates in each
   direction, plus TCP retransmissions and dropped bytes when they occur. Endpoints
   are shown as pods where Retina resolved them; other IPs resolve to Services
@@ -55,6 +55,6 @@ A few things to know before installing:
   sync automatically as namespaces come and go.
 - Expect roughly 500m CPU / 300 Mi memory requested per node (upstream defaults).
 
-To remove it again, use the **Uninstall** button in the page header. It deletes
+To remove it again, open the **⋮** menu in the page header and choose **Uninstall network agent…**. It deletes
 everything the install created. If the Retina install wasn't created by Kubus (AKS
 add-ons, your own Helm release), a warning notes that it may be managed elsewhere.

@@ -20,20 +20,19 @@ import SpeedOutlinedIcon from '@mui/icons-material/SpeedOutlined';
 import SyncAltOutlinedIcon from '@mui/icons-material/SyncAltOutlined';
 import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined';
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
-import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import type { ClusterNetworkSummary, NetworkPeer, NetworkSeriesEntry } from '@kubus/shared';
 import { useNetworkAgentStatus, useNetworkSummary } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { EmptyState } from '../components/EmptyState.js';
+import { UsageRanking, type UsageRankingRow } from '../components/UsageRanking.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { InstallNetworkAgentButton, UninstallNetworkAgentButton } from '../components/NetworkAgentControls.js';
 import { formatBps } from '../components/format.js';
-import { SERIES_DARK, SERIES_LIGHT, timeTickFormatter } from '../components/chart-theme.js';
+import { formatAxisValue, metricColors, niceValueTicks, timeAxisTicks } from '../components/chart-theme.js';
 
-// Sent/received pair from the shared chart palette (same set as MetricsPage).
-const SENT_COLOR = { light: SERIES_LIGHT[0]!, dark: SERIES_DARK[0]! };
-const RECV_COLOR = { light: SERIES_LIGHT[1]!, dark: SERIES_DARK[1]! };
 const MAX_LINK_ROWS = 50;
 
 export function NetworkMetricsPage() {
@@ -43,8 +42,22 @@ export function NetworkMetricsPage() {
     return <NoClustersState icon={<NetworkCheckOutlinedIcon />} />;
   }
 
+  // One cluster: its name and controls sit in the page header. Several:
+  // the page header names the page and each cluster gets its own section header.
+  if (selected.length === 1) {
+    return (
+      <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <ClusterNetworkSection ctx={selected[0]!} single />
+      </Box>
+    );
+  }
   return (
     <Stack spacing={3} sx={{ p: 2 }}>
+      <PageHeader title="Network Metrics" icon={<NetworkCheckOutlinedIcon />}>
+        <Typography variant="body2" color="text.secondary">
+          {selected.length} clusters
+        </Typography>
+      </PageHeader>
       {selected.map((ctx) => (
         <ClusterNetworkSection key={ctx} ctx={ctx} />
       ))}
@@ -52,7 +65,7 @@ export function NetworkMetricsPage() {
   );
 }
 
-function ClusterNetworkSection({ ctx }: { ctx: string }) {
+function ClusterNetworkSection({ ctx, single = false }: { ctx: string; single?: boolean }) {
   // The hook polls fast on its own while an install is settling.
   const { data: status, error: statusError } = useNetworkAgentStatus(ctx);
   const { data: summary, error: summaryError } = useNetworkSummary(ctx);
@@ -61,43 +74,48 @@ function ClusterNetworkSection({ ctx }: { ctx: string }) {
   const installed = status?.installed ?? false;
   const available = summary?.available ?? false;
 
+  const controls = (
+    <>
+      {status?.version && <Chip size="small" variant="outlined" label={`retina ${status.version}`} />}
+      {installed && (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={available ? 'success' : 'warning'}
+          label={available ? 'collecting' : status?.ready ? 'waiting for samples' : 'starting'}
+        />
+      )}
+      {installed && status && status.nodesDesired > 0 && <Chip size="small" variant="outlined" label={`${status.nodesReady}/${status.nodesDesired} nodes`} />}
+      <Box sx={{ flex: 1 }} />
+      {installed && <UninstallNetworkAgentButton ctx={ctx} status={status} trigger="menu" />}
+    </>
+  );
+  const notInstalled = !!status && !installed && !available;
+
   return (
-    <Box>
-      <ClusterSectionHeader ctx={ctx}>
-        {status?.version && <Chip size="small" variant="outlined" label={`retina ${status.version}`} />}
-        {installed && (
-          <Chip
-            size="small"
-            variant="outlined"
-            color={available ? 'success' : 'warning'}
-            label={available ? 'collecting' : status?.ready ? 'waiting for samples' : 'starting'}
-          />
-        )}
-        {installed && status && status.nodesDesired > 0 && (
-          <Chip size="small" variant="outlined" label={`${status.nodesReady}/${status.nodesDesired} nodes`} />
-        )}
-        <Box sx={{ flex: 1 }} />
-        {installed && <UninstallNetworkAgentButton ctx={ctx} status={status} />}
-      </ClusterSectionHeader>
+    <Box sx={notInstalled && single ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : undefined}>
+      {single ? (
+        <PageHeader title="Network Metrics" icon={<NetworkCheckOutlinedIcon />}>
+          <Typography variant="body2" color="text.secondary">
+            {ctx}
+          </Typography>
+          {controls}
+        </PageHeader>
+      ) : (
+        <ClusterSectionHeader ctx={ctx}>{controls}</ClusterSectionHeader>
+      )}
 
       {error && <Alert severity="error">{error.message}</Alert>}
       {!error && !status && <Skeleton variant="rounded" height={140} />}
 
-      {status && !installed && !available && (
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-              <Typography variant="subtitle2">The network agent is not installed in this cluster</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Kubus deploys Microsoft's open-source Retina agent as a DaemonSet and reads its eBPF traffic counters through the
-                Kubernetes API — powering live pod-to-pod throughput and the busiest-links table on this page. No Prometheus or other
-                backend is required, and it works with any CNI.
-              </Typography>
-              <InstallNetworkAgentButton ctx={ctx} />
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
+      {notInstalled &&
+        (single ? (
+          <NotInstalledState ctx={ctx} />
+        ) : (
+          <Card variant="outlined">
+            <NotInstalledState ctx={ctx} />
+          </Card>
+        ))}
 
       {status && installed && !available && (
         <Card variant="outlined">
@@ -117,10 +135,20 @@ function ClusterNetworkSection({ ctx }: { ctx: string }) {
   );
 }
 
+function NotInstalledState({ ctx }: { ctx: string }) {
+  return (
+    <EmptyState
+      icon={<NetworkCheckOutlinedIcon />}
+      title="The network agent is not installed"
+      subtitle="Kubus deploys Microsoft's open-source Retina agent as a DaemonSet and reads its eBPF traffic counters through the Kubernetes API. That powers live pod-to-pod throughput and the busiest links on this page. It needs no Prometheus or other backend and works with any CNI."
+    >
+      <InstallNetworkAgentButton ctx={ctx} />
+    </EmptyState>
+  );
+}
+
 function NetworkCharts({ summary }: { summary: ClusterNetworkSummary }) {
-  const dark = useTheme().palette.mode === 'dark';
-  const sentColor = dark ? SENT_COLOR.dark : SENT_COLOR.light;
-  const recvColor = dark ? RECV_COLOR.dark : RECV_COLOR.light;
+  const { sent: sentColor, received: recvColor } = metricColors(useTheme().palette.mode);
 
   const latest = summary.clusterSeries.at(-1);
 
@@ -144,7 +172,7 @@ function NetworkCharts({ summary }: { summary: ClusterNetworkSummary }) {
               <ThroughputLineChart series={summary.clusterSeries} color={sentColor} />
             </ChartCard>
             <ChartCard title="Top pods by traffic" sub="sent + received, latest sample">
-              <TopPodsBarChart summary={summary} sentColor={sentColor} recvColor={recvColor} />
+              <TopPodsRanking summary={summary} sentColor={sentColor} recvColor={recvColor} />
             </ChartCard>
           </Grid>
 
@@ -159,6 +187,8 @@ function NetworkCharts({ summary }: { summary: ClusterNetworkSummary }) {
 
 function ThroughputLineChart({ series, color }: { series: ClusterNetworkSummary['clusterSeries']; color: string }) {
   const times = useMemo(() => series.map((s) => new Date(s.t)), [series]);
+  const timeAxis = useMemo(() => timeAxisTicks(times), [times]);
+  const valueTicks = niceValueTicks(Math.max(0, ...series.map((s) => s.bps)), 'rate');
   return (
     <LineChart
       height={240}
@@ -172,45 +202,47 @@ function ThroughputLineChart({ series, color }: { series: ClusterNetworkSummary[
           valueFormatter: (v: number | null) => (v === null ? '' : formatBps(v)),
         },
       ]}
-      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
-      yAxis={[{ min: 0, valueFormatter: (v: number) => formatBps(v), width: 72 }]}
+      xAxis={[{ data: times, scaleType: 'time', ...timeAxis }]}
+      yAxis={[{ min: 0, max: valueTicks.max, tickInterval: valueTicks.tickInterval, valueFormatter: (v: number) => formatAxisValue('rate', v), width: 72 }]}
       grid={{ horizontal: true }}
       hideLegend
-      sx={{ '& .MuiLineChart-area': { fillOpacity: 0.25 } }}
+      sx={{ '& .MuiLineChart-area': { fillOpacity: 0.2 } }}
     />
   );
 }
 
-function TopPodsBarChart({ summary, sentColor, recvColor }: { summary: ClusterNetworkSummary; sentColor: string; recvColor: string }) {
+function TopPodsRanking({ summary, sentColor, recvColor }: { summary: ClusterNetworkSummary; sentColor: string; recvColor: string }) {
   // Merge the sent/recv top lists into one ranking by combined rate so a
-  // single chart shows both directions per pod.
-  const { names, sent, recv } = useMemo(() => {
-    const byKey = new Map<string, { name: string; sent: number; recv: number }>();
+  // single list shows both directions per pod.
+  const rows = useMemo<UsageRankingRow[]>(() => {
+    const byKey = new Map<string, UsageRankingRow>();
     const add = (e: NetworkSeriesEntry) => {
       const key = e.namespace ? `${e.namespace}/${e.name}` : e.name;
       if (byKey.has(key)) return;
       const latest = e.series.at(-1);
-      byKey.set(key, { name: key, sent: latest?.sentBps ?? 0, recv: latest?.recvBps ?? 0 });
+      byKey.set(key, { key, name: e.name, detail: e.namespace, values: [latest?.sentBps ?? 0, latest?.recvBps ?? 0] });
     };
     summary.topPodsSent.forEach(add);
     summary.topPodsRecv.forEach(add);
-    const rows = [...byKey.values()].sort((a, b) => b.sent + b.recv - (a.sent + a.recv)).slice(0, 10);
-    return { names: rows.map((r) => r.name), sent: rows.map((r) => r.sent), recv: rows.map((r) => r.recv) };
+    const total = (r: UsageRankingRow) => r.values.reduce((a, b) => a + b, 0);
+    return [...byKey.values()].sort((a, b) => total(b) - total(a)).slice(0, 10);
   }, [summary]);
 
   return (
-    <BarChart
-      layout="horizontal"
-      height={Math.max(160, names.length * 32 + 60)}
-      series={[
-        { data: sent, label: 'Sent', color: sentColor, stack: 'traffic', valueFormatter: (v: number | null) => (v === null ? '' : formatBps(v)) },
-        { data: recv, label: 'Received', color: recvColor, stack: 'traffic', valueFormatter: (v: number | null) => (v === null ? '' : formatBps(v)) },
-      ]}
-      yAxis={[{ data: names, scaleType: 'band', width: 190, tickLabelStyle: { fontSize: 11 } }]}
-      xAxis={[{ min: 0, valueFormatter: (v: number) => formatBps(v) }]}
-      grid={{ vertical: true }}
-      slotProps={{ legend: { sx: { fontSize: 12 } } }}
-    />
+    <>
+      <Stack direction="row" spacing={2} sx={{ mb: 1, fontSize: 12, color: 'text.secondary' }}>
+        {[
+          ['Sent', sentColor],
+          ['Received', recvColor],
+        ].map(([label, color]) => (
+          <Stack key={label} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+            <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: color }} />
+            <span>{label}</span>
+          </Stack>
+        ))}
+      </Stack>
+      <UsageRanking rows={rows} colors={[sentColor, recvColor]} format={formatBps} empty="No pod traffic observed yet." />
+    </>
   );
 }
 

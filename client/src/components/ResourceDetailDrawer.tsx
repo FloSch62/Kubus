@@ -63,6 +63,7 @@ import { TopologyGraph } from './TopologyGraph.js';
 import { useDetailStore, type ManifestDraft } from '../state/detail.js';
 import { useUiPrefsStore, type ManifestViewMode } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
+import { useRecordRecent } from '../state/recent.js';
 
 export interface ResourceSelection {
   ctx: string;
@@ -128,6 +129,8 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
 
   // Reset per-resource view state when the selection changes.
   const selKey = sel ? `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace ?? ''}|${sel.name}` : '';
+  // The command palette lists recently opened resources.
+  useRecordRecent(sel);
   const initialTabRef = useRef(initialTab);
   initialTabRef.current = initialTab;
   useEffect(() => {

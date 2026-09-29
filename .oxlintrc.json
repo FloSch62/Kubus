@@ -34,6 +34,7 @@
         "client/src/components/BatchCreateDialog.tsx",
         "client/src/components/ConfirmDialog.tsx",
         "client/src/components/FileCopyDialog.tsx",
+        "client/src/components/PortForwardPicker.tsx",
         "client/src/components/RowActions.tsx",
         "client/src/components/detail/ManifestTree.tsx",
         "client/src/layout/ClusterSwitcher.tsx",

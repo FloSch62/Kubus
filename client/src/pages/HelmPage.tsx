@@ -1,6 +1,6 @@
 import { READ_ONLY_GRID_SLOTS } from '../components/ResourceGridCell.js';
 import { GridTooltips } from '../components/CellTooltip.js';
-import { Suspense, lazy, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -27,7 +27,7 @@ import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import SystemUpdateAltOutlinedIcon from '@mui/icons-material/SystemUpdateAltOutlined';
 import UpgradeIcon from '@mui/icons-material/Upgrade';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { HelmChartUpdate, HelmOperation, HelmReleaseSummary } from '@kubus/shared';
@@ -112,7 +112,23 @@ export function HelmPage() {
   const [filter, setFilter] = useState<ReleaseFilter>('all');
   const deferredFilterText = useDeferredValue(filterText);
   const gridRootRef = useRef<HTMLDivElement>(null);
-  const helmEngine = useAppInfo().data?.helmEngine ?? false;
+  const appInfo = useAppInfo().data;
+  const helmEngine = appInfo?.helmEngine ?? false;
+  // `?install=1` (the command palette's "Install a Helm chart…") opens the
+  // install dialog once the app info says the Helm engine is available.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const installRequested = searchParams.get('install') === '1';
+  useEffect(() => {
+    if (!installRequested || !appInfo) return;
+    if (appInfo.helmEngine) setInstallOpen(true);
+    setSearchParams(
+      (params) => {
+        params.delete('install');
+        return params;
+      },
+      { replace: true },
+    );
+  }, [installRequested, appInfo, setSearchParams]);
   const operations = useHelmOperations();
   const uninstall = useHelmUninstall();
   const uninstallTargetProtected = useIsProtected(uninstallTarget?.ctx ?? '');

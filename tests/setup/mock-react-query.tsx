@@ -50,9 +50,12 @@ export function useMutation<T>(config: T): T {
   return config;
 }
 
-export function useQueries(config: { queries: unknown[]; combine: (results: Array<{ data?: unknown }>) => unknown }) {
-  harness().multiQueryConfigs.push(config);
-  return config.combine(config.queries.map(() => ({ data: { available: true, items: [] } })));
+export function useQueries(config: { queries: Array<{ queryKey?: readonly unknown[] }>; combine: (results: Array<{ data?: unknown }>) => unknown }) {
+  const state = harness();
+  state.multiQueryConfigs.push(config);
+  // A query with an entry in queryResults answers from it; the rest get the
+  // generic list-shaped default.
+  return config.combine(config.queries.map((q) => state.queryResults.get(JSON.stringify(q.queryKey)) ?? { data: { available: true, items: [] } }));
 }
 
 // These exports keep component imports harmless when a test reaches the app

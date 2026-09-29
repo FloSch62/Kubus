@@ -17,8 +17,11 @@ you get little trend charts rather than a single instantaneous number.
 
 - **Metrics page**: the sidebar entry below Topology, with cluster-wide CPU/memory
   trends, per-node lines, top pods, and a per-namespace breakdown for every selected
-  cluster. If a cluster has no metrics-server yet, the page offers a one-click install
-  instead.
+  cluster. Top pods and namespaces are ranked lists: the name first, its namespace or pod
+  count underneath, then a bar, the value and its share of the cluster's capacity. CPU is
+  drawn in blue and memory in violet, so green, amber and red keep meaning healthy,
+  degraded and failing. If a cluster has no metrics-server yet, the page offers a
+  one-click install instead.
 - **Details drawer → Metrics tab**: live CPU/memory charts for **Pods** and **Nodes**,
   with the current value called out.
 - **Resource lists**: CPU and memory columns on the Pods list.
@@ -50,7 +53,8 @@ resources as managed by Kubus. Graphs appear within a minute of the pod becoming
 Re-running the install is safe: it re-applies the same manifest, which also repairs a
 broken install.
 
-To remove it again, use the **Uninstall** button in the Metrics page header. If the
+To remove it again, open the **⋮** menu in the Metrics page header and choose
+**Uninstall metrics-server…**. If the
 metrics-server wasn't installed by Kubus (k3s bundles one; cloud distributions often
 manage their own), Kubus warns you first, since your distribution may recreate it or
 expect removal through its own tooling.

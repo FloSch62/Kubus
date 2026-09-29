@@ -15,7 +15,9 @@ window to babysit. Kubus manages forwards centrally and shows them all on one pa
 
 ## Starting a forward
 
-- **Pod** or **Service** ⋮ menu → **Port forward…**
+- **Pod** or **Service** ⋮ menu → **Port forward…**, or press ++f++ on a focused row.
+- On the **Port Forwards** page, **Start a forward…** opens a searchable list of Services
+  and running Pods with their declared ports. Pick one and finish in the same dialog.
 
 In the dialog:
 

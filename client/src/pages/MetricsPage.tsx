@@ -24,16 +24,18 @@ import MemoryOutlinedIcon from '@mui/icons-material/MemoryOutlined';
 import SdStorageOutlinedIcon from '@mui/icons-material/SdStorageOutlined';
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
 import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined';
-import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import type { ClusterMetricsSummary, MetricsSeriesEntry } from '@kubus/shared';
 import { invalidateMetricsServer, useMetricsServerStatus, useMetricsSummary } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { EmptyState } from '../components/EmptyState.js';
+import { UsageRanking, type UsageRankingRow } from '../components/UsageRanking.js';
 import { NoClustersState } from '../components/NoClustersState.js';
 import { InstallMetricsServerButton, UninstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { formatBytes, formatCpu } from '../components/format.js';
-import { SERIES_DARK, SERIES_LIGHT, timeTickFormatter } from '../components/chart-theme.js';
+import { SERIES_DARK, SERIES_LIGHT, formatAxisValue, metricColors, niceValueTicks, timeAxisTicks } from '../components/chart-theme.js';
 
 const MAX_NODE_SERIES = 8;
 const MAX_NAMESPACE_BARS = 10;
@@ -45,8 +47,22 @@ export function MetricsPage() {
     return <NoClustersState icon={<QueryStatsOutlinedIcon />} />;
   }
 
+  // One cluster: its name and controls sit in the page header. Several:
+  // the page header names the page and each cluster gets its own section header.
+  if (selected.length === 1) {
+    return (
+      <Box sx={{ p: 1.5 }}>
+        <ClusterMetricsSection ctx={selected[0]!} single />
+      </Box>
+    );
+  }
   return (
     <Stack spacing={3} sx={{ p: 2 }}>
+      <PageHeader title="Metrics" icon={<QueryStatsOutlinedIcon />}>
+        <Typography variant="body2" color="text.secondary">
+          {selected.length} clusters
+        </Typography>
+      </PageHeader>
       {selected.map((ctx) => (
         <ClusterMetricsSection key={ctx} ctx={ctx} />
       ))}
@@ -54,7 +70,7 @@ export function MetricsPage() {
   );
 }
 
-function ClusterMetricsSection({ ctx }: { ctx: string }) {
+function ClusterMetricsSection({ ctx, single = false }: { ctx: string; single?: boolean }) {
   // The hook polls fast on its own while an install is settling.
   const { data: status, error: statusError } = useMetricsServerStatus(ctx);
   const { data: summary, error: summaryError } = useMetricsSummary(ctx);
@@ -64,43 +80,53 @@ function ClusterMetricsSection({ ctx }: { ctx: string }) {
   const installed = status?.installed ?? false;
   const available = summary?.available ?? false;
 
+  const controls = (
+    <>
+      {status?.version && <Chip size="small" variant="outlined" label={`metrics-server ${status.version}`} />}
+      {installed && (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={available ? 'success' : 'warning'}
+          label={available ? 'collecting' : status?.ready ? 'waiting for samples' : 'starting'}
+        />
+      )}
+      {/* One-shot refetch, independent of the cadence preset — works while polling is paused. */}
+      <Tooltip title="Refresh metrics now">
+        <IconButton size="small" aria-label={`Refresh metrics for ${ctx}`} onClick={() => invalidateMetricsServer(qc, ctx)}>
+          <RefreshIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      <Box sx={{ flex: 1 }} />
+      {installed && <UninstallMetricsServerButton ctx={ctx} status={status} trigger="menu" />}
+    </>
+  );
+
   return (
     <Box>
-      <ClusterSectionHeader ctx={ctx}>
-        {status?.version && <Chip size="small" variant="outlined" label={`metrics-server ${status.version}`} />}
-        {installed && (
-          <Chip
-            size="small"
-            variant="outlined"
-            color={available ? 'success' : 'warning'}
-            label={available ? 'collecting' : status?.ready ? 'waiting for samples' : 'starting'}
-          />
-        )}
-        {/* One-shot refetch, independent of the cadence preset — works while polling is paused. */}
-        <Tooltip title="Refresh metrics now">
-          <IconButton size="small" aria-label={`Refresh metrics for ${ctx}`} onClick={() => invalidateMetricsServer(qc, ctx)}>
-            <RefreshIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Box sx={{ flex: 1 }} />
-        {installed && <UninstallMetricsServerButton ctx={ctx} status={status} />}
-      </ClusterSectionHeader>
+      {single ? (
+        <PageHeader title="Metrics" icon={<QueryStatsOutlinedIcon />}>
+          <Typography variant="body2" color="text.secondary">
+            {ctx}
+          </Typography>
+          {controls}
+        </PageHeader>
+      ) : (
+        <ClusterSectionHeader ctx={ctx}>{controls}</ClusterSectionHeader>
+      )}
 
       {error && <Alert severity="error">{error.message}</Alert>}
       {!error && !status && <Skeleton variant="rounded" height={140} />}
 
       {status && !installed && !available && (
         <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-              <Typography variant="subtitle2">metrics-server is not installed in this cluster</Typography>
-              <Typography variant="body2" color="text.secondary">
-                metrics-server collects CPU and memory usage from every node's kubelet and serves it through the metrics.k8s.io API —
-                powering the graphs on this page, the usage columns in resource lists, and the Overview node gauges.
-              </Typography>
-              <InstallMetricsServerButton ctx={ctx} />
-            </Stack>
-          </CardContent>
+          <EmptyState
+            icon={<QueryStatsOutlinedIcon />}
+            title="metrics-server is not installed"
+            subtitle="metrics-server collects CPU and memory usage from every node's kubelet and serves it through the metrics.k8s.io API. It powers the graphs on this page, the usage columns in resource lists and the Overview node gauges."
+          >
+            <InstallMetricsServerButton ctx={ctx} />
+          </EmptyState>
         </Card>
       )}
 
@@ -123,10 +149,9 @@ function ClusterMetricsSection({ ctx }: { ctx: string }) {
 }
 
 function ClusterCharts({ summary }: { summary: ClusterMetricsSummary }) {
-  const dark = useTheme().palette.mode === 'dark';
-  const series = dark ? SERIES_DARK : SERIES_LIGHT;
-  const cpuColor = series[0]!;
-  const memColor = series[1]!;
+  const mode = useTheme().palette.mode;
+  const series = mode === 'dark' ? SERIES_DARK : SERIES_LIGHT;
+  const { cpu: cpuColor, memory: memColor } = metricColors(mode);
 
   const latest = summary.clusterSeries.at(-1);
   const cpuPct = latest && summary.cpuCapacityMilli ? (latest.cpuMilli / summary.cpuCapacityMilli) * 100 : undefined;
@@ -147,8 +172,8 @@ function ClusterCharts({ summary }: { summary: ClusterMetricsSummary }) {
           value={latest ? formatBytes(latest.memBytes) : '—'}
           sub={memPct !== undefined ? `${memPct.toFixed(0)}% of ${formatBytes(summary.memCapacityBytes!)}` : undefined}
         />
-        <StatTile icon={<DnsOutlinedIcon />} label="Nodes reporting" value={summary.nodes.length} />
-        <StatTile icon={<ViewInArOutlinedIcon />} label="Pods reporting" value={summary.podCount} />
+        <StatTile icon={<DnsOutlinedIcon />} label="Nodes measured" value={summary.nodes.length} sub="with usage samples" />
+        <StatTile icon={<ViewInArOutlinedIcon />} label="Pods measured" value={summary.podCount} sub="running pods with usage samples" />
       </Grid>
 
       {summary.clusterSeries.length < 2 ? (
@@ -178,20 +203,20 @@ function ClusterCharts({ summary }: { summary: ClusterMetricsSummary }) {
           )}
 
           <Grid container spacing={1.5}>
-            <ChartCard title="Top pods by CPU">
-              <TopBarChart entries={summary.topPodsCpu} metric="cpu" color={cpuColor} />
+            <ChartCard title="Top pods by CPU" sub={summary.cpuCapacityMilli ? 'latest sample · % of cluster capacity' : 'latest sample'}>
+              <UsageRanking rows={podRanking(summary.topPodsCpu, 'cpu', summary.cpuCapacityMilli)} colors={[cpuColor]} format={formatCpu} />
             </ChartCard>
-            <ChartCard title="Top pods by memory">
-              <TopBarChart entries={summary.topPodsMem} metric="mem" color={memColor} />
+            <ChartCard title="Top pods by memory" sub={summary.memCapacityBytes ? 'latest sample · % of cluster capacity' : 'latest sample'}>
+              <UsageRanking rows={podRanking(summary.topPodsMem, 'mem', summary.memCapacityBytes)} colors={[memColor]} format={formatBytes} />
             </ChartCard>
           </Grid>
 
           <Grid container spacing={1.5}>
-            <ChartCard title="CPU by namespace">
-              <NamespaceBarChart summary={summary} metric="cpu" color={cpuColor} />
+            <ChartCard title="CPU by namespace" sub={summary.cpuCapacityMilli ? '% of cluster capacity' : undefined}>
+              <UsageRanking rows={namespaceRanking(summary, 'cpu', summary.cpuCapacityMilli)} colors={[cpuColor]} format={formatCpu} />
             </ChartCard>
-            <ChartCard title="Memory by namespace">
-              <NamespaceBarChart summary={summary} metric="mem" color={memColor} />
+            <ChartCard title="Memory by namespace" sub={summary.memCapacityBytes ? '% of cluster capacity' : undefined}>
+              <UsageRanking rows={namespaceRanking(summary, 'mem', summary.memCapacityBytes)} colors={[memColor]} format={formatBytes} />
             </ChartCard>
           </Grid>
 
@@ -226,6 +251,33 @@ function nodeOverflowNote(count: number): string | undefined {
   return count > MAX_NODE_SERIES ? `busiest ${MAX_NODE_SERIES} of ${count} nodes` : undefined;
 }
 
+/** Pods by latest usage: name first, namespace underneath, share of cluster capacity. */
+function podRanking(entries: MetricsSeriesEntry[], metric: Metric, capacity: number | undefined): UsageRankingRow[] {
+  const value = metricValue(metric);
+  return entries.map((e) => {
+    const v = value(e.series.at(-1) ?? { cpuMilli: 0, memBytes: 0 });
+    return { key: `${e.namespace ?? ''}/${e.name}`, name: e.name, detail: e.namespace, values: [v], share: capacity ? v / capacity : undefined };
+  });
+}
+
+function namespaceRanking(summary: ClusterMetricsSummary, metric: Metric, capacity: number | undefined): UsageRankingRow[] {
+  const value = metricValue(metric);
+  const sorted = [...summary.namespaces].sort((a, b) => value(b) - value(a));
+  const rows: UsageRankingRow[] = sorted.slice(0, MAX_NAMESPACE_BARS).map((n) => ({
+    key: n.namespace,
+    name: n.namespace,
+    detail: `${n.pods} ${n.pods === 1 ? 'pod' : 'pods'}`,
+    values: [value(n)],
+    share: capacity ? value(n) / capacity : undefined,
+  }));
+  const rest = sorted.slice(MAX_NAMESPACE_BARS);
+  if (rest.length) {
+    const total = rest.reduce((sum, n) => sum + value(n), 0);
+    rows.push({ key: '(rest)', name: `${rest.length} more namespaces`, values: [total], share: capacity ? total / capacity : undefined });
+  }
+  return rows;
+}
+
 function UsageLineChart({
   entries,
   metric,
@@ -243,18 +295,26 @@ function UsageLineChart({
   const fmt = metricFormat(metric);
   // One shared time axis: ticks are aligned across entries because samples of
   // a poll share a timestamp; entries missing a tick chart as null (gap).
-  const { times, data } = useMemo(() => {
+  const { times, data, peak } = useMemo(() => {
     const tickSet = new Set<number>();
     for (const e of entries) for (const s of e.series) tickSet.add(s.t);
     const ticks = [...tickSet].sort((a, b) => a - b);
     const index = new Map(ticks.map((t, i) => [t, i]));
+    let peak = 0;
     const rows = entries.map((e) => {
       const row: (number | null)[] = Array.from({ length: ticks.length }, () => null);
-      for (const s of e.series) row[index.get(s.t)!] = value(s);
+      for (const s of e.series) {
+        const v = value(s);
+        row[index.get(s.t)!] = v;
+        peak = Math.max(peak, v);
+      }
       return row;
     });
-    return { times: ticks.map((t) => new Date(t)), data: rows };
+    return { times: ticks.map((t) => new Date(t)), data: rows, peak };
   }, [entries, value]);
+  const timeAxis = useMemo(() => timeAxisTicks(times), [times]);
+  const unit = metric === 'cpu' ? 'cpu' : 'bytes';
+  const valueTicks = niceValueTicks(peak, unit);
 
   return (
     <LineChart
@@ -267,55 +327,12 @@ function UsageLineChart({
         area,
         valueFormatter: (v: number | null) => (v === null ? '' : fmt(v)),
       }))}
-      xAxis={[{ data: times, scaleType: 'time', valueFormatter: timeTickFormatter(times) }]}
-      yAxis={[{ min: 0, valueFormatter: (v: number) => fmt(v), width: 56 }]}
+      xAxis={[{ data: times, scaleType: 'time', ...timeAxis }]}
+      yAxis={[{ min: 0, max: valueTicks.max, tickInterval: valueTicks.tickInterval, valueFormatter: (v: number) => formatAxisValue(unit, v), width: 64 }]}
       grid={{ horizontal: true }}
       hideLegend={hideLegend ?? entries.length < 2}
-      sx={area ? { '& .MuiLineChart-area': { fillOpacity: 0.25 } } : undefined}
+      sx={area ? { '& .MuiLineChart-area': { fillOpacity: 0.2 } } : undefined}
       slotProps={{ legend: { sx: { fontSize: 12 } } }}
-    />
-  );
-}
-
-function TopBarChart({ entries, metric, color }: { entries: MetricsSeriesEntry[]; metric: Metric; color: string }) {
-  const value = metricValue(metric);
-  const fmt = metricFormat(metric);
-  const names = entries.map((e) => (e.namespace ? `${e.namespace}/${e.name}` : e.name));
-  const values = entries.map((e) => value(e.series.at(-1) ?? { cpuMilli: 0, memBytes: 0 }));
-  return (
-    <BarChart
-      layout="horizontal"
-      height={Math.max(160, entries.length * 30 + 60)}
-      series={[{ data: values, valueFormatter: (v: number | null) => (v === null ? '' : fmt(v)), color }]}
-      yAxis={[{ data: names, scaleType: 'band', width: 190, tickLabelStyle: { fontSize: 11 } }]}
-      xAxis={[{ min: 0, valueFormatter: (v: number) => fmt(v) }]}
-      grid={{ vertical: true }}
-      hideLegend
-    />
-  );
-}
-
-function NamespaceBarChart({ summary, metric, color }: { summary: ClusterMetricsSummary; metric: Metric; color: string }) {
-  const value = metricValue(metric);
-  const fmt = metricFormat(metric);
-  const sorted = [...summary.namespaces].sort((a, b) => value(b) - value(a));
-  const shown = sorted.slice(0, MAX_NAMESPACE_BARS);
-  const rest = sorted.slice(MAX_NAMESPACE_BARS);
-  const names = shown.map((n) => n.namespace);
-  const values = shown.map((n) => value(n));
-  if (rest.length) {
-    names.push(`(${rest.length} more)`);
-    values.push(rest.reduce((sum, n) => sum + value(n), 0));
-  }
-  return (
-    <BarChart
-      layout="horizontal"
-      height={Math.max(160, names.length * 30 + 60)}
-      series={[{ data: values, valueFormatter: (v: number | null) => (v === null ? '' : fmt(v)), color }]}
-      yAxis={[{ data: names, scaleType: 'band', width: 150, tickLabelStyle: { fontSize: 11 } }]}
-      xAxis={[{ min: 0, valueFormatter: (v: number) => fmt(v) }]}
-      grid={{ vertical: true }}
-      hideLegend
     />
   );
 }
