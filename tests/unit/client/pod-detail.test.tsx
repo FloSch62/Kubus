@@ -30,6 +30,13 @@ vi.mock('../../../client/src/api/queries.js', () => ({
 }));
 
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: effects.toast }));
+const lastOutput = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown> | undefined>, lines: ['boom: config missing'] }));
+vi.mock('../../../client/src/components/detail/last-output.js', () => ({
+  useLastOutput: (sel: Record<string, unknown> | undefined) => {
+    lastOutput.calls.push(sel);
+    return sel ? { status: 'done', lines: lastOutput.lines } : undefined;
+  },
+}));
 vi.mock('../../../client/src/components/PortForwardDialog.js', () => ({
   PortForwardDialog: ({ initialRemotePort, onClose }: { initialRemotePort?: number; onClose: () => void }) => (
     <div>
@@ -254,11 +261,18 @@ describe('PodDetail', () => {
     expect(tile('Restarts')).toHaveTextContent('2');
     expect(screen.getByText('10.0.0.7')).toBeInTheDocument();
 
-    expect(screen.getByText('Why this pod isn’t ready')).toBeInTheDocument();
-    expect(screen.getByText(/Pod: SchedulingGated/)).toBeInTheDocument();
-    expect(screen.getByText(/PodScheduled: Unschedulable/)).toBeInTheDocument();
-    expect(screen.getByText(/worker: CrashLoopBackOff/)).toBeInTheDocument();
-    expect(screen.getByText(/FailedScheduling ×3/)).toBeInTheDocument();
+    // Failing containers and the scheduler's refusal are said in words; what
+    // the diagnosis does not cover stays listed as Kubernetes reports it.
+    const banner = screen.getByRole('alert', { name: 'Why this pod isn’t ready' });
+    expect(within(banner).getByText('Container failed-init exited with code 2')).toBeInTheDocument();
+    expect(within(banner).getByText('Container worker keeps crashing')).toBeInTheDocument();
+    expect(within(banner).getByText('No node can run this pod: No matching nodes')).toBeInTheDocument();
+    expect(within(banner).getByText(/Pod: SchedulingGated/)).toBeInTheDocument();
+    expect(within(banner).getByText(/mesh: Waiting/)).toBeInTheDocument();
+    expect(within(banner).getByText('FailedMount')).toBeInTheDocument();
+    // Covered by the diagnosis: no repeat of the condition or the scheduler events.
+    expect(within(banner).queryByText(/PodScheduled: Unschedulable/)).not.toBeInTheDocument();
+    expect(within(banner).queryByText(/FailedScheduling/)).not.toBeInTheDocument();
 
     expect(screen.getByText('Init containers')).toBeInTheDocument();
     expect(screen.getByText('Debug containers')).toBeInTheDocument();
@@ -286,10 +300,12 @@ describe('PodDetail', () => {
   it('keeps each container’s probes, environment, mounts and command inside its panel', () => {
     render(<PodDetail obj={richPod()} ctx="dev" />);
 
-    // A running container that lost readiness says so; the crashlooping one
-    // carries its waiting message and the restart history shows the exit code.
-    // …once in the problems banner and once on the container itself.
-    expect(screen.getAllByText('backing off')).toHaveLength(2);
+    // The crashlooping container's kubelet message is not repeated on its
+    // panel; the banner keeps it one click away. The restart history of the
+    // running container still shows its exit code.
+    expect(screen.queryByText('backing off')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kubelet message' })[1]!);
+    expect(screen.getAllByText('backing off')).toHaveLength(1);
     expect(screen.getByText(/2 restarts · last Error \(exit 137\)/)).toBeInTheDocument();
 
     // Nothing is expanded until asked.
@@ -369,7 +385,8 @@ describe('PodDetail', () => {
     // While the env is loading the toggle exists and shows a spinner once opened.
     fireEvent.click(screen.getByRole('button', { name: 'Environment for app' }));
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    expect(screen.getByText('Pulling')).toBeInTheDocument();
+    // The diagnosis explains the pod, so the latest normal event is not needed as a stand-in.
+    expect(screen.queryByText('Pulling')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(effects.toast).toHaveBeenCalledWith('error', 'stop denied');
 
@@ -402,5 +419,47 @@ describe('PodDetail', () => {
     expect(screen.getByText('8080/TCP')).not.toHaveAttribute('role', 'button');
     const containers = screen.getByText('Containers').closest('div')!;
     expect(within(containers).queryByText('Ready')).not.toBeInTheDocument();
+  });
+
+  it('explains a crash loop in words with the last output of the crashed run', () => {
+    lastOutput.calls = [];
+    lastOutput.lines = ['I crash in 5s'];
+    const pod: KubeObject = {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: { name: 'crashloop', namespace: 'chaos', uid: 'crash-uid', labels: {}, annotations: {} },
+      spec: { restartPolicy: 'Always', containers: [{ name: 'crash', image: 'busybox', command: ['sh', '-c', 'echo "I crash in 5s"; sleep 5; exit 1'] }] },
+      status: {
+        phase: 'Running',
+        containerStatuses: [
+          {
+            name: 'crash',
+            ready: false,
+            restartCount: 70,
+            state: { waiting: { reason: 'CrashLoopBackOff', message: 'back-off 5m0s restarting failed container=crash pod=crashloop_chaos(crash-uid)' } },
+            lastState: { terminated: { reason: 'Error', exitCode: 1, startedAt: '2026-07-22T10:00:00Z', finishedAt: '2026-07-22T10:00:05Z' } },
+          },
+        ],
+      },
+    } as KubeObject;
+    render(<PodDetail obj={pod} ctx="dev" />);
+
+    const banner = screen.getByRole('alert', { name: 'Why this pod isn’t ready' });
+    expect(within(banner).getByText('Container crash exits with code 1 about 5 s after starting')).toBeInTheDocument();
+    expect(within(banner).getByText(/It has restarted 70 times\. Kubernetes now waits up to 5 minutes between attempts/)).toBeInTheDocument();
+    expect(within(banner).getByText('I crash in 5s')).toBeInTheDocument();
+    expect(lastOutput.calls.at(-1)).toMatchObject({ ctx: 'dev', namespace: 'chaos', pod: 'crashloop', container: 'crash', previous: true });
+    expect(within(banner).getByText(`sh -c 'echo "I crash in 5s"; sleep 5; exit 1'`)).toBeInTheDocument();
+    // The kubelet's own wording is folded away, and not repeated on the container panel.
+    expect(screen.queryByText(/back-off 5m0s restarting/)).not.toBeInTheDocument();
+    expect(tile('Restarts')).toHaveTextContent('70');
+    expect(tile('Ready')).toHaveTextContent('0/1');
+
+    fireEvent.click(within(banner).getByRole('button', { name: 'Previous logs' }));
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'logs', pods: ['crashloop'], container: 'crash', previous: true, follow: false });
+    fireEvent.click(within(banner).getByRole('button', { name: 'Events' }));
+    expect(useDetailStore.getState().tabRequest).toMatchObject({ selKey: 'dev||v1|pods|chaos|crashloop', tab: 'events' });
+    fireEvent.click(within(banner).getByRole('button', { name: 'Kubelet message' }));
+    expect(within(banner).getByText(/back-off 5m0s restarting failed container=crash/)).toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@ import { GenericDetail } from './GenericDetail.js';
 import { DataKeyRows } from './ConfigMapDetail.js';
 import { Fact, Facts } from './Facts.js';
 import { Section } from './Section.js';
+import { SummaryStrip } from './SummaryStrip.js';
 import { useSecretTls } from '../../api/queries.js';
 import { statusTextColor } from '../../theme.js';
 import { UsedBySection } from './UsedBySection.js';
@@ -42,31 +43,23 @@ export function SecretDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
 
   return (
     <Box>
-      <Box sx={{ px: 2, pt: 2 }}>
-        <Facts>
-          <Fact label="Type" mono>
-            {typeof obj.type === 'string' ? obj.type : undefined}
-          </Fact>
-          <Fact label="Keys">{keys.length}</Fact>
-          <Fact label="Immutable" hint="Immutable Secrets cannot be edited — only replaced.">
-            {obj.immutable === true && (
-              <Box component="span" sx={{ fontWeight: 550, color: statusTextColor('warning') }}>
-                Yes
-              </Box>
-            )}
-          </Fact>
-        </Facts>
-      </Box>
-      <Stack spacing={2} sx={{ px: 2, pt: 2 }}>
-        <UsedBySection target={{ ctx, group: '', version: 'v1', plural: 'secrets', kind: 'Secret', name: obj.metadata.name, namespace: obj.metadata.namespace }} emptyText="Nothing mounts, reads or pulls with this Secret." />
+      <Stack spacing={1.5} sx={{ px: 2, pt: 2 }}>
+        <SummaryStrip
+          items={[
+            { label: 'Type', value: typeof obj.type === 'string' ? obj.type : 'Opaque', mono: true, span: 2 },
+            { label: 'Keys', value: String(keys.length) },
+            obj.immutable === true && { label: 'Immutable', value: 'Yes', tone: 'warning', hint: 'Immutable Secrets cannot be edited, only replaced.' },
+          ]}
+        />
         {keys.length > 0 && (
-          <Section title="Data keys" count={keys.length}>
+          <Section title="Data" count={keys.length}>
             <DataKeyRows rows={keys.map((k) => ({ key: k }))} />
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              Values are redacted — reveal, copy or edit them per key in the Data tab.
+              Values stay hidden here. Reveal, copy or edit them per key in the Data tab.
             </Typography>
           </Section>
         )}
+        <UsedBySection target={{ ctx, group: '', version: 'v1', plural: 'secrets', kind: 'Secret', name: obj.metadata.name, namespace: obj.metadata.namespace }} emptyText="Nothing mounts, reads or pulls with this Secret." />
         {isTls &&
           (tls.data?.certificates ?? []).map((cert, i) => (
             <Card key={`${cert.source ?? ''}:${cert.serialNumber || i}`} variant="outlined">

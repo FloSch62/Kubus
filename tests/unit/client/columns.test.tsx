@@ -261,7 +261,8 @@ describe('resource table columns', () => {
     });
 
     renderCells(columns, target);
-    expect(screen.getByTestId('cell-nodePods')).toHaveTextContent('12 (2 ds)');
+    // Same count as the node drawer's Pods tile: active pods against the pods the node accepts.
+    expect(screen.getByTestId('cell-nodePods')).toHaveTextContent('12 / 110');
     expect(screen.getByTestId('cell-podStatus')).toHaveTextContent('Running');
     expect(screen.getByTestId('cell-hpaConditions')).toHaveTextContent('Backoff');
     expect(screen.getByTestId('cell-hpaMetrics')).toHaveTextContent('cpu 42% / 60%, memory ? / 64Mi');

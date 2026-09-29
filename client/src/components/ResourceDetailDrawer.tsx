@@ -56,7 +56,7 @@ import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
 import { CopyValueButton } from './CellCopy.js';
 import { MetricsChart } from './MetricsChart.js';
-import { DetailQuickActions } from './RowActions.js';
+import { DetailQuickActions, RowActions, hasDetailQuickActions } from './RowActions.js';
 import { StatusChip } from './StatusChip.js';
 import { TruncationTooltip } from './truncation.js';
 import { TopologyGraph } from './TopologyGraph.js';
@@ -260,6 +260,10 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   }, [tabAvailable, tab, schemaSource]);
   const customKind = obj ? customKindEntry(obj.apiVersion, obj.kind) : undefined;
   const CustomActions = customKind?.actions;
+  const actionTarget = sel && obj ? { ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj } : undefined;
+  // Kinds with nothing to put in the action bar keep their ⋮ menu in the
+  // title row instead of spending a whole row on it.
+  const actionBar = !!actionTarget && !objGone && (!!CustomActions || hasDetailQuickActions(actionTarget));
   const statusWord = obj && (objGone ? 'Deleted' : (headerStatus(behaviorKind, obj) ?? customKind?.status?.(obj)));
   const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
@@ -458,6 +462,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 <StatusChip status={statusWord} size="md" />
               </Box>
             )}
+            {actionTarget && !objGone && !actionBar && <RowActions target={actionTarget} />}
             {(!inline || tab === 'map') && (
               <Tooltip title={fullScreen ? 'Restore drawer' : 'Full screen'}>
                 <IconButton onClick={() => setFullScreen((v) => !v)} aria-label={fullScreen ? 'Restore drawer' : 'Full screen'}>
@@ -474,9 +479,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
               Deleted from the cluster — showing the last known state.
             </Alert>
           )}
-          {obj && !objGone && (
+          {actionTarget && actionBar && obj && (
             <DetailQuickActions
-              target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }}
+              target={actionTarget}
               extra={CustomActions && <CustomActions ctx={sel.ctx} group={sel.group} version={sel.version} plural={sel.plural} obj={obj} />}
             />
           )}

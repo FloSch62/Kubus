@@ -7,6 +7,7 @@ import {
   decodeReleaseRecord,
   encodeReleasePayload,
   revOf,
+  testHookSummary,
 } from '../../../server/src/helm/release-reader.js';
 import { HttpProblem } from '../../../server/src/util/errors.js';
 
@@ -159,5 +160,33 @@ describe('revOf', () => {
 
   it('returns 0 when there is no revision suffix', () => {
     expect(revOf({ metadata: { name: 'not-a-release-record' } })).toBe(0);
+  });
+});
+
+describe('testHookSummary', () => {
+  const hook = (name: string, events: string[], lastRun?: Record<string, unknown>) => ({ name, kind: 'Pod', path: `templates/${name}.yaml`, manifest: '', events, last_run: lastRun });
+
+  it('is absent for charts without tests', () => {
+    expect(testHookSummary(payload({ hooks: [hook('migrate', ['pre-upgrade'])] }))).toBeUndefined();
+    expect(testHookSummary(payload())).toBeUndefined();
+  });
+
+  it('counts test hooks and treats Go zero times as never run', () => {
+    const zero = { started_at: '0001-01-01T00:00:00Z', completed_at: '0001-01-01T00:00:00Z', phase: '' };
+    expect(testHookSummary(payload({ hooks: [hook('t1', ['test']), hook('t2', ['test-success'], zero), hook('migrate', ['pre-install'])] }))).toEqual({ count: 2 });
+  });
+
+  it('reports the last run, failed when any test failed', () => {
+    const ok = { started_at: '2026-07-01T10:00:00Z', completed_at: '2026-07-01T10:00:05Z', phase: 'Succeeded' };
+    const bad = { started_at: '2026-07-01T10:00:06Z', completed_at: '2026-07-01T10:00:09Z', phase: 'Failed' };
+    expect(testHookSummary(payload({ hooks: [hook('t1', ['test'], ok)] }))).toEqual({
+      count: 1,
+      lastRun: { phase: 'Succeeded', startedAt: '2026-07-01T10:00:00Z', completedAt: '2026-07-01T10:00:05Z' },
+    });
+    expect(testHookSummary(payload({ hooks: [hook('t1', ['test'], ok), hook('t2', ['test'], bad)] }))?.lastRun).toEqual({
+      phase: 'Failed',
+      startedAt: '2026-07-01T10:00:00Z',
+      completedAt: '2026-07-01T10:00:09Z',
+    });
   });
 });

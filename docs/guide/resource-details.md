@@ -43,7 +43,9 @@ collapsible sections hold the rest.
   clickable. A probe on a named port shows the number it resolves to, such as
   `http (9898)`, and a name the container doesn't declare is flagged. A projected volume
   lists each of its sources (Secrets, ConfigMaps, the service account token, downward API
-  fields), and the Secrets, ConfigMaps and service account open in the drawer.
+  fields), and the Secrets, ConfigMaps and service account open in the drawer. When a
+  container fails, the banner [says why in plain words](#why-a-pod-is-not-running) and
+  shows the last lines it wrote before it stopped.
 - **Deployments** show ready/updated/available/unavailable replicas with a rollout
   progress bar, the failing conditions and pod reasons in full, the pod template's
   containers, the pods, and the ReplicaSets still holding pods. The pencil next to a
@@ -66,10 +68,18 @@ collapsible sections hold the rest.
   name; a ports table (port → targetPort, nodePort) with one-click port forwarding; the
   live **endpoints** from the EndpointSlices with their pods and readiness; and the pods
   the selector matches.
-- **Nodes** show roles, pod count, kubelet version, internal IP and condition health, then
-  system info, addresses, capacity and the pods on the node. Pods that come from a
-  DaemonSet carry a **DS** tag, and the chips above the list show only those or only the
-  rest.
+- **Nodes** show roles, pods, kubelet version and condition health, then an
+  **Allocation** table: CPU, memory and pods requested and used against what the node can
+  allocate, so you can tell at a glance whether a node is full. The pod count is the same
+  everywhere, in the Nodes list, the summary and the pod list: pods running or waiting on
+  the node, out of the most it accepts. Finished pods hold no slot, so they are counted
+  apart and left out of the list. System info collapses to a one-line summary, and a
+  capacity table only appears when the kubelet reserves part of the node for the system.
+  Pods that come from a DaemonSet carry a **DS** tag, and the chips above the list show
+  only those or only the rest.
+- **ConfigMaps** show the number of keys, their total size and what uses them, then each
+  key with the first lines of its value and a **Show all** link for longer ones. **Edit
+  data** in the action bar opens the Data tab.
 - **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
 - **NetworkPolicies** spell out what the policy does: the pods it applies to, whether it
@@ -94,6 +104,10 @@ collapsible sections hold the rest.
   belongs to.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
   and copyable). The full spec and status live one tab over, in the Manifest tab.
+
+The **Metadata** section keeps what the drawer's title does not already say: the API
+version, when the object was created and its UID. Kinds with nothing for the action bar,
+such as Roles or Ingresses, show their ⋮ menu in the title row instead.
 
 ### Operator resources
 
@@ -126,6 +140,27 @@ sit in the drawer's action bar next to the ⋮ menu (see
   release history. Kustomizations, HelmReleases, their sources and the other Flux objects
   that can be suspended are reconciled, suspended and resumed from the drawer.
 - **cert-manager Certificates** lead with when the certificate expires and renews.
+
+### Why a pod is not running
+
+Kubernetes reports a failing container in its own vocabulary: `CrashLoopBackOff` and a
+kubelet message with the pod's UID in it. The pod's banner turns that into one sentence
+you can act on, and keeps the original message under **Kubelet message**:
+
+| The pod says | The banner says |
+| --- | --- |
+| `CrashLoopBackOff` after exit code 1 | *Container api exits with code 1 about 5 s after starting*, how often it restarted and how long Kubernetes now waits between attempts. |
+| `OOMKilled` | *Container api runs out of memory and is killed*, with a note that it used more than its limit. |
+| `ImagePullBackOff`, `ErrImagePull` | *Image registry.example/api:1.4 cannot be pulled*, with the reason when the runtime gives one: host not found, image or tag not found, access denied, rate limited. |
+| `CreateContainerConfigError` | *Container api cannot start: ConfigMap api-config does not exist*, or the missing key. |
+| Pending, no node fits | *No node can run this pod: Insufficient cpu*, how many nodes could take it and what the pod requests. |
+
+For a container that crashed or stopped, the banner shows the **last output before exit**:
+the final lines the previous run wrote, the same you would get from
+`kubectl logs --previous`. **Previous logs** opens those logs in the dock, **Events**
+switches to the Events tab, and the container's command is shown next to them. Warning
+events the sentence already covers, such as the back-off events, are not listed again;
+any others stay below it. Workload banners use the same wording for their pods.
 
 ### Why a pod is Pending
 

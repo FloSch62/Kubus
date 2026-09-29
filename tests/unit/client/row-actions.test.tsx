@@ -5,6 +5,7 @@ import type { DebugImagePreset, KubeconfigSettings, KubeObject } from '@kubus/sh
 import {
   DetailQuickActions,
   drainBudgetHints,
+  hasDetailQuickActions,
   isLogTargetKind,
   RowActionMenu,
   RowActions,
@@ -16,6 +17,7 @@ import { rowKeyActionsFor } from '../../../client/src/components/row-key-actions
 import { ROW_KEYS, type RowKeyAction } from '../../../client/src/row-keys';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useDockStore } from '../../../client/src/state/dock';
+import { useDetailStore } from '../../../client/src/state/detail';
 import { useNavigationStore } from '../../../client/src/state/navigation';
 
 describe('drainBudgetHints', () => {
@@ -157,6 +159,9 @@ const gvr: Record<string, { group: string; version: string; plural: string }> = 
   ReplicaSet: { group: 'apps', version: 'v1', plural: 'replicasets' },
   Job: { group: 'batch', version: 'v1', plural: 'jobs' },
   CronJob: { group: 'batch', version: 'v1', plural: 'cronjobs' },
+  ConfigMap: { group: '', version: 'v1', plural: 'configmaps' },
+  Secret: { group: '', version: 'v1', plural: 'secrets' },
+  Role: { group: 'rbac.authorization.k8s.io', version: 'v1', plural: 'roles' },
 };
 
 function target(kind: string, spec: Record<string, unknown> = {}, extra: Partial<KubeObject> = {}): RowActionTarget {
@@ -597,6 +602,39 @@ describe('controller and node actions', () => {
     }
     await waitFor(() => expect(screen.getByText(/Done — evicted 2\/2 pods/)).toBeInTheDocument());
     view.unmount();
+  });
+
+  it('offers Drain in the node detail panel and edits ConfigMap data from it', () => {
+    const node = target('Node', { unschedulable: false });
+    let view = render(
+      <MemoryRouter>
+        <DetailQuickActions target={node} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Drain' }));
+    expect(screen.getByPlaceholderText('node-a')).toBeInTheDocument();
+    view.unmount();
+
+    useDetailStore.setState({ tabRequest: undefined });
+    const cm = target('ConfigMap');
+    view = render(
+      <MemoryRouter>
+        <DetailQuickActions target={cm} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit data' }));
+    expect(useDetailStore.getState().tabRequest).toEqual({ selKey: 'dev||v1|configmaps|team-a|configmap-a', tab: 'data', remember: undefined });
+    view.unmount();
+  });
+
+  it('knows which kinds have a detail action bar', () => {
+    expect(hasDetailQuickActions(target('Pod'))).toBe(true);
+    expect(hasDetailQuickActions(target('ConfigMap'))).toBe(true);
+    expect(hasDetailQuickActions(target('Secret'))).toBe(true);
+    expect(hasDetailQuickActions(target('Service'))).toBe(true);
+    expect(hasDetailQuickActions(target('Role'))).toBe(false);
+    // A custom resource whose kind collides with a built-in name gets no built-in actions.
+    expect(hasDetailQuickActions({ ...target('Widget'), kind: 'Pod' })).toBe(false);
   });
 
   it('starts a node debug pod from the image catalog after confirming a protected node', () => {

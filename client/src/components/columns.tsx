@@ -206,9 +206,11 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     renderCell: (params) => {
       const summary = opts.nodeAllocation?.(params.row.ctx, obj(params.row).metadata.name) ?? EMPTY_NODE_ALLOCATION;
       const podCapacity = nodeAllocatablePods(obj(params.row));
-      const text = `${summary.podCount}${summary.daemonSetPodCount ? ` (${summary.daemonSetPodCount} ds)` : ''}`;
+      // Same count as the node's Pods tile: pods not yet finished, against the pods it accepts.
+      const text = podCapacity ? `${summary.podCount} / ${podCapacity}` : String(summary.podCount);
+      const split = summary.daemonSetPodCount ? `, ${summary.daemonSetPodCount} from DaemonSets` : '';
       return (
-        <Tooltip title={podCapacity ? `${summary.podCount} / ${podCapacity} allocatable pods` : text}>
+        <Tooltip title={`${summary.podCount} pods running or waiting${split}${podCapacity ? ` · ${podCapacity} allowed` : ''}`}>
           <Typography variant="body2" noWrap>
             {text}
           </Typography>

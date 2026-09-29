@@ -2,6 +2,7 @@ import type { KubeObject, ObjectSignal } from '@kubus/shared';
 import { podSummary } from '../../kube-display.js';
 import type { ProblemItem } from './ProblemBanner.js';
 import { podSchedulingIssue, type SchedulingIssue } from './scheduling.js';
+import { diagnosePod } from './pod-diagnosis.js';
 
 /**
  * The pure half of a workload's "why isn't this ready" banner, shared by the
@@ -61,6 +62,18 @@ function latestWarning(warnings: ObjectSignal['warnings'] | undefined, uid: stri
 const plural = (n: number) => `${n} pod${n === 1 ? '' : 's'}`;
 
 /**
+ * A failing pod's reason in words ("Image app:1.2 cannot be pulled: image or
+ * tag not found") with the kubelet's message kept as `raw`; the kubelet
+ * message alone when no plain-language reading applies.
+ */
+function podReason(pod: KubeObject): { message?: string; raw?: string } {
+  const diagnosis = diagnosePod(pod).find((d) => d.kind !== 'unschedulable');
+  const raw = containerMessage(pod);
+  if (diagnosis) return { message: diagnosis.headline, raw: diagnosis.raw ?? raw };
+  return { message: raw };
+}
+
+/**
  * The pods' reasons, grouped the way `kubectl get pods` would make you
  * piece them together: "2 pods CrashLoopBackOff" with the first waiting
  * message, and for pods no node would take "1 pod Pending: 0/3 nodes
@@ -68,7 +81,7 @@ const plural = (n: number) => `${n} pod${n === 1 ? '' : 's'}`;
  */
 export function podProblems(pods: KubeObject[], warningsFor?: WarningsFor): WorkloadProblem[] {
   const scheduling = new Map<string, { count: number; issue: SchedulingIssue; at?: string; nodes: Set<string> }>();
-  const groups = new Map<string, { count: number; message?: string; at?: string }>();
+  const groups = new Map<string, { count: number; message?: string; raw?: string; at?: string }>();
   for (const pod of pods) {
     const summary = podSummary(pod);
     if (HEALTHY.has(summary.status)) continue;
@@ -85,7 +98,9 @@ export function podProblems(pods: KubeObject[], warningsFor?: WarningsFor): Work
     const entry = groups.get(summary.status) ?? { count: 0 };
     entry.count += 1;
     if (!entry.message) {
-      entry.message = containerMessage(pod);
+      const reason = podReason(pod);
+      entry.message = reason.message;
+      entry.raw = reason.raw;
       if (!entry.message) {
         const warning = latestWarning(warnings, pod.metadata.uid);
         entry.message = warning ? `${warning.reason}: ${warning.message}` : undefined;
@@ -100,16 +115,17 @@ export function podProblems(pods: KubeObject[], warningsFor?: WarningsFor): Work
   }
   // Neighbouring states (ErrImagePull → ImagePullBackOff) carry the same
   // message; say it once under a combined headline.
-  const byMessage = new Map<string, { titles: string[]; at?: string }>();
+  const byMessage = new Map<string, { titles: string[]; at?: string; raw?: string }>();
   for (const [state, entry] of groups) {
     const key = entry.message ?? `\0${state}`;
     const merged = byMessage.get(key) ?? { titles: [] };
     merged.titles.push(`${plural(entry.count)} ${state}`);
     merged.at ??= entry.at;
+    merged.raw ??= entry.raw;
     byMessage.set(key, merged);
   }
-  for (const [key, { titles, at }] of byMessage) {
-    items.push({ title: titles.join(' · '), message: key.startsWith('\0') ? undefined : key, ...(at && { at }) });
+  for (const [key, { titles, at, raw }] of byMessage) {
+    items.push({ title: titles.join(' · '), message: key.startsWith('\0') ? undefined : key, ...(at && { at }), ...(raw && raw !== key && { raw }) });
   }
   return items;
 }

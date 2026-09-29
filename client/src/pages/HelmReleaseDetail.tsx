@@ -5,6 +5,9 @@ import Box from '@mui/material/Box';
 import Breadcrumbs from '@mui/material/Breadcrumbs';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
+import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
 import Chip from '@mui/material/Chip';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Link from '@mui/material/Link';
@@ -24,6 +27,7 @@ import Typography from '@mui/material/Typography';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import UndoIcon from '@mui/icons-material/Undo';
 import UpgradeIcon from '@mui/icons-material/Upgrade';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -86,6 +90,7 @@ export function HelmReleaseDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rollbackTo, setRollbackTo] = useState<number | null>(null);
   const [rollbackMenuAnchor, setRollbackMenuAnchor] = useState<HTMLElement | null>(null);
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   const [diffRange, setDiffRange] = useState<{ from: number; to: number } | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [deleteCrds, setDeleteCrds] = useState(false);
@@ -124,12 +129,37 @@ export function HelmReleaseDetailPage() {
     setSearchParams(next, { replace: true });
   }, [activeOperation, helmEngine, release, requestedAction, searchParams, setSearchParams]);
 
+  const tests = release?.tests;
+  const testsRun = tests?.lastRun;
+  const testsRunAt = testsRun?.completedAt ?? testsRun?.startedAt;
+  // The header already shows the status and where the release lives; the
+  // tiles carry what it does not.
   const summaryItems: Array<SummaryItem | false | undefined> = release
     ? [
-        { label: 'Status', value: <StatusChip status={release.status} />, title: release.status },
-        { label: 'Revision', value: String(release.revision) },
-        { label: 'Chart', value: `${release.chart}-${release.chartVersion}`, span: 2 },
-        !!release.appVersion && { label: 'App version', value: release.appVersion },
+        {
+          label: 'Chart',
+          value: `${release.chart} ${release.chartVersion}`,
+          title: `${release.chart}-${release.chartVersion}`,
+          span: 2,
+          detail:
+            release.appVersion || chartSource ? (
+              <>
+                {release.appVersion ? `app ${release.appVersion}` : null}
+                {release.appVersion && chartSource ? ' · ' : null}
+                {chartSource ? <ChartSourceLink url={chartSource} /> : null}
+              </>
+            ) : undefined,
+        },
+        {
+          label: 'Revision',
+          value: String(release.revision),
+          detail: release.updated ? (
+            <>
+              <AgeCell timestamp={release.updated} variant="caption" /> ago
+            </>
+          ) : undefined,
+          title: formatDate(release.updated),
+        },
         {
           label: 'Resources',
           value: resources.data ? helmResourceSummaryText(resourceSummary) : 'checking…',
@@ -152,19 +182,27 @@ export function HelmReleaseDetailPage() {
               ? 'Kubus could not safely match this release to a chart source that also contains its current version.'
               : undefined,
         },
-        {
-          label: 'Updated',
-          value: release.updated ? (
+        !!tests && {
+          label: 'Tests',
+          value: testsRun ? (testsRun.phase === 'Succeeded' ? 'Passed' : testsRun.phase) : 'Not run',
+          tone: testsRun?.phase === 'Failed' ? 'error' : testsRun?.phase === 'Succeeded' ? 'success' : undefined,
+          hint: `${tests.count} test hook${tests.count === 1 ? '' : 's'} in the chart, run with helm test.`,
+          detail: testsRunAt ? (
             <>
-              <AgeCell timestamp={release.updated} /> ago
+              <AgeCell timestamp={testsRunAt} variant="caption" /> ago
             </>
           ) : (
-            '—'
+            `${tests.count} hook${tests.count === 1 ? '' : 's'}`
           ),
-          title: formatDate(release.updated),
         },
       ]
     : [];
+  const canRollBack = targets.length > 0;
+  const releaseDetails = release
+    ? [release.description, `storage: ${release.driver === 'configmap' ? 'configmap' : 'secret'}`, release.firstDeployed ? `first deployed ${formatDate(release.firstDeployed)}` : undefined]
+        .filter(Boolean)
+        .join(' · ')
+    : undefined;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 2 }}>
@@ -216,7 +254,7 @@ export function HelmReleaseDetailPage() {
             </Typography>
             <StatusChip status={release.status} size="md" />
             <Typography variant="body2" color="text.secondary">
-              {ns} @ {ctx}
+              {ns} · {ctx}
             </Typography>
             {ctx ? <HelmLiveBadge contexts={[ctx]} /> : null}
             <Box sx={{ flex: 1 }} />
@@ -234,39 +272,68 @@ export function HelmReleaseDetailPage() {
                   </Button>
                 </span>
               </Tooltip>
-              <Tooltip title={targets.length ? '' : 'No earlier deployed revision to roll back to'}>
-                <span>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<UndoIcon />}
-                    endIcon={<KeyboardArrowDownIcon />}
-                    disabled={!targets.length || !!activeOperation}
-                    aria-haspopup="menu"
-                    onClick={(event) => setRollbackMenuAnchor(event.currentTarget)}
-                  >
-                    Roll back
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={previousRevision ? `Compare revision ${previousRevision.revision} with the current revision` : 'This release has a single revision'}>
-                <span>
+              {canRollBack && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<UndoIcon />}
+                  endIcon={<KeyboardArrowDownIcon />}
+                  disabled={!!activeOperation}
+                  aria-haspopup="menu"
+                  onClick={(event) => setRollbackMenuAnchor(event.currentTarget)}
+                >
+                  Roll back
+                </Button>
+              )}
+              {previousRevision && (
+                <Tooltip title={`Compare revision ${previousRevision.revision} with the current revision`}>
                   <Button
                     size="small"
                     variant="outlined"
                     startIcon={<DifferenceOutlinedIcon />}
-                    disabled={!previousRevision}
-                    onClick={() => previousRevision && setDiffRange({ from: previousRevision.revision, to: release.revision })}
+                    onClick={() => setDiffRange({ from: previousRevision.revision, to: release.revision })}
                   >
                     Diff
                   </Button>
-                </span>
-              </Tooltip>
-              <Button size="small" color="error" startIcon={<DeleteIcon />} variant="outlined" disabled={!!activeOperation} onClick={() => setConfirmOpen(true)}>
-                Uninstall
-              </Button>
+                </Tooltip>
+              )}
+              <IconButton size="small" aria-label={`More actions for ${release.name}`} aria-haspopup="menu" onClick={(event) => setMoreAnchor(event.currentTarget)}>
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
             </Stack>
           </Stack>
+          <Menu open={moreAnchor !== null} anchorEl={moreAnchor} onClose={() => setMoreAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+            {!canRollBack && (
+              <MenuItem disabled>
+                <ListItemIcon>
+                  <UndoIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary="Roll back" secondary="No earlier deployed revision to roll back to" />
+              </MenuItem>
+            )}
+            {!previousRevision && (
+              <MenuItem disabled>
+                <ListItemIcon>
+                  <DifferenceOutlinedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary="Diff revisions" secondary="This release has a single revision" />
+              </MenuItem>
+            )}
+            {(!canRollBack || !previousRevision) && <Divider />}
+            <MenuItem
+              disabled={!!activeOperation}
+              onClick={() => {
+                setMoreAnchor(null);
+                setConfirmOpen(true);
+              }}
+              sx={{ color: 'error.main' }}
+            >
+              <ListItemIcon sx={{ color: 'inherit' }}>
+                <DeleteIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary="Uninstall…" secondary={activeOperation ? `Wait for the running ${activeOperation.kind} to finish` : undefined} />
+            </MenuItem>
+          </Menu>
           <Menu open={rollbackMenuAnchor !== null} anchorEl={rollbackMenuAnchor} onClose={() => setRollbackMenuAnchor(null)}>
             {targets.map((revision) => (
               <MenuItem
@@ -296,26 +363,14 @@ export function HelmReleaseDetailPage() {
           <Box sx={{ flex: 1, minHeight: 0, pt: 1, overflow: tab === 'overview' || tab === 'history' || tab === 'notes' ? 'auto' : 'hidden', display: 'flex', flexDirection: 'column' }}>
             {tab === 'overview' && ctx && ns && name && (
               <DetailStack sx={{ p: 0, pb: 2 }}>
-                <Section title="Resources" count={resourceSummary.total + resourceSummary.hooks} flush>
+                <Section title="Resources" count={resourceSummary.total} flush>
                   <HelmReleaseResources ctx={ctx} ns={ns} name={name} active={tab === 'overview'} />
                 </Section>
-                <Section title="Details" defaultOpen>
+                <Section title="Details" defaultOpen={false} description={releaseDetails}>
                   <Facts>
-                    <Fact label="Chart">
-                      {release.chart}-{release.chartVersion}
-                      {chartSource ? (
-                        <>
-                          {' '}
-                          <ChartSourceLink url={chartSource} />
-                        </>
-                      ) : null}
-                    </Fact>
-                    <Fact label="App version">{release.appVersion}</Fact>
                     <Fact label="Description">{release.description}</Fact>
                     <Fact label="First deployed">{formatDate(release.firstDeployed)}</Fact>
                     <Fact label="Last deployed">{formatDate(release.updated)}</Fact>
-                    <Fact label="Namespace">{ns}</Fact>
-                    <Fact label="Cluster">{ctx}</Fact>
                     <Fact label="Storage driver" hint="Where Helm keeps this release's records">
                       {release.driver === 'configmap' ? 'configmap' : 'secret'}
                     </Fact>

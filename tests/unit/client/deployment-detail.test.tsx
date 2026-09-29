@@ -141,6 +141,10 @@ describe('DeploymentDetail', () => {
     expect(within(banner).getByText(/Available: MinimumReplicasUnavailable/)).toBeInTheDocument();
     expect(within(banner).getByText('Deployment does not have minimum availability.')).toBeInTheDocument();
     expect(within(banner).getByText('1 pod CrashLoopBackOff')).toBeInTheDocument();
+    // The pod's reason in words; the kubelet message stays one click away.
+    expect(within(banner).getByText('Container app keeps crashing')).toBeInTheDocument();
+    expect(within(banner).queryByText('back-off 5m restarting failed container')).not.toBeInTheDocument();
+    fireEvent.click(within(banner).getByRole('button', { name: 'Kubelet message' }));
     expect(within(banner).getByText('back-off 5m restarting failed container')).toBeInTheDocument();
 
     expect(screen.getByText('1 CrashLoopBackOff · 1 Running')).toBeInTheDocument();

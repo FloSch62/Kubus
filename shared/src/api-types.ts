@@ -1244,6 +1244,8 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   chartDependencies: number;
   /** Number of hooks stored in the release record. */
   hookCount: number;
+  /** `helm test` hooks and the latest run Helm recorded for them (absent: never run). */
+  tests?: { count: number; lastRun?: { phase: string; startedAt?: string; completedAt?: string } };
   /** CRDs shipped in the chart's crds/ directory — offered for optional cleanup on uninstall. */
   chartCrds: string[];
 }

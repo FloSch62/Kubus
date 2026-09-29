@@ -165,6 +165,35 @@ export function chartCrdNames(payload: HelmReleasePayload): string[] {
   return names.sort();
 }
 
+/** Helm writes Go's zero time for hooks that never ran. */
+function hookTime(value: unknown): string | undefined {
+  return typeof value === 'string' && value && !value.startsWith('0001-01-01') ? value : undefined;
+}
+
+/**
+ * The chart's `helm test` hooks and the most recent run Helm recorded on
+ * them (`last_run` is updated by `helm test`). Undefined when the chart has
+ * no tests.
+ */
+export function testHookSummary(payload: HelmReleasePayload): HelmReleaseDetail['tests'] {
+  const tests = (payload.hooks ?? []).filter((hook) => hook.events?.some((event) => event === 'test' || event === 'test-success' || event === 'test-failure'));
+  if (!tests.length) return undefined;
+  // Each hook keeps only its own latest run; `helm test` runs them all, so
+  // together they describe the last run: failed if any failed.
+  const runs = tests
+    .map((hook) => hook.last_run ?? {})
+    .map((run) => ({ phase: typeof run.phase === 'string' ? run.phase : '', startedAt: hookTime(run.started_at), completedAt: hookTime(run.completed_at) }))
+    .filter((run) => run.phase && run.phase !== 'Unknown' && run.startedAt);
+  const lastRun = runs.length
+    ? {
+        phase: runs.some((run) => run.phase === 'Failed') ? 'Failed' : runs.some((run) => run.phase === 'Running') ? 'Running' : 'Succeeded',
+        startedAt: runs.map((run) => run.startedAt!).sort()[0],
+        completedAt: runs.map((run) => run.completedAt ?? '').sort().at(-1) || undefined,
+      }
+    : undefined;
+  return { count: tests.length, lastRun };
+}
+
 function toDetail(payload: HelmReleasePayload, driver: StorageDriver): HelmReleaseDetail {
   return {
     ...summarize(payload, driver),
@@ -179,6 +208,7 @@ function toDetail(payload: HelmReleasePayload, driver: StorageDriver): HelmRelea
     description: payload.info?.description,
     chartDependencies: payload.chart?.metadata?.dependencies?.length ?? 0,
     hookCount: payload.hooks?.length ?? 0,
+    tests: testHookSummary(payload),
     chartCrds: chartCrdNames(payload),
   };
 }
