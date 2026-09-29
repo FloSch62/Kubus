@@ -17,9 +17,20 @@ const RECONCILE_ANNOTATION = 'reconcile.fluxcd.io/requestedAt';
 const isArgoApplication = (group: string, plural: string) => group === 'argoproj.io' && plural === 'applications';
 const isArgoRollout = (group: string, plural: string) => group === 'argoproj.io' && plural === 'rollouts';
 const isExternalSecret = (group: string, plural: string) => group === 'external-secrets.io' && plural === 'externalsecrets';
-// Every Flux object (Kustomization, HelmRelease, the sources) honours both
-// the reconcile annotation and spec.suspend.
-const isFluxObject = (group: string) => group.endsWith('.toolkit.fluxcd.io');
+
+/** The Flux kinds that honour both the reconcile annotation and spec.suspend. */
+const FLUX_SUSPENDABLE: Record<string, readonly string[]> = {
+  'kustomize.toolkit.fluxcd.io': ['kustomizations'],
+  'helm.toolkit.fluxcd.io': ['helmreleases'],
+  'source.toolkit.fluxcd.io': ['gitrepositories', 'ocirepositories', 'helmrepositories', 'helmcharts', 'buckets'],
+  'notification.toolkit.fluxcd.io': ['alerts', 'providers', 'receivers'],
+  'image.toolkit.fluxcd.io': ['imagerepositories', 'imageupdateautomations'],
+};
+const isFluxObject = (group: string, plural: string) => !!FLUX_SUSPENDABLE[group]?.includes(plural);
+
+const VERSION_RE = /^v\d+(?:(?:alpha|beta)\d+)?$/;
+const GROUP_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
+const PLURAL_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const APPLIES_TO: Record<OperatorAction, (group: string, plural: string) => boolean> = {
   'argocd-refresh': isArgoApplication,
@@ -69,29 +80,42 @@ async function patchStatus(handle: ClusterHandle, target: Target, body: { status
 
 interface ArgoApplicationShape {
   operation?: unknown;
-  spec?: { source?: { targetRevision?: string }; sources?: Array<{ targetRevision?: string }> };
+  spec?: {
+    source?: { targetRevision?: string };
+    sources?: Array<{ targetRevision?: string }>;
+    syncPolicy?: { syncOptions?: string[]; retry?: unknown };
+  };
   status?: { operationState?: { phase?: string } };
 }
 
 /**
- * Start a sync the way `argocd app sync` does: an `operation.sync` for the
- * revision(s) the Application tracks. Refused while another operation is
- * pending or running, since the controller would drop one of the two.
+ * Start a sync the way the Argo CD API server does for `argocd app sync`:
+ * an `operation.sync` for the revision(s) the Application tracks, carrying
+ * the Application's sync options (the controller reads ServerSideApply,
+ * Replace, PruneLast and friends from the operation, not the spec) and its
+ * retry policy. Refused while another operation is pending or running; the
+ * patch is conditional on the resourceVersion that was checked, so an
+ * auto-sync that starts in between makes it fail with 409 instead of being
+ * overwritten.
  */
 async function argoSync(handle: ClusterHandle, target: Target, prune: boolean): Promise<void> {
   const app = await handle.raw.json<KubeObject & ArgoApplicationShape>(resourcePath(target.group, target.version, target.plural, { namespace: target.namespace, name: target.name }));
   if (app.operation || app.status?.operationState?.phase === 'Running') {
     throw new HttpProblem(409, `${target.name} already has an operation in progress`);
   }
-  const sources = app.spec?.sources ?? [];
+  const spec = app.spec ?? {};
+  const sources = spec.sources ?? [];
   const sync: Record<string, unknown> = { prune };
   if (sources.length) sync.revisions = sources.map((source) => source.targetRevision || 'HEAD');
-  else sync.revision = app.spec?.source?.targetRevision || 'HEAD';
-  await mergePatch(handle, target, { operation: { initiatedBy: { username: 'kubus' }, sync } });
+  else sync.revision = spec.source?.targetRevision || 'HEAD';
+  if (spec.syncPolicy?.syncOptions?.length) sync.syncOptions = spec.syncPolicy.syncOptions;
+  const operation: Record<string, unknown> = { initiatedBy: { username: 'kubus' }, sync };
+  if (spec.syncPolicy?.retry) operation.retry = spec.syncPolicy.retry;
+  await mergePatch(handle, target, { metadata: { resourceVersion: app.metadata.resourceVersion }, operation });
 }
 
 interface RolloutShape {
-  spec?: { paused?: boolean; strategy?: { canary?: { steps?: unknown[] } } };
+  spec?: { paused?: boolean; strategy?: { canary?: { steps?: unknown[] }; blueGreen?: unknown } };
   status?: {
     abort?: boolean;
     controllerPause?: boolean;
@@ -103,37 +127,87 @@ interface RolloutShape {
   };
 }
 
+/** `GetCurrentCanaryStep`: the step index, 0 when unset, undefined without canary steps. */
+function currentCanaryStep(ro: RolloutShape): number | undefined {
+  if (!ro.spec?.strategy?.canary?.steps?.length) return undefined;
+  return ro.status?.currentStepIndex ?? 0;
+}
+
 /**
- * `kubectl argo rollouts promote [--full]`. A plain promote clears the pause
- * conditions (and unpauses spec.paused); when the current step's analysis
- * came back Inconclusive the controller also holds a pause of its own, so the
- * step index moves on past it. A full promote skips every remaining step.
+ * The patches `kubectl argo rollouts promote [--full]` makes, branch for
+ * branch (getPatches in the plugin): a spec patch, a status patch, and the
+ * unified patch used when the CRD has no status subresource.
+ */
+export function promotePatches(ro: RolloutShape, full: boolean): { spec?: unknown; status?: { status: Record<string, unknown> }; unified: unknown } {
+  const spec = ro.spec ?? {};
+  const status = ro.status ?? {};
+  const steps = spec.strategy?.canary?.steps?.length ?? 0;
+  const unpause = spec.paused ? { spec: { paused: false } } : undefined;
+  if (full) {
+    return {
+      spec: unpause,
+      status: status.currentPodHash !== status.stableRS ? { status: { promoteFull: true } } : undefined,
+      unified: { spec: { paused: false }, status: { promoteFull: true } },
+    };
+  }
+  const index = currentCanaryStep(ro);
+  const next = index === undefined ? undefined : index < steps ? index + 1 : index;
+  const inconclusive = !!spec.strategy?.canary && status.canary?.currentStepAnalysisRunStatus?.status === 'Inconclusive';
+  if (inconclusive && (status.pauseConditions?.length ?? 0) > 0 && status.controllerPause) {
+    // Stuck on an Inconclusive analysis: clear the controller's own pause and move past the step.
+    return {
+      spec: unpause,
+      status: next === undefined ? undefined : { status: { pauseConditions: null, controllerPause: false, currentStepIndex: next } },
+      unified: { spec: { paused: false }, status: { pauseConditions: null } },
+    };
+  }
+  if ((status.pauseConditions?.length ?? 0) > 0) {
+    return { spec: unpause, status: { status: { pauseConditions: null } }, unified: { spec: { paused: false }, status: { pauseConditions: null } } };
+  }
+  if (spec.strategy?.canary && next !== undefined) {
+    // Nothing paused: the canary is mid-step (analysis, experiment), so promote moves on to the next one.
+    return {
+      spec: unpause,
+      status: { status: { pauseConditions: null, currentStepIndex: next } },
+      unified: { spec: { paused: false }, status: { pauseConditions: null, currentStepIndex: next } },
+    };
+  }
+  return { spec: unpause, unified: { spec: { paused: false }, status: { pauseConditions: null } } };
+}
+
+/**
+ * Apply the promote patches as the plugin does: status first on the status
+ * subresource, falling back to the unified patch on the object when the CRD
+ * has none, then the spec. A promote with nothing to change is refused so
+ * the UI does not report a promotion that did not happen.
  */
 async function promoteRollout(handle: ClusterHandle, target: Target, full: boolean): Promise<void> {
   const ro = await handle.raw.json<KubeObject & RolloutShape>(resourcePath(target.group, target.version, target.plural, { namespace: target.namespace, name: target.name }));
-  const status = ro.status ?? {};
-  if (full) {
-    if (status.currentPodHash && status.currentPodHash === status.stableRS) {
-      throw new HttpProblem(409, `${target.name} is already fully promoted`);
-    }
-    await patchStatus(handle, target, { status: { promoteFull: true } });
-  } else {
-    const steps = ro.spec?.strategy?.canary?.steps?.length ?? 0;
-    const inconclusive = status.canary?.currentStepAnalysisRunStatus?.status === 'Inconclusive';
-    if (inconclusive && status.controllerPause && (status.pauseConditions?.length ?? 0) > 0 && status.currentStepIndex !== undefined) {
-      await patchStatus(handle, target, { status: { pauseConditions: null, currentStepIndex: Math.min(status.currentStepIndex + 1, steps) } });
-    } else {
-      await patchStatus(handle, target, { status: { pauseConditions: null } });
+  const patches = promotePatches(ro, full);
+  if (!patches.status && !patches.spec) {
+    throw new HttpProblem(409, full ? `${target.name} is already fully promoted` : `${target.name} has nothing to promote`);
+  }
+  let specPatch = patches.spec;
+  if (patches.status) {
+    try {
+      await mergePatch(handle, target, patches.status, 'status');
+    } catch (err) {
+      if ((err as { code?: number }).code !== 404) throw err;
+      specPatch = patches.unified;
     }
   }
-  if (ro.spec?.paused) await mergePatch(handle, target, { spec: { paused: false } });
+  if (specPatch) await mergePatch(handle, target, specPatch);
 }
 
 export async function runOperatorAction(handle: ClusterHandle, req: OperatorActionRequest): Promise<void> {
   const applies = APPLIES_TO[req.action];
   if (!applies) throw new HttpProblem(422, `unknown action ${String(req.action)}`);
-  if (!applies(req.group, req.plural)) throw new HttpProblem(422, `${req.action} does not apply to ${req.plural}.${req.group || 'core'}`);
-  if (!req.name || !req.namespace || !req.version) throw new HttpProblem(422, 'namespace, name and version are required');
+  if (typeof req.group !== 'string' || !GROUP_RE.test(req.group) || typeof req.plural !== 'string' || !PLURAL_RE.test(req.plural)) {
+    throw new HttpProblem(422, 'group and plural must be lower-case API names');
+  }
+  if (typeof req.version !== 'string' || !VERSION_RE.test(req.version)) throw new HttpProblem(422, 'version must look like v1, v2beta1 or v1alpha1');
+  if (!applies(req.group, req.plural)) throw new HttpProblem(422, `${req.action} does not apply to ${req.plural}.${req.group}`);
+  if (!req.name || !req.namespace) throw new HttpProblem(422, 'namespace and name are required');
   const target: Target = { group: req.group, version: req.version, plural: req.plural, namespace: req.namespace, name: req.name };
   switch (req.action) {
     case 'argocd-refresh':

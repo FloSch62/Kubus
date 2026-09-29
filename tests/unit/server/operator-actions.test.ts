@@ -37,19 +37,40 @@ const rollout = (action: OperatorActionRequest['action']): OperatorActionRequest
 
 describe('operator actions', () => {
   it('refreshes and syncs Argo CD Applications the way argocd does', async () => {
-    const { handle, calls } = fakeHandle({ [APP]: { metadata: { name: 'guestbook' }, spec: { source: { targetRevision: 'main' } } } });
+    const { handle, calls } = fakeHandle({
+      [APP]: {
+        metadata: { name: 'guestbook', resourceVersion: '42' },
+        spec: {
+          source: { targetRevision: 'main' },
+          syncPolicy: { automated: { prune: true }, syncOptions: ['ServerSideApply=true', 'CreateNamespace=true'], retry: { limit: 3, backoff: { duration: '5s' } } },
+        },
+      },
+    });
     await runOperatorAction(handle, app({ action: 'argocd-refresh' }));
     await runOperatorAction(handle, app({ prune: true }));
     expect(calls).toEqual([
       { path: APP, method: 'PATCH', body: { metadata: { annotations: { 'argocd.argoproj.io/refresh': 'normal' } } } },
-      { path: APP, method: 'PATCH', body: { operation: { initiatedBy: { username: 'kubus' }, sync: { prune: true, revision: 'main' } } } },
+      {
+        path: APP,
+        method: 'PATCH',
+        body: {
+          // The checked resourceVersion makes a racing auto-sync fail the patch with 409.
+          metadata: { resourceVersion: '42' },
+          operation: {
+            initiatedBy: { username: 'kubus' },
+            // The controller reads ServerSideApply and friends from the operation, as the API server copies them.
+            sync: { prune: true, revision: 'main', syncOptions: ['ServerSideApply=true', 'CreateNamespace=true'] },
+            retry: { limit: 3, backoff: { duration: '5s' } },
+          },
+        },
+      },
     ]);
   });
 
   it('syncs every source of a multi-source Application and refuses while an operation runs', async () => {
-    const multi = fakeHandle({ [APP]: { metadata: { name: 'guestbook' }, spec: { sources: [{ targetRevision: 'v2' }, {}] } } });
+    const multi = fakeHandle({ [APP]: { metadata: { name: 'guestbook', resourceVersion: '7' }, spec: { sources: [{ targetRevision: 'v2' }, {}] } } });
     await runOperatorAction(multi.handle, app());
-    expect(multi.calls[0]?.body).toEqual({ operation: { initiatedBy: { username: 'kubus' }, sync: { prune: false, revisions: ['v2', 'HEAD'] } } });
+    expect(multi.calls[0]?.body).toEqual({ metadata: { resourceVersion: '7' }, operation: { initiatedBy: { username: 'kubus' }, sync: { prune: false, revisions: ['v2', 'HEAD'] } } });
 
     const busy = fakeHandle({ [APP]: { metadata: { name: 'guestbook' }, spec: {}, status: { operationState: { phase: 'Running' } } } });
     await expect(runOperatorAction(busy.handle, app())).rejects.toMatchObject({ statusCode: 409 });
@@ -74,7 +95,25 @@ describe('operator actions', () => {
       },
     });
     await runOperatorAction(handle, rollout('rollout-promote'));
-    expect(calls).toEqual([{ path: `${ROLLOUT}/status`, method: 'PATCH', body: { status: { pauseConditions: null, currentStepIndex: 3 } } }]);
+    expect(calls).toEqual([{ path: `${ROLLOUT}/status`, method: 'PATCH', body: { status: { pauseConditions: null, controllerPause: false, currentStepIndex: 3 } } }]);
+  });
+
+  it('moves a canary that is mid-step without a pause on to the next step, as the plugin does', async () => {
+    const analysing = fakeHandle({
+      [ROLLOUT]: { metadata: { name: 'checkout' }, spec: { strategy: { canary: { steps: [{}, { analysis: {} }, {}] } } }, status: { currentStepIndex: 1, currentPodHash: 'new', stableRS: 'old' } },
+    });
+    await runOperatorAction(analysing.handle, rollout('rollout-promote'));
+    expect(analysing.calls).toEqual([{ path: `${ROLLOUT}/status`, method: 'PATCH', body: { status: { pauseConditions: null, currentStepIndex: 2 } } }]);
+
+    // On the last step the index stays put; without a status subresource the unified patch goes to the object.
+    const legacy = fakeHandle({ [ROLLOUT]: { metadata: { name: 'checkout' }, spec: { strategy: { canary: { steps: [{}, {}] } } }, status: { currentStepIndex: 2 } } }, { noStatusSubresource: true });
+    await runOperatorAction(legacy.handle, rollout('rollout-promote'));
+    expect(legacy.calls).toEqual([{ path: ROLLOUT, method: 'PATCH', body: { spec: { paused: false }, status: { pauseConditions: null, currentStepIndex: 2 } } }]);
+
+    // A blue-green rollout that is neither paused nor waiting has nothing to promote, and says so.
+    const idle = fakeHandle({ [ROLLOUT]: { metadata: { name: 'checkout' }, spec: { strategy: { blueGreen: {} } }, status: {} } });
+    await expect(runOperatorAction(idle.handle, rollout('rollout-promote'))).rejects.toMatchObject({ statusCode: 409 });
+    expect(idle.calls).toEqual([]);
   });
 
   it('promotes fully, aborts and retries through the status subresource, falling back without one', async () => {
@@ -123,6 +162,12 @@ describe('operator actions', () => {
     await expect(runOperatorAction(handle, { action: 'flux-suspend', group: 'apps', version: 'v1', plural: 'deployments', namespace: 'a', name: 'b' })).rejects.toMatchObject({ statusCode: 422 });
     await expect(runOperatorAction(handle, { ...rollout('rollout-abort'), plural: 'applications' })).rejects.toMatchObject({ statusCode: 422 });
     await expect(runOperatorAction(handle, { action: 'nope' as OperatorActionRequest['action'], group: 'argoproj.io', version: 'v1', plural: 'rollouts', namespace: 'a', name: 'b' })).rejects.toMatchObject({ statusCode: 422 });
+    // Only Flux kinds that honour suspend, and only well-formed API coordinates.
+    const flux = { action: 'flux-suspend' as const, group: 'source.toolkit.fluxcd.io', version: 'v1', namespace: 'a', name: 'b' };
+    await expect(runOperatorAction(handle, { ...flux, plural: 'artifacts' })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(runOperatorAction(handle, { ...flux, plural: 'gitrepositories', version: 'v1/../../../api/v1/secrets' })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(runOperatorAction(handle, { ...flux, plural: 'gitrepositories/x' })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(runOperatorAction(handle, { ...flux, plural: 'gitrepositories', group: 'Source.toolkit.fluxcd.io' })).rejects.toMatchObject({ statusCode: 422 });
     expect(calls).toEqual([]);
   });
 });
