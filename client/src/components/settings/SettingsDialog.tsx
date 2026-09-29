@@ -444,8 +444,8 @@ function DebugContainersSection() {
       <Section title="Image catalog">
         <Stack spacing={1.5}>
           <Typography variant="caption" color="text.secondary">
-            The images offered when attaching a debug container to a pod (<b>Debug container…</b> in the pod menu). A profile on an entry is
-            pre-selected with it.
+            The images offered when starting a debug container on a pod or a node (<b>Debug container…</b> in their menus). A profile on an
+            entry is pre-selected with it.
           </Typography>
           <List dense sx={{ border: 1, borderColor: 'divider', borderRadius: 1, py: 0 }}>
             {catalog.map((p, i) => {

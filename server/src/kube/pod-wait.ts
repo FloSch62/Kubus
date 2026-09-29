@@ -33,10 +33,12 @@ export async function waitForContainerRunning(
   namespace: string,
   pod: string,
   container: string,
-  opts: { ephemeral?: boolean; timeoutMs?: number } = {},
+  opts: { ephemeral?: boolean; timeoutMs?: number; onWaiting?: (reason: string) => void; signal?: AbortSignal } = {},
 ): Promise<void> {
   const deadline = Date.now() + (opts.timeoutMs ?? 60_000);
+  let lastReason: string | undefined;
   for (;;) {
+    opts.signal?.throwIfAborted();
     const obj = await handle.raw.json<KubeObject>(resourcePath('', 'v1', 'pods', { namespace, name: pod }));
     const status = obj.status as PodStatus | undefined;
     const statuses = opts.ephemeral ? status?.ephemeralContainerStatuses : status?.containerStatuses;
@@ -49,12 +51,16 @@ export async function waitForContainerRunning(
     if (waiting?.reason && FATAL_WAIT_REASONS.has(waiting.reason)) {
       throw new HttpProblem(422, `container ${container} failed to start: ${waiting.reason}${waiting.message ? ` — ${waiting.message}` : ''}`);
     }
+    if (waiting?.reason && waiting.reason !== lastReason) {
+      lastReason = waiting.reason;
+      opts.onWaiting?.(waiting.reason);
+    }
     if (status?.phase === 'Failed' || status?.phase === 'Succeeded') {
       throw new HttpProblem(422, `pod ${pod} is ${status.phase}`);
     }
     if (Date.now() > deadline) {
       throw new HttpProblem(504, `timed out waiting for container ${container} to start${waiting?.reason ? ` (last state: ${waiting.reason})` : ''}`);
     }
-    await delay(500);
+    await delay(500, undefined, { signal: opts.signal });
   }
 }

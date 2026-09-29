@@ -193,7 +193,7 @@ export default function TerminalPaneImpl({
     if (reconnectRequest > 0) useDockStore.getState().setTerminalSession(tab.id, undefined);
     const ws = new WebSocket(
       tab.kind === 'node-shell'
-        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, cols: term.cols, rows: term.rows, terminalId })
+        ? wsUrl('/ws/node-shell', { ctx: tab.ctx, node: tab.node, image: tab.image, profile: tab.profile, cols: term.cols, rows: term.rows, terminalId })
         : wsUrl('/ws/exec', {
             ctx: tab.ctx,
             namespace: tab.namespace,

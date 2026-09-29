@@ -65,7 +65,7 @@ function validDockTab(value: unknown): boolean {
   if (tab.kind === 'terminal') {
     return [tab.namespace, tab.pod, tab.container].every((field) => boundedString(field, 1000));
   }
-  if (tab.kind === 'node-shell') return boundedString(tab.node, 1000);
+  if (tab.kind === 'node-shell') return boundedString(tab.node, 1000) && optionalString(tab.image, 1000) && optionalString(tab.profile, 100);
   if (tab.kind !== 'logs' || !boundedString(tab.namespace, 1000)) return false;
   if (!Array.isArray(tab.pods) || tab.pods.length > 1000 || !tab.pods.every((pod) => boundedString(pod, 1000))) return false;
   return (

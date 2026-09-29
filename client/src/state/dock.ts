@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LogTargetKind } from '@kubus/shared';
+import type { DebugProfile, LogTargetKind } from '@kubus/shared';
 import { useDetailStore } from './detail.js';
 import { windowScopeId } from '../window-management.js';
 
@@ -27,6 +27,9 @@ export interface NodeShellTab {
   title: string;
   ctx: string;
   node: string;
+  /** Set for a debug pod: the shell runs in this image instead of nsentering the host. */
+  image?: string;
+  profile?: DebugProfile;
   pinned?: boolean;
   color?: string;
   terminalId?: string;

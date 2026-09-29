@@ -51,7 +51,8 @@ machine.
     ---
 
     A real terminal into any container, ephemeral debug containers for distroless
-    pods, and a privileged node shell that runs `nsenter` on the host.
+    pods, a privileged node shell that runs `nsenter` on the host, and debug pods
+    that bring your own tools to a node.
 
     [:octicons-arrow-right-24: Shell & debug](guide/shell.md)
 

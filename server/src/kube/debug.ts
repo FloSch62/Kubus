@@ -22,7 +22,7 @@ const DEBUG_IDLE_COMMAND = ['sh', '-c', `trap "exit 0" TERM INT; i=0; while [ ! 
  * container inherits namespace/PodSecurity defaults; `restricted` matches the
  * PodSecurity restricted policy so debugging works in enforced namespaces.
  */
-const PROFILE_SECURITY_CONTEXT: Record<DebugProfile, object | undefined> = {
+export const PROFILE_SECURITY_CONTEXT: Record<DebugProfile, object | undefined> = {
   general: undefined,
   restricted: { runAsNonRoot: true, allowPrivilegeEscalation: false, capabilities: { drop: ['ALL'] }, seccompProfile: { type: 'RuntimeDefault' } },
   netadmin: { capabilities: { add: ['NET_ADMIN', 'NET_RAW'] } },

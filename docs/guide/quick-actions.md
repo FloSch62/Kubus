@@ -49,6 +49,7 @@ can see what you're rolling back to first.
 | **Cordon / Uncordon** | Mark the node un/schedulable. |
 | **Drain…** | Cordon, then evict all non-DaemonSet pods, with live progress (evicted *X / Y*). |
 | **Node shell…** | Open a [privileged root shell on the node](shell.md#node-shell). |
+| **Debug container…** | Start a [debug pod on the node](shell.md#node-debug-containers) with an image from the debug catalog. |
 
 The **Drain** dialog streams progress as it evicts, so you can watch a node empty out in
 real time rather than staring at a spinner.
@@ -61,7 +62,7 @@ first, so a stray click can't take something down.
 
 !!! danger "Destructive actions and the production guard"
 
-    Delete, scale-to-zero, drain, cordon and node shell are gated by the
+    Delete, scale-to-zero, drain, cordon, node shell and node debug containers are gated by the
     [production guard](production-guard.md) on clusters you mark as protected. The guard
     is a UI safety net against slips. It is not a server-side permission boundary, so for
     real authorization use Kubernetes RBAC.
