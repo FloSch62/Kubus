@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   detectLevel,
   markSegs,
+  parseFields,
   parseLine,
   stripAnsi,
   type Seg,
@@ -243,5 +244,48 @@ describe('markSegs', () => {
 
   it('does not match across segment boundaries', () => {
     expect(markSegs([{ text: 'ab' }, { text: 'cd' }], 'bc')).toEqual([{ text: 'ab' }, { text: 'cd' }]);
+  });
+});
+
+describe('parseFields', () => {
+  it('flattens a JSON object into dotted keys with typed values', () => {
+    expect(parseFields('{"level":"info","n":3,"ok":true,"none":null,"http":{"method":"GET","tags":["a","b"]},"list":[{"id":1}],"empty":{}}')).toEqual({
+      format: 'json',
+      fields: [
+        { key: 'level', value: 'info', kind: 'str' },
+        { key: 'n', value: '3', kind: 'num' },
+        { key: 'ok', value: 'true', kind: 'bool' },
+        { key: 'none', value: 'null', kind: 'null' },
+        { key: 'http.method', value: 'GET', kind: 'str' },
+        { key: 'http.tags', value: '["a","b"]', kind: 'json' },
+        { key: 'list[0].id', value: '1', kind: 'num' },
+        { key: 'empty', value: '{}', kind: 'json' },
+      ],
+    });
+  });
+
+  it('keeps multi-line string values intact', () => {
+    expect(parseFields('{"stack":"Error: x\\n  at y"}')?.fields[0]?.value).toBe('Error: x\n  at y');
+  });
+
+  it('reads logfmt pairs, unquoting values and keeping the text around them', () => {
+    expect(parseFields('INFO ready level=info msg="slow \\"query\\"" ms=12 ok=true')).toEqual({
+      format: 'logfmt',
+      text: 'INFO ready',
+      fields: [
+        { key: 'level', value: 'info', kind: 'str' },
+        { key: 'msg', value: 'slow "query"', kind: 'str' },
+        { key: 'ms', value: '12', kind: 'num' },
+        { key: 'ok', value: 'true', kind: 'bool' },
+      ],
+    });
+  });
+
+  it('ignores plain lines, arrays, invalid JSON and single pairs', () => {
+    expect(parseFields('just a line')).toBeUndefined();
+    expect(parseFields('[1,2]')).toBeUndefined();
+    expect(parseFields('{not json')).toBeUndefined();
+    expect(parseFields('{}')).toBeUndefined();
+    expect(parseFields('only=one')).toBeUndefined();
   });
 });
