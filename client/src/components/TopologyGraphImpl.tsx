@@ -1,11 +1,12 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
+import ButtonBase from '@mui/material/ButtonBase';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { useTheme, type Theme } from '@mui/material/styles';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { alpha, useTheme, type Theme } from '@mui/material/styles';
 import {
   applyNodeChanges,
   Background,
@@ -14,6 +15,7 @@ import {
   EdgeLabelRenderer,
   Handle,
   MarkerType,
+  MiniMap,
   Position,
   ReactFlow,
   type Edge,
@@ -27,7 +29,7 @@ import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@
 import { useTopologyGraphs } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
 import { statusTextColor } from '../theme.js';
-import { cachedTopologyLayout, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
+import { NODE_WIDTH, cachedTopologyLayout, estimateNodeHeight, isFoldedReplicaSets, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
 import type { TopologyGraphProps } from './TopologyGraph.js';
 
 interface TopologyNodeData extends Record<string, unknown> {
@@ -66,61 +68,101 @@ const EDGE_COLOR: Record<'light' | 'dark', Record<GraphEdge['kind'], string>> = 
   },
 };
 
+// Traffic edges animate as dashed lines; the legend draws them dashed too.
+const DASHED_KINDS = new Set<GraphEdge['kind']>(['routes', 'selects']);
+
 function nodeStatusColor(status: GraphNodeStatus, theme: Theme): string {
   return status === 'unknown' ? theme.palette.text.secondary : theme.palette[status].main;
+}
+
+// Cards are narrow so a namespace fits the screen at a readable zoom; long
+// names keep their tail (a pod's random suffix) and elide the middle instead.
+const LABEL_FONT_SIZE = 13.5;
+const LABEL_WIDTH = NODE_WIDTH - 24;
+
+let measureContext: CanvasRenderingContext2D | null | undefined;
+
+function textWidth(text: string, font: string): number {
+  if (measureContext === undefined) {
+    try {
+      measureContext = document.createElement('canvas').getContext('2d') ?? null;
+    } catch {
+      measureContext = null;
+    }
+  }
+  if (!measureContext) return text.length * LABEL_FONT_SIZE * 0.56;
+  measureContext.font = font;
+  return measureContext.measureText(text).width;
+}
+
+export function compactLabel(label: string, maxWidth: number, font: string): string {
+  if (textWidth(label, font) <= maxWidth) return label;
+  // Keep the last dash segment whole when it is short, otherwise an even tail.
+  const lastDash = label.lastIndexOf('-');
+  const segment = lastDash > 0 ? label.slice(lastDash) : '';
+  const tail = segment.length > 1 && segment.length <= 8 ? segment : label.slice(-Math.ceil(label.length / 3));
+  let head = label.slice(0, label.length - tail.length);
+  while (head.length > 1 && textWidth(`${head}…${tail}`, font) > maxWidth) head = head.slice(0, -1);
+  return `${head}…${tail}`;
 }
 
 function TopologyNode({ data, selected }: NodeProps) {
   const node = (data as TopologyNodeData).graphNode;
   const theme = useTheme();
+  const folded = isFoldedReplicaSets(node);
   const color = nodeStatusColor(node.status, theme);
-  // Small status text needs the AA-safe tone; the 5px stripe can stay bright.
+  // Small status text needs the AA-safe tone; the status stripe can stay bright.
   const reasonColor = node.status === 'unknown' ? theme.palette.text.secondary : statusTextColor(node.status)(theme);
+  const stripe = folded ? 1 : 4;
   return (
     <Box
       sx={{
         position: 'relative',
-        width: 236,
+        width: NODE_WIDTH,
         border: 1,
-        borderColor: selected ? 'primary.main' : 'divider',
-        borderLeft: `5px solid ${color}`,
-        bgcolor: 'background.paper',
+        borderStyle: folded ? 'dashed' : 'solid',
+        borderColor: selected ? 'primary.main' : folded ? 'text.disabled' : 'divider',
+        borderLeft: folded ? undefined : `${stripe}px solid ${color}`,
+        bgcolor: folded ? 'transparent' : 'background.paper',
         borderRadius: 1,
-        boxShadow: selected ? 5 : 1,
+        boxShadow: folded ? 0 : selected ? 5 : 1,
         cursor: 'pointer',
-        px: 1.25,
-        py: 0.9,
+        px: 1.1,
+        py: 0.75,
+        '&:hover': folded ? { borderColor: 'primary.main', bgcolor: 'action.hover' } : undefined,
       }}
     >
       {/* xyflow anchors handles to the padding box, so the asymmetric borders
-          (5px status stripe left, 1px right) need compensating offsets to put
+          (status stripe left, 1px right) need compensating offsets to put
           both dots on the outer edge. */}
       <Handle
         type="target"
         position={Position.Left}
-        style={{ width: 8, height: 8, border: 0, background: color, left: -5 }}
+        style={{ width: 8, height: 8, border: 0, background: folded ? theme.palette.text.disabled : color, left: -stripe }}
       />
       <Handle
         type="source"
         position={Position.Right}
-        style={{ width: 8, height: 8, border: 0, background: color, right: -1 }}
+        style={{ width: 8, height: 8, border: 0, background: folded ? theme.palette.text.disabled : color, right: -1 }}
       />
-      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-        <Chip label={node.ref.kind} size="small" sx={{ height: 18, fontSize: 10, maxWidth: 120 }} />
-        <Typography variant="caption" color="text.secondary" noWrap>
-          {node.layer}
-        </Typography>
-      </Stack>
-      <Typography variant="body2" sx={{ fontWeight: 700, mt: 0.5 }} noWrap title={node.label}>
-        {node.label}
+      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', fontSize: 11, lineHeight: 1.35 }}>
+        {node.ref.kind}
+      </Typography>
+      <Typography
+        variant="body2"
+        noWrap
+        title={folded ? undefined : node.label}
+        sx={{ fontSize: LABEL_FONT_SIZE, fontWeight: folded ? 500 : 600, lineHeight: 1.35, color: folded ? 'text.secondary' : undefined }}
+      >
+        {folded ? node.label : compactLabel(node.label, LABEL_WIDTH, `600 ${LABEL_FONT_SIZE}px ${theme.typography.fontFamily ?? 'sans-serif'}`)}
       </Typography>
       {node.sublabel && (
-        <Typography variant="caption" color="text.secondary" noWrap title={node.sublabel}>
+        <Typography variant="caption" color="text.secondary" noWrap title={node.sublabel} sx={{ display: 'block', lineHeight: 1.4 }}>
           {node.sublabel}
         </Typography>
       )}
       {node.reason && (
-        <Typography variant="caption" sx={{ display: 'block', color: reasonColor, mt: 0.25 }} noWrap title={node.reason}>
+        <Typography variant="caption" sx={{ display: 'block', color: reasonColor, lineHeight: 1.4 }} noWrap title={node.reason}>
           {node.reason}
         </Typography>
       )}
@@ -318,7 +360,7 @@ export function toFlowState(layout: TopologyLayout): FlowState {
         target: edge.target,
         type: 'routed',
         label,
-        animated: edge.kind === 'routes' || edge.kind === 'selects',
+        animated: DASHED_KINDS.has(edge.kind),
         // Colors resolve per theme mode in the render-side edges memo.
         style: { strokeWidth: 1.7 },
         labelStyle: { fontWeight: 700, fontSize: 11 },
@@ -340,11 +382,34 @@ function isFocusedNode(node: GraphNode, focus: NonNullable<TopologyGraphProps['f
   );
 }
 
+// Below this zoom the card text is too small to read, so a graph that only
+// fits by shrinking further opens at this zoom instead, anchored on its entry
+// side, and the minimap covers the rest.
+const READABLE_ZOOM = 0.75;
+const VIEW_PADDING = 32;
+
+function layoutBounds(nodes: TopologyFlowNode[]) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    minX = Math.min(minX, node.position.x);
+    minY = Math.min(minY, node.position.y);
+    maxX = Math.max(maxX, node.position.x + NODE_WIDTH);
+    maxY = Math.max(maxY, node.position.y + estimateNodeHeight(node.data.graphNode));
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 export default function TopologyGraphImpl({
   contexts,
   namespaces,
   focus,
   hideDisconnected = true,
+  foldReplicaSets,
+  onFoldReplicaSetsChange,
+  onStats,
   emptyTitle = 'No connected topology found',
 }: TopologyGraphProps) {
   const theme = useTheme();
@@ -353,14 +418,32 @@ export default function TopologyGraphImpl({
   const pushDetail = useDetailStore((s) => s.push);
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [interactive, setInteractive] = useState(false);
+  // Folding is controlled by the Topology page (header switch) and local
+  // everywhere else, e.g. the resource drawer's Map tab.
+  const [localFold, setLocalFold] = useState(true);
+  const fold = foldReplicaSets ?? localFold;
+  const setFold = useCallback(
+    (next: boolean) => {
+      if (foldReplicaSets === undefined) setLocalFold(next);
+      onFoldReplicaSetsChange?.(next);
+    },
+    [foldReplicaSets, onFoldReplicaSetsChange],
+  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  // On a graph larger than the screen the issue list would cover nodes, so it
+  // starts collapsed there; the header still shows the count.
+  const [issuesOpen, setIssuesOpen] = useState<boolean>();
+  const showIssues = issuesOpen ?? !overflowing;
   // Remounts (tab switches, drawer reopens) reuse the cached layout for the
   // current data synchronously, so the finished graph is on screen from the
   // very first frame instead of after an async layout pass.
-  const laidOut = useRef<{ graphs: RelationshipGraph[] | undefined; hide: boolean } | null>(null);
+  const laidOut = useRef<{ graphs: RelationshipGraph[] | undefined; hide: boolean; fold: boolean } | null>(null);
   const [flow, setFlow] = useState<FlowState>(() => {
-    const cached = cachedTopologyLayout(graphs, hideDisconnected);
+    const initialFold = foldReplicaSets ?? true;
+    const cached = cachedTopologyLayout(graphs, hideDisconnected, initialFold);
     if (!cached) return emptyFlow;
-    laidOut.current = { graphs, hide: hideDisconnected };
+    laidOut.current = { graphs, hide: hideDisconnected, fold: initialFold };
     return toFlowState(cached);
   });
   const [layoutPending, setLayoutPending] = useState(false);
@@ -368,13 +451,14 @@ export default function TopologyGraphImpl({
 
   // ELK layout is async, so positions land in state instead of a useMemo.
   useEffect(() => {
-    if (laidOut.current && laidOut.current.graphs === graphs && laidOut.current.hide === hideDisconnected) return;
+    const current = laidOut.current;
+    if (current && current.graphs === graphs && current.hide === hideDisconnected && current.fold === fold) return;
     let cancelled = false;
     setLayoutPending(true);
-    layoutTopology(graphs, hideDisconnected)
+    layoutTopology(graphs, hideDisconnected, fold)
       .then((layout) => {
         if (cancelled) return;
-        laidOut.current = { graphs, hide: hideDisconnected };
+        laidOut.current = { graphs, hide: hideDisconnected, fold };
         // Transition: rendering hundreds of nodes shouldn't block clicks/pans.
         // layoutPending clears inside it so the loading state holds until the
         // graph actually commits.
@@ -392,7 +476,7 @@ export default function TopologyGraphImpl({
     return () => {
       cancelled = true;
     };
-  }, [graphs, hideDisconnected]);
+  }, [graphs, hideDisconnected, fold]);
 
   // Re-fit the viewport when the set of displayed nodes changes (not on drag).
   // Focused graphs (opened from a resource drawer) center on the focused
@@ -402,16 +486,47 @@ export default function TopologyGraphImpl({
     () => (focus ? flow.nodes.find((node) => isFocusedNode(node.data.graphNode, focus))?.id : undefined),
     [flow.nodes, focus],
   );
+  // Bounds come from the layout itself (known card sizes), so this doesn't
+  // wait for xyflow to measure the rendered nodes.
+  const flowNodesRef = useRef(flow.nodes);
+  flowNodesRef.current = flow.nodes;
   useEffect(() => {
     if (!nodeIdsKey) return;
     const frame = requestAnimationFrame(() => {
-      void instanceRef.current?.fitView({
-        maxZoom: 1,
-        ...(focusedNodeId ? { nodes: [{ id: focusedNodeId }] } : {}),
-      });
+      const instance = instanceRef.current;
+      const container = containerRef.current;
+      if (!instance || !container) return;
+      const bounds = layoutBounds(flowNodesRef.current);
+      const { width, height } = container.getBoundingClientRect();
+      const fitZoom = Math.min((width - VIEW_PADDING * 2) / bounds.width, (height - VIEW_PADDING * 2) / bounds.height, 1);
+      if (fitZoom >= READABLE_ZOOM) {
+        void instance.fitView({ maxZoom: 1, padding: 0.08 });
+        setOverflowing(false);
+        return;
+      }
+      setOverflowing(true);
+      // A focused map (a drawer's Map tab) centres on its resource instead.
+      const focused = focusedNodeId ? flowNodesRef.current.find((node) => node.id === focusedNodeId) : undefined;
+      if (focused) {
+        const centerY = focused.position.y + estimateNodeHeight(focused.data.graphNode) / 2;
+        void instance.setCenter(focused.position.x + NODE_WIDTH / 2, centerY, { zoom: READABLE_ZOOM });
+        return;
+      }
+      const contentHeight = bounds.height * READABLE_ZOOM;
+      const y = contentHeight <= height - VIEW_PADDING * 2 ? (height - contentHeight) / 2 - bounds.y * READABLE_ZOOM : VIEW_PADDING - bounds.y * READABLE_ZOOM;
+      void instance.setViewport({ x: VIEW_PADDING - bounds.x * READABLE_ZOOM, y, zoom: READABLE_ZOOM });
     });
     return () => cancelAnimationFrame(frame);
   }, [nodeIdsKey, focusedNodeId]);
+
+  const focusNode = useCallback((id: string) => {
+    const node = flowNodesRef.current.find((candidate) => candidate.id === id);
+    const instance = instanceRef.current;
+    if (!node || !instance) return;
+    setSelectedNodeId(id);
+    const zoom = Math.max(instance.getZoom(), READABLE_ZOOM);
+    void instance.setCenter(node.position.x + NODE_WIDTH / 2, node.position.y + estimateNodeHeight(node.data.graphNode) / 2, { zoom, duration: 300 });
+  }, []);
 
   const onNodesChange = useCallback((changes: NodeChange<TopologyFlowNode>[]) => {
     setFlow((f) => ({ ...f, nodes: applyNodeChanges(changes, f.nodes) }));
@@ -458,7 +573,10 @@ export default function TopologyGraphImpl({
           selected: !!activeSelectedNodeId && connected,
           markerEnd: { type: MarkerType.ArrowClosed, color },
           style: { ...edge.style, stroke: color, strokeWidth: activeSelectedNodeId && connected ? 2.8 : edge.style?.strokeWidth, opacity: connected ? 1 : 0.1 },
-          labelStyle: { ...edge.labelStyle, fill: color, opacity: connected ? 1 : 0.1 },
+          // Labels would need wide gaps between columns; the footer legend
+          // explains the colors, and a highlighted node names its links.
+          label: activeSelectedNodeId && connected ? edge.label : undefined,
+          labelStyle: { ...edge.labelStyle, fill: color },
         };
       });
       // Edges paint in array order within the edge layer, and every edge
@@ -470,11 +588,17 @@ export default function TopologyGraphImpl({
     [activeSelectedNodeId, flow.edges, theme.palette.mode],
   );
   const { warnings, problemNodes } = flow;
+  const foldedCount = useMemo(() => flow.nodes.filter((node) => isFoldedReplicaSets(node.data.graphNode)).length, [flow.nodes]);
+  const resourceCount = flow.nodes.length - foldedCount;
+  const edgeKinds = useMemo(() => [...new Set(flow.edges.map((edge) => edge.data!.kind))].sort(), [flow.edges]);
+  useEffect(() => {
+    onStats?.({ resources: resourceCount, links: flow.edges.length, issues: problemNodes.length, folded: foldedCount });
+  }, [onStats, resourceCount, flow.edges.length, problemNodes.length, foldedCount]);
   // keepPreviousData preserves the prior graph while a new scope is fetched.
   // Keep it visible for a fast transition, but mark it as stale until both the
   // request and layout for the current data have completed.
   const layoutOutOfDate =
-    graphs !== undefined && (laidOut.current?.graphs !== graphs || laidOut.current.hide !== hideDisconnected);
+    graphs !== undefined && (laidOut.current?.graphs !== graphs || laidOut.current.hide !== hideDisconnected || laidOut.current.fold !== fold);
   const topologyPending = isPlaceholderData || layoutPending || layoutOutOfDate;
   const loading = nodes.length === 0 && (isLoading || topologyPending);
   const updating = nodes.length > 0 && topologyPending;
@@ -499,6 +623,7 @@ export default function TopologyGraphImpl({
 
   return (
     <Box
+      ref={containerRef}
       sx={{
         position: 'relative',
         height: '100%',
@@ -523,6 +648,7 @@ export default function TopologyGraphImpl({
           '&:hover': { bgcolor: 'action.hover' },
           '& svg': { fill: 'currentColor' },
         },
+        '& .react-flow__minimap': { overflow: 'hidden' },
         '& .react-flow__attribution': {
           bgcolor: 'background.paper',
           color: 'text.secondary',
@@ -539,7 +665,6 @@ export default function TopologyGraphImpl({
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         minZoom={0.12}
         maxZoom={2}
         nodesDraggable={interactive}
@@ -550,51 +675,116 @@ export default function TopologyGraphImpl({
         }}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
-        onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-        onNodeDoubleClick={(_event, node) => inspectNode(node)}
+        onNodeClick={(_event, node) => {
+          if (isFoldedReplicaSets((node.data as TopologyNodeData).graphNode)) setFold(false);
+          else setSelectedNodeId(node.id);
+        }}
+        onNodeDoubleClick={(_event, node) => {
+          if (!isFoldedReplicaSets((node.data as TopologyNodeData).graphNode)) inspectNode(node);
+        }}
         onPaneClick={() => setSelectedNodeId(undefined)}
       >
         <Background color={theme.palette.divider} />
         <Controls onInteractiveChange={setInteractive} />
+        {overflowing && nodes.length > 0 && (
+          <MiniMap
+            pannable
+            zoomable
+            ariaLabel="Topology overview"
+            nodeColor={(node) => nodeStatusColor((node.data as TopologyNodeData).graphNode.status, theme)}
+            nodeStrokeWidth={0}
+            nodeBorderRadius={2}
+            maskColor={alpha(theme.palette.background.default, 0.72)}
+            style={{ width: 168, height: 104, backgroundColor: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, borderRadius: 8 }}
+          />
+        )}
       </ReactFlow>
 
-      {!loading && !updating && (
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          width: 280,
-          maxWidth: 'calc(100% - 24px)',
-          bgcolor: 'background.paper',
-          border: 1,
-          borderColor: 'divider',
-          borderRadius: 1,
-          boxShadow: 4,
-          p: 1.25,
-        }}
-      >
-        <Stack direction="row" spacing={0.75} sx={{ mb: 0.75, flexWrap: 'wrap' }}>
-          <Chip size="small" label={`${nodes.length} nodes`} variant="outlined" />
-          <Chip size="small" label={`${edges.length} links`} variant="outlined" />
-          {problemNodes.length > 0 && <Chip size="small" label={`${problemNodes.length} issues`} color="warning" variant="outlined" />}
+      {!loading && !updating && (problemNodes.length > 0 || warnings.length > 0) && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
+            width: 300,
+            maxWidth: 'calc(100% - 24px)',
+            bgcolor: 'background.paper',
+            border: 1,
+            borderColor: 'divider',
+            borderRadius: 1,
+            boxShadow: 4,
+            overflow: 'hidden',
+          }}
+        >
+          {problemNodes.length > 0 ? (
+            <>
+              <ButtonBase
+                onClick={() => setIssuesOpen((open) => !open)}
+                aria-expanded={showIssues}
+                sx={{ width: '100%', justifyContent: 'space-between', px: 1.25, py: 0.75, typography: 'caption', fontWeight: 600 }}
+              >
+                {problemNodes.length} {problemNodes.length === 1 ? 'issue' : 'issues'}
+                <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary', transform: showIssues ? 'rotate(180deg)' : undefined }} />
+              </ButtonBase>
+              {showIssues && (
+                <Box sx={{ maxHeight: 208, overflowY: 'auto', pb: 0.5 }}>
+                  {problemNodes.map((node) => (
+                    <ButtonBase
+                      key={node.id}
+                      onClick={() => focusNode(node.id)}
+                      title={`${node.ref.kind}/${node.label}: ${node.reason ?? node.status}`}
+                      sx={{ display: 'block', width: '100%', textAlign: 'left', px: 1.25, py: 0.25, '&:hover': { bgcolor: 'action.hover' } }}
+                    >
+                      <Typography variant="caption" noWrap sx={{ display: 'block', color: statusTextColor(node.status === 'error' ? 'error' : 'warning')(theme) }}>
+                        {node.ref.kind}/{node.label}: {node.reason ?? node.status}
+                      </Typography>
+                    </ButtonBase>
+                  ))}
+                </Box>
+              )}
+            </>
+          ) : (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 1.25, py: 0.75 }} noWrap title={warnings[0]}>
+              {warnings[0]}
+            </Typography>
+          )}
+        </Box>
+      )}
+
+      {!loading && !updating && nodes.length > 0 && (
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{
+            position: 'absolute',
+            left: 52,
+            bottom: 10,
+            maxWidth: `calc(100% - ${overflowing ? 248 : 68}px)`,
+            alignItems: 'center',
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            px: 1,
+            py: 0.25,
+            borderRadius: 1,
+            bgcolor: alpha(theme.palette.background.default, 0.9),
+          }}
+        >
+          {edgeKinds.map((kind) => (
+            <Stack key={kind} direction="row" spacing={0.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+              <svg width="18" height="6" aria-hidden="true">
+                <line x1="0" y1="3" x2="18" y2="3" stroke={EDGE_COLOR[theme.palette.mode][kind]} strokeWidth="2" strokeDasharray={DASHED_KINDS.has(kind) ? '4 3' : undefined} />
+              </svg>
+              <Typography variant="caption" color="text.secondary">
+                {kind}
+              </Typography>
+            </Stack>
+          ))}
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+            {onStats ? '' : `${resourceCount} ${resourceCount === 1 ? 'resource' : 'resources'} · `}
+            Click a node to highlight its links, double-click to open it.
+            {foldedCount > 0 && ' Dashed cards hold old ReplicaSets.'}
+          </Typography>
         </Stack>
-        {problemNodes.slice(0, 4).map((node) => (
-          <Typography key={node.id} variant="caption" color={node.status === 'error' ? 'error.main' : 'warning.main'} sx={{ display: 'block' }} noWrap title={`${node.ref.kind}/${node.label}: ${node.reason ?? node.status}`}>
-            {node.ref.kind}/{node.label}: {node.reason ?? node.status}
-          </Typography>
-        ))}
-        {problemNodes.length === 0 && warnings.length > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} noWrap title={warnings[0]}>
-            {warnings[0]}
-          </Typography>
-        )}
-        {problemNodes.length === 0 && warnings.length === 0 && (
-          <Typography variant="caption" color="text.secondary">
-            Click a node to highlight its connections. Double-click to inspect it.
-          </Typography>
-        )}
-      </Box>
       )}
 
       {!isLoading && !topologyPending && nodes.length === 0 && (

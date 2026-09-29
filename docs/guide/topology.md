@@ -24,11 +24,18 @@ what's wired to what.
 
 ## Reading the graph
 
-- **Nodes** are resources; **edges** are ownership or references.
+- **Nodes** are resources; **edges** are ownership or references. The legend at the bottom
+  names each edge colour, and dashed edges carry traffic (routes and selectors).
 - The [namespace filter](clusters.md#filtering-by-namespace) scopes what's drawn.
-- Toggle **hide disconnected** to drop isolated resources and focus on what's actually
-  connected.
-- Click a node to open its [details drawer](resource-details.md) and dig in.
+- **Only connected** (on by default) drops isolated resources so you see what's actually
+  wired together. Turn it off to include everything in scope.
+- Old ReplicaSets that no longer run pods fold into one dashed card per Deployment. Click
+  that card, or turn on **Old ReplicaSets** in the header, to show them individually.
+- Click a node to highlight its links and name them. Double-click it to open its
+  [details drawer](resource-details.md) and dig in.
+- The graph opens at a zoom where names stay readable. When it is larger than the screen,
+  drag to pan and use the minimap in the corner to jump around; the fit button in the
+  controls zooms out to show everything at once.
 
 !!! tip "Tracing a problem"
 
