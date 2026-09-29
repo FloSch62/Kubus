@@ -30,7 +30,7 @@ The **Scale** dialog shows the current replica count and lets you set a new one.
 since the autoscaler will likely override a manual change.
 
 To scale several Deployments or StatefulSets to the same count, tick them in the list
-and click **Scale** in the toolbar. The dialog lists every workload with its current and
+and click **Scale** in the bar that opens above the list. The dialog lists every workload with its current and
 new replica count. Workloads an autoscaler manages are named in a warning and skipped,
 unless you tick **Override the autoscaler on these too**. Scaling running workloads on a
 [protected cluster](production-guard.md) to zero asks you to type a confirmation first,

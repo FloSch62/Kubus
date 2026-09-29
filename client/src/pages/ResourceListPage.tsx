@@ -47,6 +47,7 @@ import { diffSideFor, openCompare } from '../compare-link.js';
 import { BulkScaleDialog } from '../components/BulkScaleDialog.js';
 import { BULK_SCALE_KINDS } from '../components/bulk-scale.js';
 import { CopyRowsButton } from '../components/CopyRowsButton.js';
+import { SelectionBar } from '../components/SelectionBar.js';
 import { LabelColumnsButton } from '../components/LabelColumnsButton.js';
 import { buildLabelColumns, insertLabelColumns } from '../components/label-columns.js';
 
@@ -826,70 +827,74 @@ export function ResourceListPage() {
         onSelectionChange={setSelectedRows}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}
+        selectionBar={
+          selectedRows.length > 0 ? (
+            <SelectionBar count={selectedRows.length} onClear={() => setSelectedRows([])}>
+              {multiLogs && (
+                <Button
+                  startIcon={<SubjectIcon />}
+                  variant="outlined"
+                  onClick={() => {
+                    // Group by ctx+namespace — one log session per group.
+                    const groups = new Map<string, ClusterRow[]>();
+                    for (const row of selectedRows) {
+                      const key = `${row.ctx}|${row.obj.metadata.namespace ?? ''}`;
+                      groups.set(key, [...(groups.get(key) ?? []), row]);
+                    }
+                    for (const [key, rows] of groups) {
+                      const [ctx, namespace] = key.split('|');
+                      addTab({
+                        kind: 'logs',
+                        id: dockTabId(),
+                        title: `logs: ${rows.length} pods`,
+                        ctx: ctx!,
+                        namespace: namespace ?? '',
+                        pods: rows.map((r) => r.obj.metadata.name),
+                        sources: rows.map((r) => ({ pod: r.obj.metadata.name, containers: podContainerNames(r.obj) })),
+                        follow: true,
+                        tailLines: 500,
+                      });
+                    }
+                  }}
+                >
+                  Logs ({selectedRows.length})
+                </Button>
+              )}
+              {selectedRows.length === 2 && (
+                <Button
+                  startIcon={<DifferenceOutlinedIcon />}
+                  variant="outlined"
+                  onClick={() => {
+                    const [a, b] = selectedRows.map((r) => diffSideFor({ ctx: r.ctx, group, version, plural, namespace: r.obj.metadata.namespace, name: r.obj.metadata.name }));
+                    if (a && b) openCompare(a, b);
+                  }}
+                >
+                  Compare 2
+                </Button>
+              )}
+              {bulkScalable && (
+                <Button startIcon={<OpenInFullIcon />} variant="outlined" onClick={() => setBulkDialog('scale')}>
+                  Scale ({selectedRows.length})
+                </Button>
+              )}
+              {bulkRestartable && (
+                <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
+                  Restart ({selectedRows.length})
+                </Button>
+              )}
+              <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} />
+              <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
+                Delete ({selectedRows.length})
+              </Button>
+            </SelectionBar>
+          ) : undefined
+        }
         toolbar={
           <>
             <LabelColumnsButton tableId={kindPath} rows={list.rows} />
             <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>
               Save view
             </Button>
-            {multiLogs && (
-              <Button
-                startIcon={<SubjectIcon />}
-                variant="outlined"
-                onClick={() => {
-                  // Group by ctx+namespace — one log session per group.
-                  const groups = new Map<string, ClusterRow[]>();
-                  for (const row of selectedRows) {
-                    const key = `${row.ctx}|${row.obj.metadata.namespace ?? ''}`;
-                    groups.set(key, [...(groups.get(key) ?? []), row]);
-                  }
-                  for (const [key, rows] of groups) {
-                    const [ctx, namespace] = key.split('|');
-                    addTab({
-                      kind: 'logs',
-                      id: dockTabId(),
-                      title: `logs: ${rows.length} pods`,
-                      ctx: ctx!,
-                      namespace: namespace ?? '',
-                      pods: rows.map((r) => r.obj.metadata.name),
-                      sources: rows.map((r) => ({ pod: r.obj.metadata.name, containers: podContainerNames(r.obj) })),
-                      follow: true,
-                      tailLines: 500,
-                    });
-                  }
-                }}
-              >
-                Logs ({selectedRows.length})
-              </Button>
-            )}
-            {selectedRows.length === 2 && (
-              <Button
-                startIcon={<DifferenceOutlinedIcon />}
-                variant="outlined"
-                onClick={() => {
-                  const [a, b] = selectedRows.map((r) => diffSideFor({ ctx: r.ctx, group, version, plural, namespace: r.obj.metadata.namespace, name: r.obj.metadata.name }));
-                  if (a && b) openCompare(a, b);
-                }}
-              >
-                Compare 2
-              </Button>
-            )}
-            {selectedRows.length > 0 && bulkScalable && (
-              <Button startIcon={<OpenInFullIcon />} variant="outlined" onClick={() => setBulkDialog('scale')}>
-                Scale ({selectedRows.length})
-              </Button>
-            )}
-            {selectedRows.length > 0 && bulkRestartable && (
-              <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
-                Restart ({selectedRows.length})
-              </Button>
-            )}
-            {selectedRows.length > 0 && <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} />}
-            {selectedRows.length > 0 && (
-              <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
-                Delete ({selectedRows.length})
-              </Button>
-            )}
             <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setCreateOpen(true)}>
               Create
             </Button>

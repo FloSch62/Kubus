@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, PrinterColumn, ResourceKindInfo } from '@kubus/shared';
@@ -76,6 +76,7 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
     rows: Row[];
     columns: Array<{ field: string; valueGetter?: (...args: unknown[]) => unknown; renderCell?: (params: { row: Row; value?: unknown }) => ReactNode }>;
     toolbar?: ReactNode;
+    selectionBar?: ReactNode;
     onSelectionChange?: (rows: Row[]) => void;
     selectedRows?: Row[];
     onFilterChange?: (value: string) => void;
@@ -90,6 +91,7 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
   }) => (
     <section data-testid="resource-table">
       <div>{props.toolbar}</div>
+      <div>{props.selectionBar}</div>
       <output data-testid="table-state">
         {JSON.stringify({ hidden: props.hiddenFields, active: props.activeRowId, loading: props.loading, selected: props.selectedRows?.map((row) => row.obj.metadata.name) })}
       </output>
@@ -381,6 +383,19 @@ describe('ResourceListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
     expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy rows (2)' })).toBeInTheDocument();
+  });
+
+  it('keeps bulk actions in their own bar that clears the selection', () => {
+    renderPage('/r/apps/v1/deployments');
+    expect(screen.queryByRole('region', { name: 'Selected rows' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    const bar = screen.getByRole('region', { name: 'Selected rows' });
+    expect(bar).toHaveTextContent('2 selected');
+    expect(within(bar).getByRole('button', { name: 'Delete (2)' })).toBeInTheDocument();
+    // The page's own buttons stay out of the bar.
+    expect(within(bar).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Clear selection' }));
+    expect(screen.queryByRole('region', { name: 'Selected rows' })).not.toBeInTheDocument();
   });
 
   it('builds custom printer columns and links the API drawer to its CRD', () => {

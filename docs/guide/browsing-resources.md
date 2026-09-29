@@ -114,14 +114,16 @@ scale, restart, port-forward, delete and more. That's covered in
 [Quick actions](quick-actions.md). To inspect instead, click the resource's **name** to
 open the [details drawer](resource-details.md).
 
-Tick the checkboxes to act on several rows at once. The toolbar then offers actions for
-the checked rows:
+Tick the checkboxes to act on several rows at once. A bar opens under the filter with
+the number of checked rows, the actions for them and **Clear selection**:
 
 - **Copy rows** puts the checked rows on the clipboard with the columns you see, header
   included. Pick **TSV** to paste into a spreadsheet or **CSV** for a file. Values are
   the raw data behind each cell, so ages come out as timestamps and memory in bytes.
 - **Scale** (Deployments and StatefulSets) sets one replica count on all of them. See
   [scaling several workloads](quick-actions.md#scaling).
+- **Compare 2** appears when exactly two rows are checked and opens them side by side
+  in the [Diff page](diff.md).
 - **Restart** (Deployments, StatefulSets, DaemonSets), **Logs** (Pods) and **Delete**
   work the same way.
 

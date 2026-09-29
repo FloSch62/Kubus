@@ -47,9 +47,10 @@ vi.mock('../../../client/src/api/queries.js', () => ({
 }));
 vi.mock('../../../client/src/app-navigate.js', () => ({ appNavigate: fixtures.navigate }));
 vi.mock('../../../client/src/components/ResourceTable.js', () => ({
-  ResourceTable: (props: { rows: Row[]; toolbar?: ReactNode; onSelectionChange?: (rows: Row[]) => void }) => (
+  ResourceTable: (props: { rows: Row[]; toolbar?: ReactNode; selectionBar?: ReactNode; onSelectionChange?: (rows: Row[]) => void }) => (
     <section>
       <div>{props.toolbar}</div>
+      <div>{props.selectionBar}</div>
       <button onClick={() => props.onSelectionChange?.(props.rows.slice(0, 1))}>Mock select one</button>
       <button onClick={() => props.onSelectionChange?.(props.rows.slice(0, 2))}>Mock select two</button>
       <button onClick={() => props.onSelectionChange?.(props.rows)}>Mock select all</button>

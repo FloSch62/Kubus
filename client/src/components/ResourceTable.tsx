@@ -55,6 +55,8 @@ interface Props {
   onRowKey?: (row: ClusterRow, action: RowKeyAction) => boolean;
   /** Extra toolbar elements (e.g. create button). */
   toolbar?: ReactNode;
+  /** Bulk actions for the checked rows, shown on their own row under the toolbar. */
+  selectionBar?: ReactNode;
   /** Enable checkbox selection; returns selected rows. */
   onSelectionChange?: (rows: ClusterRow[]) => void;
   /** Controlled checkbox selection, kept in sync with external bulk actions. */
@@ -111,6 +113,7 @@ export function ResourceTable({
   onRowContextMenu,
   onRowKey,
   toolbar,
+  selectionBar,
   checkboxSelection,
   onSelectionChange,
   selectedRows,
@@ -531,6 +534,7 @@ export function ResourceTable({
         <Box sx={{ flex: 1 }} />
         {toolbar}
       </Stack>
+      {selectionBar}
       <GridTooltips rootRef={tableRef}>
         <DataGrid
           rows={gridRows}
