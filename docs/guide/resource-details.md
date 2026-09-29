@@ -123,8 +123,8 @@ sit in the drawer's action bar next to the ⋮ menu (see
 - **Flux Kustomizations** show the ready state, the last applied revision, the source
   (a link) and the inventory of objects they manage. **HelmReleases** show the chart and
   version, the Helm release they manage (linked to its [Helm page](helm.md)) and the
-  release history. Every Flux object, sources included, can be reconciled, suspended and
-  resumed from the drawer.
+  release history. Kustomizations, HelmReleases, their sources and the other Flux objects
+  that can be suspended are reconciled, suspended and resumed from the drawer.
 - **cert-manager Certificates** lead with when the certificate expires and renews.
 
 ### Why a pod is Pending
