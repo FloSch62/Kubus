@@ -234,6 +234,10 @@ describe('locking and filtering', () => {
     expect(lockReason(['spec', 'replicas'])).toBeUndefined();
     expect(lockReason(['data', 'password'])).toBeUndefined();
     expect(lockReason(['data', 'password'], { secretRedacted: true })).toMatch(/Reveal/);
+    const lastApplied = ['metadata', 'annotations', 'kubectl.kubernetes.io/last-applied-configuration'];
+    expect(lockReason(lastApplied, { secretRedacted: true })).toMatch(/Reveal/);
+    expect(lockReason(lastApplied)).toBeUndefined();
+    expect(lockReason(['metadata', 'annotations', 'team'], { secretRedacted: true })).toBeUndefined();
     expect(lockReason([])).toBeUndefined();
   });
 

@@ -429,6 +429,10 @@ export function lockReason(path: JsonPath, opts: { secretRedacted?: boolean } = 
   if (head === 'status') return 'Status is written by the controller and is read-only here.';
   if (head === 'metadata' && typeof second === 'string' && LOCKED_METADATA.has(second)) return 'Identity fields cannot be edited.';
   if (opts.secretRedacted && (head === 'data' || head === 'stringData')) return 'Reveal the Secret to edit its data.';
+  // The applied-configuration annotation carries the data too, masked alike.
+  if (opts.secretRedacted && head === 'metadata' && second === 'annotations' && path[2] === 'kubectl.kubernetes.io/last-applied-configuration') {
+    return 'Reveal the Secret to edit its data.';
+  }
   return undefined;
 }
 
