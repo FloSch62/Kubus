@@ -107,10 +107,54 @@ const CellCopyButton = memo(function CellCopyButton({ cell }: { cell: HTMLElemen
   );
 });
 
+function flashCopiedCell(cell: Element) {
+  cell.classList.remove('kubus-cell-copied-flash');
+  // Force a reflow so copying the same cell twice restarts the animation.
+  void (cell as HTMLElement).offsetWidth;
+  cell.classList.add('kubus-cell-copied-flash');
+}
+
+/** Text fields keep their own copy; a focused row checkbox does not count. */
+function isTypingTarget(target: Element): boolean {
+  if (target instanceof HTMLInputElement) return target.type !== 'checkbox' && target.type !== 'radio';
+  return target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function isCopyShortcut(event: KeyboardEvent): boolean {
+  // keyCode as well as key: the grid matches on keyCode, which still reads C
+  // on layouts whose C key types another letter.
+  return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key.toLowerCase() === 'c' || event.keyCode === 67);
+}
+
+/**
+ * Ctrl/Cmd+C inside the grid copies the focused cell, and only that. The
+ * DataGrid has its own copy handler on the same key press that copies the
+ * checked rows as TSV instead; with both running, whichever clipboard write
+ * finished last won. This listener runs in the capture phase, ahead of the
+ * grid's, and stops the event there. Whole rows are copied with the explicit
+ * Copy rows action. A real text selection keeps the native copy.
+ */
+function handleGridCopyShortcut(event: KeyboardEvent) {
+  if (!isCopyShortcut(event)) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest('.MuiDataGrid-root')) return;
+  if (isTypingTarget(target)) return;
+  if (window.getSelection()?.toString()) return;
+  event.stopPropagation();
+  event.preventDefault();
+  const cell = target.closest('.MuiDataGrid-cell');
+  const text = cell?.querySelector<HTMLElement>('[data-copy-text]')?.dataset.copyText ?? '';
+  if (!cell || !text) return;
+  void copyToClipboard(text).then((ok) => {
+    if (ok) flashCopiedCell(cell);
+  });
+}
+
 /**
  * One hover copy button shared by the whole grid. Virtualized scrolling used
  * to mount a button (and two SVGs) in every non-empty visible cell; moving a
  * single portal between cells keeps that DOM out of the row recycle path.
+ * It also owns the grid's Ctrl/Cmd+C (see handleGridCopyShortcut).
  */
 export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | null> }) {
   const [activeCell, setActiveCell] = useState<HTMLElement | null>(null);
@@ -134,6 +178,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
 
     root.addEventListener('pointerover', showForPointer);
     root.addEventListener('pointerleave', hide);
+    root.addEventListener('keydown', handleGridCopyShortcut, { capture: true });
     root.addEventListener('wheel', hide, { passive: true });
     // A stationary pointer does not reliably emit enter/leave events while
     // virtualization replaces the row beneath it. Hide immediately; the next
@@ -144,6 +189,7 @@ export function CellCopyOverlay({ rootRef }: { rootRef: RefObject<HTMLElement | 
     return () => {
       root.removeEventListener('pointerover', showForPointer);
       root.removeEventListener('pointerleave', hide);
+      root.removeEventListener('keydown', handleGridCopyShortcut, { capture: true });
       root.removeEventListener('wheel', hide);
       root.removeEventListener('scroll', hide, true);
     };
@@ -194,21 +240,20 @@ export function withCellCopy<R extends GridValidRowModel>(column: GridColDef<R>)
   };
 }
 
-/** Ctrl/Cmd+C on a focused cell copies its value and flashes the cell. */
+/**
+ * Ctrl/Cmd+C on a focused cell copies its value and flashes the cell. Grids
+ * with a CellCopyOverlay handle the shortcut before it gets here; this covers
+ * a grid rendered without one.
+ */
 export const handleCopyCellKeyDown: GridEventListener<'cellKeyDown'> = (params, event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-  if (event.key.toLowerCase() !== 'c') return;
+  if (event.defaultPrevented || !isCopyShortcut(event.nativeEvent)) return;
   // A real text selection means the user wants the native copy behavior.
   if (window.getSelection()?.toString()) return;
   const text = cellCopyText(params.value);
   if (!text) return;
   const cell = (event.target as HTMLElement | null)?.closest?.('.MuiDataGrid-cell');
   void copyToClipboard(text).then((ok) => {
-    if (!ok || !cell) return;
-    cell.classList.remove('kubus-cell-copied-flash');
-    // Force a reflow so copying the same cell twice restarts the animation.
-    void (cell as HTMLElement).offsetWidth;
-    cell.classList.add('kubus-cell-copied-flash');
+    if (ok && cell) flashCopiedCell(cell);
   });
 };
 
