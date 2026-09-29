@@ -18,6 +18,7 @@ import {
   relationPathScore,
   schemaFieldDescription,
   selectorMatches,
+  typedReference,
   type RelationHint,
 } from './relation-hints.js';
 import { groupFamily } from './used-by.js';
@@ -117,8 +118,6 @@ function crdSchema(crds: KubeObject[], source: ReferenceSource): unknown {
   return undefined;
 }
 
-const NAME_LEAF_RE = /(^|\.)name$/;
-
 /**
  * The kinds a field can point at. A sibling `kind` field or the CRD's own
  * description of the field decides outright (`certain`); otherwise the kinds
@@ -130,7 +129,7 @@ export function kindsForHint(typedHint: RelationHint, kinds: KindSpec[], source:
   // A sibling `kind` vouches for the reference's `name` (or its selector)
   // only; other leaves (a Gateway parentRef's sectionName "http") are no
   // such object.
-  const hint = typedHint.referenceKind && !typedHint.selector && !NAME_LEAF_RE.test(typedHint.path) ? { path: typedHint.path, value: typedHint.value } : typedHint;
+  const hint = typedReference(typedHint);
   const family = groupFamily(source.group);
   const tier = (spec: KindSpec) => (spec.group === source.group ? 0 : groupFamily(spec.group) === family ? 1 : spec.custom ? 3 : 2);
   const bestTier = (list: KindSpec[]) => {
@@ -143,10 +142,11 @@ export function kindsForHint(typedHint: RelationHint, kinds: KindSpec[], source:
     return { kinds: named.length ? bestTier(named) : [], certain: true };
   }
   if (description) {
-    // A schema describing its own kind ("hostnames … to select a HTTPRoute")
-    // explains the object, it does not point at another one.
+    // A schema that selects its own kind ("hostnames … to select a
+    // HTTPRoute") explains the object; only a plain reference to its own
+    // kind ("the name of the delegate VirtualService") points at another.
     const ownKind = (spec: KindSpec) => spec.group === source.group && canonicalKind(spec.kind) === canonicalKind(source.kind ?? '');
-    const named = kinds.filter((spec) => !ownKind(spec) && descriptionNamesKind(description, spec.kind));
+    const named = kinds.filter((spec) => descriptionNamesKind(description, spec.kind, { ownKind: ownKind(spec) }));
     if (named.length) return { kinds: bestTier(named), certain: true };
   }
   // The last segment decides when it names a kind (`interfaceResource` under
@@ -278,8 +278,9 @@ export async function computeReferences(handle: ClusterHandle, source: Reference
   };
 
   const nameHints: Array<{ hint: RelationHint; relation: string; detail: string; fromSpec: boolean }> = [];
+  const namesInstalledKind = (field: string) => kinds.some((spec) => pathNamesKind(field, spec.kind));
   for (const hint of collectRelationHints({ spec: obj.spec, status: obj.status })) {
-    if (hint.selector || !looksLikeName(hint.value) || holdsNonNameValues(hint.path) || referencePath(hint.path) === undefined) continue;
+    if (hint.selector || !looksLikeName(hint.value) || holdsNonNameValues(hint.path, namesInstalledKind) || referencePath(hint.path) === undefined) continue;
     nameHints.push({ hint, relation: 'references', detail: hintPath(hint.path), fromSpec: hint.path.startsWith('spec') });
   }
   for (const hint of collectMetadataRelationHints(obj)) {

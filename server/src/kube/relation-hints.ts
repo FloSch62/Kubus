@@ -236,18 +236,45 @@ export function looksLikeName(value: string): boolean {
   return OBJECT_NAME_RE.test(value);
 }
 
-// Last words of field names that hold something other than an object name:
+// Field names whose values are hosts, addresses, URLs, paths or images:
 // `spec.hostnames` carries podinfo.example.com, which is a valid DNS
 // subdomain and so passes `looksLikeName`, but names a host, not an object.
-// (Terms are as `tokens` singularizes them: addresses → addresse.)
-const NON_NAME_FIELD_TERMS = new Set(['host', 'hostname', 'domain', 'addres', 'addresse', 'url', 'uri', 'email', 'ip', 'ips', 'cidr', 'fqdn', 'path', 'image']);
+// Only a field named exactly this counts, so a kind-named field that ends in
+// one of the words (`bridgeDomain`, a BridgeDomain) stays a reference.
+const NON_NAME_FIELDS = new Set([
+  'host', 'hosts', 'hostname', 'hostnames', 'domain', 'domains', 'address', 'addresses', 'url', 'urls', 'uri', 'uris',
+  'email', 'emails', 'ip', 'ips', 'cidr', 'cidrs', 'fqdn', 'fqdns', 'path', 'paths', 'image', 'images',
+]);
 
-/** Whether a field's own name says its values are hosts, addresses, URLs, paths or images rather than object names. */
-export function holdsNonNameValues(path: string): boolean {
+/**
+ * Whether a field's own name says its values are hosts, addresses, URLs,
+ * paths or images rather than object names. A field that an installed kind
+ * is named after (`spec.domain` beside a Domain kind) is left to the kind
+ * rules; `namesKind` answers that for the caller's set of kinds.
+ */
+export function holdsNonNameValues(path: string, namesKind?: (field: string) => boolean): boolean {
   const leaf = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean).at(-1);
-  if (!leaf) return false;
-  const last = tokens(leaf).at(-1);
-  return !!last && NON_NAME_FIELD_TERMS.has(last);
+  if (!leaf || !NON_NAME_FIELDS.has(leaf.toLowerCase())) return false;
+  return !namesKind?.(leaf);
+}
+
+const NAME_LEAF_RE = /(^|\.)name$/;
+
+/**
+ * A hint as far as its sibling `kind` vouches for it. A typed reference
+ * names its object in `name` (`{kind: Gateway, name: web}`) or in a field
+ * named for the kind (`{kind: TopoNode, node: s001}`), or selects it; its
+ * other leaves (`sectionName: https`, KEDA's `envSourceContainerName`) are
+ * no such object, so they lose the kind and are judged by their field name
+ * alone. Context leaves (namespace, apiVersion) are left as they are.
+ */
+export function typedReference(hint: RelationHint): RelationHint {
+  if (!hint.referenceKind || hint.selector) return hint;
+  const path = hint.path.replace(ARRAY_INDEX_RE, '');
+  const leaf = path.split('.').at(-1)?.toLowerCase() ?? '';
+  if (NAME_LEAF_RE.test(path) || REFERENCE_CONTEXT_FIELDS.has(leaf) || pathNamesKind(path, hint.referenceKind)) return hint;
+  const { referenceKind: _kind, referenceGroup: _group, ...rest } = hint;
+  return rest;
 }
 
 /** Reduce an object to the hints that can name a known kind plus its selectors; everything else is dropped. */
@@ -255,7 +282,8 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
   const body = { spec: obj.spec, status: obj.status };
   const hints: RelationHint[] = [];
   const selectors: ReferenceDigest['selectors'] = [];
-  for (const hint of collectRelationHints(body)) {
+  for (const raw of collectRelationHints(body)) {
+    const hint = typedReference(raw);
     if (hint.selector) {
       if (hint.referenceKind || namesKind(hint.path)) {
         const { value: _value, ...selector } = hint;
@@ -263,7 +291,7 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
       }
       continue;
     }
-    if (!looksLikeName(hint.value) || holdsNonNameValues(hint.path)) continue;
+    if (!looksLikeName(hint.value) || holdsNonNameValues(hint.path, namesKind)) continue;
     if (!hint.referenceKind && !namesKind(hint.path)) continue;
     const kept: RelationHint = { path: hint.path, value: hint.value };
     if (hint.referenceKind) kept.referenceKind = hint.referenceKind;
@@ -308,6 +336,10 @@ export function textNamesKind(text: string, kind: string): boolean {
 }
 
 const REFERENCE_CUE_RE = /\b(refer(?:ence|ences|enced|s|ring)?|names? of|to use|used for|select(?:s|ed|or|ors)?|associated|object)\b/i;
+// The same cues without "select": what a description must say to point at an
+// object of its own kind. "Hostnames … to select a HTTPRoute" describes the
+// route itself; "the name of the delegate VirtualService" points at another.
+const REFERENCE_CUE_NO_SELECT_RE = /\b(refer(?:ence|ences|enced|s|ring)?|names? of|to use|used for|associated|object)\b/i;
 
 // Sentence ends, blank lines and list bullets: the pieces a cue and a kind must share.
 const SENTENCE_BREAK_RE = /(?<=[.!?])\s+|\n\s*\n|\n\s*[*-]\s+/;
@@ -320,8 +352,9 @@ const SENTENCE_BREAK_RE = /(?<=[.!?])\s+|\n\s*\n|\n\s*[*-]\s+/;
  * that says "the name of the HTTP query param" and, paragraphs later,
  * "the Gateway API" names no Gateway.
  */
-export function descriptionNamesKind(description: string, kind: string): boolean {
-  return description.split(SENTENCE_BREAK_RE).some((sentence) => REFERENCE_CUE_RE.test(sentence) && textNamesKind(sentence, kind));
+export function descriptionNamesKind(description: string, kind: string, opts: { ownKind?: boolean } = {}): boolean {
+  const cue = opts.ownKind ? REFERENCE_CUE_NO_SELECT_RE : REFERENCE_CUE_RE;
+  return description.split(SENTENCE_BREAK_RE).some((sentence) => cue.test(sentence) && textNamesKind(sentence, kind));
 }
 
 export function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {
@@ -344,7 +377,8 @@ export function canonicalKind(kind: string): string {
  * `kind` field says so outright. Generic leaves (name, kind, namespace)
  * never count on their own.
  */
-export function relationPathScore(hint: RelationHint, target: { kind: string; plural: string; group?: string }): number {
+export function relationPathScore(typedHint: RelationHint, target: { kind: string; plural: string; group?: string }): number {
+  const hint = typedReference(typedHint);
   const path = referencePath(hint.path);
   if (path === undefined) return 0;
   const pathScore = kindPathCoverage(path, target) + (tokens(path).includes(canonicalKind(target.kind)) ? 3 : 0);

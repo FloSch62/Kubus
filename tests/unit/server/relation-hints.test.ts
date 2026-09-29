@@ -196,4 +196,34 @@ describe('relation hints', () => {
     expect(schemaMentionsKind(undefined, 'TopoNode')).toBe(false);
     expect(schemaMentionsKind(object({ spec: { type: 'object', 'x-kubernetes-preserve-unknown-fields': true } }), 'TopoNode')).toBe(false);
   });
+
+  it('lets a sibling kind vouch only for the reference itself, in digests and scores alike', () => {
+    const namesKind = createPathFilter(kindVocabulary(['Gateway', 'TopoNode', 'Deployment']));
+    const digest = digestObject(
+      {
+        metadata: { name: 'route', uid: 'r' },
+        spec: {
+          parentRefs: [{ group: 'gateway.networking.k8s.io', kind: 'Gateway', name: 'web', sectionName: 'https' }],
+          scaleTargetRef: { kind: 'Deployment', name: 'api', envSourceContainerName: 'worker' },
+          peer: { kind: 'TopoNode', node: 's001' },
+          bridgeDomain: 'bd-a',
+        },
+      },
+      namesKind,
+    );
+    expect(digest.hints.map((h) => `${h.path}=${h.value}${h.referenceKind ? ` (${h.referenceKind})` : ''}`)).toEqual([
+      'spec.parentRefs[0].group=gateway.networking.k8s.io (Gateway)',
+      'spec.parentRefs[0].name=web (Gateway)',
+      'spec.scaleTargetRef.name=api (Deployment)',
+      'spec.peer.node=s001 (TopoNode)',
+    ]);
+    const gateway = { kind: 'Gateway', plural: 'gateways', group: 'gateway.networking.k8s.io' };
+    expect(relationPathScore({ path: 'spec.parentRefs[0].sectionName', value: 'https', referenceKind: 'Gateway' }, gateway)).toBe(0);
+    expect(relationPathScore({ path: 'spec.parentRefs[0].name', value: 'web', referenceKind: 'Gateway' }, gateway)).toBeGreaterThanOrEqual(100);
+    // bridgeDomain is kept once a BridgeDomain kind is in the vocabulary.
+    const withBridge = digestObject({ metadata: { name: 'bi', uid: 'b' }, spec: { bridgeDomain: 'bd-a' } }, createPathFilter(kindVocabulary(['BridgeDomain'])));
+    expect(withBridge.hints).toEqual([{ path: 'spec.bridgeDomain', value: 'bd-a' }]);
+    expect(descriptionNamesKind('Hostnames that should match to select a HTTPRoute.', 'HTTPRoute', { ownKind: true })).toBe(false);
+    expect(descriptionNamesKind('The name of the delegate VirtualService.', 'VirtualService', { ownKind: true })).toBe(true);
+  });
 });

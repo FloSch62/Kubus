@@ -27,6 +27,8 @@ const CRDS = [
   crd('fabrics.example.com', 'Fabric', 'fabrics', object({ leafs: object({ leafNodeSelectors: list(string(), 'Label selector used to select Toponodes.') }), credentialSecret: string() })),
   crd('interfaces.example.com', 'Interface', 'interfaces', object({ members: list(object({ node: string() })) })),
   crd('services.example.com', 'VirtualNetwork', 'virtualnetworks', object({ vlans: list(object({ name: string() })) })),
+  crd('bridges.example.com', 'BridgeDomain', 'bridgedomains', object({ type: string() })),
+  crd('bridges.example.com', 'VlanPort', 'vlanports', object({ bridgeDomain: string('Reference to a BridgeDomain.'), vlan: string() })),
   crd('gateway.networking.k8s.io', 'HTTPRoute', 'httproutes', object({
     hostnames: list(string(), 'Hostnames defines a set of hostnames that should match against the HTTP Host header to select a HTTPRoute used to process the request.'),
     rules: list(object({ backendRefs: list(object({ name: string('Name is the name of the referent.'), port: { type: 'integer' } })) })),
@@ -352,12 +354,15 @@ describe('HTTPRoute hostnames', () => {
   });
 
   it('treats host, address, URL, path and image fields as holding no object names', () => {
-    for (const path of ['spec.hostnames[0]', 'spec.hostname', 'status.addresses[0].value', 'spec.address', 'spec.loadBalancerIP', 'spec.issuerURL', 'spec.domains[1]', 'spec.image']) {
-      expect(holdsNonNameValues(path.endsWith('.value') ? 'status.addresses[0]' : path), path).toBe(true);
+    for (const path of ['spec.hostnames[0]', 'spec.hostname', 'status.addresses[0]', 'spec.address', 'spec.url', 'spec.ips[1]', 'spec.domains[1]', 'spec.image']) {
+      expect(holdsNonNameValues(path), path).toBe(true);
     }
-    for (const path of ['spec.rules[0].backendRefs[0].name', 'spec.secretName', 'spec.ipAddressPool', 'spec.nodeProfile', 'spec.hostPathClass']) {
+    // Only a field named exactly so: kind-named fields that end in one of the words stay references.
+    for (const path of ['spec.rules[0].backendRefs[0].name', 'spec.secretName', 'spec.ipAddressPool', 'spec.nodeProfile', 'spec.hostPathClass', 'spec.bridgeDomain', 'spec.loadBalancerIP']) {
       expect(holdsNonNameValues(path), path).toBe(false);
     }
+    // A field an installed kind is named after is left to the kind rules.
+    expect(holdsNonNameValues('spec.domain', (field) => field === 'domain')).toBe(false);
   });
 
   it('does not list a hostname as a missing HTTPRoute', async () => {
@@ -370,5 +375,22 @@ describe('HTTPRoute hostnames', () => {
     expect(result.items.map((item) => `${item.ref.kind}/${item.ref.name}`)).not.toContain('HTTPRoute/podinfo.example.com');
     expect(result.items.filter((item) => item.missing)).toEqual([]);
     expect(gets.some((path) => path.includes('podinfo.example.com'))).toBe(false);
+  });
+});
+
+describe('review regressions', () => {
+  it('keeps kind-named fields that end in a host-like word as references (bridgeDomain)', async () => {
+    const focus = { ...cr('VlanPort', 'vlanports', 'bi-1', 'eda', { bridgeDomain: 'bd-a', vlan: 'vlan-10' }), apiVersion: 'bridges.example.com/v1' };
+    const { handle } = handleWith({ focus, custom: { bridgedomains: [{ name: 'bd-a', namespace: 'eda', uid: 'bd' }] } }, { indexLive: true });
+    const result = await computeReferences(handle, { group: 'bridges.example.com', version: 'v1', plural: 'vlanports', kind: 'VlanPort', name: 'bi-1', namespace: 'eda' });
+    expect(result.items.map((i) => `${i.ref.kind}/${i.ref.name}: ${i.detail}`)).toEqual(['BridgeDomain/bd-a: spec.bridgeDomain']);
+  });
+
+  it('still lets a description point at the object\'s own kind with a plain reference cue', () => {
+    const istio = 'networking.istio.io';
+    const kinds = [{ group: istio, version: 'v1', plural: 'virtualservices', kind: 'VirtualService', namespaced: true, custom: true }];
+    const source = { group: istio, kind: 'VirtualService' };
+    expect(kindsForHint({ path: 'spec.http[0].delegate.name', value: 'reviews' }, kinds, source, 'Name specifies the name of the delegate VirtualService.')).toMatchObject({ certain: true, kinds: [{ kind: 'VirtualService' }] });
+    expect(kindsForHint({ path: 'spec.hosts[0]', value: 'reviews' }, kinds, source, 'The destination hosts to which traffic is being sent, used to select a VirtualService.')).toMatchObject({ certain: false });
   });
 });
