@@ -9,6 +9,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import type { KubeObject } from '@kubus/shared';
 import { useApplyResource, useDryRunResource } from '../../api/queries.js';
 import { DiffViewer } from '../DiffViewer.js';
+import { isSaveChord } from '../../editor-keys.js';
 
 export interface ReviewTarget {
   ctx: string;
@@ -71,8 +72,22 @@ export function ReviewApplyDialog({
   };
 
   const findings = dryRun.data?.findings ?? [];
+  const canApply = !apply.isPending && !dryRun.isPending && !!dryRun.data?.ok;
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog
+      open
+      onClose={onClose}
+      maxWidth="lg"
+      fullWidth
+      onKeyDown={(e) => {
+        // Mod+S, the chord that opened this review, applies it once the
+        // dry-run allows; it never reaches the browser's save dialog.
+        if (!isSaveChord(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (canApply) void doApply();
+      }}
+    >
       <DialogTitle>
         Review changes — {sel.namespace ? `${sel.namespace}/` : ''}
         {sel.name}
@@ -106,7 +121,7 @@ export function ReviewApplyDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" disabled={apply.isPending || dryRun.isPending || !dryRun.data?.ok} onClick={() => void doApply()}>
+        <Button variant="contained" disabled={!canApply} onClick={() => void doApply()}>
           {apply.isPending ? 'Applying…' : 'Apply'}
         </Button>
       </DialogActions>

@@ -54,6 +54,12 @@ interface DetailState {
   drafts: Record<string, ManifestDraft>;
   /** Action stalled behind the discard confirmation while the Data editor is dirty. */
   pendingDiscard?: () => void;
+  /**
+   * A drawer tab asked for by a keyboard flow, applied (and cleared) by the
+   * drawer showing that selection. `remember` also writes it to the page URL;
+   * callers that put the tab in the URL themselves leave it off.
+   */
+  tabRequest?: { selKey: string; tab: string; remember?: boolean };
   open: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
   push: (sel: ResourceSelection, opts?: { embedded?: boolean }) => void;
   back: () => void;
@@ -65,6 +71,8 @@ interface DetailState {
   /** Stage manifest/YAML edits for their resource; a draft equal to its base is dropped. */
   setDraft: (draft: ManifestDraft) => void;
   clearDraft: (selKey: string) => void;
+  requestTab: (selKey: string, tab: string, opts?: { remember?: boolean }) => void;
+  consumeTabRequest: () => void;
   /** Run now, or stall behind the discard confirmation while the Data editor is dirty. */
   guard: (action: () => void) => void;
   confirmDiscard: () => void;
@@ -139,6 +147,10 @@ export const useDetailStore = create<DetailState>((set, get) => {
       const drafts = { ...get().drafts };
       delete drafts[selKey];
       update({ drafts });
+    },
+    requestTab: (selKey, tab, opts) => set({ tabRequest: { selKey, tab, remember: opts?.remember } }),
+    consumeTabRequest: () => {
+      if (get().tabRequest) update({ tabRequest: undefined });
     },
     guard: (action) => {
       if (get().dataDirty) set({ pendingDiscard: action });

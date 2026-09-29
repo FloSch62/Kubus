@@ -1,5 +1,5 @@
 
-const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'complete', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached']);
+const GOOD = new Set(['running', 'succeeded', 'active', 'bound', 'ready', 'available', 'complete', 'completed', 'deployed', 'true', 'healthy', 'synced', 'up', 'attached', 'accepted', 'programmed']);
 const BAD = new Set([
   'failed',
   'crashloopbackoff',
@@ -21,6 +21,9 @@ const BAD = new Set([
   'replicafailure',
   'unavailable',
   'noendpoints',
+  'notaccepted',
+  'notprogrammed',
+  'aborted',
 ]);
 const WARN = new Set([
   'pending',
@@ -39,6 +42,9 @@ const WARN = new Set([
   'progressing',
   'paused',
   'terminated',
+  'outofsync',
+  'suspended',
+  'missing',
 ]);
 
 export function statusColor(status: string): 'success' | 'error' | 'warning' | 'default' {

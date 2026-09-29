@@ -15,9 +15,12 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
+import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
+import { useGridApiRef } from '@mui/x-data-grid';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { useApiResourcesForContexts, useClusterSignals, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
@@ -27,8 +30,10 @@ import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
 import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
-import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, useDetailStore } from '../state/detail.js';
+import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, selKeyOf, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
+import { rowKeyActionsFor } from '../components/row-key-actions.js';
+import type { RowKeyAction } from '../row-keys.js';
 import { YamlEditor } from '../components/YamlEditor.js';
 import { BatchCreateDialog } from '../components/BatchCreateDialog.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -39,6 +44,14 @@ import { usePaneActive } from '../layout/pane-context.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
+import { diffSideFor, openCompare } from '../compare-link.js';
+import { BulkScaleDialog } from '../components/BulkScaleDialog.js';
+import { BULK_SCALE_KINDS } from '../components/bulk-scale.js';
+import { CopyRowsButton } from '../components/CopyRowsButton.js';
+import { liveSelection } from '../components/live-selection.js';
+import { SelectionBar } from '../components/SelectionBar.js';
+import { LabelColumnsButton } from '../components/LabelColumnsButton.js';
+import { buildLabelColumns, insertLabelColumns } from '../components/label-columns.js';
 
 // Wide, rarely-needed builtin columns start hidden; the column menu re-enables
 // them. Labels carry no signal on CRDs, so the Kind/Group/Scope columns take
@@ -259,6 +272,14 @@ function EmbeddedResourceDetail() {
         aria-label="Resource details"
         tabIndex={-1}
         onKeyDown={(e) => {
+          // E opens the Manifest tab. Focus inside the panel reaches the
+          // drawer's own handler; this covers the panel itself, where
+          // keyboard row activation puts it.
+          if (e.target === e.currentTarget && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            useDetailStore.getState().requestTab(selKeyOf(sel), 'manifest', { remember: true });
+            return;
+          }
           // Escape closes the panel and hands focus back to the grid — but
           // never while typing (inputs, Monaco), where Escape has meaning.
           if (e.key !== 'Escape' || isTextEntryTarget(e.target)) return;
@@ -431,8 +452,20 @@ export function ResourceListPage() {
   const isBatchCreate = group === 'batch' && (kind === 'Job' || kind === 'CronJob');
   const nsFilter = useClustersStore((s) => s.namespaces);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
-  const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
-  const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number } | null>(null);
+  const [checkedRows, setCheckedRows] = useState<ClusterRow[]>([]);
+  // Every bulk action reads the checked rows as they are now, not as they were
+  // when checked (see liveSelection): the production guard must see a workload
+  // that was scaled up since, and copies must carry current values.
+  const selectedRows = useMemo(() => liveSelection(checkedRows, list.rows), [checkedRows, list.rows]);
+  // Copy rows follows the grid's on-screen sort.
+  const gridApiRef = useGridApiRef();
+  const sortedRowIds = useCallback(() => gridApiRef.current?.getSortedRowIds(), [gridApiRef]);
+  // The row menu, opened by right-click, or mounted closed to run a row key
+  // (`run`) through its dialogs; `seq` remounts it for every key press.
+  const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number; run?: RowKeyAction; seq?: number } | null>(null);
+  const rowKeySeq = useRef(0);
+  // Stable entry point for the row menus' "Edit manifest" (the columns are memoized).
+  const openManifestRef = useRef<(row: ClusterRow) => void>(() => {});
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
   const create = useCreateResource();
@@ -440,15 +473,16 @@ export function ResourceListPage() {
   const addSavedView = useNavigationStore((s) => s.addSavedView);
   const del = useDeleteResource();
   const rolloutRestart = useRolloutRestart();
-  const [bulkDialog, setBulkDialog] = useState<'delete' | 'restart' | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<'delete' | 'restart' | 'scale' | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
   // This page instance is reused across kinds — a selection must not survive
   // the switch to a different resource list.
-  useEffect(() => setSelectedRows([]), [group, version, plural]);
+  useEffect(() => setCheckedRows([]), [group, version, plural]);
 
   const bulkRestartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
+  const bulkScalable = !!behaviorKind && BULK_SCALE_KINDS.has(behaviorKind);
   const bulkProtected = selectedRows.some((r) => contextSettings[r.ctx]?.protected ?? protectByDefault);
   const runBulk = async (
     verb: string,
@@ -464,7 +498,7 @@ export function ResourceListPage() {
       const succeeded = new Set(
         rows.flatMap((row, i) => (results[i]?.status === 'fulfilled' ? [row.obj.metadata.uid] : [])),
       );
-      setSelectedRows((current) => current.filter((row) => !succeeded.has(row.obj.metadata.uid)));
+      setCheckedRows((current) => current.filter((row) => !succeeded.has(row.obj.metadata.uid)));
     }
     const failures = results
       .map((result, i) => ({ result, row: rows[i]! }))
@@ -597,7 +631,7 @@ export function ResourceListPage() {
       renderCell: (p) => (
         <>
           {quickLogs && <RowLogsButton target={rowActionTarget(p.row)} />}
-          <RowActions target={rowActionTarget(p.row)} />
+          <RowActions target={rowActionTarget(p.row)} keyHints onOpenManifest={() => openManifestRef.current(p.row)} />
         </>
       ),
     });
@@ -615,7 +649,11 @@ export function ResourceListPage() {
     [signalsLookup, behaviorKind],
   );
 
-  const columns = useMemo(() => {
+  // Label and annotation columns the user added to this list.
+  const labelColumnSpecs = useUiPrefsStore((s) => s.labelColumns[kindPath]);
+  const labelColumns = useMemo(() => buildLabelColumns(labelColumnSpecs ?? []), [labelColumnSpecs]);
+
+  const gridColumns = useMemo(() => {
     if (!metricColumns.length && !signalColumn) return staticColumns;
     const merged = [...staticColumns];
     if (signalColumn) {
@@ -640,6 +678,7 @@ export function ResourceListPage() {
     }
     return merged;
   }, [staticColumns, metricColumns, columnIds, signalColumn]);
+  const columns = useMemo(() => insertLabelColumns(gridColumns, labelColumns), [gridColumns, labelColumns]);
   const hiddenFields = useMemo(
     () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
     [isCustomKind, printerCols, behaviorKind],
@@ -668,20 +707,40 @@ export function ResourceListPage() {
 
   const multiLogs = kind === 'Pod' && selectedRows.length > 0;
 
-  const openRow = (row: ClusterRow) => {
+  const openRow = (row: ClusterRow, tab?: string) => {
     // Update immediately so the embedded panel responds in the same render
     // cycle; the URL remains the deep-link source of truth. Picking a row is
     // an explicit ask for details, so also undo a collapse.
-    openDetail(
-      { ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind },
-      { embedded: true },
-    );
+    const rowSel = { ctx: row.ctx, group, version, plural, kind, name: row.obj.metadata.name, namespace: row.obj.metadata.namespace, custom: isCustomKind };
+    if (tab) useDetailStore.getState().requestTab(selKeyOf(rowSel), tab);
+    openDetail(rowSel, { embedded: true });
     setDetailCollapsed(false);
     const next = new URLSearchParams(searchParams);
     next.delete('field');
-    next.delete('dt');
+    if (tab) next.set('dt', tab);
+    else next.delete('dt');
     next.set('sel', `${row.ctx}|${row.obj.metadata.namespace ?? ''}|${row.obj.metadata.name}`);
     setSearchParams(next);
+  };
+  openManifestRef.current = (row) => {
+    openRow(row, 'manifest');
+    requestDetailFocus();
+  };
+
+  // Single keys on the focused row run the row menu's flows (dialogs,
+  // confirmations and the production guard included), only where the row
+  // has that action.
+  const handleRowKey = (row: ClusterRow, action: RowKeyAction): boolean => {
+    const target = rowActionTarget(row);
+    if (!rowKeyActionsFor(target).has(action)) return false;
+    if (action === 'manifest') {
+      openManifestRef.current(row);
+      return true;
+    }
+    rowKeySeq.current += 1;
+    setContextMenuOpen(false);
+    setContextAction({ target, mouseX: 0, mouseY: 0, run: action, seq: rowKeySeq.current });
+    return true;
   };
 
   const saveCurrentView = () => {
@@ -703,6 +762,7 @@ export function ResourceListPage() {
         sort: prefs.sortModels[kindPath],
         columnVisibility: prefs.columnVisibility[kindPath],
         columnWidths: prefs.columnWidths[kindPath],
+        labelColumns: prefs.labelColumns[kindPath] ?? [],
       },
     });
   };
@@ -758,6 +818,7 @@ export function ResourceListPage() {
         onFilterChange={(value) => setQueryParam('q', value)}
         onLabelSelectorChange={(value) => setQueryParam('label', value)}
         onClearFilters={clearFilters}
+        onOpenDefinition={crdSelection ? () => pushDetail(crdSelection, { embedded: true }) : undefined}
         onRowClick={openRow}
         onRowActivate={(row) => {
           // Keyboard activation also moves focus into the panel; Escape there
@@ -769,56 +830,81 @@ export function ResourceListPage() {
           setContextAction({ target: rowActionTarget(row), mouseX: position.clientX + 2, mouseY: position.clientY - 6 });
           setContextMenuOpen(true);
         }}
+        onRowKey={handleRowKey}
         checkboxSelection
         selectedRows={selectedRows}
-        onSelectionChange={setSelectedRows}
+        onSelectionChange={setCheckedRows}
+        apiRef={gridApiRef}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}
-        toolbar={
-          <>
-            <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>
-              Save view
-            </Button>
-            {multiLogs && (
-              <Button
-                startIcon={<SubjectIcon />}
-                variant="outlined"
-                onClick={() => {
-                  // Group by ctx+namespace — one log session per group.
-                  const groups = new Map<string, ClusterRow[]>();
-                  for (const row of selectedRows) {
-                    const key = `${row.ctx}|${row.obj.metadata.namespace ?? ''}`;
-                    groups.set(key, [...(groups.get(key) ?? []), row]);
-                  }
-                  for (const [key, rows] of groups) {
-                    const [ctx, namespace] = key.split('|');
-                    addTab({
-                      kind: 'logs',
-                      id: dockTabId(),
-                      title: `logs: ${rows.length} pods`,
-                      ctx: ctx!,
-                      namespace: namespace ?? '',
-                      pods: rows.map((r) => r.obj.metadata.name),
-                      sources: rows.map((r) => ({ pod: r.obj.metadata.name, containers: podContainerNames(r.obj) })),
-                      follow: true,
-                      tailLines: 500,
-                    });
-                  }
-                }}
-              >
-                Logs ({selectedRows.length})
-              </Button>
-            )}
-            {selectedRows.length > 0 && bulkRestartable && (
-              <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
-                Restart ({selectedRows.length})
-              </Button>
-            )}
-            {selectedRows.length > 0 && (
+        selectionBar={
+          selectedRows.length > 0 ? (
+            <SelectionBar count={selectedRows.length} onClear={() => setCheckedRows([])}>
+              {multiLogs && (
+                <Button
+                  startIcon={<SubjectIcon />}
+                  variant="outlined"
+                  onClick={() => {
+                    // Group by ctx+namespace — one log session per group.
+                    const groups = new Map<string, ClusterRow[]>();
+                    for (const row of selectedRows) {
+                      const key = `${row.ctx}|${row.obj.metadata.namespace ?? ''}`;
+                      groups.set(key, [...(groups.get(key) ?? []), row]);
+                    }
+                    for (const [key, rows] of groups) {
+                      const [ctx, namespace] = key.split('|');
+                      addTab({
+                        kind: 'logs',
+                        id: dockTabId(),
+                        title: `logs: ${rows.length} pods`,
+                        ctx: ctx!,
+                        namespace: namespace ?? '',
+                        pods: rows.map((r) => r.obj.metadata.name),
+                        sources: rows.map((r) => ({ pod: r.obj.metadata.name, containers: podContainerNames(r.obj) })),
+                        follow: true,
+                        tailLines: 500,
+                      });
+                    }
+                  }}
+                >
+                  Logs ({selectedRows.length})
+                </Button>
+              )}
+              {selectedRows.length === 2 && (
+                <Button
+                  startIcon={<DifferenceOutlinedIcon />}
+                  variant="outlined"
+                  onClick={() => {
+                    const [a, b] = selectedRows.map((r) => diffSideFor({ ctx: r.ctx, group, version, plural, namespace: r.obj.metadata.namespace, name: r.obj.metadata.name }));
+                    if (a && b) openCompare(a, b);
+                  }}
+                >
+                  Compare 2
+                </Button>
+              )}
+              {bulkScalable && (
+                <Button startIcon={<OpenInFullIcon />} variant="outlined" onClick={() => setBulkDialog('scale')}>
+                  Scale ({selectedRows.length})
+                </Button>
+              )}
+              {bulkRestartable && (
+                <Button startIcon={<RestartAltIcon />} variant="outlined" onClick={() => setBulkDialog('restart')}>
+                  Restart ({selectedRows.length})
+                </Button>
+              )}
+              <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} sortedRowIds={sortedRowIds} />
               <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
                 Delete ({selectedRows.length})
               </Button>
-            )}
+            </SelectionBar>
+          ) : undefined
+        }
+        toolbar={
+          <>
+            <LabelColumnsButton tableId={kindPath} rows={list.rows} />
+            <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>
+              Save view
+            </Button>
             <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setCreateOpen(true)}>
               Create
             </Button>
@@ -870,13 +956,19 @@ export function ResourceListPage() {
           )
         }
       />
+      {bulkDialog === 'scale' && (
+        <BulkScaleDialog rows={selectedRows} kind={kind} group={group} version={version} plural={plural} title={resourceTitle} onClose={() => setBulkDialog(null)} />
+      )}
       {contextAction && (
         <RowActionMenu
-          key={contextAction.target.obj.metadata.uid}
+          key={`${contextAction.target.obj.metadata.uid}:${contextAction.seq ?? 'menu'}`}
           target={contextAction.target}
           anchorPosition={{ top: contextAction.mouseY, left: contextAction.mouseX }}
           open={contextMenuOpen}
           onClose={() => setContextMenuOpen(false)}
+          keyHints
+          runAction={contextAction.run}
+          onOpenManifest={() => openManifestRef.current({ ctx: contextAction.target.ctx, obj: contextAction.target.obj })}
         />
       )}
       <ApiResourceDrawer

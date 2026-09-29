@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { execClientControlSchema, watchClientMessageSchema } from '@kubus/shared/ws-protocol';
+import { execClientControlSchema, logSocketQuerySchema, watchClientMessageSchema } from '@kubus/shared/ws-protocol';
 
 describe('watchClientMessageSchema', () => {
   const sub = {
@@ -111,5 +111,78 @@ describe('execClientControlSchema', () => {
   it('rejects non-object payloads', () => {
     expect(execClientControlSchema.safeParse(null).success).toBe(false);
     expect(execClientControlSchema.safeParse('resize').success).toBe(false);
+  });
+});
+
+describe('logSocketQuerySchema', () => {
+  it('parses a fixed pod session with defaults', () => {
+    const result = logSocketQuerySchema.safeParse({ ctx: 'kind-a', namespace: 'ops', pods: 'api-0,api-1,', token: 'ignored' });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      ctx: 'kind-a',
+      namespace: 'ops',
+      pods: ['api-0', 'api-1'],
+      exclude: [],
+      containers: undefined,
+      container: undefined,
+      follow: true,
+      previous: false,
+      tailLines: undefined,
+      sinceSeconds: undefined,
+      resumeAt: {},
+    });
+  });
+
+  it('parses a followed workload session', () => {
+    const result = logSocketQuerySchema.safeParse({
+      ctx: 'kind-a',
+      namespace: 'ops',
+      target: 'Deployment',
+      targetName: 'web',
+      exclude: 'web-a',
+      containers: 'app,sidecar',
+      follow: 'false',
+      previous: 'true',
+      tailLines: '500',
+      sinceSeconds: '600',
+    });
+    expect(result.data).toMatchObject({
+      pods: [],
+      target: 'Deployment',
+      targetName: 'web',
+      exclude: ['web-a'],
+      containers: ['app', 'sidecar'],
+      follow: false,
+      previous: true,
+      tailLines: 500,
+      sinceSeconds: 600,
+    });
+  });
+
+  it('keeps an empty container list distinct from no filter', () => {
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', pods: 'p', containers: '' }).data?.containers).toEqual([]);
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', pods: 'p', container: '' }).data?.container).toBeUndefined();
+  });
+
+  it('drops malformed resume cursors and counts', () => {
+    const result = logSocketQuerySchema.safeParse({
+      ctx: 'a',
+      namespace: 'b',
+      pods: 'p',
+      tailLines: 'lots',
+      sinceSeconds: '-5',
+      resumeAt: JSON.stringify({ 'p/app': '2026-07-22T12:00:00.000000000Z', 'p/bad': 'yesterday', 'p/num': 5 }),
+    });
+    expect(result.data).toMatchObject({ tailLines: undefined, sinceSeconds: undefined, resumeAt: { 'p/app': '2026-07-22T12:00:00.000000000Z' } });
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', pods: 'p', resumeAt: '{oops' }).data?.resumeAt).toEqual({});
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', pods: 'p', resumeAt: '[1]' }).data?.resumeAt).toEqual({});
+  });
+
+  it('requires pods or a complete target', () => {
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b' }).success).toBe(false);
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', target: 'Deployment' }).success).toBe(false);
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', target: 'Pod', targetName: 'x' }).success).toBe(false);
+    expect(logSocketQuerySchema.safeParse({ ctx: '', namespace: 'b', pods: 'p' }).success).toBe(false);
+    expect(logSocketQuerySchema.safeParse({ ctx: 'a', namespace: 'b', target: 'Job', targetName: 'x' }).success).toBe(true);
   });
 });

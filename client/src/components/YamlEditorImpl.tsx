@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { OnMount } from '@monaco-editor/react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useTheme } from '@mui/material/styles';
 import type { ResourceDryRunResponse } from '@kubus/shared';
 import { copyToClipboard } from '../clipboard.js';
+import { isSaveChord, isSubmitChord } from '../editor-keys.js';
+import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { newYamlModelPath } from '../monaco-setup.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useYamlSchema, type YamlEditorProps } from './YamlEditor.js';
 import { MonacoEditor } from './MonacoEditor.js';
 
-export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', applyUnchanged, onChange, draft, toolbar, schema }: YamlEditorProps) {
+export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, applyLabel = 'Apply', applyUnchanged, onChange, draft, toolbar, schema, onReview, notice }: YamlEditorProps) {
   const theme = useTheme();
+  const rootRef = useRef<HTMLDivElement>(null);
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
   const [text, setText] = useState(draft ?? value);
   const lastValueRef = useRef(value);
@@ -86,28 +91,96 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
     }
   };
 
-  const validate = async () => {
-    if (!onDryRun) return;
+  const validate = async (): Promise<ResourceDryRunResponse | undefined> => {
+    if (!onDryRun) return undefined;
     setDryRunBusy(true);
     setError(undefined);
     try {
       const result = await onDryRun(text);
       setDryRun(result);
       setDryRunText(text);
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDryRun(undefined);
       setDryRunText(undefined);
+      return undefined;
     } finally {
       setDryRunBusy(false);
     }
   };
 
+  // Mod+Enter presses the primary button, running the required dry-run
+  // first. Findings stop it so they get read; the next Mod+Enter applies.
+  const submit = async () => {
+    if (!onApply || busy || dryRunBusy || !applicable) return;
+    if (!dryRunPassed) {
+      if (dryRunCurrent) return;
+      const result = await validate();
+      if (!result?.ok || result.findings.length > 0) return;
+    }
+    await apply();
+  };
+
   // A dropped YAML file replaces the editor content and goes through the
   // normal edit flow (dirty → dry-run gate → apply). Capture-phase handlers
   // keep Monaco's own text drag-and-drop from swallowing file drops.
-  const editable = !(readOnly ?? !onApply);
+  const editable = !(readOnly ?? !(onApply || onReview));
   const MAX_DROP_BYTES = 2 * 1024 * 1024;
+
+  // Keyboard chords are registered once (Monaco actions, the dialog-wide
+  // listener) and read the current handlers from here.
+  const chordsRef = useRef<{ review?: () => void; submit?: () => void }>({});
+  chordsRef.current = {
+    review: onReview ? () => (editable && dirty ? onReview(text) : undefined) : undefined,
+    submit: onApply ? () => void submit() : undefined,
+  };
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    // addAction (unlike addCommand) scopes the keybinding to this editor, so
+    // several mounted editors (hidden tabs, a create dialog) do not collide.
+    const actions = [
+      editor.addAction({
+        id: 'kubus.review-apply',
+        label: 'Review & apply',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        run: () => chordsRef.current.review?.(),
+      }),
+      editor.addAction({
+        id: 'kubus.submit',
+        label: applyLabel,
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+        run: () => {
+          const submitNow = chordsRef.current.submit;
+          if (submitNow) submitNow();
+          else editor.trigger('keyboard', 'editor.action.insertLineAfter', null);
+        },
+      }),
+    ];
+    editor.onDidDispose(() => {
+      for (const action of actions) action.dispose();
+    });
+  };
+  // The same chords with focus outside Monaco: anywhere in the surrounding
+  // dialog (a create dialog opens with focus on the dialog itself), or in
+  // this editor's toolbar when it is not in a dialog.
+  useEffect(() => {
+    const root = rootRef.current;
+    const scope = root?.closest<HTMLElement>('.MuiDialog-root') ?? root;
+    if (!scope) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const { review, submit: submitNow } = chordsRef.current;
+      if (review && isSaveChord(event)) {
+        event.preventDefault();
+        review();
+      } else if (submitNow && isSubmitChord(event)) {
+        event.preventDefault();
+        submitNow();
+      }
+    };
+    scope.addEventListener('keydown', onKey);
+    return () => scope.removeEventListener('keydown', onKey);
+  }, []);
 
   const loadDroppedFile = async (file: File) => {
     if (file.size > MAX_DROP_BYTES) {
@@ -129,6 +202,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
 
   return (
     <Box
+      ref={rootRef}
       sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       onDragOverCapture={(e) => {
         if (!editable || !e.dataTransfer.types.includes('Files')) return;
@@ -155,9 +229,9 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
         <Button startIcon={<ContentCopyIcon fontSize="small" />} color={copied ? 'success' : 'primary'} disabled={!text} onClick={() => void copyYaml()}>
           {copied ? 'Copied' : 'Copy'}
         </Button>
-        {onApply ? (
+        {onApply || onReview ? (
           <>
-            {onDryRun ? (
+            {onDryRun && !onReview ? (
               <Button disabled={!applicable || dryRunBusy || busy} onClick={() => void validate()}>
                 {dryRunBusy ? 'Validating…' : dryRunCurrent?.ok ? 'Validated' : 'Dry run'}
               </Button>
@@ -171,12 +245,23 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
             >
               Reset
             </Button>
-            <Button variant="contained" disabled={!applicable || busy || !dryRunPassed} onClick={() => void apply()}>
-              {busy ? 'Applying…' : applyLabel}
-            </Button>
+            {onReview ? (
+              <Tooltip title={`${HOTKEY_MOD_LABEL}S`} describeChild>
+                <span>
+                  <Button variant="contained" disabled={!dirty || !editable} onClick={() => onReview(text)}>
+                    Review & apply
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button variant="contained" disabled={!applicable || busy || !dryRunPassed} onClick={() => void apply()}>
+                {busy ? 'Applying…' : applyLabel}
+              </Button>
+            )}
           </>
         ) : null}
       </Stack>
+      {notice}
       {error ? (
         <Alert severity="error" onClose={() => setError(undefined)} sx={{ borderRadius: 0, flexShrink: 0 }}>
           {error}
@@ -219,6 +304,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
           language="yaml"
           path={modelPath}
           value={text}
+          onMount={handleEditorMount}
           onChange={(v) => {
             setText(v ?? '');
             onChange?.(v ?? '');
@@ -228,7 +314,7 @@ export default function YamlEditorImpl({ value, readOnly, onApply, onDryRun, app
           }}
           theme={theme.palette.mode === 'dark' ? 'vs-dark' : 'light'}
           options={{
-            readOnly: readOnly ?? !onApply,
+            readOnly: !editable,
             minimap: { enabled: false },
             fontSize: monoFontSize,
             scrollBeyondLastLine: false,

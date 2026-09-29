@@ -220,6 +220,24 @@ describe('buildManifest', () => {
 });
 
 describe('maskSecretValues', () => {
+  it('masks the data kubectl apply keeps in the last-applied annotation', () => {
+    const applied = { apiVersion: 'v1', kind: 'Secret', metadata: { name: 's' }, data: { password: 'aHVudGVyMg==', user: 'YWRtaW4=' } };
+    const obj = {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: { name: 's', uid: 'u', annotations: { 'kubectl.kubernetes.io/last-applied-configuration': JSON.stringify(applied), team: 'db' } },
+      data: applied.data,
+    } as unknown as KubeObject;
+    const masked = maskSecretValues(obj, (name) => name === 'user');
+    const annotation = masked.metadata.annotations!['kubectl.kubernetes.io/last-applied-configuration']!;
+    expect(annotation).not.toContain('aHVudGVyMg==');
+    expect(JSON.parse(annotation)).toMatchObject({ metadata: { name: 's' }, data: { password: REDACTED, user: 'YWRtaW4=' } });
+    expect(masked.metadata.annotations!.team).toBe('db');
+
+    const broken = { ...obj, metadata: { ...obj.metadata, annotations: { 'kubectl.kubernetes.io/last-applied-configuration': '{not json' } } } as KubeObject;
+    expect(maskSecretValues(broken, () => false).metadata.annotations!['kubectl.kubernetes.io/last-applied-configuration']).toBe(REDACTED);
+  });
+
   it('masks stringData a draft may carry, not only data and binaryData', () => {
     const obj = { apiVersion: 'v1', kind: 'Secret', metadata: { name: 's', uid: 'u' }, data: { a: 'YQ==' }, stringData: { b: 'plain' } } as unknown as KubeObject;
     const masked = maskSecretValues(obj, () => false) as unknown as { data: Record<string, string>; stringData: Record<string, string> };

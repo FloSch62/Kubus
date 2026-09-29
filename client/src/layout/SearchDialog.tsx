@@ -29,6 +29,7 @@ import { useUiStore } from '../state/ui.js';
 import { toggleNavRail } from '../shortcuts.js';
 import { showToast } from '../state/toast.js';
 import { actionsForRef, usePaletteRunner, type PaletteAction } from '../actions/resource-actions.js';
+import { RowKeyHint } from '../components/RowKeyHint.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 
 function favoriteFromResult(result: SearchResult): FavoriteItem {
@@ -277,7 +278,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   }, [activeIndex]);
 
   const hint = stage
-    ? `Actions — ${stage.title}`
+    ? `Actions — ${stage.title} · keys work on a focused list row`
     : commandMode
       ? 'Commands'
       : query.trim().length > 1
@@ -382,10 +383,13 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                   )}
                   {row.type === 'command' && <ListItemText primary={row.command.title} secondary={row.command.subtitle} />}
                   {row.type === 'action' && (
-                    <ListItemText
-                      primary={row.action.title}
-                      slotProps={{ primary: { sx: row.action.danger ? { color: 'error.main' } : undefined } }}
-                    />
+                    <>
+                      <ListItemText
+                        primary={row.action.title}
+                        slotProps={{ primary: { sx: row.action.danger ? { color: 'error.main' } : undefined } }}
+                      />
+                      {row.action.rowKey && <RowKeyHint action={row.action.rowKey} title="Key for this action on a focused list row" />}
+                    </>
                   )}
                 </ListItemButton>
               );

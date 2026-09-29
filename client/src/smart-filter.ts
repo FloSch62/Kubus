@@ -8,7 +8,8 @@
  * negates it. Quotes protect spaces: `name:"foo bar"`.
  *
  * Examples: `status:crash ns:prod`, `restarts>5`, `cpu>100m`, `mem>50%`,
- * `label:app=nginx age>2d !node:worker-1`, `type:lb`, `image:redis`.
+ * `label:app=nginx age>2d !node:worker-1`, `type:lb`, `image:redis`,
+ * `uid:3f2a9c1e`.
  */
 import type { KubeObject } from '@kubus/shared';
 import type { ClusterRow } from './api/queries.js';
@@ -55,6 +56,7 @@ const KNOWN_KEYS = new Set([
   'reason',
   'message',
   'kind',
+  'uid',
 ]);
 
 const CLAUSE_RE = /^([a-zA-Z]+)(>=|<=|:|>|<)(.*)$/;
@@ -295,6 +297,18 @@ function escapeRegExp(s: string): string {
   return s.replace(REGEXP_SPECIALS_RE, '\\$&');
 }
 
+/**
+ * UIDs a `uid:` clause matches: the object's own, and for an Event also the
+ * object it is about, so a UID from an audit log finds the events too.
+ */
+function objectUids(obj: KubeObject): string[] {
+  const uids = obj.metadata.uid ? [obj.metadata.uid] : [];
+  const event = obj as { involvedObject?: { uid?: string }; regarding?: { uid?: string } };
+  const involved = event.involvedObject?.uid ?? event.regarding?.uid;
+  if (involved) uids.push(involved);
+  return uids;
+}
+
 // ---- status alias predicates ----
 
 type StatusPredicate = (kind: string, obj: KubeObject) => boolean;
@@ -354,6 +368,8 @@ function matchClauseValue(clause: FilterClause, value: string, row: ClusterRow, 
       return matchKeyValueMap(obj.metadata.labels, value);
     case 'annotation':
       return matchKeyValueMap(obj.metadata.annotations, value);
+    case 'uid':
+      return objectUids(obj).some((uid) => uid.toLowerCase().includes(v));
     case 'node': {
       const node = ctx.kind === 'Pod' ? podSummary(obj).node : ((obj.spec as { nodeName?: string } | undefined)?.nodeName ?? '');
       return (node ?? '').toLowerCase().includes(v);
@@ -498,6 +514,7 @@ const KEY_SUGGESTIONS: KeySuggestion[] = [
   },
   { key: 'reason:', hint: 'event reason contains', kinds: ['Event'] },
   { key: 'message:', hint: 'event message contains', kinds: ['Event'] },
+  { key: 'uid:', hint: 'object UID contains (a prefix is enough)' },
 ];
 
 /**

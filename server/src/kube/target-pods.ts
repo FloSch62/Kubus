@@ -1,6 +1,7 @@
 import type { KubeObject, LogTargetKind } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
+import { selectorMatches } from './relation-hints.js';
 
 export interface LabelSelector {
   matchLabels?: Record<string, string>;
@@ -65,4 +66,74 @@ export async function resolveTargetPods(handle: ClusterHandle, target: KubeObjec
 
   const pods = await listPods(handle, namespace, selector);
   return pods.filter((pod) => owns(pod, target.metadata.uid));
+}
+
+/** API coordinates of every kind a log session can target. */
+export const LOG_TARGET_RESOURCES: Record<LogTargetKind, { group: string; version: string; plural: string }> = {
+  Pod: { group: '', version: 'v1', plural: 'pods' },
+  Deployment: { group: 'apps', version: 'v1', plural: 'deployments' },
+  ReplicaSet: { group: 'apps', version: 'v1', plural: 'replicasets' },
+  StatefulSet: { group: 'apps', version: 'v1', plural: 'statefulsets' },
+  DaemonSet: { group: 'apps', version: 'v1', plural: 'daemonsets' },
+  Service: { group: '', version: 'v1', plural: 'services' },
+  Job: { group: 'batch', version: 'v1', plural: 'jobs' },
+};
+
+export type TargetPodMatcher = (pod: KubeObject) => Promise<boolean>;
+
+/**
+ * Why a target can never have pods, or undefined when pods may match it. A
+ * Service without a selector (the API server's own, or one backed by
+ * hand-managed EndpointSlices) selects no pods, so waiting for them is futile.
+ */
+export function targetWithoutPods(target: KubeObject, kind: LogTargetKind): string | undefined {
+  if (kind !== 'Service') return undefined;
+  const selector = (target.spec as { selector?: Record<string, string> } | undefined)?.selector;
+  return selector && Object.keys(selector).length ? undefined : 'it has no pod selector';
+}
+
+/**
+ * Membership test for pods that appear after a target was resolved, with the
+ * same rules as resolveTargetPods. Deployments own pods through ReplicaSets
+ * that a rollout creates later, so an unknown ReplicaSet owner is looked up
+ * once and remembered.
+ */
+export function targetPodMatcher(handle: ClusterHandle, target: KubeObject, kind: LogTargetKind, namespace: string): TargetPodMatcher {
+  const inNamespace = (pod: KubeObject) => (pod.metadata.namespace ?? namespace) === namespace;
+  if (kind === 'Pod') {
+    return async (pod) => inNamespace(pod) && pod.metadata.name === target.metadata.name;
+  }
+  if (kind === 'Service') {
+    const selector = (target.spec as { selector?: Record<string, string> } | undefined)?.selector;
+    return async (pod) => inNamespace(pod) && selectorMatches(selector ?? {}, pod.metadata.labels);
+  }
+  const selector = (target.spec as { selector?: LabelSelector } | undefined)?.selector;
+  const labelsMatch = (pod: KubeObject) => !selector || selectorMatches(selector, pod.metadata.labels);
+  if (kind === 'Job') {
+    return async (pod) => inNamespace(pod) && owns(pod, target.metadata.uid) && labelsMatch(pod);
+  }
+  if (!selector) return async () => false;
+  if (kind !== 'Deployment') {
+    return async (pod) => inNamespace(pod) && labelsMatch(pod) && owns(pod, target.metadata.uid);
+  }
+
+  const replicaSetOwned = new Map<string, Promise<boolean>>();
+  return async (pod) => {
+    if (!inNamespace(pod) || !labelsMatch(pod)) return false;
+    const owner = (pod.metadata.ownerReferences ?? []).find((ref) => ref.controller && ref.kind === 'ReplicaSet');
+    if (!owner) return false;
+    let owned = replicaSetOwned.get(owner.uid);
+    if (!owned) {
+      owned = handle.raw
+        .json<KubeObject>(resourcePath('apps', 'v1', 'replicasets', { namespace, name: owner.name }))
+        .then((rs) => rs.metadata.uid === owner.uid && owns(rs, target.metadata.uid))
+        .catch(() => {
+          // Ask again on the pod's next update rather than excluding it for good.
+          replicaSetOwned.delete(owner.uid);
+          return false;
+        });
+      replicaSetOwned.set(owner.uid, owned);
+    }
+    return owned;
+  };
 }

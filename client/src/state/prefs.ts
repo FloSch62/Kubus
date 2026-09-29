@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { LabelColumnSpec } from '@kubus/shared';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { StateStorage } from 'zustand/middleware';
@@ -45,6 +46,8 @@ interface UiPrefsState {
   columnVisibility: Record<string, Record<string, boolean>>;
   /** User-chosen sort, keyed by table id. */
   sortModels: Record<string, TableSortModel>;
+  /** Label and annotation columns the user added, keyed by table id, in column order. */
+  labelColumns: Record<string, LabelColumnSpec[]>;
   /** Manifest tab: the object as a tree or as YAML text. */
   manifestView: ManifestViewMode;
   /**
@@ -59,10 +62,15 @@ interface UiPrefsState {
   setColumnWidth: (tableId: string, field: string, width: number) => void;
   setColumnVisibility: (tableId: string, model: Record<string, boolean>) => void;
   setSortModel: (tableId: string, model: TableSortModel) => void;
-  /** Replace a table with a saved snapshot; absent parts restore implicit defaults. */
+  setLabelColumns: (tableId: string, columns: LabelColumnSpec[]) => void;
+  /**
+   * Replace a table with a saved snapshot; absent parts restore implicit
+   * defaults. Label columns are the exception: a snapshot without the key
+   * (saved before they existed) leaves the current ones in place.
+   */
   applyTableState: (
     tableId: string,
-    state: { columnWidths?: Record<string, number>; columnVisibility?: Record<string, boolean>; sort?: TableSortModel },
+    state: { columnWidths?: Record<string, number>; columnVisibility?: Record<string, boolean>; sort?: TableSortModel; labelColumns?: LabelColumnSpec[] },
   ) => void;
 }
 
@@ -135,6 +143,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
       columnWidths: {},
       columnVisibility: {},
       sortModels: {},
+      labelColumns: {},
       manifestView: 'tree',
       listState: {},
       set: (patch) => set(patch),
@@ -159,11 +168,17 @@ export const useUiPrefsStore = create<UiPrefsState>()(
         set((state) => ({
           sortModels: { ...state.sortModels, [tableId]: model },
         })),
+      setLabelColumns: (tableId, columns) =>
+        set((state) => ({
+          labelColumns: replaceTableValue(state.labelColumns, tableId, columns.length ? columns : undefined),
+        })),
       applyTableState: (tableId, state) =>
         set((s) => ({
           columnWidths: replaceTableValue(s.columnWidths, tableId, state.columnWidths),
           columnVisibility: replaceTableValue(s.columnVisibility, tableId, state.columnVisibility),
           sortModels: replaceTableValue(s.sortModels, tableId, state.sort),
+          labelColumns:
+            'labelColumns' in state ? replaceTableValue(s.labelColumns, tableId, state.labelColumns?.length ? state.labelColumns : undefined) : s.labelColumns,
         })),
     }),
     {
@@ -186,6 +201,7 @@ export const useUiPrefsStore = create<UiPrefsState>()(
         columnWidths: state.columnWidths,
         columnVisibility: state.columnVisibility,
         sortModels: state.sortModels,
+        labelColumns: state.labelColumns,
         manifestView: state.manifestView,
         listState: state.listState,
       }),

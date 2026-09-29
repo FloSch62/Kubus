@@ -336,6 +336,14 @@ export interface ListResponse {
   continue?: string;
 }
 
+/** Object names of one kind (in one namespace), for pickers. */
+export interface ResourceNamesResponse {
+  /** Sorted. */
+  names: string[];
+  /** More exist than the server returns; the picker shows the first ones. */
+  truncated?: boolean;
+}
+
 export interface ResourceRef {
   ctx: string;
   group: string;
@@ -376,6 +384,12 @@ export interface FavoriteItem {
   scopes?: string[];
 }
 
+/** A list column showing one label or annotation value per row. */
+export interface LabelColumnSpec {
+  source: 'label' | 'annotation';
+  key: string;
+}
+
 /** Grid state snapshotted with a saved view so restoring brings back the exact table. */
 export interface SavedViewGridState {
   /** Global namespace filter at save time (empty = all namespaces). */
@@ -383,6 +397,8 @@ export interface SavedViewGridState {
   sort?: ReadonlyArray<{ field: string; sort: 'asc' | 'desc' | null | undefined }>;
   columnVisibility?: Record<string, boolean>;
   columnWidths?: Record<string, number>;
+  /** Label and annotation columns; absent on views saved before they existed (those keep the current ones). */
+  labelColumns?: LabelColumnSpec[];
 }
 
 export interface SavedView {
@@ -522,6 +538,35 @@ export interface RolloutPauseRequest {
   namespace: string;
   name: string;
   paused: boolean;
+}
+
+/**
+ * Operator actions on custom resources, each made the way the operator's own
+ * CLI makes it: Argo CD's refresh annotation and `operation.sync`, the Argo
+ * Rollouts plugin's status patches, the External Secrets `force-sync`
+ * annotation, Flux's `reconcile.fluxcd.io/requestedAt` and `spec.suspend`.
+ */
+export type OperatorAction =
+  | 'argocd-refresh'
+  | 'argocd-sync'
+  | 'rollout-promote'
+  | 'rollout-promote-full'
+  | 'rollout-abort'
+  | 'rollout-retry'
+  | 'eso-force-sync'
+  | 'flux-reconcile'
+  | 'flux-suspend'
+  | 'flux-resume';
+
+export interface OperatorActionRequest {
+  action: OperatorAction;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string;
+  name: string;
+  /** argocd-sync: also delete resources that are no longer in the source. */
+  prune?: boolean;
 }
 
 /** One entry of a workload's rollout history (ReplicaSet / ControllerRevision). */
@@ -708,6 +753,8 @@ export interface LogTargetPod {
 
 export interface LogTargetPodsResponse {
   pods: LogTargetPod[];
+  /** Why the target can never have pods (a Service without a selector); absent when pods may still join. */
+  noPodsReason?: string;
 }
 
 // ---- Metrics ----
@@ -955,7 +1002,7 @@ export interface OperatorResourceRollup {
 }
 
 export interface OperatorRollup {
-  /** Stable slug: cert-manager, argo, flux, keda, karpenter. */
+  /** Stable slug: cert-manager, argo, flux, external-secrets, keda, gateway-api, karpenter. */
   id: string;
   /** Display name. */
   name: string;
@@ -1049,6 +1096,16 @@ export interface PodResourcesResponse {
 
 // ---- Namespace overview ----
 
+/** Objects of one kind split by health, for the inventory's health bars. Sums to the kind's total. */
+export interface InventoryHealth {
+  /** Running, ready, bound or complete. */
+  healthy: number;
+  /** Working in part or still converging: some replicas down, not ready yet, near a limit. */
+  degraded: number;
+  /** Not working: nothing ready, crash-looping, last run failed, quota exhausted. */
+  failed: number;
+}
+
 export interface NamespaceInventoryEntry {
   kind: string;
   group: string;
@@ -1057,6 +1114,8 @@ export interface NamespaceInventoryEntry {
   total: number;
   /** Entries with a health notion (workloads, PVCs, quotas…). */
   unhealthy?: number;
+  /** Health split for kinds that have a notion of it; absent for plain config kinds. */
+  health?: InventoryHealth;
   /** Counted from an installed CRD rather than a builtin API. */
   custom?: boolean;
   /** Resource API missing or RBAC-denied. */
@@ -1076,11 +1135,36 @@ export interface NamespaceQuotaStatus {
   resources: NamespaceQuotaResource[];
 }
 
+/**
+ * One object the inventory counts as degraded or failed, with the reason.
+ * Per kind these add up to the degraded and failed parts of its health bar.
+ */
+export interface InventoryProblem {
+  kind: string;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string;
+  name: string;
+  grade: 'degraded' | 'failed';
+  reason: string;
+  message?: string;
+  /** Replica-shaped kinds only. */
+  ready?: number;
+  desired?: number;
+  /** Pods only. */
+  restarts?: number;
+  /** Counted from an installed CRD rather than a builtin API. */
+  custom?: boolean;
+}
+
 export interface NamespaceOverview {
   namespaces: string[];
   /** Namespace phase (Active/Terminating) — only when a single namespace is scoped. */
   status?: string;
   inventory: NamespaceInventoryEntry[];
+  /** Every object behind the degraded and failed parts of the inventory's bars, failed first. */
+  problems: InventoryProblem[];
   workloadHealth: OverviewKindHealth[];
   issues: OverviewWorkloadIssue[];
   failingPods: OverviewProblemPod[];

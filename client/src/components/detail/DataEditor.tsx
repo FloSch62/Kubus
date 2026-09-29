@@ -8,6 +8,9 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Collapse from '@mui/material/Collapse';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
@@ -16,6 +19,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
@@ -31,6 +35,7 @@ import { copyToClipboard } from '../../clipboard.js';
 import { showToast } from '../../state/toast.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { ReviewApplyDialog } from './ReviewApplyDialog.js';
+import { serializeDataEntries, type DataCopyFormat } from './data-copy.js';
 import { formatBytes } from '../format.js';
 import {
   REDACTED,
@@ -109,6 +114,9 @@ export function DataEditor({ sel, isSecret, onDirtyChange }: { sel: DataEditorSe
   const [revealAll, setRevealAll] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [review, setReview] = useState(false);
+  const [copyMenu, setCopyMenu] = useState<HTMLElement | null>(null);
+  // A Secret copy with values still hidden waits here for explicit consent.
+  const [pendingCopy, setPendingCopy] = useState<DataCopyFormat | null>(null);
   const nextIdRef = useRef(1);
 
   useEffect(() => {
@@ -155,6 +163,33 @@ export function DataEditor({ sel, isSecret, onDirtyChange }: { sel: DataEditorSe
   const copyValue = async (entry: DataEntry) => {
     const ok = await copyToClipboard(entry.mode === 'binary' ? entryRaw(entry, isSecret) : entry.value);
     showToast(ok ? 'success' : 'error', ok ? `Copied value of ${entry.name}` : 'Copy to clipboard failed');
+  };
+
+  const copyAll = async (format: DataCopyFormat) => {
+    if (!entries) return;
+    const { text, count, skipped } = serializeDataEntries(entries, format, isSecret);
+    if (!count) {
+      showToast('warning', skipped.length ? 'Only binary keys here; copy them as YAML instead' : 'No keys to copy');
+      return;
+    }
+    const ok = await copyToClipboard(text);
+    if (!ok) {
+      showToast('error', 'Copy to clipboard failed');
+      return;
+    }
+    const what = `${count} ${count === 1 ? 'key' : 'keys'} as ${format === 'env' ? 'KEY=value' : 'YAML'}`;
+    const notes = [skipped.length ? `binary ${skipped.length === 1 ? 'key' : 'keys'} ${skipped.join(', ')} left out` : '', dirty ? 'including unapplied edits' : '']
+      .filter(Boolean)
+      .join('; ');
+    showToast('success', `Copied ${what}${notes ? ` (${notes})` : ''}`);
+  };
+
+  const requestCopyAll = (format: DataCopyFormat) => {
+    setCopyMenu(null);
+    // Revealed values are already on screen; hidden ones need a yes first.
+    const hidden = isSecret && (entries ?? []).some((e) => !e.deleted && e.name.trim() && !valueShown(e));
+    if (hidden) setPendingCopy(format);
+    else void copyAll(format);
   };
 
   const addKey = () => {
@@ -220,6 +255,24 @@ export function DataEditor({ sel, isSecret, onDirtyChange }: { sel: DataEditorSe
           />
         )}
         <Box sx={{ flex: 1 }} />
+        <Button
+          startIcon={<ContentCopyIcon fontSize="small" />}
+          endIcon={<ArrowDropDownIcon />}
+          disabled={!entries.some((e) => !e.deleted && e.name.trim())}
+          aria-haspopup="menu"
+          aria-expanded={copyMenu ? 'true' : undefined}
+          onClick={(e) => setCopyMenu(e.currentTarget)}
+        >
+          Copy all
+        </Button>
+        <Menu anchorEl={copyMenu} open={!!copyMenu} onClose={() => setCopyMenu(null)}>
+          <MenuItem onClick={() => requestCopyAll('env')}>
+            <ListItemText primary="As KEY=value" secondary="One line per key, for .env files" />
+          </MenuItem>
+          <MenuItem onClick={() => requestCopyAll('yaml')}>
+            <ListItemText primary="As YAML" secondary={isSecret ? 'stringData and data, ready to paste into a Secret' : 'data and binaryData, ready to paste into a ConfigMap'} />
+          </MenuItem>
+        </Menu>
         {!readOnly && (
           <>
             <Button startIcon={<AddIcon fontSize="small" />} onClick={addKey}>
@@ -274,6 +327,23 @@ export function DataEditor({ sel, isSecret, onDirtyChange }: { sel: DataEditorSe
           ))}
         </Stack>
       </Box>
+      <ConfirmDialog
+        open={pendingCopy !== null}
+        title="Copy decoded Secret values?"
+        message={
+          <>
+            Some values are still hidden. Copying puts every value of <b>{sel.name}</b> on the clipboard as plain text, where other apps and
+            clipboard history can read it. The values stay hidden here.
+          </>
+        }
+        confirmLabel="Copy values"
+        onConfirm={() => {
+          const format = pendingCopy;
+          setPendingCopy(null);
+          if (format) void copyAll(format);
+        }}
+        onClose={() => setPendingCopy(null)}
+      />
       <ConfirmDialog
         open={confirmReset}
         title="Discard changes?"

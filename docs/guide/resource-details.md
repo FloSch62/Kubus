@@ -21,10 +21,11 @@ you're on.
 | **Overview** | A kind-aware summary (see below). | Every kind |
 | **Manifest** | The object as a [browsable tree](#the-manifest-tab) or as [YAML](#editing-yaml), editable either way. | Every kind |
 | **Schema** | The CRD's OpenAPI schema, with a picker for the served versions. | CustomResourceDefinitions |
+| **Data** | Each key with its value, editable one key at a time. **Copy all** copies every key as `KEY=value` lines or as YAML ready to paste into a manifest. | ConfigMaps, Secrets |
 | **Events** | Events involving this object, newest first, Warnings highlighted. The tab carries a count of recent warnings before you open it. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
 | **Metrics** | Live CPU/memory [history charts](metrics.md). | Pods, Nodes |
-| **History** | Rollout revisions with images and change-cause, and rollback. | Deployments, StatefulSets |
+| **History** | Rollout revisions with images and change-cause, and rollback. | Deployments, StatefulSets, DaemonSets |
 
 ## Kind-aware overviews
 
@@ -39,16 +40,36 @@ collapsible sections hold the rest.
   own probes, environment, mounts and command a click away. Below that come init and
   ephemeral debug containers, placement and identity details, volumes, scheduling,
   conditions and metadata. Related ConfigMaps, Secrets, PVCs, nodes and owners are all
-  clickable.
+  clickable. A probe on a named port shows the number it resolves to, such as
+  `http (9898)`, and a name the container doesn't declare is flagged. A projected volume
+  lists each of its sources (Secrets, ConfigMaps, the service account token, downward API
+  fields), and the Secrets, ConfigMaps and service account open in the drawer.
 - **Deployments** show ready/updated/available/unavailable replicas with a rollout
   progress bar, the failing conditions and pod reasons in full, the pod template's
-  containers, the pods, and the ReplicaSets still holding pods.
+  containers, the pods, and the ReplicaSets still holding pods. The pencil next to a
+  container's image changes it in place.
+- **StatefulSets** get the same summary, progress bar, problem banner and container
+  panels, with a pencil to change an image. Pods are listed in ordinal order, so
+  `worker-2` comes before `worker-10`. **Volume claims** has one row per claim template
+  and ordinal with the claim's phase and capacity, including claims kept after a
+  scale-down. **Revisions** shows the revisions that still run pods with their images, which
+  is how a rollout held by a partition looks. Details name the update strategy and
+  partition, the pod management policy, the claim retention policy and the governing
+  Service, flagged when it is missing or not headless, with the per-pod DNS names it gives.
+- **DaemonSets** show desired, current, ready, up-to-date and misscheduled counts, the
+  container panels, and the pods with the node each runs on. **Nodes** lists every node
+  that isn't running a ready pod and says why: the scheduler's reason for a pod stuck
+  Pending there (not enough CPU, for example), or the node selector, required node
+  affinity or untolerated taint that leaves the node out. **Revisions** works as it does
+  for StatefulSets.
 - **Services** show type, cluster IP, ready endpoints and port count; the in-cluster DNS
   name; a ports table (port → targetPort, nodePort) with one-click port forwarding; the
   live **endpoints** from the EndpointSlices with their pods and readiness; and the pods
   the selector matches.
 - **Nodes** show roles, pod count, kubelet version, internal IP and condition health, then
-  system info, addresses, capacity and the pods on the node.
+  system info, addresses, capacity and the pods on the node. Pods that come from a
+  DaemonSet carry a **DS** tag, and the chips above the list show only those or only the
+  rest.
 - **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
 - **NetworkPolicies** spell out what the policy does: the pods it applies to, whether it
@@ -57,10 +78,66 @@ collapsible sections hold the rest.
 - **PodDisruptionBudgets** show allowed disruptions against healthy and required pods,
   the covered pods, and a banner when evictions are blocked, which is exactly where a
   node drain would hang. The drain dialog names such budgets before you start.
+- **Namespaces** show what lives inside: every kind with objects in the namespace as a
+  tile with its count and a healthy, degraded and failed bar, custom resources included.
+  A tile opens that kind's list with the namespace filter set to this namespace. Below
+  the inventory come the problems behind the bars: every object a bar counts as degraded
+  or failed, with its reason, each opening in the drawer. Last come the namespace's
+  ResourceQuotas as usage bars.
 - **ResourceQuotas** show used against hard per resource as bars, exhausted resources
   first. **LimitRanges** show one table per type with defaults, minimums and maximums.
+- **Custom resources** get an overview built from their CRD: the printer columns and the
+  plain status fields as facts (a column that points at a list, such as an HTTPRoute's
+  hostnames, reads as a comma-separated list), then the conditions. Status lists whose
+  items carry their own conditions, such as a route's `status.parents[].conditions` or a
+  Gateway's listeners, get one block per item, labelled with the parent or listener it
+  belongs to.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
   and copyable). The full spec and status live one tab over, in the Manifest tab.
+
+### Operator resources
+
+A few widely used operators get a dedicated overview on top of that, and their actions
+sit in the drawer's action bar next to the ⋮ menu (see
+[Quick actions](quick-actions.md#operators)).
+
+- **HTTPRoutes and GRPCRoutes** show a rules table: each rule's path, header, query or
+  gRPC method matches on the left, the backends they send traffic to on the right, with
+  each backend's weight and share of the traffic and a link to the Service. Filters such
+  as header changes and rewrites are listed under the backends. Every parent Gateway gets
+  its own block with its Accepted and ResolvedRefs conditions, and a banner explains a
+  parent that rejected the route, could not resolve a backend or has not reported yet.
+  TCP, TLS and UDP routes use the same view without the matches.
+- **Gateways** list their listeners with protocol, port, hostname, TLS certificates and
+  how many routes each one has attached, followed by the routes that name the Gateway as
+  a parent and whether it accepted them. **GatewayClasses** show their controller and
+  the Gateways built from them.
+- **Argo Rollouts** show the phase, strategy, current step and canary weight, the canary
+  step list with the current step marked, and the stable and canary images side by side.
+- **Argo CD Applications** show sync and health, the source repository and the revision
+  it synced, the auto-sync, prune and self-heal flags, the last operation, and every
+  managed resource with its own sync and health, the unhealthy ones first.
+- **External Secrets** show whether the last sync worked and when it ran, the store it
+  reads (a link), the Secret it writes (a link, or *not created yet*) and how remote keys
+  map onto Secret keys.
+- **Flux Kustomizations** show the ready state, the last applied revision, the source
+  (a link) and the inventory of objects they manage. **HelmReleases** show the chart and
+  version, the Helm release they manage (linked to its [Helm page](helm.md)) and the
+  release history. Kustomizations, HelmReleases, their sources and the other Flux objects
+  that can be suspended are reconciled, suspended and resumed from the drawer.
+- **cert-manager Certificates** lead with when the certificate expires and renews.
+
+### Why a pod is Pending
+
+A pod that no node will take has no container state to report, so the workload banner
+reads the scheduler instead. It takes the pod's `PodScheduled` condition and the latest
+`FailedScheduling` event, the same events the [Overview](overview.md) collects, and groups
+pods with the same answer into one line, such as *1 pod Pending: 0/3 nodes available,
+Insufficient cpu*, with the scheduler's full message below it. The pod row repeats the
+short reason under its status. When the problem names a node (the one a DaemonSet pod is
+meant for) or a ResourceQuota, the banner links to it. StatefulSets and DaemonSets have
+no condition for a pod the API refused, so their banner also shows the controller's
+recent `FailedCreate` events, which is where an exceeded quota shows up.
 
 ### Links in both directions
 
@@ -88,15 +165,18 @@ overview also answers the other question, *who depends on this*:
   is sent say so under the list and fill in on the next refresh.
 - **Routed by** on a Service lists the Ingresses and Gateway API routes that send
   traffic to it, with their hosts and paths.
-- **Selected by** on a Pod or Deployment lists the Services, autoscalers,
-  PodDisruptionBudgets and NetworkPolicies whose selectors match it.
+- **Selected by** on a Pod, Deployment, StatefulSet or DaemonSet lists the Services,
+  autoscalers, PodDisruptionBudgets and NetworkPolicies whose selectors match it. An
+  autoscaler's row shows its replica range and each metric's current value against its
+  target, such as `cpu 42% / 60%`, the same figures as the **Metrics** column of the
+  HorizontalPodAutoscalers list.
 - The **namespace** in the drawer header and in Metadata is a link: it opens the
   namespace's overview (the Overview page filtered to that namespace).
 - Annotation values that are URLs, and bare hosts under link-shaped keys such as
   `argocd.argoproj.io/url` or a `runbook`, open in a new tab.
 
 Every row in these sections opens the referrer in the drawer, with the usual back stack.
-Long lists get a filter box; the pod lists inside Node, Service and Deployment overviews
+Long lists get a filter box; the pod lists inside Node, Service and workload overviews
 accept the same `/` [smart filter](smart-filters.md) syntax as the list pages.
 
 !!! tip "Navigate and come back"
@@ -105,6 +185,9 @@ accept the same `/` [smart filter](smart-filters.md) syntax as the list pages.
     follows it, keeping a **back stack**. Use the back arrow to return to where you were.
     The tab you were on (Events, Manifest, Metrics) rides along in the page tab's URL,
     so reopening a closed tab or restarting Kubus brings back the object *and* the tab.
+
+Press `e` anywhere in the drawer (outside a text field) to jump to the Manifest tab. In a
+list, `e` on a focused row opens that row straight on its Manifest tab.
 
 ## The Manifest tab
 
@@ -146,8 +229,8 @@ Editing works in place:
    other top-level key.
 3. Changed rows are marked and counted. Each one can be reset on its own, and **Reset**
    drops everything.
-4. **Review & apply** shows the YAML diff, runs a server dry-run and only then enables
-   **Apply**.
+4. **Review & apply** (or ++ctrl+s++ / ++cmd+s++) shows the YAML diff, runs a server
+   dry-run and only then enables **Apply**.
 
 Some rows are locked with a padlock: the status block belongs to the controller, identity
 fields (name, namespace, UID, resource version) belong to the API server, and a Secret's
@@ -172,16 +255,30 @@ object's API schema for completion and hover help.
 
 1. Switch the Manifest tab to **YAML**.
 2. Make your changes.
-3. **Dry run** to have the server validate them, then **Replace** to write the object, or
-   **Reset** to reload from the server.
+3. Press **Review & apply** (or ++ctrl+s++ / ++cmd+s++). You get the same diff and server
+   dry-run as in the tree, and **Apply** writes the object once the server accepts it.
+   **Reset** drops your edits.
+
+The editor works on a copy of the object taken when you opened it, so it never reloads
+under your cursor. Kubus keeps watching the live object, though. When it changes on the
+server, a banner says so right away: **Reload** loads the new version into a clean editor,
+and **Rebase edits** replays your edits onto it. The rebased text is serialized fresh, so
+it keeps every edit but not your formatting or comments.
+
+Status updates don't count as changes, with or without edits, since controllers rewrite
+status all the time. Kubus writes your edits against the latest version in that case, so
+a Deployment in the middle of a rollout never makes you rebase.
 
 ### Conflict detection
 
 If the object changed on the server while you were editing, Kubus won't blindly clobber
 it. The apply is rejected, you're shown the conflict, the view refreshes to the latest
-state, and you can re-apply your change against it. No silent overwrites. In the Manifest
-tab a banner offers to **rebase** your edits onto the refreshed object, so you keep them
-instead of starting over.
+state, and you can re-apply your change against it. No silent overwrites. In the tree and
+the YAML view alike, a banner offers to **rebase** your edits onto the refreshed object as
+soon as it changes, so you keep them instead of starting over, usually before you ever
+reach **Apply**. While **Review & apply** is open, the replay happens on its own and the
+diff and dry-run follow. If the server already holds your edits, the review closes and
+tells you nothing is left to apply.
 
 !!! warning "Edits are real"
 
@@ -193,7 +290,9 @@ instead of starting over.
 
 You don't need an existing object to use the editor. Kubus can open a blank YAML buffer
 so you can paste or write a manifest and apply it to create the resource, the same way
-`kubectl apply -f` would.
+`kubectl apply -f` would. Press ++ctrl+enter++ / ++cmd+enter++ to create without reaching
+for the mouse: when you edited the template, the server dry-run runs first, and any
+findings stop the create so you can read them.
 
 ## See also
 

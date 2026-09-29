@@ -330,3 +330,16 @@ spec:
     expect(onClose).toHaveBeenCalledOnce();
   }, 15_000);
 });
+
+describe('BatchCreateDialog keyboard', () => {
+  it('creates from the form with Mod+Enter once the form is ready', () => {
+    renderDialog('Job', undefined, 'team-a');
+    fireEvent.keyDown(screen.getByLabelText('Name'), { key: 'Enter', ctrlKey: true });
+    expect(queries.createMutate).not.toHaveBeenCalled();
+    fillRequired();
+    fireEvent.keyDown(screen.getByLabelText('Image'), { key: 'Enter' });
+    expect(queries.createMutate).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByLabelText('Image'), { key: 'Enter', metaKey: true });
+    expect(latestYaml(queries.createMutate)).toMatchObject({ metadata: { name: 'nightly-task', namespace: 'team-a' } });
+  });
+});

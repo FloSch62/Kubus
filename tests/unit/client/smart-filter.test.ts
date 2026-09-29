@@ -222,6 +222,40 @@ describe('matchesSmartFilter', () => {
     expect(matches('kind:deploy', healthyPod(), pod)).toBe(false);
   });
 
+  describe('uid', () => {
+    const withUid = (uid: string) => {
+      const obj = healthyPod();
+      obj.metadata.uid = uid;
+      return obj;
+    };
+
+    it('parses uid as a known key', () => {
+      expect(parseSmartFilter('uid:3f2a9c1e')).toEqual([{ key: 'uid', op: ':', values: ['3f2a9c1e'], negated: false }]);
+    });
+
+    it('matches the full UID, a prefix or any fragment, case-insensitively', () => {
+      const obj = withUid('3f2a9c1e-7b4d-4c1a-9e2f-0a1b2c3d4e5f');
+      expect(matches('uid:3f2a9c1e-7b4d-4c1a-9e2f-0a1b2c3d4e5f', obj, pod)).toBe(true);
+      expect(matches('uid:3f2a9c1e', obj, pod)).toBe(true);
+      expect(matches('uid:0A1B2C', obj, pod)).toBe(true);
+      expect(matches('uid:deadbeef', obj, pod)).toBe(false);
+    });
+
+    it('supports negation and OR alternatives', () => {
+      const obj = withUid('aaaa-1111');
+      expect(matches('!uid:aaaa', obj, pod)).toBe(false);
+      expect(matches('uid:bbbb,aaaa', obj, pod)).toBe(true);
+    });
+
+    it('matches an event on the UID of the object it is about', () => {
+      const ev = { ...makeEvent(), involvedObject: { kind: 'Pod', name: 'web-1', uid: 'pod-uid-42' } };
+      expect(matches('uid:pod-uid-42', ev, fctx('Event'))).toBe(true);
+      expect(matches(`uid:${ev.metadata.uid}`, ev, fctx('Event'))).toBe(true);
+      const regarding = { ...makeObj({ name: 'ev-2' }), regarding: { kind: 'Pod', name: 'web-2', uid: 'pod-uid-7' } };
+      expect(matches('uid:pod-uid-7', regarding, fctx('Event'))).toBe(true);
+    });
+  });
+
   describe('labels and annotations', () => {
     it('matches label presence by key substring', () => {
       expect(matches('label:app', healthyPod(), pod)).toBe(true);
@@ -537,6 +571,12 @@ describe('smartFilterSuggestions', () => {
     const ev = smartFilterSuggestions('', 'Event', none).map((s) => s.completion);
     expect(ev).toContain('reason:');
     expect(ev).toContain('message:');
+  });
+
+  it('offers uid: for every kind', () => {
+    expect(smartFilterSuggestions('u', 'Pod', none)).toEqual([{ completion: 'uid:', hint: 'object UID contains (a prefix is enough)' }]);
+    expect(smartFilterSuggestions('', 'Event', none).map((s) => s.completion)).toContain('uid:');
+    expect(smartFilterSuggestions('', 'ConfigMap', none).map((s) => s.completion)).toContain('uid:');
   });
 
   it('completes partial keys', () => {

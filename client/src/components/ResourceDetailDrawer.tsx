@@ -21,30 +21,36 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { SxProps, Theme } from '@mui/material/styles';
 import { gvkForResource, isRecentWarning, type KubeObject } from '@kubus/shared';
 import { useNow } from './AgeCell.js';
-import { isResourceGone, useApplyResource, useDryRunResource, useResource, useResourceEvents } from '../api/queries.js';
+import { isResourceGone, useResource, useResourceEvents } from '../api/queries.js';
 import { jobPhase, nodeStatus, podSummary, withoutManagedFields, workloadStatus } from '../kube-display.js';
-import { isTextEntryTarget } from '../text-entry.js';
+import { isTextEntryTarget, isTextEntryTargetWithin } from '../text-entry.js';
 import { YamlEditor } from './YamlEditor.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { GenericDetail } from './detail/GenericDetail.js';
 import { ConfigMapDetail } from './detail/ConfigMapDetail.js';
 import { DataEditor } from './detail/DataEditor.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
+import { StatefulSetDetail } from './detail/StatefulSetDetail.js';
+import { DaemonSetDetail } from './detail/DaemonSetDetail.js';
 import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
-import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { NetworkPolicyDetail } from './detail/NetworkPolicyDetail.js';
 import { PodDisruptionBudgetDetail } from './detail/PodDisruptionBudgetDetail.js';
 import { ResourceQuotaDetail } from './detail/ResourceQuotaDetail.js';
 import { LimitRangeDetail } from './detail/LimitRangeDetail.js';
+import { NamespaceDetail } from './detail/NamespaceDetail.js';
+import { customKindEntry } from './detail/kinds/registry.js';
 import { CountPill } from './detail/Section.js';
 import { openNamespaceOverview } from '../namespace-link.js';
 import { ManifestView } from './detail/ManifestView.js';
-import { dumpManifest, parseYamlMapping, rebaseEdits } from './detail/manifest-tree.js';
+import { displayPath, dumpManifest, parseYamlMapping, yamlWithLatestVersion } from './detail/manifest-tree.js';
+import { LiveChangeAlert } from './detail/LiveChangeAlert.js';
+import { ReviewApplyDialog } from './detail/ReviewApplyDialog.js';
+import { rebaseYamlDraft, useYamlSnapshot } from './detail/yaml-live.js';
 import { maskSecretValues } from './detail/data-editor.js';
 import { RolloutHistory } from './detail/RolloutHistory.js';
 import { AgeCell } from './AgeCell.js';
@@ -129,6 +135,22 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
     setTabError(undefined);
     setReveal(false);
   }, [selKey]);
+  // Keyboard flows ask for a tab through the store (E on a list row opens
+  // the row straight on its Manifest tab). Runs after the reset above, so a
+  // request that arrives with a new selection wins over its initial tab.
+  const tabRequest = useDetailStore((s) => s.tabRequest);
+  const consumeTabRequest = useDetailStore((s) => s.consumeTabRequest);
+  const onTabChangeRef = useRef(onTabChange);
+  onTabChangeRef.current = onTabChange;
+  useEffect(() => {
+    if (!tabRequest || tabRequest.selKey !== selKey) return;
+    consumeTabRequest();
+    guardLeave(() => {
+      setTabError(undefined);
+      setTab(tabRequest.tab);
+      if (tabRequest.remember) onTabChangeRef.current?.(tabRequest.tab);
+    });
+  }, [tabRequest, selKey, consumeTabRequest, guardLeave]);
   const draft = useDetailStore((s) => s.drafts[selKey]);
   const setDraft = (next: ManifestDraft | undefined) => (next ? storeSetDraft(next) : clearDraft(selKey));
   // The Manifest tab shows the object as a tree or as YAML. A draft pins the
@@ -142,12 +164,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
     if (!hasSel) setFullScreen(false);
   }, [hasSel]);
 
-  // Live-refresh the object while Overview or the Manifest tree is showing so
+  // Live-refresh the object while Overview or the Manifest tab is showing so
   // stuck pods, rollouts and conditions update in place — fed by the watch
   // stream so it keeps pace with the tables, with the poll as fallback. The
-  // YAML view keeps the snapshot it opened with (an editor that reloads under
-  // the cursor is unusable); a manifest draft freezes its own base.
-  const liveTab = tab === 'overview' || (tab === 'manifest' && view === 'tree');
+  // YAML view edits a snapshot (useYamlSnapshot) and only uses the live
+  // object to notice changes; a manifest draft freezes its own base.
+  const liveTab = tab === 'overview' || tab === 'manifest';
   const { data: obj, refetch, error } = useResource(sel ? { ...sel, reveal: isSecret && reveal } : undefined, {
     liveMs: liveTab ? 5000 : undefined,
     watch: liveTab,
@@ -163,7 +185,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   // the values until the reveal switch is on. Revealed reads stay on the poll
   // (the watch stream carries redacted objects).
   const { data: revealedSecret, refetch: refetchRevealed } = useResource(isSecret && tab === 'manifest' && sel ? { ...sel, reveal: true } : undefined, {
-    liveMs: view === 'tree' ? 5000 : undefined,
+    liveMs: 5000,
   });
   const manifestObj = isSecret ? revealedSecret : obj;
   const secretMasked = isSecret && !reveal;
@@ -172,15 +194,17 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   // server's event cache), so the Events tab can carry its warning count
   // before anyone clicks it.
   const { data: events } = useResourceEvents(sel ? { ctx: sel.ctx, name: sel.name, kind: sel.kind, namespace: sel.namespace } : undefined);
-  const apply = useApplyResource();
-  const dryRun = useDryRunResource();
-
   const liveBase = useMemo(() => (manifestObj ? withoutManagedFields(manifestObj) : undefined), [manifestObj]);
   const showYaml = tab === 'manifest' && view === 'yaml';
+  const yamlLive = useYamlSnapshot(selKey, showYaml, liveBase, draft);
+  const yamlBase = yamlLive.snapshot;
   // Only serialize for the YAML view — dumping a large object mid-open would
   // stall the drawer's slide-in animation. An unrevealed Secret shows masked
   // text, read-only, so nothing can be typed over placeholders.
-  const yamlText = useMemo(() => (liveBase && showYaml ? dumpManifest(secretMasked ? maskAll(liveBase) : liveBase) : ''), [liveBase, showYaml, secretMasked]);
+  const yamlText = useMemo(() => (yamlBase && showYaml ? dumpManifest(secretMasked ? maskAll(yamlBase) : yamlBase) : ''), [yamlBase, showYaml, secretMasked]);
+  const [yamlReview, setYamlReview] = useState(false);
+  // The rv the live object had when an apply hit a 409 (null: none pending).
+  const [yamlConflictRv, setYamlConflictRv] = useState<string | null>(null);
   // The editor measures dirtiness against the draft's base, and starts from
   // the carried-over text when the draft came from the tree.
   const yamlValue = draft ? (secretMasked ? dumpManifest(maskAll(draft.base)) : draft.baseText) : yamlText;
@@ -234,6 +258,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   useEffect(() => {
     if (!tabAvailable && (tab !== 'schema' || schemaSource)) setTab('overview');
   }, [tabAvailable, tab, schemaSource]);
+  const customKind = obj ? customKindEntry(obj.apiVersion, obj.kind) : undefined;
+  const CustomActions = customKind?.actions;
+  const statusWord = obj && (objGone ? 'Deleted' : (headerStatus(behaviorKind, obj) ?? customKind?.status?.(obj)));
   const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
     top: `${drawerTopOffset}px`,
@@ -260,35 +287,62 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
         : 'min(720px, 80vw)';
   const mapNamespaces = sel?.namespace ? [sel.namespace] : [];
 
-  const handleApply = async (text: string) => {
-    if (!sel) return;
-    try {
-      await apply.mutateAsync({ ...sel, yamlBody: text });
-      setDraft(undefined);
-    } catch (err) {
-      // 409 → refresh, then replay the edits onto the server's current state
-      // (picking up its resourceVersion) so the next apply can succeed.
-      if ((err as { status?: number }).status === 409) {
-        const latest = (await (isSecret ? refetchRevealed() : refetch()))?.data;
-        const current = useDetailStore.getState().drafts[selKey];
-        let outcome = 'the resource changed on the server; the editor has been refreshed, re-apply your edits.';
-        if (latest && current?.selKey === selKey) {
-          const base = withoutManagedFields(latest);
-          const baseText = dumpManifest(base);
-          const parsed = current.mode === 'yaml' ? parseYamlMapping(current.text) : undefined;
-          if (parsed?.ok) {
-            const { value, skipped } = rebaseEdits(current.base, parsed.value, base);
-            setDraft({ ...current, base, baseText, obj: value, text: dumpManifest(value) });
-            outcome = `the resource changed on the server; your edits were replayed onto the latest version${skipped.length ? ` (${skipped.length} to list items that no longer exist were dropped)` : ''} — dry-run and apply again.`;
-          } else {
-            setDraft({ ...current, base, baseText, obj: base, text: current.mode === 'yaml' ? current.text : baseText });
-          }
-        }
-        throw new Error(`${(err as Error).message} — ${outcome}`);
+  const refetchManifest = () => void (isSecret ? refetchRevealed() : refetch());
+  // Replay YAML edits onto the object that moved on the server; a clean
+  // editor just loads the latest version. Returns false when the text does
+  // not parse and nothing was replayed.
+  const rebaseYaml = (): boolean => {
+    if (!liveBase) return false;
+    const current = useDetailStore.getState().drafts[selKey];
+    if (current?.mode === 'yaml') {
+      const result = rebaseYamlDraft(current, liveBase);
+      if (!result.ok) {
+        setTabError(`The YAML does not parse, so your edits cannot be replayed yet. Fix it, then rebase again. ${result.error}`);
+        return false;
       }
-      throw err;
+      setDraft(result.draft);
+      if (result.skipped.length) {
+        showToast('warning', `${result.skipped.length} ${result.skipped.length === 1 ? 'edit' : 'edits'} could not be replayed: the list item no longer exists (${result.skipped.map((c) => displayPath(c.path)).join(', ')}).`);
+      }
     }
+    yamlLive.pinTo(liveBase);
+    return true;
   };
+  const rebaseYamlRef = useRef(rebaseYaml);
+  rebaseYamlRef.current = rebaseYaml;
+  // The review follows the YAML draft: a draft that disappears (applied,
+  // reset, or rebased back onto its base) takes the review flag with it, so
+  // it cannot reopen on the next keystroke.
+  const yamlReviewOpen = yamlReview && showYaml && draft?.mode === 'yaml' && !secretMasked;
+  useEffect(() => {
+    if (yamlReview && !yamlReviewOpen) setYamlReview(false);
+  }, [yamlReview, yamlReviewOpen]);
+  // While the review is open, or after an apply hit a 409, edits are replayed
+  // as soon as the object moves beyond status, so the review always shows
+  // what Apply writes. Status drift needs nothing: the review writes with the
+  // latest resourceVersion.
+  const liveRv = liveBase?.metadata.resourceVersion;
+  useEffect(() => {
+    const conflicted = yamlConflictRv !== null;
+    if (!conflicted && !yamlReviewOpen) return;
+    if (yamlLive.moved) {
+      setYamlConflictRv(null);
+      const draftBefore = useDetailStore.getState().drafts[selKey];
+      if (!rebaseYamlRef.current() || !draftBefore) return;
+      showToast(
+        'info',
+        useDetailStore.getState().drafts[selKey]
+          ? 'The object changed on the server. Your edits were replayed onto the latest version; review and apply again.'
+          : 'The object changed on the server and already holds your edits. Nothing is left to apply.',
+      );
+    } else if (conflicted && (liveRv ?? '') !== yamlConflictRv) {
+      setYamlConflictRv(null);
+    }
+  }, [yamlConflictRv, yamlReviewOpen, yamlLive.moved, liveRv, selKey]);
+  const yamlReviewBody = useMemo(
+    () => (yamlReviewOpen && draft ? yamlWithLatestVersion(draft.text, draft.base, liveBase) : ''),
+    [yamlReviewOpen, draft, liveBase],
+  );
   const revealToggle = isSecret ? (
     <FormControlLabel
       control={<Switch size="small" checked={reveal} onChange={(e) => setReveal(e.target.checked)} />}
@@ -316,7 +370,18 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
       }
       slotProps={{
         backdrop: { invisible: true },
-        paper: { sx: inline ? undefined : { ...drawerPaperSx, width: drawerWidth, maxWidth: '100vw' } },
+        paper: {
+          sx: inline ? undefined : { ...drawerPaperSx, width: drawerWidth, maxWidth: '100vw' },
+          // E opens the Manifest tab. On the paper, not the content, so it
+          // also works while the overlay drawer's paper itself holds focus.
+          onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
+            if (e.defaultPrevented || e.key.toLowerCase() !== 'e' || e.ctrlKey || e.metaKey || e.altKey || !sel || tab === 'manifest') return;
+            if (isTextEntryTargetWithin(e.target, e.currentTarget)) return;
+            e.preventDefault();
+            if (dataDirty) guardLeave(() => switchTab('manifest'));
+            else switchTab('manifest');
+          },
+        },
       }}
     >
       {sel && (
@@ -388,9 +453,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 <CopyValueButton text={sel.name} label={`Copy name ${sel.name}`} />
               </Stack>
             </Box>
-            {obj && (objGone || headerStatus(behaviorKind, obj)) && (
+            {statusWord && (
               <Box sx={{ flexShrink: 0, px: 0.5 }}>
-                <StatusChip status={objGone ? 'Deleted' : headerStatus(behaviorKind, obj)!} size="md" />
+                <StatusChip status={statusWord} size="md" />
               </Box>
             )}
             {(!inline || tab === 'map') && (
@@ -409,7 +474,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
               Deleted from the cluster — showing the last known state.
             </Alert>
           )}
-          {obj && !objGone && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
+          {obj && !objGone && (
+            <DetailQuickActions
+              target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }}
+              extra={CustomActions && <CustomActions ctx={sel.ctx} group={sel.group} version={sel.version} plural={sel.plural} obj={obj} />}
+            />
+          )}
           <Tabs
             value={tab}
             onChange={(_e, v) => (dataDirty ? guardLeave(() => switchTab(v as string)) : switchTab(v as string))}
@@ -464,7 +534,7 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                   showToast('success', `${sel.kind} ${sel.name} updated`);
                   void refetch();
                 }}
-                onConflict={() => void (isSecret ? refetchRevealed() : refetch())}
+                onConflict={refetchManifest}
               />
             )}
             {tab === 'overview' && overviewObj && overviewObj.metadata.uid === obj?.metadata.uid && <OverviewForKind kind={behaviorKind} obj={overviewObj} ctx={sel.ctx} crd={isCrd ? undefined : backingCrd} version={sel.version} />}
@@ -502,12 +572,17 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 draft={yamlDraftText}
                 readOnly={secretMasked}
                 onChange={(text) => {
-                  if (!liveBase || secretMasked) return;
-                  setDraft({ selKey, base: draft?.base ?? liveBase, baseText: draft?.baseText ?? yamlText, obj: draft?.obj ?? liveBase, text, mode: 'yaml' });
+                  if (!yamlBase || secretMasked) return;
+                  setDraft({ selKey, base: draft?.base ?? yamlBase, baseText: draft?.baseText ?? yamlText, obj: draft?.obj ?? yamlBase, text, mode: 'yaml' });
                 }}
-                applyLabel="Replace"
-                onApply={secretMasked ? undefined : handleApply}
-                onDryRun={sel && !secretMasked ? (text) => dryRun.mutateAsync({ ctx: sel.ctx, yamlBody: text }) : undefined}
+                onReview={
+                  secretMasked
+                    ? undefined
+                    : () => {
+                        if (useDetailStore.getState().drafts[selKey]?.mode === 'yaml') setYamlReview(true);
+                      }
+                }
+                notice={yamlLive.moved && !objGone ? <LiveChangeAlert editing={!!draft} onAction={rebaseYaml} /> : undefined}
                 schema={sel ? { ctx: sel.ctx, group: sel.group, version: sel.version, kind: sel.kind } : undefined}
                 toolbar={
                   <>
@@ -520,6 +595,27 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                     )}
                   </>
                 }
+              />
+            )}
+            {yamlReviewOpen && draft && (
+              <ReviewApplyDialog
+                sel={sel}
+                yamlBody={yamlReviewBody}
+                left={draft.baseText}
+                right={draft.text}
+                onClose={() => setYamlReview(false)}
+                onApplied={(updated) => {
+                  setYamlReview(false);
+                  // The editor continues from the version the apply stored.
+                  yamlLive.afterApply(updated);
+                  setDraft(undefined);
+                  showToast('success', `${sel.kind} ${sel.name} updated`);
+                  refetchManifest();
+                }}
+                onConflict={() => {
+                  setYamlConflictRv(liveRv ?? '');
+                  refetchManifest();
+                }}
               />
             )}
             {tab === 'events' && <EventsList events={events?.items ?? []} />}
@@ -613,6 +709,10 @@ const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, ver
   switch (kind) {
     case 'Deployment':
       return <DeploymentDetail obj={obj} ctx={ctx} />;
+    case 'StatefulSet':
+      return <StatefulSetDetail obj={obj} ctx={ctx} />;
+    case 'DaemonSet':
+      return <DaemonSetDetail obj={obj} ctx={ctx} />;
     case 'Pod':
       return <PodDetail obj={obj} ctx={ctx} />;
     case 'Node':
@@ -633,15 +733,16 @@ const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, ver
       return <ResourceQuotaDetail obj={obj} ctx={ctx} />;
     case 'LimitRange':
       return <LimitRangeDetail obj={obj} ctx={ctx} />;
-    default:
-      // cert-manager Certificates get an expiry/renewal headline the printer
-      // columns don't surface.
-      if (crd?.metadata.name === 'certificates.cert-manager.io') {
-        return <CertificateDetail obj={obj} ctx={ctx} crd={crd} version={version} />;
-      }
-      // Custom resources with their backing CRD loaded get a status-aware
+    case 'Namespace':
+      return <NamespaceDetail obj={obj} ctx={ctx} />;
+    default: {
+      if (!crd) return <GenericDetail obj={obj} ctx={ctx} />;
+      // Well-known custom resources (cert-manager, Gateway API, Argo, External
+      // Secrets, Flux) have dedicated views; the rest get a status-aware
       // overview driven by the CRD's printer columns.
-      return crd ? <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} /> : <GenericDetail obj={obj} ctx={ctx} />;
+      const View = customKindEntry(obj.apiVersion, obj.kind)?.view;
+      return View ? <View obj={obj} ctx={ctx} crd={crd} version={version} /> : <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} />;
+    }
   }
 });
 

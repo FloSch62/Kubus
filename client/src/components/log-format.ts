@@ -197,6 +197,96 @@ function parseLogfmtSegs(line: string): Seg[] | undefined {
   return segs;
 }
 
+export interface LogField {
+  key: string;
+  value: string;
+  kind: 'str' | 'num' | 'bool' | 'null' | 'json';
+}
+
+export interface LogFields {
+  format: 'json' | 'logfmt';
+  fields: LogField[];
+  /** logfmt: the text around the key=value pairs, if any. */
+  text?: string;
+}
+
+const MAX_FIELDS = 200;
+const MAX_FIELD_DEPTH = 6;
+
+function flattenJson(value: unknown, key: string, out: LogField[], depth: number): void {
+  if (out.length >= MAX_FIELDS) return;
+  if (value === null) {
+    out.push({ key, value: 'null', kind: 'null' });
+  } else if (typeof value === 'string') {
+    out.push({ key, value, kind: 'str' });
+  } else if (typeof value === 'number') {
+    out.push({ key, value: String(value), kind: 'num' });
+  } else if (typeof value === 'boolean') {
+    out.push({ key, value: String(value), kind: 'bool' });
+  } else if (Array.isArray(value)) {
+    // Scalar lists read best inline; lists of objects get one row per field.
+    if (depth >= MAX_FIELD_DEPTH || value.every((item) => item === null || typeof item !== 'object')) {
+      out.push({ key, value: JSON.stringify(value), kind: 'json' });
+    } else {
+      value.forEach((item, index) => flattenJson(item, `${key}[${index}]`, out, depth + 1));
+    }
+  } else if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length || depth >= MAX_FIELD_DEPTH) {
+      out.push({ key, value: JSON.stringify(value), kind: 'json' });
+    } else {
+      for (const [child, childValue] of entries) flattenJson(childValue, key ? `${key}.${child}` : child, out, depth + 1);
+    }
+  }
+}
+
+function unquoteLogfmt(value: string): string {
+  if (!value.startsWith('"')) return value;
+  try {
+    return JSON.parse(value) as string;
+  } catch {
+    return value.slice(1, value.endsWith('"') ? -1 : undefined);
+  }
+}
+
+/**
+ * Split a structured line into a field table: a JSON object (nested keys
+ * flattened to dotted paths) or logfmt key=value pairs. Plain lines return
+ * undefined.
+ */
+export function parseFields(line: string): LogFields | undefined {
+  const trimmed = line.trim();
+  if (trimmed.startsWith('{') && line.length <= 65_536) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length) {
+      const fields: LogField[] = [];
+      flattenJson(parsed, '', fields, 0);
+      return fields.length ? { format: 'json', fields } : undefined;
+    }
+  }
+  const pairs = [...line.matchAll(LOGFMT_PAIR)];
+  if (pairs.length < 2) return undefined;
+  const fields: LogField[] = [];
+  let text = '';
+  let last = 0;
+  for (const match of pairs) {
+    text += line.slice(last, match.index);
+    last = match.index + match[0].length;
+    if (fields.length >= MAX_FIELDS) continue;
+    const raw = match[2]!;
+    const value = unquoteLogfmt(raw);
+    const kind = raw.startsWith('"') ? 'str' : LOGFMT_NUM_RE.test(value) ? 'num' : value === 'true' || value === 'false' ? 'bool' : 'str';
+    fields.push({ key: match[1]!, value, kind });
+  }
+  text = (text + line.slice(last)).trim();
+  return { format: 'logfmt', fields, text: text || undefined };
+}
+
 /** Parse a raw log line into styled segments (ANSI > JSON > logfmt > plain). */
 export function parseLine(line: string): Seg[] {
   if (ANSI_RE.test(line)) return parseAnsi(line);

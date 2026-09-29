@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { alpha } from '@mui/material/styles';
 import Alert from '@mui/material/Alert';
@@ -54,9 +54,10 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
-  resolveLogTargetPods,
   useCordon,
   useDebugImages,
   useDebugPod,
@@ -77,6 +78,7 @@ import { useIsProtected } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
 import { showErrorToast, showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { findOwningScaler, type OwningScaler } from './owning-scaler.js';
 import { FileCopyDialog } from './FileCopyDialog.js';
 import { TriggerCronJobDialog } from './TriggerCronJobDialog.js';
 import { PortForwardDialog, isForwardableKind } from './PortForwardDialog.js';
@@ -84,10 +86,14 @@ import { execTargetContainer, podContainerNames } from '../kube-display.js';
 import { isBuiltInDebugImage, mergeDebugPresets, normalizeDebugImageName } from '../debug-presets.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
+import { openLogsForTarget as openTargetLogs } from '../actions/open-logs.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
+import { diffSideFor, openCompare } from '../compare-link.js';
 import { labelSelectorMatches, type LabelSelector } from './detail/selectors.js';
 import { IS_WINDOWS } from '../platform.js';
+import { rowKeyForEvent, type RowKeyAction } from '../row-keys.js';
+import { RowKeyHint, rowKeyItemProps } from './RowKeyHint.js';
 
 export interface RowActionTarget {
   ctx: string;
@@ -104,6 +110,12 @@ export interface RowActionMenuProps {
   anchorPosition?: { top: number; left: number } | null;
   open: boolean;
   onClose: () => void;
+  /** Print the row keys on the items and accept them in the open menu (list rows, where the keys work). */
+  keyHints?: boolean;
+  /** Run this row-key action on mount, through the same dialogs, without showing the menu. */
+  runAction?: RowKeyAction;
+  /** Open the row on its Manifest tab; the item shows only where the caller can do that. */
+  onOpenManifest?: () => void;
 }
 
 const LOG_TARGET_KINDS = new Set<string>(['Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service', 'Job']);
@@ -117,31 +129,9 @@ async function openLogsForTarget(target: RowActionTarget, addTab: (tab: DockTab)
   const { ctx, kind, obj } = target;
   const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === kind ? kind : undefined;
   if (!actionKind || !isLogTargetKind(actionKind)) return;
-  const name = obj.metadata.name;
   const namespace = obj.metadata.namespace;
   if (!namespace) throw new Error(`${kind} has no namespace`);
-  const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
-  if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
-  const byNamespace = new Map<string, typeof pods>();
-  for (const pod of pods) {
-    const namespacePods = byNamespace.get(pod.namespace);
-    if (namespacePods) namespacePods.push(pod);
-    else byNamespace.set(pod.namespace, [pod]);
-  }
-  for (const [ns, namespacePods] of byNamespace) {
-    const podNames = namespacePods.map((pod) => pod.name);
-    addTab({
-      kind: 'logs',
-      id: dockTabId(),
-      title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${actionKind}/${name}`,
-      ctx,
-      namespace: ns,
-      pods: podNames,
-      sources: namespacePods.map((pod) => ({ pod: pod.name, containers: pod.containers })),
-      target: { kind: actionKind, name },
-      follow: true,
-    });
-  }
+  await openTargetLogs({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name: obj.metadata.name }, addTab);
 }
 
 /** Inline quick action: stream logs without opening the actions menu. Renders nothing for kinds without logs. */
@@ -205,7 +195,7 @@ function NodeShellConfirmDialog({
 }
 
 /** Soft-tonal labeled button for the detail panel's quick-action bar. */
-function QuickActionButton({
+export function QuickActionButton({
   icon,
   label,
   onClick,
@@ -247,8 +237,9 @@ function QuickActionButton({
  * The detail panel's action bar: the two or three operations someone opens a
  * resource for, as labeled buttons, with everything else behind the `⋮` menu
  * at the right end. Kind-specific actions lead; the first one is emphasized.
+ * Custom resources bring their own through `extra` (Sync, Promote, Reconcile).
  */
-export function DetailQuickActions({ target }: { target: RowActionTarget }) {
+export function DetailQuickActions({ target, extra }: { target: RowActionTarget; extra?: ReactNode }) {
   const [dialog, setDialog] = useState<'forward' | 'scale' | 'trigger' | 'node-shell' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
@@ -350,6 +341,7 @@ export function DetailQuickActions({ target }: { target: RowActionTarget }) {
           }
         />
       )}
+      {extra}
       <Box sx={{ flex: 1 }} />
       <RowActions target={target} />
       <NodeShellConfirmDialog
@@ -369,7 +361,7 @@ export function DetailQuickActions({ target }: { target: RowActionTarget }) {
   );
 }
 
-export function RowActions({ target }: { target: RowActionTarget }) {
+export function RowActions({ target, keyHints, onOpenManifest }: { target: RowActionTarget; keyHints?: boolean; onOpenManifest?: () => void }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -389,13 +381,15 @@ export function RowActions({ target }: { target: RowActionTarget }) {
       >
         <MoreVertIcon fontSize="small" />
       </IconButton>
-      {anchor && <RowActionMenu target={target} anchorEl={anchor} open={open} onClose={() => setOpen(false)} />}
+      {anchor && (
+        <RowActionMenu target={target} anchorEl={anchor} open={open} onClose={() => setOpen(false)} keyHints={keyHints} onOpenManifest={onOpenManifest} />
+      )}
     </>
   );
 }
 
-export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose }: RowActionMenuProps) {
-  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'node-debug' | 'files' | 'trigger' | null>(null);
+export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose, keyHints, runAction, onOpenManifest }: RowActionMenuProps) {
+  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'node-debug' | 'files' | 'trigger' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
 
   const del = useDeleteResource();
@@ -450,6 +444,54 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
       setLogsBusy(false);
     }
   };
+  const openShell = () =>
+    addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: podExecContainer });
+
+  // A row key runs the same flow as its menu item, through the same dialogs
+  // (a keyed restart confirms first, a stray key is easier than a stray
+  // click). False when this row has no such action.
+  const runRowKey = (action: RowKeyAction): boolean => {
+    switch (action) {
+      case 'logs':
+        if (!canViewLogs) return false;
+        void openLogs();
+        return true;
+      case 'shell':
+        if (podExecContainer) openShell();
+        else if (isNode) setDialog('node-shell');
+        else return false;
+        return true;
+      case 'forward':
+        if (!canForward) return false;
+        setDialog('forward');
+        return true;
+      case 'scale':
+        if (!scalable) return false;
+        setDialog('scale');
+        return true;
+      case 'restart':
+        if (restartable) setDialog('restart');
+        else if (isReplicaSet) setDialog('restart-rs');
+        else return false;
+        return true;
+      case 'manifest':
+        if (!onOpenManifest) return false;
+        onOpenManifest();
+        return true;
+      case 'delete':
+        setDialog('delete');
+        return true;
+    }
+  };
+  const runRowKeyRef = useRef(runRowKey);
+  runRowKeyRef.current = runRowKey;
+  const ranRef = useRef(false);
+  useEffect(() => {
+    if (!runAction || ranRef.current) return;
+    ranRef.current = true;
+    runRowKeyRef.current(runAction);
+  }, [runAction]);
+  const hint = (action: RowKeyAction) => (keyHints ? <RowKeyHint action={action} /> : null);
 
   return (
     <>
@@ -460,9 +502,22 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         open={open}
         onClose={close}
         onClick={(e) => e.stopPropagation()}
+        slotProps={{
+          list: {
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (!keyHints || e.repeat) return;
+              const action = rowKeyForEvent(e);
+              if (!action || !runRowKey(action)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              close();
+            },
+          },
+        }}
       >
         {canViewLogs && (
           <MenuItem
+            {...rowKeyItemProps('logs', keyHints)}
             onClick={() => {
               void openLogs();
               close();
@@ -473,12 +528,14 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <SubjectIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Logs</ListItemText>
+            {hint('logs')}
           </MenuItem>
         )}
         {podExecContainer && (
           <MenuItem
+            {...rowKeyItemProps('shell', keyHints)}
             onClick={() => {
-              addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${name}`, ctx, namespace: namespace ?? '', pod: name, container: podExecContainer });
+              openShell();
               close();
             }}
           >
@@ -486,6 +543,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <TerminalIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Shell</ListItemText>
+            {hint('shell')}
           </MenuItem>
         )}
         {isPod && (
@@ -516,6 +574,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         )}
         {canForward && (
           <MenuItem
+            {...rowKeyItemProps('forward', keyHints)}
             onClick={() => {
               setDialog('forward');
               close();
@@ -525,6 +584,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <CableIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Port forward…</ListItemText>
+            {hint('forward')}
           </MenuItem>
         )}
         {scalable && scaler && (
@@ -542,6 +602,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         )}
         {scalable && scaler && (
           <MenuItem
+            {...rowKeyItemProps('scale', keyHints)}
             onClick={() => {
               setDialog('scale');
               close();
@@ -551,10 +612,12 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <OpenInFullIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Override replicas…</ListItemText>
+            {hint('scale')}
           </MenuItem>
         )}
         {scalable && !scaler && (
           <MenuItem
+            {...rowKeyItemProps('scale', keyHints)}
             onClick={() => {
               setDialog('scale');
               close();
@@ -564,10 +627,12 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <OpenInFullIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Scale…</ListItemText>
+            {hint('scale')}
           </MenuItem>
         )}
         {restartable && (
           <MenuItem
+            {...rowKeyItemProps('restart', keyHints)}
             onClick={() => {
               restart.mutate(
                 { ctx, body: { kind: kind as 'Deployment', namespace: namespace ?? '', name } },
@@ -580,6 +645,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <RestartAltIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Rollout restart</ListItemText>
+            {hint('restart')}
           </MenuItem>
         )}
         {isDeployment && (
@@ -598,6 +664,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         )}
         {isReplicaSet && (
           <MenuItem
+            {...rowKeyItemProps('restart', keyHints)}
             onClick={() => {
               setDialog('restart-rs');
               close();
@@ -607,6 +674,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <RestartAltIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Restart pods…</ListItemText>
+            {hint('restart')}
           </MenuItem>
         )}
         {restartable && (
@@ -680,6 +748,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         )}
         {isNode && (
           <MenuItem
+            {...rowKeyItemProps('shell', keyHints)}
             onClick={() => {
               setDialog('node-shell');
               close();
@@ -689,6 +758,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <TerminalIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Node shell…</ListItemText>
+            {hint('shell')}
           </MenuItem>
         )}
         {isNode && (
@@ -715,6 +785,21 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               <DownhillSkiingIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText>Drain…</ListItemText>
+          </MenuItem>
+        )}
+        {onOpenManifest && (
+          <MenuItem
+            {...rowKeyItemProps('manifest', keyHints)}
+            onClick={() => {
+              onOpenManifest();
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <DataObjectIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Edit manifest</ListItemText>
+            {hint('manifest')}
           </MenuItem>
         )}
         <MenuItem
@@ -760,8 +845,20 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
           </ListItemIcon>
           <ListItemText>Copy kubectl get command</ListItemText>
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            openCompare(diffSideFor({ ctx, group: target.group, version: target.version, plural: target.plural, namespace, name }));
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <DifferenceOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Compare with…</ListItemText>
+        </MenuItem>
         <Divider />
         <MenuItem
+          {...rowKeyItemProps('delete', keyHints)}
           onClick={() => {
             setDialog('delete');
             close();
@@ -772,6 +869,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <DeleteIcon fontSize="small" color="error" />
           </ListItemIcon>
           <ListItemText>Delete…</ListItemText>
+          {hint('delete')}
         </MenuItem>
       </Menu>
 
@@ -795,6 +893,34 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
               onSuccess: () => {
                 setDialog(null);
                 ok(`Deleted ${name}`);
+              },
+              onError: (e) => {
+                setDialog(null);
+                fail(e);
+              },
+            },
+          )
+        }
+      />
+      <ConfirmDialog
+        open={dialog === 'restart'}
+        title={`Restart ${kind}`}
+        message={
+          <>
+            Trigger a rolling restart of <b>{namespace ? `${namespace}/` : ''}{name}</b> on cluster <b>{ctx}</b>? Pods are replaced one by one.
+          </>
+        }
+        confirmLabel="Restart"
+        busy={restart.isPending}
+        confirmText={isProtected ? name : undefined}
+        onClose={() => setDialog(null)}
+        onConfirm={() =>
+          restart.mutate(
+            { ctx, body: { kind: kind as 'Deployment', namespace: namespace ?? '', name } },
+            {
+              onSuccess: () => {
+                setDialog(null);
+                ok(`Rollout restart triggered for ${name}`);
               },
               onError: (e) => {
                 setDialog(null);
@@ -860,21 +986,6 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
   );
 }
 
-interface HpaSpec {
-  scaleTargetRef?: { apiVersion?: string; kind?: string; name?: string };
-  minReplicas?: number;
-  maxReplicas?: number;
-}
-
-interface OwningScaler {
-  /** The resource the user should edit: the ScaledObject when the HPA is KEDA-managed, else the HPA itself. */
-  kind: 'ScaledObject' | 'HorizontalPodAutoscaler';
-  name: string;
-  gvr: { group: string; version: string; plural: string };
-  minReplicas?: number;
-  maxReplicas?: number;
-}
-
 /**
  * Resolve the HPA or KEDA ScaledObject that owns a workload's replica count, if any.
  * `pending` covers only the initial lookup; a failed lookup resolves to no scaler so
@@ -887,28 +998,6 @@ function useOwningScaler(target: RowActionTarget | undefined): { scaler: OwningS
       : undefined,
   );
   return { scaler: target ? findOwningScaler(target, hpas?.items) : undefined, pending: !!target && isLoading };
-}
-
-function findOwningScaler(target: RowActionTarget, hpas: KubeObject[] | undefined): OwningScaler | undefined {
-  const hpa = hpas?.find((h) => {
-    const ref = (h.spec as HpaSpec | undefined)?.scaleTargetRef;
-    if (ref?.kind !== target.kind || ref.name !== target.obj.metadata.name) return false;
-    const refGroup = ref.apiVersion ? (ref.apiVersion.includes('/') ? ref.apiVersion.split('/')[0] : '') : undefined;
-    return refGroup === undefined || refGroup === target.group;
-  });
-  if (!hpa) return undefined;
-  const spec = hpa.spec as HpaSpec | undefined;
-  const scaledObject =
-    (hpa.metadata.ownerReferences ?? []).find((o) => o.kind === 'ScaledObject')?.name ?? hpa.metadata.labels?.['scaledobject.keda.sh/name'];
-  return scaledObject
-    ? { kind: 'ScaledObject', name: scaledObject, gvr: { group: 'keda.sh', version: 'v1alpha1', plural: 'scaledobjects' }, minReplicas: spec?.minReplicas, maxReplicas: spec?.maxReplicas }
-    : {
-        kind: 'HorizontalPodAutoscaler',
-        name: hpa.metadata.name,
-        gvr: { group: 'autoscaling', version: 'v2', plural: 'horizontalpodautoscalers' },
-        minReplicas: spec?.minReplicas,
-        maxReplicas: spec?.maxReplicas,
-      };
 }
 
 function ScaleDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {

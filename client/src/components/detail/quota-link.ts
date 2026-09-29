@@ -24,3 +24,23 @@ export function quotaLinksFor(message: string | undefined, namespace: string | u
     onClick: () => open((ctx) => ({ ctx, group: '', version: 'v1', plural: 'resourcequotas', kind: 'ResourceQuota', name, namespace })),
   }));
 }
+
+/** Problem-banner links to nodes a problem names (a DaemonSet pod's target node). */
+export function nodeLinksFor(nodes: string[] | undefined, open: (selection: (ctx: string) => ResourceSelection) => void): ProblemLink[] | undefined {
+  if (!nodes?.length) return undefined;
+  return nodes.map((name) => ({
+    label: `Open node ${name}`,
+    onClick: () => open((ctx) => ({ ctx, group: '', version: 'v1', plural: 'nodes', kind: 'Node', name })),
+  }));
+}
+
+/** Quota and node links together, in that order; undefined when there are none. */
+export function problemLinksFor(
+  message: string | undefined,
+  nodes: string[] | undefined,
+  namespace: string | undefined,
+  open: (selection: (ctx: string) => ResourceSelection) => void,
+): ProblemLink[] | undefined {
+  const links = [...(quotaLinksFor(message, namespace, open) ?? []), ...(nodeLinksFor(nodes, open) ?? [])];
+  return links.length ? links : undefined;
+}

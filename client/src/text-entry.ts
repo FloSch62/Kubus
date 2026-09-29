@@ -25,3 +25,22 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 export function isEditorOrTerminalTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && !!target.closest('.xterm, .monaco-editor');
 }
+
+/**
+ * isTextEntryTarget for a handler that itself sits on a dialog-like surface
+ * (a temporary drawer's paper is role="dialog"): that surface does not
+ * count, but typing targets and dialogs or menus opened from it still do.
+ */
+export function isTextEntryTargetWithin(target: EventTarget | null, surface: Element): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const modal = target.closest('[role="dialog"], [role="menu"], [role="listbox"]');
+  if (modal && modal !== surface) return true;
+  const tag = target.tagName;
+  if (tag === 'INPUT' && !NON_TEXT_INPUT_TYPES.has((target as HTMLInputElement).type)) return true;
+  return (
+    target.isContentEditable ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    !!target.closest('[contenteditable="true"], [role="textbox"], .monaco-editor, .xterm')
+  );
+}

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, PrinterColumn, ResourceKindInfo } from '@kubus/shared';
@@ -38,7 +38,7 @@ const fixtures = vi.hoisted(() => ({
   }) },
 }));
 
-const effects = vi.hoisted(() => ({ toast: vi.fn() }));
+const effects = vi.hoisted(() => ({ toast: vi.fn(), copy: vi.fn(async (_text: string) => true), rowKeyResults: [] as Array<boolean | undefined> }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useClusterSignals: () => ({ data: undefined }),
@@ -54,18 +54,29 @@ vi.mock('../../../client/src/api/queries.js', () => ({
 }));
 
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: effects.toast }));
+vi.mock('../../../client/src/clipboard.js', () => ({ copyToClipboard: effects.copy }));
 vi.mock('../../../client/src/components/RowActions.js', () => ({
   isLogTargetKind: (kind: string) => ['Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'Service'].includes(kind),
   RowLogsButton: ({ target }: { target: { obj: KubeObject } }) => <button>Quick logs {target.obj.metadata.name}</button>,
-  RowActions: ({ target }: { target: { obj: KubeObject } }) => <button>Actions {target.obj.metadata.name}</button>,
-  RowActionMenu: ({ target, open, onClose }: { target: { obj: KubeObject }; open: boolean; onClose: () => void }) =>
-    open ? <button onClick={onClose}>Context actions {target.obj.metadata.name}</button> : null,
+  RowActions: ({ target, onOpenManifest }: { target: { obj: KubeObject }; onOpenManifest?: () => void }) => (
+    <>
+      <button>Actions {target.obj.metadata.name}</button>
+      {onOpenManifest && <button onClick={onOpenManifest}>Edit manifest {target.obj.metadata.name}</button>}
+    </>
+  ),
+  RowActionMenu: ({ target, open, onClose, runAction }: { target: { obj: KubeObject }; open: boolean; onClose: () => void; runAction?: string }) => (
+    <>
+      {open && <button onClick={onClose}>Context actions {target.obj.metadata.name}</button>}
+      {runAction && <output>Row key {runAction} on {target.obj.metadata.name}</output>}
+    </>
+  ),
 }));
 vi.mock('../../../client/src/components/ResourceTable.js', () => ({
   ResourceTable: (props: {
     rows: Row[];
     columns: Array<{ field: string; valueGetter?: (...args: unknown[]) => unknown; renderCell?: (params: { row: Row; value?: unknown }) => ReactNode }>;
     toolbar?: ReactNode;
+    selectionBar?: ReactNode;
     onSelectionChange?: (rows: Row[]) => void;
     selectedRows?: Row[];
     onFilterChange?: (value: string) => void;
@@ -73,12 +84,14 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
     onRowClick?: (row: Row) => void;
     onRowActivate?: (row: Row) => void;
     onRowContextMenu?: (row: Row, position: { clientX: number; clientY: number }) => void;
+    onRowKey?: (row: Row, action: 'delete' | 'scale' | 'manifest') => boolean;
     hiddenFields?: string[];
     activeRowId?: string;
     loading?: boolean;
   }) => (
     <section data-testid="resource-table">
       <div>{props.toolbar}</div>
+      <div>{props.selectionBar}</div>
       <output data-testid="table-state">
         {JSON.stringify({ hidden: props.hiddenFields, active: props.activeRowId, loading: props.loading, selected: props.selectedRows?.map((row) => row.obj.metadata.name) })}
       </output>
@@ -90,6 +103,11 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
       <button onClick={() => props.onRowClick?.(props.rows[0]!)}>Mock open row</button>
       <button onClick={() => props.onRowActivate?.(props.rows[0]!)}>Mock activate row</button>
       <button onClick={() => props.onRowContextMenu?.(props.rows[0]!, { clientX: 20, clientY: 30 })}>Mock context row</button>
+      {(['delete', 'scale', 'manifest'] as const).map((action) => (
+        <button key={action} onClick={() => effects.rowKeyResults.push(props.onRowKey?.(props.rows[0]!, action))}>
+          Mock key {action}
+        </button>
+      ))}
       {props.rows[0] && props.columns.flatMap((column) => {
         if (!column.renderCell) return [];
         const value = column.valueGetter?.(undefined, props.rows[0], column, {});
@@ -132,6 +150,12 @@ vi.mock('../../../client/src/components/BatchCreateDialog.js', () => ({
       Batch create {kind}
       <button onClick={onClose}>Close batch mock</button>
     </div>
+  ),
+}));
+
+vi.mock('../../../client/src/components/BulkScaleDialog.js', () => ({
+  BulkScaleDialog: ({ rows }: { rows: Row[] }) => (
+    <output data-testid="scale-rows">{rows.map((r) => `${r.obj.metadata.name}:${String((r.obj.spec as { replicas?: number }).replicas)}`).join(',')}</output>
   ),
 }));
 
@@ -200,6 +224,7 @@ beforeEach(() => {
   fixtures.del.mutateAsync.mockClear();
   fixtures.restart.mutateAsync.mockClear();
   effects.toast.mockClear();
+  effects.rowKeyResults = [];
   useClustersStore.setState({
     selected: ['dev', 'prod'],
     namespaces: ['team-a'],
@@ -210,10 +235,12 @@ beforeEach(() => {
     sortModels: {},
     columnVisibility: {},
     columnWidths: {},
+    labelColumns: {},
   });
+  effects.copy.mockClear();
   useNavigationStore.setState({ favorites: [], savedViews: [] });
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined, tabRequest: undefined });
   Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0) });
   Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: (id: number) => window.clearTimeout(id) });
 });
@@ -333,6 +360,83 @@ describe('ResourceListPage', () => {
     expect(screen.getByTestId('table-state')).toHaveTextContent('"selected":["web-b"]');
   });
 
+  it('offers Scale and Copy rows for checked Deployments, with label columns in the copy', async () => {
+    const deployment = resource('apps', 'v1', 'deployments', 'Deployment');
+    fixtures.resources = [deployment];
+    fixtures.byContext = { dev: [deployment], prod: [deployment] };
+    fixtures.rows = [row('web-10', 'dev', 'team-a', 'Deployment'), row('web-2', 'prod', 'team-b', 'Deployment')];
+    useUiPrefsStore.setState({ labelColumns: { '/r/apps/v1/deployments': [{ source: 'label', key: 'tier' }] } });
+    renderPage('/r/apps/v1/deployments');
+    expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a column for any label or annotation key' })).toHaveTextContent('Columns (1)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.getByRole('button', { name: 'Scale (2)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy rows (2)' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As CSV/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalled());
+    const [header, first] = effects.copy.mock.calls[0]![0].split('\n');
+    expect(header).toBe('Name,Namespace,Cluster,Ready,Up-to-date,Available,tier,Labels,CPU,Memory,Age');
+    expect(first).toMatch(/^web-10,team-a,dev,.*,frontend,app=web tier=frontend,/);
+    expect(effects.toast).toHaveBeenCalledWith('success', 'Copied 2 rows × 11 columns as CSV');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+    expect(useNavigationStore.getState().savedViews[0]?.grid?.labelColumns).toEqual([{ source: 'label', key: 'tier' }]);
+  });
+
+  it('acts on the checked rows as they are now, not as they were when checked', async () => {
+    const deployment = resource('apps', 'v1', 'deployments', 'Deployment');
+    fixtures.resources = [deployment];
+    fixtures.byContext = { dev: [deployment] };
+    const scaled = (name: string, replicas: number): Row => {
+      const r = row(name, 'dev', 'team-a', 'Deployment');
+      return { ...r, obj: { ...r.obj, spec: { replicas } } };
+    };
+    fixtures.rows = [scaled('api', 0), scaled('web', 1)];
+    // A fresh element per render, so the rerender below reaches the page.
+    const page = () => (
+      <MemoryRouter initialEntries={['/r/apps/v1/deployments']}>
+        <Routes>
+          <Route path="/r/:group/:version/:plural" element={<ResourceListPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = render(page());
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.getByRole('region', { name: 'Selected rows' })).toHaveTextContent('2 selected');
+
+    // While checked: api is scaled up and web is deleted.
+    fixtures.rows = [scaled('api', 3)];
+    rerender(page());
+    expect(screen.getByRole('region', { name: 'Selected rows' })).toHaveTextContent('1 selected');
+    fireEvent.click(screen.getByRole('button', { name: 'Scale (1)' }));
+    expect(screen.getByTestId('scale-rows')).toHaveTextContent('api:3');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy rows (1)' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As CSV/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalled());
+    expect(effects.copy.mock.calls[0]![0].trim().split('\n').map((line) => line.split(',')[0])).toEqual(['Name', 'api']);
+  });
+
+  it('keeps bulk scale to Deployments and StatefulSets', () => {
+    renderPage('/r/core/v1/pods');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy rows (2)' })).toBeInTheDocument();
+  });
+
+  it('keeps bulk actions in their own bar that clears the selection', () => {
+    renderPage('/r/apps/v1/deployments');
+    expect(screen.queryByRole('region', { name: 'Selected rows' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    const bar = screen.getByRole('region', { name: 'Selected rows' });
+    expect(bar).toHaveTextContent('2 selected');
+    expect(within(bar).getByRole('button', { name: 'Delete (2)' })).toBeInTheDocument();
+    // The page's own buttons stay out of the bar.
+    expect(within(bar).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Clear selection' }));
+    expect(screen.queryByRole('region', { name: 'Selected rows' })).not.toBeInTheDocument();
+  });
+
   it('builds custom printer columns and links the API drawer to its CRD', () => {
     const widget = resource('example.io', 'v1', 'widgets', 'Widget', true);
     fixtures.resources = [widget];
@@ -388,5 +492,34 @@ describe('ResourceListPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close batch mock' }));
       view.unmount();
     }
+  });
+});
+
+describe('ResourceListPage row keys', () => {
+  it('runs row keys through the row menu, only where the row has the action', () => {
+    renderPage('/r/core/v1/pods');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key delete' }));
+    expect(effects.rowKeyResults).toEqual([true]);
+    expect(screen.getByText('Row key delete on pod-a')).toBeInTheDocument();
+    // Pods do not scale: the key is refused and stays free for the filter shortcut.
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key scale' }));
+    expect(effects.rowKeyResults).toEqual([true, false]);
+    expect(screen.queryByText('Row key scale on pod-a')).not.toBeInTheDocument();
+  });
+
+  it('opens the focused row on its Manifest tab with E, from the key and from the menu item', async () => {
+    renderPage('/r/core/v1/pods?q=pod');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock key manifest' }));
+    expect(effects.rowKeyResults).toEqual([true]);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('dt=manifest'));
+    expect(screen.getByTestId('location')).toHaveTextContent('sel=dev%7Cteam-a%7Cpod-a');
+    expect(screen.getByTestId('location')).toHaveTextContent('q=pod');
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ name: 'pod-a', kind: 'Pod' });
+    expect(useDetailStore.getState().tabRequest).toMatchObject({ selKey: 'dev||v1|pods|team-a|pod-a', tab: 'manifest' });
+    expect(useDetailStore.getState().focusSeq).toBe(1);
+
+    act(() => useDetailStore.setState({ tabRequest: undefined }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit manifest pod-a' }));
+    expect(useDetailStore.getState().tabRequest).toMatchObject({ tab: 'manifest' });
   });
 });

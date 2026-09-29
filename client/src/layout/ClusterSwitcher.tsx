@@ -219,6 +219,7 @@ export function ClusterSwitcher() {
   const selected = useClustersStore((s) => s.selected);
   const toggleContext = useClustersStore((s) => s.toggleContext);
   const setSelected = useClustersStore((s) => s.setSelected);
+  const seedKubeconfigNamespaces = useClustersStore((s) => s.seedKubeconfigNamespaces);
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const setContextSetting = useClustersStore((s) => s.setContextSetting);
   const contextOrder = useClustersStore((s) => s.contextOrder);
@@ -265,6 +266,12 @@ export function ClusterSwitcher() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contexts, selected]);
+
+  // A context selected for the first time starts on the namespace its
+  // kubeconfig entry names (`kubectl config set-context --namespace`).
+  useEffect(() => {
+    if (contexts) seedKubeconfigNamespaces(contexts);
+  }, [contexts, selected, seedKubeconfigNamespaces]);
 
   const { sections, flat, matches } = useMemo(
     () => buildPicker(contexts ?? [], contextSettings, contextOrder, query),

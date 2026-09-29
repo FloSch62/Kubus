@@ -25,6 +25,7 @@ const HELP_SECTIONS = [
       ['/ns:prod cluster:staging', 'Namespace contains prod and cluster contains staging'],
       ['/label:app=nginx', 'Label app is nginx. Use * as a wildcard in values.'],
       ['/label:app', 'Resource has a label key containing app'],
+      ['/uid:3f2a9c1e', 'Object UID contains 3f2a9c1e. Events also match on the object they are about.'],
     ],
   },
   {

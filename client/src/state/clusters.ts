@@ -35,6 +35,12 @@ interface ClustersState {
    * edits apply to every selected cluster.
    */
   namespacesByContext: Record<string, string[]>;
+  /**
+   * Contexts whose kubeconfig namespace has been offered as their initial
+   * filter. A context is seeded once, the first time it is selected; after
+   * that the user's own choice (including "all namespaces") sticks.
+   */
+  namespaceSeeded: string[];
   themeMode: 'light' | 'dark' | 'os';
   /** Per-context UI settings keyed by context name. */
   contextSettings: Record<string, ContextSettings>;
@@ -50,6 +56,8 @@ interface ClustersState {
   toggleContext: (name: string) => void;
   /** Set the namespace filter for the given clusters (default: every selected one). */
   setNamespaces: (namespaces: string[], contexts?: string[]) => void;
+  /** Seed newly selected clusters' filters from their kubeconfig namespaces (see `namespaceSeeded`). */
+  seedKubeconfigNamespaces: (contexts: KubeconfigNamespace[]) => void;
   // Cycles light → dark → os → light
   toggleTheme: () => void;
   // setTheme directly sets the theme mode to any valid value ('light', 'dark', 'os')
@@ -59,6 +67,32 @@ interface ClustersState {
   setPickerLayout: (layout: PickerLayout) => void;
   /** Forget all client-side state for a context (after it was removed from the kubeconfig). */
   removeContext: (name: string) => void;
+}
+
+/** A kubeconfig context and the namespace it names, if any. */
+export interface KubeconfigNamespace {
+  name: string;
+  namespace?: string;
+}
+
+/**
+ * The first selection of a context adopts the namespace its kubeconfig entry
+ * names, unless that cluster already has a filter of its own. Contexts are
+ * marked seeded either way, so the kubeconfig never overrides a later choice.
+ * Returns undefined when nothing changes.
+ */
+export function kubeconfigNamespaceSeed(
+  state: Pick<ClustersState, 'selected' | 'namespaceSeeded' | 'namespacesByContext'>,
+  contexts: KubeconfigNamespace[],
+): Pick<ClustersState, 'namespaceSeeded' | 'namespacesByContext'> | undefined {
+  const fresh = contexts.filter((c) => state.selected.includes(c.name) && !state.namespaceSeeded.includes(c.name));
+  if (!fresh.length) return undefined;
+  const namespacesByContext = { ...state.namespacesByContext };
+  for (const c of fresh) {
+    const namespace = c.namespace?.trim();
+    if (namespace && !namespacesByContext[c.name]?.length) namespacesByContext[c.name] = [namespace];
+  }
+  return { namespaceSeeded: [...state.namespaceSeeded, ...fresh.map((c) => c.name)], namespacesByContext };
 }
 
 interface WindowClusterContext {
@@ -137,6 +171,7 @@ export const useClustersStore = create<ClustersState>()(
       selected: initialWindowClusterContext.selected,
       namespaces: initialWindowClusterContext.namespaces,
       namespacesByContext: initialWindowClusterContext.namespacesByContext ?? {},
+      namespaceSeeded: [],
       themeMode: 'os',
       contextSettings: {},
       contextOrder: [],
@@ -155,6 +190,11 @@ export const useClustersStore = create<ClustersState>()(
             else delete byContext[ctx];
           }
           return { namespacesByContext: byContext, namespaces: namespacesForContexts(byContext, s.selected) };
+        }),
+      seedKubeconfigNamespaces: (contexts) =>
+        set((s) => {
+          const seed = kubeconfigNamespaceSeed(s, contexts);
+          return seed ? { ...seed, namespaces: namespacesForContexts(seed.namespacesByContext, s.selected) } : s;
         }),
       //Ternary operator to cycle through three values: 'light' → 'dark' → 'os' → 'light'…
       toggleTheme: () => set((s) => ({ themeMode: s.themeMode === 'light' ? 'dark' : s.themeMode === 'dark' ? 'os' : 'light' })),
@@ -175,6 +215,7 @@ export const useClustersStore = create<ClustersState>()(
           return {
             selected,
             namespacesByContext,
+            namespaceSeeded: s.namespaceSeeded.filter((n) => n !== name),
             namespaces: namespacesForContexts(namespacesByContext, selected),
             contextSettings,
             contextOrder: s.contextOrder.filter((n) => n !== name),
@@ -187,19 +228,26 @@ export const useClustersStore = create<ClustersState>()(
       storage: createJSONStorage(() => sharedClusterStorage),
       // A window's active cluster/namespace context is deliberately absent:
       // rehydrating app-wide cluster metadata must not navigate other windows.
-      partialize: ({ themeMode, contextSettings, contextOrder, pickerLayout }) => ({
+      partialize: ({ themeMode, contextSettings, contextOrder, pickerLayout, namespaceSeeded }) => ({
         themeMode,
         contextSettings,
         contextOrder,
         pickerLayout,
+        namespaceSeeded,
       }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted as Partial<ClustersState>),
-        selected: current.selected,
-        namespaces: current.namespaces,
-        namespacesByContext: current.namespacesByContext,
-      }),
+      merge: (persisted, current) => {
+        const stored = persisted as Partial<ClustersState> | undefined;
+        return {
+          ...current,
+          ...stored,
+          selected: current.selected,
+          namespaces: current.namespaces,
+          namespacesByContext: current.namespacesByContext,
+          // State from before seeding existed: the clusters already open were
+          // chosen by hand, so leave their filters alone.
+          namespaceSeeded: stored ? (stored.namespaceSeeded ?? current.selected) : current.namespaceSeeded,
+        };
+      },
     },
   ),
 );

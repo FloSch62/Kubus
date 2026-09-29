@@ -30,6 +30,7 @@ import { cronHumanText, cronNextRuns } from '../cron.js';
 import { showToast } from '../state/toast.js';
 import { formatRelative } from './AgeCell.js';
 import { YamlEditor } from './YamlEditor.js';
+import { isSubmitChord } from '../editor-keys.js';
 
 type BatchKind = 'Job' | 'CronJob';
 
@@ -241,7 +242,19 @@ export function BatchCreateDialog({
   );
 
   return (
-    <Dialog open onClose={onClose} maxWidth="md" fullWidth slotProps={{ paper: { sx: { height: '85vh' } } }}>
+    <Dialog
+      open
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      slotProps={{ paper: { sx: { height: '85vh' } } }}
+      onKeyDown={(e) => {
+        // Mod+Enter creates from the form; the YAML tab's editor has its own.
+        if (tab !== 'form' || !isSubmitChord(e) || !formReady || create.isPending) return;
+        e.preventDefault();
+        submit();
+      }}
+    >
       <DialogTitle sx={{ pb: 0 }}>
         Create {kind} on {ctx}
       </DialogTitle>

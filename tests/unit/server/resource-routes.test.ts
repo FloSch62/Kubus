@@ -131,6 +131,33 @@ describe('resource routes', () => {
     expect(revealed.json().data.password).toBe('c2VjcmV0');
   });
 
+  it('fingerprints Secret values for compare views without revealing them', async () => {
+    const read = async (password: string) => {
+      const secret = manifest('Secret', 'credentials', 'default');
+      Object.assign(secret, { data: { password, user: 'YWRtaW4=' } });
+      rawJson.mockResolvedValueOnce(secret);
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/contexts/kind-a/resources/core/v1/secrets/credentials?namespace=default&reveal=digest',
+      });
+      return response.json().data as Record<string, string>;
+    };
+    const a = await read('c2VjcmV0');
+    const b = await read('b3RoZXI=');
+    expect(a.password).toMatch(/^•••••••• #[0-9a-f]{8}$/);
+    expect(JSON.stringify(a)).not.toContain('c2VjcmV0');
+    // Same value, same fingerprint; different value, different fingerprint.
+    expect(a.user).toBe(b.user);
+    expect(a.password).not.toBe(b.password);
+
+    // Only Secrets are fingerprinted; digest on anything else is a plain read.
+    const cm = manifest('ConfigMap', 'settings', 'default');
+    Object.assign(cm, { data: { mode: 'fast' } });
+    rawJson.mockResolvedValueOnce(cm);
+    const plain = await app.inject({ method: 'GET', url: '/api/contexts/kind-a/resources/core/v1/configmaps/settings?namespace=default&reveal=digest' });
+    expect(plain.json().data.mode).toBe('fast');
+  });
+
   it('replaces matching manifests and fills a missing namespace from the URL', async () => {
     const body = manifest('Deployment', 'web');
     const response = await app.inject({

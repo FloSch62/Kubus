@@ -50,6 +50,11 @@ This is where Kubus earns its keep. When two or more clusters are selected:
 The **namespace filter** next to the cluster switcher narrows every list to the
 namespaces you choose. Leave it empty to see all namespaces.
 
+The first time you select a context whose kubeconfig entry names a namespace (the one
+`kubectl config set-context --namespace` sets), Kubus starts that cluster's filter on it,
+so a fresh install lands where `kubectl` would. This happens once per context. Clear or
+change the filter and Kubus keeps your choice from then on.
+
 The selection is remembered **per cluster**: pick `team-a` on the dev cluster, switch to
 prod and set `payments`, and each cluster brings its own namespaces back when you return
 to it. With several clusters selected the filter shows the union; a chip that applies to

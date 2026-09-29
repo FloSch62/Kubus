@@ -296,6 +296,52 @@ export function rebaseEdits<T>(base: unknown, draft: unknown, latest: T): Rebase
   return { value: next, skipped };
 }
 
+interface VersionedObject {
+  metadata?: { resourceVersion?: string };
+  status?: unknown;
+}
+
+/**
+ * Whether two snapshots of an object differ only in status and the
+ * bookkeeping every write bumps (resourceVersion, generation, managedFields).
+ * Controllers rewrite status constantly; such drift is no reason to rebase.
+ */
+export function sameBeyondStatus(a: VersionedObject, b: VersionedObject): boolean {
+  if (a.metadata?.resourceVersion === b.metadata?.resourceVersion) return true;
+  const strip = ({ status: _status, metadata, ...rest }: VersionedObject) => {
+    const { resourceVersion: _rv, generation: _generation, managedFields: _managed, ...meta } = (metadata ?? {}) as Record<string, unknown>;
+    return { ...rest, metadata: meta };
+  };
+  return deepEqual(strip(a), strip(b));
+}
+
+/**
+ * The manifest to write for edits made on `base` while the server moved on
+ * only in status: it carries the latest resourceVersion (and the latest
+ * status, unless the edits touch it), so the write is not refused as a
+ * conflict. Real drift, or a resourceVersion the edits changed, is returned
+ * as is and stays a conflict.
+ */
+export function withLatestVersion<T extends VersionedObject>(edited: T, base: VersionedObject, latest: VersionedObject | undefined): T {
+  const rv = base.metadata?.resourceVersion;
+  if (!latest || latest.metadata?.resourceVersion === rv || edited.metadata?.resourceVersion !== rv || !sameBeyondStatus(base, latest)) return edited;
+  const next: VersionedObject = { ...edited, metadata: { ...edited.metadata, resourceVersion: latest.metadata?.resourceVersion } };
+  if (deepEqual(edited.status, base.status)) {
+    if (latest.status === undefined) delete next.status;
+    else next.status = latest.status;
+  }
+  return next as T;
+}
+
+/** withLatestVersion for YAML text; text that does not parse is left for the dry-run to report. */
+export function yamlWithLatestVersion(text: string, base: VersionedObject, latest: VersionedObject | undefined): string {
+  if (!latest || latest.metadata?.resourceVersion === base.metadata?.resourceVersion || !sameBeyondStatus(base, latest)) return text;
+  const parsed = parseYamlMapping(text);
+  if (!parsed.ok) return text;
+  const next = withLatestVersion(parsed.value as VersionedObject, base, latest);
+  return next === parsed.value ? text : dumpManifest(next);
+}
+
 /**
  * Translate a path from `source` into `target`: keyed list items are found
  * by their label, positional ones keep their index. Undefined when a keyed
@@ -429,6 +475,10 @@ export function lockReason(path: JsonPath, opts: { secretRedacted?: boolean } = 
   if (head === 'status') return 'Status is written by the controller and is read-only here.';
   if (head === 'metadata' && typeof second === 'string' && LOCKED_METADATA.has(second)) return 'Identity fields cannot be edited.';
   if (opts.secretRedacted && (head === 'data' || head === 'stringData')) return 'Reveal the Secret to edit its data.';
+  // The applied-configuration annotation carries the data too, masked alike.
+  if (opts.secretRedacted && head === 'metadata' && second === 'annotations' && path[2] === 'kubectl.kubernetes.io/last-applied-configuration') {
+    return 'Reveal the Secret to edit its data.';
+  }
   return undefined;
 }
 

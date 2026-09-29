@@ -266,6 +266,49 @@ describe('DataEditor', () => {
     await waitFor(() => expect(effects.toast).toHaveBeenCalledWith('success', 'Secret credentials updated'));
   });
 
+  it('copies all ConfigMap keys as KEY=value or YAML', async () => {
+    render(<DataEditor sel={configMapSelection} isSecret={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy all' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As KEY=value/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalledWith('alpha=one\nmultiline="first\\nsecond"\n'));
+    expect(effects.toast).toHaveBeenCalledWith('success', 'Copied 2 keys as KEY=value (binary key blob left out)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy all' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As YAML/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenLastCalledWith(expect.stringContaining('binaryData:\n  blob: AQID')));
+    expect(effects.toast).toHaveBeenLastCalledWith('success', 'Copied 3 keys as YAML');
+  });
+
+  it('asks before copying Secret values that are still hidden', async () => {
+    queries.latest = secret();
+    render(<DataEditor sel={secretSelection} isSecret />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy all' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As KEY=value/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Copy decoded Secret values?' });
+    expect(effects.copy).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Copy decoded Secret values?' })).not.toBeInTheDocument());
+    expect(effects.copy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy all' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As KEY=value/ }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Copy decoded Secret values?' })).getByRole('button', { name: 'Copy values' }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalledWith('password=hunter2\n'));
+    // The values stay masked in the editor.
+    await waitFor(() => expect(screen.getByRole('button', { name: /password ••••••••/ })).toBeInTheDocument());
+  });
+
+  it('copies revealed Secret values without asking again', async () => {
+    queries.latest = secret();
+    render(<DataEditor sel={secretSelection} isSecret />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Reveal values' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy all' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As YAML/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalledWith('stringData:\n  password: hunter2\ndata:\n  binary: /w==\n'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('shows loading, load errors, empty data, and immutable resources', async () => {
     queries.latest = undefined;
     const loading = render(<DataEditor sel={configMapSelection} isSecret={false} />);

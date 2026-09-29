@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import {
@@ -7,7 +7,7 @@ import {
   ResourceDetailPanel,
   type ResourceSelection,
 } from '../../../client/src/components/ResourceDetailDrawer';
-import { useDetailStore } from '../../../client/src/state/detail';
+import { selKeyOf, useDetailStore } from '../../../client/src/state/detail';
 import { useUiPrefsStore } from '../../../client/src/state/prefs';
 
 const queries = vi.hoisted(() => ({
@@ -19,14 +19,10 @@ const queries = vi.hoisted(() => ({
   refetch: vi.fn(),
   refetchRevealed: vi.fn(),
   resourceError: null as Error | null,
-  applyMode: 'success' as 'success' | 'conflict' | 'error',
-  applyMutateAsync: vi.fn(),
-  dryRunMutateAsync: vi.fn(),
 }));
 
 const effects = vi.hoisted(() => ({
   yamlSchema: vi.fn(),
-  yamlError: vi.fn(),
   detailProps: [] as Array<{ name: string; kind: string }>,
 }));
 
@@ -48,8 +44,6 @@ vi.mock('../../../client/src/api/queries.js', () => ({
     queries.eventsCalls.push(selection);
     return { data: { items: queries.events } };
   },
-  useApplyResource: () => ({ mutateAsync: queries.applyMutateAsync }),
-  useDryRunResource: () => ({ mutateAsync: queries.dryRunMutateAsync }),
 }));
 
 vi.mock('../../../client/src/components/YamlEditor.js', () => ({
@@ -58,30 +52,28 @@ vi.mock('../../../client/src/components/YamlEditor.js', () => ({
     value,
     draft,
     readOnly,
-    applyLabel,
-    onApply,
-    onDryRun,
+    onReview,
     onChange,
     toolbar,
+    notice,
   }: {
     value: string;
     draft?: string;
     readOnly?: boolean;
-    applyLabel?: string;
-    onApply?: (value: string) => Promise<unknown>;
-    onDryRun?: (value: string) => Promise<unknown>;
+    onReview?: (value: string) => void;
     onChange?: (value: string) => void;
     toolbar?: ReactNode;
+    notice?: ReactNode;
   }) => (
     <div data-testid="yaml-editor">
       {toolbar}
+      {notice}
       <span>{readOnly ? 'read-only editor' : 'editable editor'}</span>
       <textarea aria-label="YAML input" value={value} readOnly />
       <textarea aria-label="YAML draft" value={draft ?? ''} readOnly />
-      <span>{applyLabel}</span>
-      <button onClick={() => void onApply?.(draft ?? value).catch((error: unknown) => effects.yamlError(error))}>Apply YAML mock</button>
-      <button onClick={() => void onDryRun?.(value)}>Dry run YAML mock</button>
+      <button disabled={!onReview} onClick={() => onReview?.(draft ?? value)}>Review YAML mock</button>
       <button onClick={() => onChange?.('kind: [')}>Type broken YAML</button>
+      <button onClick={() => onChange?.(value.replace('hostname: orig', 'hostname: edited'))}>Edit hostname</button>
       <button onClick={() => onChange?.('kind: Pod\nmetadata:\n  name: pod-a\nspec:\n  hostname: edited\n')}>Type valid YAML</button>
     </div>
   ),
@@ -120,6 +112,18 @@ vi.mock('../../../client/src/components/detail/ManifestView.js', () => ({
   ),
 }));
 
+vi.mock('../../../client/src/components/detail/ReviewApplyDialog.js', () => ({
+  ReviewApplyDialog: ({ yamlBody, left, onClose, onApplied, onConflict }: { yamlBody: string; left: string; onClose: () => void; onApplied: (obj: KubeObject) => void; onConflict: () => void }) => (
+    <div>
+      <output data-testid="review-body">{yamlBody}</output>
+      <output data-testid="review-left">{left}</output>
+      <button onClick={() => onApplied({ ...queries.current!, metadata: { ...queries.current!.metadata, resourceVersion: 'applied' } })}>Applied review mock</button>
+      <button onClick={onConflict}>Conflict review mock</button>
+      <button onClick={onClose}>Close review mock</button>
+    </div>
+  ),
+}));
+
 vi.mock('../../../client/src/components/ConfirmDialog.js', () => ({
   ConfirmDialog: ({ open, title, message, onConfirm, onClose }: { open: boolean; title: string; message: string; onConfirm: () => void; onClose: () => void }) =>
     open ? (
@@ -146,6 +150,8 @@ vi.mock('../../../client/src/components/detail/DataEditor.js', () => ({
   ),
 }));
 vi.mock('../../../client/src/components/detail/DeploymentDetail.js', () => ({ DeploymentDetail: ({ obj }: { obj: KubeObject }) => <div>Deployment overview {obj.metadata.name}</div> }));
+vi.mock('../../../client/src/components/detail/StatefulSetDetail.js', () => ({ StatefulSetDetail: ({ obj }: { obj: KubeObject }) => <div>StatefulSet overview {obj.metadata.name}</div> }));
+vi.mock('../../../client/src/components/detail/DaemonSetDetail.js', () => ({ DaemonSetDetail: ({ obj }: { obj: KubeObject }) => <div>DaemonSet overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/PodDetail.js', () => ({ PodDetail: ({ obj }: { obj: KubeObject }) => <div>Pod overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/NodeDetail.js', () => ({ NodeDetail: ({ obj }: { obj: KubeObject }) => <div>Node overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/ServiceDetail.js', () => ({ ServiceDetail: ({ obj }: { obj: KubeObject }) => <div>Service overview {obj.metadata.name}</div> }));
@@ -228,22 +234,9 @@ beforeEach(() => {
   queries.refetch.mockReset();
   queries.refetchRevealed.mockReset();
   queries.resourceError = null;
-  queries.applyMode = 'success';
-  queries.applyMutateAsync.mockReset();
-  queries.applyMutateAsync.mockImplementation(async () => {
-    if (queries.applyMode === 'conflict') {
-      const error = new Error('stale object') as Error & { status: number };
-      error.status = 409;
-      throw error;
-    }
-    if (queries.applyMode === 'error') throw new Error('apply failed');
-    return {};
-  });
-  queries.dryRunMutateAsync.mockReset().mockResolvedValue({ ok: true, findings: [] });
   effects.yamlSchema.mockClear();
-  effects.yamlError.mockClear();
   effects.detailProps = [];
-  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
+  useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined, tabRequest: undefined });
   useUiPrefsStore.setState({ manifestView: 'tree' });
 });
 
@@ -297,23 +290,11 @@ describe('ResourceDetailDrawer', () => {
     fireEvent.click(screen.getByLabelText('Restore drawer'));
 
     showYaml();
-    expect(screen.getByTestId('yaml-editor')).toHaveTextContent('Replace');
+    expect(screen.getByRole('button', { name: 'Review YAML mock' })).toBeEnabled();
     expect((screen.getByLabelText('YAML input') as HTMLTextAreaElement).value).toContain('name: pod-a');
-    // In the YAML view the object freezes so live updates cannot reload the editor.
-    expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: undefined, watch: false });
+    // The YAML view stays live to notice server changes; the editor works on a snapshot.
+    expect(podCalls().at(-1)?.options).toMatchObject({ liveMs: 5000, watch: true });
     expect(useUiPrefsStore.getState().manifestView).toBe('yaml');
-    fireEvent.click(screen.getByRole('button', { name: 'Dry run YAML mock' }));
-    expect(queries.dryRunMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ ctx: 'dev' }));
-
-    queries.applyMode = 'conflict';
-    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('has been refreshed') })));
-    expect(queries.refetch).toHaveBeenCalled();
-    queries.applyMode = 'error';
-    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: 'apply failed' })));
-    queries.applyMode = 'success';
-    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
 
     fireEvent.keyDown(screen.getByLabelText('YAML input'), { key: 'ArrowLeft', altKey: true });
     expect(onBack).not.toHaveBeenCalled();
@@ -391,7 +372,7 @@ describe('ResourceDetailDrawer', () => {
   it('keeps unparsable YAML in the editor and parses valid YAML into the tree', async () => {
     const sel = selection('Pod');
     queries.current = objectFor(sel, { spec: { hostname: 'orig' } });
-    render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    const view = render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
 
     const podKey = `${sel.ctx}|${sel.group}|${sel.version}|${sel.plural}|${sel.namespace}|${sel.name}`;
     showYaml();
@@ -407,21 +388,149 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.queryByText(/The YAML does not parse/)).not.toBeInTheDocument();
     expect(screen.getByText('Manifest draft {"hostname":"edited"}')).toBeInTheDocument();
 
-    // Applying the YAML text (a 409 first) replays the edits onto the refreshed object, keeping them.
+    // Review & apply from the YAML view: a 409 refreshes the object and the
+    // edits are replayed onto it as soon as it lands, in the open review.
     fireEvent.click(screen.getByRole('button', { name: 'YAML' }));
-    queries.refetch.mockResolvedValue({ data: objectFor(sel, { spec: { hostname: 'server', nodeName: 'n1' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } }) });
-    queries.applyMode = 'conflict';
-    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
-    await waitFor(() => expect(effects.yamlError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('replayed onto the latest version') })));
+    fireEvent.click(screen.getByRole('button', { name: 'Review YAML mock' }));
+    expect(screen.getByTestId('review-body')).toHaveTextContent('hostname: edited');
+    fireEvent.click(screen.getByRole('button', { name: 'Conflict review mock' }));
+    expect(queries.refetch).toHaveBeenCalled();
+    queries.current = objectFor(sel, { spec: { hostname: 'server', nodeName: 'n1' }, metadata: { ...objectFor(sel).metadata, resourceVersion: '2' } });
+    view.rerender(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
     await waitFor(() => expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('2'));
     const rebased = useDetailStore.getState().drafts[podKey]!;
     expect(rebased.text).toContain('hostname: edited');
     expect(rebased.text).toContain('nodeName: n1');
     expect(rebased.text).toContain("resourceVersion: '2'");
+    expect(screen.getByTestId('review-body')).toHaveTextContent('nodeName: n1');
     expect((screen.getByLabelText('YAML draft') as HTMLTextAreaElement).value).toContain('hostname: edited');
-    queries.applyMode = 'success';
-    fireEvent.click(screen.getByRole('button', { name: 'Apply YAML mock' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Applied review mock' }));
     await waitFor(() => expect(useDetailStore.getState().drafts[podKey]).toBeUndefined());
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+    expect(queries.refetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the YAML view on its snapshot and offers Reload or Rebase when the server moves', () => {
+    const sel = selection('Pod');
+    const version = (rv: string, spec: Record<string, unknown>) => objectFor(sel, { spec, metadata: { ...objectFor(sel).metadata, resourceVersion: rv } });
+    const podKey = selKeyOf(sel);
+    const rerender = (view: ReturnType<typeof render>) => view.rerender(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    const input = () => (screen.getByLabelText('YAML input') as HTMLTextAreaElement).value;
+    queries.current = version('1', { hostname: 'orig' });
+    const view = render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    showYaml();
+    expect(input()).toContain('hostname: orig');
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+
+    // Status churn alone does not flag a clean editor (controllers rewrite it constantly).
+    queries.current = { ...version('1b', { hostname: 'orig' }), status: { phase: 'Running' } };
+    rerender(view);
+    expect(input()).not.toContain('phase: Running');
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+
+    // A clean editor keeps its text and offers to load the new version.
+    queries.current = version('2', { hostname: 'server' });
+    rerender(view);
+    expect(input()).toContain('hostname: orig');
+    expect(screen.getByText('This object changed on the server since the editor loaded it.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(input()).toContain('hostname: server');
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+
+    // Edits start from that snapshot; a later server change offers a rebase.
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('2');
+    queries.current = version('3', { hostname: 'server', nodeName: 'n1' });
+    rerender(view);
+    expect(screen.getByText(/changed on the server while you were editing/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase edits' }));
+    const rebased = useDetailStore.getState().drafts[podKey]!;
+    expect(rebased.base.metadata.resourceVersion).toBe('3');
+    expect(rebased.text).toContain('hostname: edited');
+    expect(rebased.text).toContain('nodeName: n1');
+    expect(screen.queryByRole('button', { name: 'Rebase edits' })).not.toBeInTheDocument();
+
+    // Text that does not parse cannot be replayed: the banner stays and says why.
+    fireEvent.click(screen.getByRole('button', { name: 'Type broken YAML' }));
+    queries.current = version('4', { hostname: 'server', nodeName: 'n2' });
+    rerender(view);
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase edits' }));
+    expect(screen.getByText(/does not parse, so your edits cannot be replayed yet/)).toBeInTheDocument();
+    expect(useDetailStore.getState().drafts[podKey]?.text).toBe('kind: [');
+    expect(screen.getByRole('button', { name: 'Rebase edits' })).toBeInTheDocument();
+  });
+
+  it('never turns status-only drift into a conflict, and drops a review whose draft is gone', async () => {
+    const sel = selection('Pod');
+    const podKey = selKeyOf(sel);
+    const version = (rv: string, spec: Record<string, unknown>, status: Record<string, unknown>) =>
+      objectFor(sel, { spec, status, metadata: { ...objectFor(sel).metadata, resourceVersion: rv } });
+    const rerender = (view: ReturnType<typeof render>) => view.rerender(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    queries.current = version('1', { hostname: 'orig' }, { phase: 'Pending' });
+    const view = render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} />);
+    showYaml();
+
+    // Review without a YAML draft (nothing typed, or the object still loading) stays closed, also later.
+    fireEvent.click(screen.getByRole('button', { name: 'Review YAML mock' }));
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+
+    // Status churns under the clean editor; the first edit starts from the
+    // older snapshot, yet nothing reads as a conflict and the review writes
+    // with the latest resourceVersion and status.
+    queries.current = version('2', { hostname: 'orig' }, { phase: 'Running' });
+    rerender(view);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit hostname' }));
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+    expect(useDetailStore.getState().drafts[podKey]?.base.metadata.resourceVersion).toBe('1');
+    expect(screen.queryByText(/changed on the server/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review YAML mock' }));
+    const body = screen.getByTestId('review-body').textContent ?? '';
+    expect(body).toContain('hostname: edited');
+    expect(body).toContain("resourceVersion: '2'");
+    expect(body).toContain('phase: Running');
+    // The typed text itself is left alone.
+    expect(useDetailStore.getState().drafts[podKey]?.text).toContain("resourceVersion: '1'");
+
+    // A 409 whose rebase lands back on the base (the server already holds the
+    // edit) drops the draft, and the review goes with it: the next edit does
+    // not bring the dialog back by itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Conflict review mock' }));
+    queries.current = version('3', { hostname: 'edited' }, { phase: 'Running' });
+    rerender(view);
+    await waitFor(() => expect(useDetailStore.getState().drafts[podKey]).toBeUndefined());
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Type valid YAML' }));
+    expect(useDetailStore.getState().drafts[podKey]).toBeDefined();
+    expect(screen.queryByTestId('review-body')).not.toBeInTheDocument();
+  });
+
+  it('opens the Manifest tab with E and applies tab requests for its selection', () => {
+    const sel = selection('Deployment');
+    queries.current = objectFor(sel, { spec: { replicas: 2 } });
+    const onTabChange = vi.fn();
+    render(<ResourceDetailPanel sel={sel} onClose={vi.fn()} onTabChange={onTabChange} />);
+    const manifestTab = () => screen.getByRole('tab', { name: 'Manifest' });
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Overview' }), { key: 'e', ctrlKey: true });
+    expect(manifestTab()).toHaveAttribute('aria-selected', 'false');
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Overview' }), { key: 'e' });
+    expect(manifestTab()).toHaveAttribute('aria-selected', 'true');
+    expect(onTabChange).toHaveBeenLastCalledWith('manifest');
+
+    // A request for another selection waits; one for this selection switches
+    // without writing the URL unless asked to.
+    fireEvent.click(screen.getByRole('tab', { name: 'Map' }));
+    onTabChange.mockClear();
+    act(() => useDetailStore.getState().requestTab('dev|apps|v1|deployments|team-a|other', 'manifest'));
+    expect(manifestTab()).toHaveAttribute('aria-selected', 'false');
+    act(() => useDetailStore.getState().requestTab(selKeyOf(sel), 'manifest'));
+    expect(manifestTab()).toHaveAttribute('aria-selected', 'true');
+    expect(onTabChange).not.toHaveBeenCalled();
+    expect(useDetailStore.getState().tabRequest).toBeUndefined();
+    fireEvent.click(screen.getByRole('tab', { name: 'Map' }));
+    onTabChange.mockClear();
+    act(() => useDetailStore.getState().requestTab(selKeyOf(sel), 'manifest', { remember: true }));
+    expect(onTabChange).toHaveBeenCalledWith('manifest');
   });
 
   it('marks a deleted resource and hides its actions, keeping the last state', () => {
@@ -552,8 +661,8 @@ describe('ResourceDetailDrawer', () => {
       ['Service', 'Service overview service-a'],
       ['ConfigMap', 'ConfigMap overview configmap-a'],
       ['Secret', 'Secret overview secret-a'],
-      ['StatefulSet', 'Generic overview statefulset-a'],
-      ['DaemonSet', 'Generic overview daemonset-a'],
+      ['StatefulSet', 'StatefulSet overview statefulset-a'],
+      ['DaemonSet', 'DaemonSet overview daemonset-a'],
     ] as const;
 
     for (const [kind, expected] of cases) {

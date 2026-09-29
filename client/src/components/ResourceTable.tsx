@@ -1,4 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useTheme } from '@mui/material/styles';
 import { layout, statusTextColor } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
@@ -10,19 +11,23 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { READ_ONLY_GRID_SLOTS } from './ResourceGridCell.js';
 import { GridTooltips } from './CellTooltip.js';
-import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
+import { DataGrid, type GridApi, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
 import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
 import { SmartFilterInput } from './SmartFilterInput.js';
 import { CellCopyOverlay, copyCellGridSx, handleCopyCellKeyDown, withCellCopy } from './CellCopy.js';
+import { withNaturalSort } from './natural-sort.js';
 import type { MetricsLookup } from './columns.js';
 import { podSummary } from '../kube-display.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useQuickSearchShortcut } from './quick-search.js';
 import { countLabel } from './format.js';
+import { handleGridRowKey } from './grid-row-keys.js';
+import type { RowKeyAction } from '../row-keys.js';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
+import SchemaOutlinedIcon from '@mui/icons-material/SchemaOutlined';
 
 interface Props {
   rows: ClusterRow[];
@@ -39,13 +44,19 @@ interface Props {
   onLabelSelectorChange?: (value: string) => void;
   /** Drop the text filter and label selector in one step (the empty state's Clear button). */
   onClearFilters?: () => void;
+  /** Custom kinds: the empty state links to the backing CRD. */
+  onOpenDefinition?: () => void;
   onRowClick?: (row: ClusterRow) => void;
   /** Keyboard activation (Enter on a cell); lets pages move focus along. */
   onRowActivate?: (row: ClusterRow) => void;
   /** Opened by right-click or the ContextMenu / Shift+F10 keys. */
   onRowContextMenu?: (row: ClusterRow, position: { clientX: number; clientY: number }) => void;
+  /** A single-key action on the focused row (L, X, F, S, R, E, Del); returns whether the row has it. */
+  onRowKey?: (row: ClusterRow, action: RowKeyAction) => boolean;
   /** Extra toolbar elements (e.g. create button). */
   toolbar?: ReactNode;
+  /** Bulk actions for the checked rows, shown on their own row under the toolbar. */
+  selectionBar?: ReactNode;
   /** Enable checkbox selection; returns selected rows. */
   onSelectionChange?: (rows: ClusterRow[]) => void;
   /** Controlled checkbox selection, kept in sync with external bulk actions. */
@@ -59,6 +70,8 @@ interface Props {
   activeRowId?: string;
   /** Remember the scroll position under this key and restore it when the table mounts again. */
   scrollKey?: string;
+  /** Lets the page read grid state, e.g. the sorted row order for Copy rows. */
+  apiRef?: RefObject<GridApi | null>;
 }
 
 const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
@@ -96,10 +109,13 @@ export function ResourceTable({
   onFilterChange,
   onLabelSelectorChange,
   onClearFilters,
+  onOpenDefinition,
   onRowClick,
   onRowActivate,
   onRowContextMenu,
+  onRowKey,
   toolbar,
+  selectionBar,
   checkboxSelection,
   onSelectionChange,
   selectedRows,
@@ -107,6 +123,7 @@ export function ResourceTable({
   tableId,
   activeRowId,
   scrollKey,
+  apiRef,
 }: Props) {
   const tableRef = useRef<HTMLDivElement>(null);
   const [localFilter, setLocalFilter] = useState('');
@@ -181,8 +198,9 @@ export function ResourceTable({
       if (!entry || entry.width !== stored) {
         // If a saved width exists, apply it on a copy of the column.
         const base = stored !== undefined ? { ...column, width: stored, flex: undefined } : column;
-        // Adds the hover copy button and sets flex display on every column.
-        entry = { width: stored, wrapped: withCellCopy(base) };
+        // Adds the hover copy button and sets flex display on every column;
+        // text columns sort naturally (worker-2 before worker-10).
+        entry = { width: stored, wrapped: withCellCopy(withNaturalSort(base)) };
         cache.set(column, entry);
       }
       return entry.wrapped;
@@ -286,8 +304,8 @@ export function ResourceTable({
   rowsByIdRef.current = rowsById;
   const filteredRef = useRef(filtered);
   filteredRef.current = filtered;
-  const callbacksRef = useRef({ onRowClick, onRowActivate, onRowContextMenu, onSelectionChange });
-  callbacksRef.current = { onRowClick, onRowActivate, onRowContextMenu, onSelectionChange };
+  const callbacksRef = useRef({ onRowClick, onRowActivate, onRowContextMenu, onRowKey, onSelectionChange });
+  callbacksRef.current = { onRowClick, onRowActivate, onRowContextMenu, onRowKey, onSelectionChange };
   const rowSelectionModel = useMemo<GridRowSelectionModel | undefined>(
     () => selectedRows && { type: 'include', ids: new Set(selectedRows.map((row) => row.obj.metadata.uid)) },
     [selectedRows],
@@ -300,6 +318,7 @@ export function ResourceTable({
 
   // The grid re-renders on every watch flush; keep the sx object stable so
   // emotion doesn't re-serialize it each time.
+  const cursorColor = useTheme().palette.primary.main;
   const gridSx = useMemo(
     () => ({
       border: 0,
@@ -308,9 +327,12 @@ export function ResourceTable({
       '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
       '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
       '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
+      // The row cursor: the row holding the focused cell (arrow keys, j/k)
+      // is marked, so single-key row actions have a visible target.
+      '& .MuiDataGrid-row:focus-within': { boxShadow: `inset 3px 0 0 ${cursorColor}` },
       ...copyCellGridSx,
     }),
-    [!!onRowClick], // eslint-disable-line react-hooks/exhaustive-deps
+    [!!onRowClick, cursorColor], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const setTextFilter = (value: string) => {
@@ -347,6 +369,9 @@ export function ResourceTable({
     else setLocalFilter('');
     onLabelSelectorChange?.('');
   };
+  const openDefinitionRef = useRef(onOpenDefinition);
+  openDefinitionRef.current = onOpenDefinition;
+  const hasDefinition = !!onOpenDefinition;
   const NoRowsOverlay = useCallback(
     () => (
       <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
@@ -367,9 +392,14 @@ export function ResourceTable({
             Clear filters
           </Button>
         )}
+        {!anyFilter && hasDefinition && (
+          <Button size="small" variant="outlined" startIcon={<SchemaOutlinedIcon />} onClick={() => openDefinitionRef.current?.()} sx={{ pointerEvents: 'auto', mt: 0.5 }}>
+            Open definition
+          </Button>
+        )}
       </Stack>
     ),
-    [filteredOut, labelFiltered, anyFilter, kind],
+    [filteredOut, labelFiltered, anyFilter, kind, hasDefinition],
   );
   const slots = useMemo(() => ({ ...READ_ONLY_GRID_SLOTS, noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
   const getRowClassName = useCallback(
@@ -428,6 +458,7 @@ export function ResourceTable({
       const row = rowsByIdRef.current.get(String(params.id));
       if (!row) return;
       const callbacks = callbacksRef.current;
+      if (handleGridRowKey(details.apiRef, params, event, row, callbacks.onRowKey)) return;
       // Keyboard equivalents of clicking and right-clicking a row.
       if (event.key === 'Enter' && (callbacks.onRowActivate || callbacks.onRowClick)) {
         event.preventDefault();
@@ -506,6 +537,7 @@ export function ResourceTable({
         <Box sx={{ flex: 1 }} />
         {toolbar}
       </Stack>
+      {selectionBar}
       <GridTooltips rootRef={tableRef}>
         <DataGrid
           rows={gridRows}
@@ -534,6 +566,7 @@ export function ResourceTable({
           onCellKeyDown={handleCellKeyDown}
           sortModel={sortModel}
           onSortModelChange={handleSortChange}
+          apiRef={apiRef}
           sx={gridSx}
         />
       </GridTooltips>

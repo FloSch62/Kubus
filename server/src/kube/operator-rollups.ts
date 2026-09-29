@@ -7,7 +7,7 @@ import type { ClusterHandle } from './cluster-manager.js';
  * from the shared watcher cache (acquired on demand, lingers after release).
  */
 
-type ReadinessCheck = 'ready-condition' | 'argo-app' | 'argo-rollout';
+export type ReadinessCheck = 'ready-condition' | 'argo-app' | 'argo-rollout' | 'route-parents';
 
 interface OperatorResourceDef {
   /** CRD metadata.name, i.e. `<plural>.<group>`. */
@@ -44,9 +44,19 @@ const OPERATORS: OperatorDef[] = [
     name: 'Flux',
     resources: [
       { crd: 'gitrepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
+      { crd: 'ocirepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'helmrepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'kustomizations.kustomize.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'helmreleases.helm.toolkit.fluxcd.io', check: 'ready-condition' },
+    ],
+  },
+  {
+    id: 'external-secrets',
+    name: 'External Secrets',
+    resources: [
+      { crd: 'externalsecrets.external-secrets.io', check: 'ready-condition' },
+      { crd: 'secretstores.external-secrets.io', check: 'ready-condition' },
+      { crd: 'clustersecretstores.external-secrets.io', check: 'ready-condition' },
     ],
   },
   {
@@ -55,6 +65,14 @@ const OPERATORS: OperatorDef[] = [
     resources: [
       { crd: 'scaledobjects.keda.sh', check: 'ready-condition' },
       { crd: 'scaledjobs.keda.sh', check: 'ready-condition' },
+    ],
+  },
+  {
+    id: 'gateway-api',
+    name: 'Gateway API',
+    resources: [
+      { crd: 'httproutes.gateway.networking.k8s.io', check: 'route-parents' },
+      { crd: 'grpcroutes.gateway.networking.k8s.io', check: 'route-parents' },
     ],
   },
   {
@@ -108,27 +126,55 @@ interface Condition {
   message?: string;
 }
 
-function readiness(check: ReadinessCheck, obj: KubeObject): { ready: boolean; reason?: string; message?: string } {
+export interface Readiness {
+  ready: boolean;
+  reason?: string;
+  message?: string;
+  /** Not ready but still converging (reconciling, progressing, paused) rather than refused outright. */
+  pending?: boolean;
+}
+
+export function readiness(check: ReadinessCheck, obj: KubeObject): Readiness {
   if (check === 'argo-app') {
     const status = obj.status as { health?: { status?: string; message?: string }; sync?: { status?: string } } | undefined;
     const health = status?.health?.status ?? 'Unknown';
     const sync = status?.sync?.status ?? 'Unknown';
     const ready = health === 'Healthy' && sync === 'Synced';
-    return ready ? { ready } : { ready, reason: health !== 'Healthy' ? health : sync, message: status?.health?.message };
+    if (ready) return { ready };
+    return { ready, reason: health !== 'Healthy' ? health : sync, message: status?.health?.message, pending: health !== 'Degraded' && health !== 'Missing' };
   }
   if (check === 'argo-rollout') {
     const status = obj.status as { phase?: string; message?: string } | undefined;
     // No phase yet (not reconciled) — don't invent a failure; any explicit
     // non-Healthy phase (Progressing, Paused, Degraded) is not ready.
     if (!status?.phase || status.phase === 'Healthy') return { ready: true };
-    return { ready: false, reason: status.phase, message: status.message };
+    return { ready: false, reason: status.phase, message: status.message, pending: status.phase !== 'Degraded' };
+  }
+  if (check === 'route-parents') {
+    // Gateway API routes report per parent Gateway. No parent status yet
+    // (no controller) is not a failure; a parent that refuses the route or
+    // cannot resolve its backends is.
+    const parents = (obj.status as { parents?: Array<{ conditions?: Condition[] }> } | undefined)?.parents ?? [];
+    const conditions = parents.flatMap((p) => p.conditions ?? []).filter((c) => c.type === 'Accepted' || c.type === 'ResolvedRefs');
+    const bad = conditions.find((c) => c.status === 'False') ?? conditions.find((c) => c.status === 'Unknown');
+    if (!bad) return { ready: true };
+    return { ready: false, reason: bad.reason ?? `Not${bad.type ?? 'Accepted'}`, message: bad.message, pending: bad.status === 'Unknown' };
   }
   const conditions = (obj.status as { conditions?: Condition[] } | undefined)?.conditions ?? [];
   const readyCond = conditions.find((c) => c.type === 'Ready');
   // No Ready condition at all (not yet reconciled schema, cluster-scoped
   // config objects) — don't invent a failure.
   if (!readyCond || readyCond.status === 'True') return { ready: true };
-  return { ready: false, reason: readyCond.reason ?? 'NotReady', message: readyCond.message };
+  return { ready: false, reason: readyCond.reason ?? 'NotReady', message: readyCond.message, pending: readyCond.status !== 'False' };
+}
+
+/** The readiness check an operator rollup uses for a CRD (`<plural>.<group>`), if any. */
+export function operatorCheckFor(crdName: string): ReadinessCheck | undefined {
+  for (const op of OPERATORS) {
+    const def = op.resources.find((r) => r.crd === crdName);
+    if (def) return def.check;
+  }
+  return undefined;
 }
 
 export async function computeOperatorRollups(handle: ClusterHandle, crds: KubeObject[], namespaces?: ReadonlySet<string>): Promise<OperatorRollup[]> {

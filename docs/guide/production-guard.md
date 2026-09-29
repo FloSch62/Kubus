@@ -26,6 +26,8 @@ anything destructive: you must **type the resource's name** to confirm.
 - **Drain** and **cordon** a node
 - **Node shell** (a privileged pod on the host) and **node debug containers**
 - **Restart pods**, Helm **rollback** and **uninstall**
+- Argo CD **Sync**, Argo Rollouts **Promote**, **Abort** and **Retry**, and Flux
+  **Suspend** and **Resume**
 
 Non-destructive actions stay one click away. The guard only stands in front of the things
 you can't undo.
@@ -51,6 +53,10 @@ in the live watch streams that back them, and appear as `••••`.
 To see a value, open the Secret's [details drawer](resource-details.md) and **reveal** it
 explicitly. Revealing is a deliberate, per-resource action. There's no global "show all
 secrets" switch to leave on by accident.
+
+**Copy all** on a Secret's Data tab follows the same rule. With the values revealed it
+copies them straight away; while any value is still hidden, Kubus first asks whether to
+put the decoded values on the clipboard, and they stay hidden on screen either way.
 
 !!! tip "Safe to screen-share"
 

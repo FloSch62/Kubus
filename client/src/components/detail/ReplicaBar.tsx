@@ -10,7 +10,22 @@ import { statusTextColor } from '../../theme.js';
  * surge replicas beyond desired hanging off the end. The caption spells
  * out the same numbers.
  */
-export function ReplicaBar({ desired, ready, total, updated, paused }: { desired: number; ready: number; total: number; updated: number; paused?: boolean }) {
+export function ReplicaBar({
+  desired,
+  ready,
+  total,
+  updated,
+  paused,
+  note,
+}: {
+  desired: number;
+  ready: number;
+  total: number;
+  updated: number;
+  paused?: boolean;
+  /** Extra caption, e.g. why replicas stay on the old template ("partition 3"). */
+  note?: string;
+}) {
   const span = Math.max(desired, total, 1);
   const readyPct = (Math.min(ready, span) / span) * 100;
   const pendingPct = (Math.max(0, Math.min(total, span) - ready) / span) * 100;
@@ -20,6 +35,7 @@ export function ReplicaBar({ desired, ready, total, updated, paused }: { desired
     total > desired ? `${total - desired} surge` : undefined,
     stale > 0 ? `${stale} on old template` : undefined,
     paused ? 'rollout paused' : undefined,
+    note,
   ].filter(Boolean);
   const tone = desired === 0 ? undefined : ready >= desired ? 'success' : ready === 0 ? 'error' : 'warning';
   return (

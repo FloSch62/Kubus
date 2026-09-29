@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
-import { REDACTED, isSecretGVR, maybeRedact, redactSecretData } from '../../../server/src/kube/redact.js';
+import { LAST_APPLIED_ANNOTATION, REDACTED, fingerprintSecretData, isSecretGVR, maybeRedact, redactSecretData } from '../../../server/src/kube/redact.js';
 
 function secret(data?: Record<string, unknown>, stringData?: Record<string, unknown>): KubeObject {
   return {
@@ -96,5 +96,33 @@ describe('maybeRedact', () => {
   it('does not redact same-plural resources from other groups', () => {
     const cr = secret({ key: 'dmFsdWU=' });
     expect(maybeRedact(cr, 'example.com', 'secrets')).toBe(cr);
+  });
+});
+
+describe('last-applied-configuration', () => {
+  function applied(data: Record<string, string>): KubeObject {
+    const manifest = { apiVersion: 'v1', kind: 'Secret', metadata: { name: 'db-creds', namespace: 'prod' }, type: 'Opaque', data };
+    return { ...secret(data), metadata: { name: 'db-creds', namespace: 'prod', uid: 'u1', annotations: { [LAST_APPLIED_ANNOTATION]: JSON.stringify(manifest), team: 'db' } } } as KubeObject;
+  }
+
+  it('masks the Secret data kubectl apply stored in the annotation', () => {
+    const out = redactSecretData(applied({ password: 'aHVudGVyMg==' }));
+    const annotation = out.metadata.annotations![LAST_APPLIED_ANNOTATION]!;
+    expect(annotation).not.toContain('aHVudGVyMg==');
+    expect(JSON.parse(annotation)).toMatchObject({ kind: 'Secret', metadata: { name: 'db-creds' }, data: { password: REDACTED } });
+    expect(out.metadata.annotations!.team).toBe('db');
+  });
+
+  it('fingerprints the annotation data the same way as the data itself', () => {
+    const out = fingerprintSecretData(applied({ password: 'aHVudGVyMg==' }));
+    const annotation = JSON.parse(out.metadata.annotations![LAST_APPLIED_ANNOTATION]!) as { data: Record<string, string> };
+    expect(annotation.data.password).toBe((out.data as Record<string, string>).password);
+    expect(annotation.data.password).not.toBe('aHVudGVyMg==');
+  });
+
+  it('hides an annotation it cannot parse', () => {
+    const obj = applied({ password: 'aHVudGVyMg==' });
+    obj.metadata.annotations![LAST_APPLIED_ANNOTATION] = '{"data":{"password":"aHVudGVyMg=="';
+    expect(redactSecretData(obj).metadata.annotations![LAST_APPLIED_ANNOTATION]).toBe(REDACTED);
   });
 });

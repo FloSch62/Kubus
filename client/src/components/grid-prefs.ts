@@ -1,11 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import type { GridColDef, GridColumnResizeParams, GridDensity, GridValidRowModel } from '@mui/x-data-grid';
 import { useUiPrefsStore } from '../state/prefs.js';
+import { withNaturalSort } from './natural-sort.js';
 
 /**
  * Shared prefs for plain DataGrid pages (Events, Helm, Port Forwards): the
  * Settings density preference plus per-table persisted column widths, matching
- * ResourceTable's behavior.
+ * ResourceTable's behavior. Text columns sort naturally (worker-2 before
+ * worker-10), as they do in resource lists.
  */
 export function useGridPrefs<R extends GridValidRowModel>(
   tableId: string,
@@ -18,7 +20,8 @@ export function useGridPrefs<R extends GridValidRowModel>(
     () =>
       columns.map((column) => {
         const width = storedWidths?.[column.field];
-        return width === undefined ? column : { ...column, width, flex: undefined };
+        const sorted = withNaturalSort(column);
+        return width === undefined ? sorted : { ...sorted, width, flex: undefined };
       }),
     [columns, storedWidths],
   );

@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import ReplayRoundedIcon from '@mui/icons-material/ReplayRounded';
-import { evalPrinterColumnPath, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
+import { evalPrinterColumnPath, hpaMetrics, hpaMetricText, printerColumnText, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
@@ -16,6 +16,7 @@ import { crdStatus, crdVersions, dataKeyCount, eventFields, hasRunningDebugConta
 import { cronHumanText, cronNextRun } from '../cron.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
+import { withoutCellCopy } from './CellCopy.js';
 import { statusTextColor } from '../theme.js';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
@@ -69,7 +70,8 @@ export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col
 }
 
 const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
-  signals: (opts) => ({
+  // The marker is an indicator, not a value: no copy button over it.
+  signals: (opts) => withoutCellCopy({
     field: SIGNALS_COLUMN_ID,
     headerName: '',
     description: 'Warning events and restarts in the last hour',
@@ -83,7 +85,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     // Sorting puts the noisiest objects first.
     valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name, obj(row).metadata.uid)),
     renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name, obj(params.row).metadata.uid)} />,
-  }),
+  } satisfies Col),
   labels: (opts) => ({
     field: 'labels',
     headerName: 'Labels',
@@ -659,6 +661,41 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
       return `${spec?.minReplicas ?? 1}/${spec?.maxReplicas ?? '?'}`;
     },
   }),
+  hpaMetrics: () => ({
+    field: 'hpaMetrics',
+    headerName: 'Metrics',
+    flex: 1.6,
+    // Room for the usual pair: "cpu 42% / 60%, memory 15Mi / 64Mi".
+    minWidth: 260,
+    valueGetter: (_v, row) => hpaMetrics(obj(row)).map(hpaMetricText).join(', '),
+    renderCell: (params) => {
+      const metrics = hpaMetrics(obj(params.row));
+      if (!metrics.length) {
+        return (
+          <Typography variant="body2" color="text.disabled">
+            —
+          </Typography>
+        );
+      }
+      // One line per metric in the tooltip; the cell keeps them on one row.
+      return (
+        <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{metrics.map(hpaMetricText).join('\n')}</Box>}>
+          <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>
+            {metrics.map((m, i) => (
+              <Box component="span" key={`${m.label}:${i}`}>
+                {i > 0 && ', '}
+                {m.label}{' '}
+                <Box component="span" sx={{ fontWeight: 600, color: m.current === undefined ? 'text.disabled' : 'text.primary' }}>
+                  {m.current ?? '?'}
+                </Box>
+                <Box component="span" sx={{ color: 'text.secondary' }}>{` / ${m.target}`}</Box>
+              </Box>
+            ))}
+          </Typography>
+        </Tooltip>
+      );
+    },
+  }),
   hpaReplicas: () => ({
     field: 'hpaReplicas',
     headerName: 'Replicas',
@@ -929,8 +966,8 @@ export function makeNodeAllocationLookup(pods: ClusterRow[]): NodeAllocationLook
 
 /**
  * Columns from a CRD's additionalPrinterColumns. Values come from evaluating
- * the column's jsonPath against the live object; non-scalar results are
- * stringified and truncated. Fields are prefixed to avoid clashing with
+ * the column's jsonPath against the live object; lists are joined, other
+ * non-scalar results are stringified and truncated. Fields are prefixed to avoid clashing with
  * preset column ids.
  */
 export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
@@ -956,10 +993,9 @@ export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
         const v = value(row);
         if (v === undefined) return numeric ? null : '';
         if (numeric) return typeof v === 'number' ? v : Number(v);
-        if (typeof v === 'object') return JSON.stringify(v).slice(0, 200);
-        if (typeof v === 'string') return v;
-        if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
-        return '';
+        // Lists (a Hostnames column on `.spec.hostnames`) read as a joined list.
+        if (typeof v === 'object' && !Array.isArray(v)) return JSON.stringify(v).slice(0, 200);
+        return printerColumnText(v) ?? '';
       },
       renderCell:
         c.type === 'date'

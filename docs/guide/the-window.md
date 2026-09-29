@@ -29,9 +29,17 @@ The strip along the top is always available, whatever page you're on:
 
 The left drawer lists every resource kind, grouped into **Workloads, Network, Config,
 Storage, Cluster** and **Access Control**. A **Custom Resources** group is populated
-automatically from the CRDs discovered in your selected clusters.
+automatically from the CRDs discovered in your selected clusters, and a **GitOps** group
+appears when Argo CD or Flux is installed.
 
-- Type in the **filter box** at the top to jump to a kind.
+Built-in kinds you reach for less often, such as PriorityClasses, Leases, IngressClasses,
+RuntimeClasses, CSIDrivers, VolumeAttachments, webhook configurations and
+ValidatingAdmissionPolicies, sit in a collapsed **More built-in kinds** group. Kubus
+builds it from discovery, so it only lists the kinds your selected clusters actually
+serve.
+
+- Type in the **filter box** at the top to jump to a kind. It searches collapsed
+  groups too, so typing `lease` finds Leases without opening **More built-in kinds**.
 - **Saved views** appear under their kind once you save a filtered list.
 - Dedicated pages sit alongside the resource groups: **Overview, Events, Helm,
   Port Forwards, Diff** and **Topology**.

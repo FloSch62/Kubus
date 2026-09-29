@@ -45,10 +45,103 @@ export type WatchServerMessage =
 
 // ---- Logs ----
 
-/** One log line frame on /ws/logs (server -> client). */
+/** Workload kinds whose log sessions follow pods as they come and go. */
+export const LOG_FOLLOW_TARGET_KINDS = ['Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Service', 'Job'] as const;
+export type LogFollowTargetKind = (typeof LOG_FOLLOW_TARGET_KINDS)[number];
+
+const csvList = z
+  .string()
+  .optional()
+  .transform((value) => (value ?? '').split(',').filter(Boolean));
+
+const optionalCount = z
+  .string()
+  .optional()
+  .transform((value) => {
+    if (!value) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : undefined;
+  });
+
+/** Per-source resume cursors ("pod/container" -> RFC3339). A malformed cursor must not block a fresh stream. */
+function parseResumeAt(value: string | undefined): Record<string, string> {
+  const cursors: Record<string, string> = {};
+  if (!value) return cursors;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [key, ts] of Object.entries(parsed)) {
+        if (typeof ts === 'string' && Number.isFinite(Date.parse(ts))) cursors[key] = ts;
+      }
+    }
+  } catch {
+    // ignore: stream from the requested tail instead
+  }
+  return cursors;
+}
+
+/**
+ * Query parameters of /ws/logs. A session reads either a fixed set of pods
+ * (`pods`) or follows a workload (`target` + `targetName`), in which case
+ * pods join and leave as the workload rolls, and `exclude` lists the pods
+ * the viewer turned off. `containers` restricts every pod to those names;
+ * omitted means all containers.
+ */
+export const logSocketQuerySchema = z
+  .object({
+    ctx: z.string().min(1),
+    namespace: z.string().min(1),
+    pods: csvList,
+    target: z.enum(LOG_FOLLOW_TARGET_KINDS).optional(),
+    targetName: z.string().min(1).optional(),
+    exclude: csvList,
+    containers: z
+      .string()
+      .optional()
+      .transform((value) => (value === undefined ? undefined : value.split(',').filter(Boolean))),
+    /** Legacy single-container selection; '' means all containers. */
+    container: z
+      .string()
+      .optional()
+      .transform((value) => value || undefined),
+    follow: z
+      .string()
+      .optional()
+      .transform((value) => value !== 'false'),
+    previous: z
+      .string()
+      .optional()
+      .transform((value) => value === 'true'),
+    tailLines: optionalCount,
+    sinceSeconds: optionalCount,
+    resumeAt: z.string().optional().transform(parseResumeAt),
+  })
+  .refine((query) => (query.target ? !!query.targetName : query.pods.length > 0), {
+    message: 'pods, or target and targetName, are required',
+  });
+
+export type LogSocketQuery = z.output<typeof logSocketQuerySchema>;
+
+/** One pod of a followed workload and the containers it runs. */
+export interface LogSourcePod {
+  pod: string;
+  containers: string[];
+}
+
+/**
+ * Frames on /ws/logs (server -> client). `pods`, `pod-joined` and
+ * `pod-left` describe membership: `pods` lists a followed workload's pods
+ * when the session opens, `pod-joined` announces a new one, and `pod-left`
+ * retires a pod for good (its containers stopped while it terminated, or it
+ * was deleted). `waiting` means a container has not started yet; its stream
+ * begins once it does.
+ */
 export type LogServerMessage =
   | { op: 'line'; pod: string; container: string; ts?: string; line: string }
-  | { op: 'pod-status'; pod: string; container: string; state: 'streaming' | 'ended' | 'error'; message?: string };
+  | { op: 'pod-status'; pod: string; container: string; state: 'waiting' | 'streaming' | 'ended' | 'error'; message?: string }
+  | { op: 'pods'; pods: LogSourcePod[] }
+  | ({ op: 'pod-joined' } & LogSourcePod)
+  | { op: 'pod-left'; pod: string; reason: 'terminated' | 'deleted' };
 
 // ---- Exec ----
 

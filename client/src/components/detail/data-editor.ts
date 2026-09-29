@@ -208,14 +208,32 @@ export function buildManifest(latest: KubeObject, entries: DataEntry[], isSecret
  * user typed or explicitly revealed stay visible, everything else is masked on
  * both sides so unchanged keys don't leak and produce no diff noise.
  */
-export function maskSecretValues(obj: KubeObject, shown: (name: string) => boolean): KubeObject {
-  const clone = JSON.parse(JSON.stringify(obj)) as KubeObject;
+/** `kubectl apply` keeps the whole applied manifest here, Secret data included. */
+export const LAST_APPLIED_ANNOTATION = 'kubectl.kubernetes.io/last-applied-configuration';
+
+function maskDataFields(obj: Record<string, unknown>, shown: (name: string) => boolean): void {
   // stringData never comes back from the API, but a draft may carry it.
   for (const field of ['data', 'binaryData', 'stringData'] as const) {
-    const map = clone[field] as Record<string, unknown> | undefined;
-    if (!map) continue;
+    const map = obj[field] as Record<string, unknown> | undefined;
+    if (!map || typeof map !== 'object') continue;
     for (const key of Object.keys(map)) {
       if (!shown(key)) map[key] = REDACTED;
+    }
+  }
+}
+
+export function maskSecretValues(obj: KubeObject, shown: (name: string) => boolean): KubeObject {
+  const clone = JSON.parse(JSON.stringify(obj)) as KubeObject;
+  maskDataFields(clone as unknown as Record<string, unknown>, shown);
+  const annotations = clone.metadata?.annotations as Record<string, string> | undefined;
+  const lastApplied = annotations?.[LAST_APPLIED_ANNOTATION];
+  if (annotations && typeof lastApplied === 'string') {
+    try {
+      const applied = JSON.parse(lastApplied) as Record<string, unknown>;
+      maskDataFields(applied, shown);
+      annotations[LAST_APPLIED_ANNOTATION] = JSON.stringify(applied);
+    } catch {
+      annotations[LAST_APPLIED_ANNOTATION] = REDACTED;
     }
   }
   return clone;

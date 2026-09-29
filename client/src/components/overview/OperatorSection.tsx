@@ -8,7 +8,8 @@ import { pluralLabel, type OperatorRollup } from '@kubus/shared';
 import { ProblemCard, kindListPath } from './cards.js';
 
 /**
- * Installed-operator rollups (cert-manager, Argo, Flux, KEDA, Karpenter):
+ * Installed-operator rollups (cert-manager, Argo, Flux, External Secrets, KEDA,
+ * Gateway API routes, Karpenter):
  * ready/total per resource kind, with the not-ready instances as chips.
  */
 export function OperatorSection({ ctx, operators, scoped }: { ctx: string; operators: OperatorRollup[]; scoped?: boolean }) {

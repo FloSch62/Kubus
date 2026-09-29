@@ -12,6 +12,8 @@ import {
   SetImageDialog,
   type RowActionTarget,
 } from '../../../client/src/components/RowActions';
+import { rowKeyActionsFor } from '../../../client/src/components/row-key-actions';
+import { ROW_KEYS, type RowKeyAction } from '../../../client/src/row-keys';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useDockStore } from '../../../client/src/state/dock';
 import { useNavigationStore } from '../../../client/src/state/navigation';
@@ -625,6 +627,141 @@ describe('controller and node actions', () => {
     fireEvent.change(screen.getByPlaceholderText('node-a'), { target: { value: 'node-a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'node-shell', image: 'busybox:1.37', profile: 'general' });
+    view.unmount();
+  });
+});
+
+describe('row keys', () => {
+  const runningPod = () =>
+    target('Pod', { containers: [{ name: 'app' }] }, { status: { containerStatuses: [{ name: 'app', state: { running: {} } }] } });
+
+  function renderKeyed(value: RowActionTarget, props: { runAction?: RowKeyAction; open?: boolean } = {}) {
+    const onClose = vi.fn();
+    const onOpenManifest = vi.fn();
+    const view = render(
+      <MemoryRouter>
+        <RowActionMenu
+          target={value}
+          anchorPosition={{ top: 10, left: 10 }}
+          open={props.open ?? true}
+          onClose={onClose}
+          keyHints
+          runAction={props.runAction}
+          onOpenManifest={onOpenManifest}
+        />
+      </MemoryRouter>,
+    );
+    return { ...view, onClose, onOpenManifest };
+  }
+
+  it('prints each key on its menu item without changing the item names', () => {
+    renderKeyed(target('Deployment', { replicas: 2 }));
+    const logs = screen.getByRole('menuitem', { name: 'Logs' });
+    expect(logs).toHaveAttribute('aria-keyshortcuts', 'L');
+    expect(logs).toHaveTextContent('LogsL');
+    expect(screen.getByRole('menuitem', { name: 'Scale…' })).toHaveAttribute('aria-keyshortcuts', 'S');
+    expect(screen.getByRole('menuitem', { name: 'Rollout restart' })).toHaveAttribute('aria-keyshortcuts', 'R');
+    expect(screen.getByRole('menuitem', { name: 'Port forward…' })).toHaveAttribute('aria-keyshortcuts', 'F');
+    expect(screen.getByRole('menuitem', { name: 'Edit manifest' })).toHaveAttribute('aria-keyshortcuts', 'E');
+    expect(screen.getByRole('menuitem', { name: 'Delete…' })).toHaveAttribute('aria-keyshortcuts', 'Delete Backspace');
+    expect(screen.getByRole('menuitem', { name: 'Set image…' })).not.toHaveAttribute('aria-keyshortcuts');
+  });
+
+  it('keeps plain menus (the details panel) free of hints and the manifest item', () => {
+    renderMenu(target('Deployment', { replicas: 2 }));
+    expect(screen.getByRole('menuitem', { name: 'Logs' })).not.toHaveAttribute('aria-keyshortcuts');
+    expect(screen.queryByRole('menuitem', { name: 'Edit manifest' })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Delete' });
+    expect(screen.queryByText('Delete Deployment')).not.toBeInTheDocument();
+  });
+
+  it('marks exactly the actions the grid keys dispatch for each kind', () => {
+    const cases: RowActionTarget[] = [
+      runningPod(),
+      target('Pod', { containers: [{ name: 'app' }] }, { status: { phase: 'Succeeded', containerStatuses: [{ name: 'app', state: { terminated: {} } }] } }),
+      target('Deployment', { replicas: 2 }),
+      target('StatefulSet', { replicas: 1 }),
+      target('DaemonSet'),
+      target('ReplicaSet', { replicas: 1 }),
+      target('Service'),
+      target('Job'),
+      target('CronJob'),
+      target('Node'),
+      target('Widget'),
+    ];
+    for (const value of cases) {
+      const view = renderKeyed(value);
+      const marked = new Set(
+        screen.getAllByRole('menuitem').flatMap((item) => {
+          const aria = item.getAttribute('aria-keyshortcuts');
+          return aria ? [ROW_KEYS.find((def) => def.aria === aria)!.action] : [];
+        }),
+      );
+      expect([...marked].sort()).toEqual([...rowKeyActionsFor(value)].sort());
+      view.unmount();
+    }
+  });
+
+  it('runs a key from the open menu and closes it', () => {
+    let view = renderKeyed(runningPod());
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'x' });
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({ kind: 'terminal', pod: 'pod-a', container: 'app' });
+    expect(view.onClose).toHaveBeenCalled();
+    view.unmount();
+
+    view = renderKeyed(runningPod());
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'e' });
+    expect(view.onOpenManifest).toHaveBeenCalled();
+    view.unmount();
+
+    // No scale on a pod: the key is left to the menu's type-ahead.
+    view = renderKeyed(runningPod());
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 's' });
+    expect(view.onClose).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('runs a row key through the same dialogs without opening the menu', async () => {
+    let view = renderKeyed(runningPod(), { runAction: 'logs', open: false });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    await waitFor(() => expect(queryMocks.resolveLogTargetPods).toHaveBeenCalledOnce());
+    view.unmount();
+
+    view = renderKeyed(runningPod(), { runAction: 'delete', open: false });
+    expect(screen.getByText('Delete Pod')).toBeInTheDocument();
+    // The cluster is protected: the production guard asks for the name.
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText('pod-a'), { target: { value: 'pod-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(queryMocks.deleteResource.mutate).toHaveBeenCalledOnce();
+    view.unmount();
+
+    // A keyed restart confirms first, unlike the menu item.
+    view = renderKeyed(target('Deployment', { replicas: 2 }), { runAction: 'restart', open: false });
+    expect(screen.getByText('Restart Deployment')).toBeInTheDocument();
+    expect(queryMocks.restart.mutate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('deployment-a'), { target: { value: 'deployment-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    expect(queryMocks.restart.mutate).toHaveBeenCalledWith(
+      { ctx: 'dev', body: { kind: 'Deployment', namespace: 'team-a', name: 'deployment-a' } },
+      expect.anything(),
+    );
+    view.unmount();
+
+    view = renderKeyed(target('ReplicaSet', { replicas: 1 }), { runAction: 'restart', open: false });
+    expect(screen.getByText('Restart ReplicaSet pods')).toBeInTheDocument();
+    view.unmount();
+
+    view = renderKeyed(target('Deployment', { replicas: 2 }), { runAction: 'scale', open: false });
+    expect(screen.getByText('Scale deployment-a')).toBeInTheDocument();
+    view.unmount();
+
+    view = renderKeyed(runningPod(), { runAction: 'forward', open: false });
+    expect(screen.getByText('Port forward — pod/pod-a')).toBeInTheDocument();
+    view.unmount();
+
+    view = renderKeyed(target('Node'), { runAction: 'shell', open: false });
+    expect(screen.getByText('Node shell — node-a')).toBeInTheDocument();
     view.unmount();
   });
 });

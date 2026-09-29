@@ -1,11 +1,13 @@
 import {
   BUILTIN_NAV_GROUPS,
+  type InventoryProblem,
   type KubeObject,
   type NamespaceInventoryEntry,
   type NamespaceOverview,
   type NamespaceQuotaStatus,
 } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
+import { gradeBuiltinKind, gradeCustomKind } from './inventory-health.js';
 import { resolveCrd } from './operator-rollups.js';
 import { collectWarningEvents, optionalItems, podFailure } from './overview.js';
 import { parseQuantity } from './quantity.js';
@@ -19,8 +21,9 @@ const INVENTORY_KINDS = BUILTIN_NAV_GROUPS.flatMap((g) => g.kinds).filter((k) =>
 
 /**
  * Popular CRDs surfaced in the inventory when installed, `<plural>.<group>`.
- * Operator kinds (cert-manager, Argo, Flux, KEDA) show up through the
- * operator rollups too; the extras here are common cluster add-ons.
+ * Every namespaced operator kind (cert-manager, Argo, Flux, External Secrets,
+ * KEDA, Gateway API routes) is here, graded with its rollup's readiness
+ * check; the extras are common cluster add-ons counted without a bar.
  */
 const POPULAR_CRDS = [
   'certificates.cert-manager.io',
@@ -30,13 +33,18 @@ const POPULAR_CRDS = [
   'kustomizations.kustomize.toolkit.fluxcd.io',
   'helmreleases.helm.toolkit.fluxcd.io',
   'gitrepositories.source.toolkit.fluxcd.io',
+  'ocirepositories.source.toolkit.fluxcd.io',
+  'helmrepositories.source.toolkit.fluxcd.io',
   'scaledobjects.keda.sh',
+  'scaledjobs.keda.sh',
   'servicemonitors.monitoring.coreos.com',
   'prometheusrules.monitoring.coreos.com',
   'externalsecrets.external-secrets.io',
+  'secretstores.external-secrets.io',
   'sealedsecrets.bitnami.com',
   'virtualservices.networking.istio.io',
   'httproutes.gateway.networking.k8s.io',
+  'grpcroutes.gateway.networking.k8s.io',
   'ingressroutes.traefik.io',
 ];
 
@@ -84,8 +92,14 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
       .sort((a, b) => `${a.namespace}/${a.name}`.localeCompare(`${b.namespace}/${b.name}`));
     unhealthyByKind.set('Pod', failingPods.length);
 
+    // Every object behind a degraded or failed part of a bar, so the bars
+    // and the problem list can never disagree.
+    const problems: InventoryProblem[] = [];
     const inventory: NamespaceInventoryEntry[] = INVENTORY_KINDS.map((spec) => {
       const entry = itemsByKind.get(spec.kind);
+      const grades =
+        entry && !entry.unavailable ? gradeBuiltinKind(spec, entry.items, health.issues.filter((i) => i.kind === spec.kind), now) : undefined;
+      if (grades) problems.push(...grades.problems);
       return {
         kind: spec.kind,
         group: spec.group,
@@ -93,35 +107,48 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
         plural: spec.plural,
         total: entry?.items.length ?? 0,
         unhealthy: unhealthyByKind.get(spec.kind),
+        health: grades?.health,
         unavailable: entry?.unavailable || undefined,
       };
     });
 
     // Installed popular CRDs, counted within the namespace.
     const crdsByName = new Map(crdsResult.items.map((c) => [c.metadata.name, c]));
-    const installedCrds = POPULAR_CRDS.map((name) => resolveCrd(crdsByName, name)).filter(
-      (crd): crd is NonNullable<typeof crd> => !!crd && crd.namespaced,
-    );
+    const installedCrds = POPULAR_CRDS.flatMap((name) => {
+      const crd = resolveCrd(crdsByName, name);
+      return crd?.namespaced ? [{ name, crd }] : [];
+    });
     const crdCounts = await Promise.all(
-      installedCrds.map(async (crd) => {
+      installedCrds.map(async ({ name, crd }) => {
         const acquired = handle.watchers.acquire(crd.group, crd.version, crd.plural);
         try {
           const result = await optionalItems(acquired.watcher);
+          const items = result.items.filter(inNamespace);
+          const grades = result.unavailable ? undefined : gradeCustomKind(name, crd, items);
           return {
-            kind: crd.kind,
-            group: crd.group,
-            version: crd.version,
-            plural: crd.plural,
-            total: result.items.filter(inNamespace).length,
-            custom: true,
-            unavailable: result.unavailable || undefined,
+            entry: {
+              kind: crd.kind,
+              group: crd.group,
+              version: crd.version,
+              plural: crd.plural,
+              total: items.length,
+              custom: true,
+              health: grades?.health,
+              unavailable: result.unavailable || undefined,
+            },
+            problems: grades?.problems ?? [],
           };
         } finally {
           acquired.release();
         }
       }),
     );
-    inventory.push(...crdCounts);
+    for (const c of crdCounts) {
+      inventory.push(c.entry);
+      problems.push(...c.problems);
+    }
+    // Failed first; within a grade, inventory order then name (stable sort).
+    problems.sort((a, b) => (a.grade === b.grade ? 0 : a.grade === 'failed' ? -1 : 1));
 
     const quotas: NamespaceQuotaStatus[] = (itemsByKind.get('ResourceQuota')?.items ?? []).map((quota) => {
       const status = quota.status as { hard?: Record<string, string>; used?: Record<string, string> } | undefined;
@@ -149,6 +176,7 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
       namespaces,
       status: (nsObject?.status as { phase?: string } | undefined)?.phase,
       inventory,
+      problems,
       workloadHealth: health.kinds,
       issues: health.issues,
       failingPods,
