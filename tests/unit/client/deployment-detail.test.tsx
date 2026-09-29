@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KubeObject } from '@kubus/shared';
+import type { ClusterSignals, KubeObject } from '@kubus/shared';
 import { DeploymentDetail } from '../../../client/src/components/detail/DeploymentDetail';
 import { useDockStore } from '../../../client/src/state/dock';
 import { useDetailStore } from '../../../client/src/state/detail';
@@ -9,6 +9,7 @@ const queries = vi.hoisted(() => ({
   replicaSets: [] as KubeObject[],
   pods: [] as KubeObject[],
   metrics: undefined as Map<string, unknown> | undefined,
+  signals: { windowMs: 3_600_000, objects: {} } as ClusterSignals,
 }));
 
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
@@ -21,6 +22,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
     isLoading: false,
   }),
   useResourceMetrics: () => ({ data: queries.metrics }),
+  useClusterSignals: (contexts: string[]) => ({ data: contexts.length ? new Map([[contexts[0], queries.signals]]) : undefined }),
 }));
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: effects.toast }));
 vi.mock('../../../client/src/components/PortForwardDialog.js', () => ({ PortForwardDialog: () => <div>Forward dialog</div> }));
@@ -115,6 +117,7 @@ beforeEach(() => {
   // The first pod never got `app` running, so a shell must land in the second.
   queries.pods = [pod('web-aaa', ['broken']), pod('web-bbb', ['app', 'broken'])];
   queries.metrics = undefined;
+  queries.signals = { windowMs: 3_600_000, objects: {} };
   effects.toast.mockClear();
   useDockStore.setState({ tabs: [], activeId: undefined, open: false, maximized: false });
   useDetailStore.setState({ stack: [], embedded: false, collapsed: false, width: 640, focusSeq: 0, dataDirty: false, drafts: {}, pendingDiscard: undefined });
@@ -232,5 +235,46 @@ describe('DeploymentDetail', () => {
     expect(screen.getByText('2 of 2 ready')).toBeInTheDocument();
     expect(screen.queryByText('Why this Deployment isn’t ready')).not.toBeInTheDocument();
     expect(screen.getByText('2 Running')).toBeInTheDocument();
+  });
+
+  it('says why a pod is Pending, from its condition or its latest FailedScheduling event', () => {
+    const big = deployment();
+    big.status = { replicas: 2, readyReplicas: 0, updatedReplicas: 2, conditions: [{ type: 'Progressing', status: 'True' }] };
+    const unscheduled = (name: string, conditions: unknown[]): KubeObject =>
+      ({
+        ...pod(name, []),
+        spec: { containers: [{ name: 'app' }] },
+        status: { phase: 'Pending', conditions },
+      }) as unknown as KubeObject;
+    const message = '0/1 nodes are available: 1 Insufficient cpu. preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.';
+    queries.pods = [
+      unscheduled('web-aaa', [{ type: 'PodScheduled', status: 'False', reason: 'Unschedulable', message }]),
+      // No condition yet: the event cache still knows why.
+      unscheduled('web-bbb', []),
+    ];
+    queries.signals = {
+      windowMs: 3_600_000,
+      objects: { 'Pod|team-a|web-bbb': { warnings: [{ reason: 'FailedScheduling', message, count: 1, lastTimestamp: '2026-09-29T10:00:00Z', uid: 'uid-web-bbb' }] } },
+    };
+    render(<DeploymentDetail obj={big} ctx="dev" />);
+
+    const banner = screen.getByRole('alert');
+    expect(within(banner).getByText('2 pods Pending: 0/1 nodes available, Insufficient cpu')).toBeInTheDocument();
+    expect(within(banner).getByText(message)).toBeInTheDocument();
+    // The short reason sits on each Pending row.
+    expect(screen.getAllByText('Insufficient cpu')).toHaveLength(2);
+  });
+
+  it('links a refused rollout to the quota its condition names', () => {
+    const refused = deployment();
+    refused.status = {
+      replicas: 0,
+      conditions: [{ type: 'ReplicaFailure', status: 'True', reason: 'FailedCreate', message: 'pods "web-x" is forbidden: exceeded quota: team-quota, requested: cpu=64' }],
+    };
+    queries.pods = [];
+    render(<DeploymentDetail obj={refused} ctx="dev" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open ResourceQuota team-quota' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'ResourceQuota', name: 'team-quota', namespace: 'team-a' });
   });
 });

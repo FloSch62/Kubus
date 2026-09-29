@@ -31,7 +31,7 @@ since the autoscaler will likely override a manual change.
 
 ### Rollout history & rollback
 
-Open a Deployment or StatefulSet's details drawer and switch to the **History** tab. You
+Open a Deployment, StatefulSet or DaemonSet's details drawer and switch to the **History** tab. You
 get every revision with its images and change-cause, the current one clearly marked, and a
 **Roll back** button on the others. It works like `kubectl rollout undo`, except that you
 can see what you're rolling back to first.

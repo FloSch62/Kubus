@@ -7,7 +7,7 @@ import TableRow from '@mui/material/TableRow';
 import type { KubeObject } from '@kubus/shared';
 import { GenericDetail, ConditionsTable, hasUnhealthyCondition } from './GenericDetail.js';
 import { Fact, Facts } from './Facts.js';
-import { PodMiniList } from './PodMiniList.js';
+import { PodMiniList, daemonSetOwner } from './PodMiniList.js';
 import { DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
 import { CopyValueButton } from '../CellCopy.js';
@@ -40,6 +40,8 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const podsQuery = useResourceList({ ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${name}` }, { liveMs: DETAIL_LIST_LIVE_MS });
   const pods = podsQuery.data?.items ?? [];
   const runningPods = pods.filter((p) => podSummary(p).status === 'Running').length;
+  // DaemonSet pods come with the node; the rest were scheduled onto it.
+  const daemonPods = pods.filter((p) => daemonSetOwner(p)).length;
   const unhealthy = hasUnhealthyCondition(obj, nodeGoodWhen);
 
   const resourceKeys = ['cpu', 'memory', 'pods', 'ephemeral-storage'].filter((k) => status.capacity?.[k] !== undefined || status.allocatable?.[k] !== undefined);
@@ -114,8 +116,13 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
           </Section>
         )}
         <ConditionsTable obj={obj} goodWhen={nodeGoodWhen} defaultOpen={unhealthy} />
-        <Section title="Pods on this node" count={podsQuery.isLoading ? undefined : pods.length} flush>
-          <PodMiniList ctx={ctx} pods={pods} loading={podsQuery.isLoading} />
+        <Section
+          title="Pods on this node"
+          count={podsQuery.isLoading ? undefined : pods.length}
+          flush
+          description={podsQuery.isLoading || !daemonPods ? undefined : `${daemonPods} from DaemonSet${daemonPods === 1 ? '' : 's'}`}
+        >
+          <PodMiniList ctx={ctx} pods={pods} loading={podsQuery.isLoading} daemonSets />
         </Section>
       </DetailStack>
       <GenericDetail obj={obj} ctx={ctx} hideConditions />

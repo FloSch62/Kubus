@@ -64,7 +64,7 @@ shows what lives inside it.
 | --- | --- |
 | Failing pods with `ImagePullBackOff` / `ErrImagePull` | A bad image reference or missing pull secret. |
 | Failing pods with `CrashLoopBackOff` | The container keeps exiting. Check its [logs](logs.md). |
-| `Pending` pods | Nothing can schedule them. Check node capacity or taints. |
+| `Pending` pods | Nothing can schedule them. Check node capacity or taints. The owning workload's drawer [spells out the scheduler's reason](resource-details.md#why-a-pod-is-pending). |
 | Warnings climbing | Look at the events timeline for the reason and the involved object. |
 
 !!! tip "Multi-cluster triage"

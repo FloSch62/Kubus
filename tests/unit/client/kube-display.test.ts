@@ -595,5 +595,6 @@ describe('workloadStatus', () => {
   it('reads DaemonSet counters', () => {
     expect(workloadStatus(kobj({ kind: 'DaemonSet', status: { desiredNumberScheduled: 3, numberReady: 3, updatedNumberScheduled: 3 } }))).toBe('Available');
     expect(workloadStatus(kobj({ kind: 'DaemonSet', status: { desiredNumberScheduled: 3, numberReady: 1, updatedNumberScheduled: 3 } }))).toBe('Progressing');
+    expect(workloadStatus(kobj({ kind: 'DaemonSet', status: { desiredNumberScheduled: 0, numberReady: 0 } }))).toBe('No eligible nodes');
   });
 });

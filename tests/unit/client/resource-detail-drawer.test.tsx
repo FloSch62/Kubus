@@ -146,6 +146,8 @@ vi.mock('../../../client/src/components/detail/DataEditor.js', () => ({
   ),
 }));
 vi.mock('../../../client/src/components/detail/DeploymentDetail.js', () => ({ DeploymentDetail: ({ obj }: { obj: KubeObject }) => <div>Deployment overview {obj.metadata.name}</div> }));
+vi.mock('../../../client/src/components/detail/StatefulSetDetail.js', () => ({ StatefulSetDetail: ({ obj }: { obj: KubeObject }) => <div>StatefulSet overview {obj.metadata.name}</div> }));
+vi.mock('../../../client/src/components/detail/DaemonSetDetail.js', () => ({ DaemonSetDetail: ({ obj }: { obj: KubeObject }) => <div>DaemonSet overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/PodDetail.js', () => ({ PodDetail: ({ obj }: { obj: KubeObject }) => <div>Pod overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/NodeDetail.js', () => ({ NodeDetail: ({ obj }: { obj: KubeObject }) => <div>Node overview {obj.metadata.name}</div> }));
 vi.mock('../../../client/src/components/detail/ServiceDetail.js', () => ({ ServiceDetail: ({ obj }: { obj: KubeObject }) => <div>Service overview {obj.metadata.name}</div> }));
@@ -552,8 +554,8 @@ describe('ResourceDetailDrawer', () => {
       ['Service', 'Service overview service-a'],
       ['ConfigMap', 'ConfigMap overview configmap-a'],
       ['Secret', 'Secret overview secret-a'],
-      ['StatefulSet', 'Generic overview statefulset-a'],
-      ['DaemonSet', 'Generic overview daemonset-a'],
+      ['StatefulSet', 'StatefulSet overview statefulset-a'],
+      ['DaemonSet', 'DaemonSet overview daemonset-a'],
     ] as const;
 
     for (const [kind, expected] of cases) {

@@ -120,7 +120,8 @@ export function workloadStatus(obj: KubeObject): string {
   const strategy = spec?.updateStrategy;
   const partition = strategy?.rollingUpdate?.partition ?? 0;
   const updateTarget = strategy?.type === 'OnDelete' ? 0 : Math.max(0, desired - partition);
-  if (desired === 0) return 'Scaled to zero';
+  // A DaemonSet can't be scaled: zero desired means no node qualifies.
+  if (desired === 0) return daemon ? 'No eligible nodes' : 'Scaled to zero';
   if (ready >= desired && (updated ?? updateTarget) >= updateTarget && total <= desired) return 'Available';
   if (ready === 0) return 'Unavailable';
   return 'Progressing';

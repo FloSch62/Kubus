@@ -24,7 +24,7 @@ you're on.
 | **Events** | Events involving this object, newest first, Warnings highlighted. The tab carries a count of recent warnings before you open it. | Every kind |
 | **Map** | A focused [topology graph](topology.md) of what this object relates to. | Every kind |
 | **Metrics** | Live CPU/memory [history charts](metrics.md). | Pods, Nodes |
-| **History** | Rollout revisions with images and change-cause, and rollback. | Deployments, StatefulSets |
+| **History** | Rollout revisions with images and change-cause, and rollback. | Deployments, StatefulSets, DaemonSets |
 
 ## Kind-aware overviews
 
@@ -39,16 +39,36 @@ collapsible sections hold the rest.
   own probes, environment, mounts and command a click away. Below that come init and
   ephemeral debug containers, placement and identity details, volumes, scheduling,
   conditions and metadata. Related ConfigMaps, Secrets, PVCs, nodes and owners are all
-  clickable.
+  clickable. A probe on a named port shows the number it resolves to, such as
+  `http (9898)`, and a name the container doesn't declare is flagged. A projected volume
+  lists each of its sources (Secrets, ConfigMaps, the service account token, downward API
+  fields), and the Secrets, ConfigMaps and service account open in the drawer.
 - **Deployments** show ready/updated/available/unavailable replicas with a rollout
   progress bar, the failing conditions and pod reasons in full, the pod template's
-  containers, the pods, and the ReplicaSets still holding pods.
+  containers, the pods, and the ReplicaSets still holding pods. The pencil next to a
+  container's image changes it in place.
+- **StatefulSets** get the same summary, progress bar, problem banner and container
+  panels, with a pencil to change an image. Pods are listed in ordinal order, so
+  `worker-2` comes before `worker-10`. **Volume claims** has one row per claim template
+  and ordinal with the claim's phase and capacity, including claims kept after a
+  scale-down. **Revisions** shows the revisions that still run pods with their images, which
+  is how a rollout held by a partition looks. Details name the update strategy and
+  partition, the pod management policy, the claim retention policy and the governing
+  Service, flagged when it is missing or not headless, with the per-pod DNS names it gives.
+- **DaemonSets** show desired, current, ready, up-to-date and misscheduled counts, the
+  container panels, and the pods with the node each runs on. **Nodes** lists every node
+  that isn't running a ready pod and says why: the scheduler's reason for a pod stuck
+  Pending there (not enough CPU, for example), or the node selector, required node
+  affinity or untolerated taint that leaves the node out. **Revisions** works as it does
+  for StatefulSets.
 - **Services** show type, cluster IP, ready endpoints and port count; the in-cluster DNS
   name; a ports table (port → targetPort, nodePort) with one-click port forwarding; the
   live **endpoints** from the EndpointSlices with their pods and readiness; and the pods
   the selector matches.
 - **Nodes** show roles, pod count, kubelet version, internal IP and condition health, then
-  system info, addresses, capacity and the pods on the node.
+  system info, addresses, capacity and the pods on the node. Pods that come from a
+  DaemonSet carry a **DS** tag, and the chips above the list show only those or only the
+  rest.
 - **Secrets** show the type and data keys, with values **[redacted](production-guard.md#secrets-are-redacted-by-default)**
   until you explicitly reveal them.
 - **NetworkPolicies** spell out what the policy does: the pods it applies to, whether it
@@ -67,6 +87,18 @@ collapsible sections hold the rest.
   first. **LimitRanges** show one table per type with defaults, minimums and maximums.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
   and copyable). The full spec and status live one tab over, in the Manifest tab.
+
+### Why a pod is Pending
+
+A pod that no node will take has no container state to report, so the workload banner
+reads the scheduler instead. It takes the pod's `PodScheduled` condition and the latest
+`FailedScheduling` event, the same events the [Overview](overview.md) collects, and groups
+pods with the same answer into one line, such as *1 pod Pending: 0/3 nodes available,
+Insufficient cpu*, with the scheduler's full message below it. The pod row repeats the
+short reason under its status. When the problem names a node (the one a DaemonSet pod is
+meant for) or a ResourceQuota, the banner links to it. StatefulSets and DaemonSets have
+no condition for a pod the API refused, so their banner also shows the controller's
+recent `FailedCreate` events, which is where an exceeded quota shows up.
 
 ### Links in both directions
 
@@ -94,15 +126,18 @@ overview also answers the other question, *who depends on this*:
   is sent say so under the list and fill in on the next refresh.
 - **Routed by** on a Service lists the Ingresses and Gateway API routes that send
   traffic to it, with their hosts and paths.
-- **Selected by** on a Pod or Deployment lists the Services, autoscalers,
-  PodDisruptionBudgets and NetworkPolicies whose selectors match it.
+- **Selected by** on a Pod, Deployment, StatefulSet or DaemonSet lists the Services,
+  autoscalers, PodDisruptionBudgets and NetworkPolicies whose selectors match it. An
+  autoscaler's row shows its replica range and each metric's current value against its
+  target, such as `cpu 42% / 60%`, the same figures as the **Metrics** column of the
+  HorizontalPodAutoscalers list.
 - The **namespace** in the drawer header and in Metadata is a link: it opens the
   namespace's overview (the Overview page filtered to that namespace).
 - Annotation values that are URLs, and bare hosts under link-shaped keys such as
   `argocd.argoproj.io/url` or a `runbook`, open in a new tab.
 
 Every row in these sections opens the referrer in the drawer, with the usual back stack.
-Long lists get a filter box; the pod lists inside Node, Service and Deployment overviews
+Long lists get a filter box; the pod lists inside Node, Service and workload overviews
 accept the same `/` [smart filter](smart-filters.md) syntax as the list pages.
 
 !!! tip "Navigate and come back"

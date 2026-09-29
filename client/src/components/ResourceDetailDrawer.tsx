@@ -30,6 +30,8 @@ import { GenericDetail } from './detail/GenericDetail.js';
 import { ConfigMapDetail } from './detail/ConfigMapDetail.js';
 import { DataEditor } from './detail/DataEditor.js';
 import { DeploymentDetail } from './detail/DeploymentDetail.js';
+import { StatefulSetDetail } from './detail/StatefulSetDetail.js';
+import { DaemonSetDetail } from './detail/DaemonSetDetail.js';
 import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
@@ -614,6 +616,10 @@ const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, ver
   switch (kind) {
     case 'Deployment':
       return <DeploymentDetail obj={obj} ctx={ctx} />;
+    case 'StatefulSet':
+      return <StatefulSetDetail obj={obj} ctx={ctx} />;
+    case 'DaemonSet':
+      return <DaemonSetDetail obj={obj} ctx={ctx} />;
     case 'Pod':
       return <PodDetail obj={obj} ctx={ctx} />;
     case 'Node':
