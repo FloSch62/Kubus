@@ -182,8 +182,11 @@ add('shell', async () => {
   await page.waitForTimeout(600);
   await page.keyboard.type('podinfo', { delay: 45 });
   await page.waitForTimeout(1200);
-  // results order: Deployment, Service, then the pods — two steps to the first Pod
+  // results: the Deployment, then its pods folded into one row. Expand the
+  // group, step onto the first Pod and open its actions.
   await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(300);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
   await page.waitForTimeout(700);
@@ -259,6 +262,9 @@ add('port-forwards', async () => {
   await nav(page, 'Port Forwards');
   await page.waitForTimeout(1800);
   await shot(page, 'port-forwards');
+  // Stop the forward again so the next run (the other theme) can start it.
+  const token = new globalThis.URL(URL).searchParams.get('token');
+  await page.request.delete(new globalThis.URL('/api/portforwards', URL).href, { headers: { Authorization: `Bearer ${token}` } });
   await page.context().close();
 });
 
