@@ -117,7 +117,7 @@ export function RolloutDetail({ obj, ctx, crd, version }: CustomKindViewProps) {
         items={[
           { label: 'Phase', value: status.abort ? 'Aborted' : (status.phase ?? '—'), tone: status.abort ? 'error' : PHASE_TONE[status.phase ?? ''] },
           { label: 'Strategy', value: strategy ?? '—' },
-          strategy === 'Canary' && steps.length > 0 && { label: 'Step', value: `${Math.min(currentStep ?? steps.length, steps.length)}/${steps.length}`, hint: 'Canary steps completed.' },
+          strategy === 'Canary' && steps.length > 0 && { label: 'Steps done', value: `${Math.min(currentStep ?? steps.length, steps.length)}/${steps.length}`, hint: 'Canary steps completed.' },
           weight !== undefined && { label: 'Canary weight', value: `${weight}%`, hint: 'Share of traffic sent to the new revision.' },
           { label: 'Ready', value: `${ready}/${desired}`, tone: ready >= desired ? 'success' : ready === 0 ? 'error' : 'warning' },
         ]}
