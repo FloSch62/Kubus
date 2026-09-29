@@ -17,6 +17,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
+import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { useApiResourcesForContexts, useClusterSignals, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
@@ -39,6 +40,7 @@ import { usePaneActive } from '../layout/pane-context.js';
 import { isTextEntryTarget } from '../text-entry.js';
 import { addLabelTerm } from '../label-selector.js';
 import { podContainerNames } from '../kube-display.js';
+import { diffSideFor, openCompare } from '../compare-link.js';
 
 // Wide, rarely-needed builtin columns start hidden; the column menu re-enables
 // them. Labels carry no signal on CRDs, so the Kind/Group/Scope columns take
@@ -807,6 +809,18 @@ export function ResourceListPage() {
                 }}
               >
                 Logs ({selectedRows.length})
+              </Button>
+            )}
+            {selectedRows.length === 2 && (
+              <Button
+                startIcon={<DifferenceOutlinedIcon />}
+                variant="outlined"
+                onClick={() => {
+                  const [a, b] = selectedRows.map((r) => diffSideFor({ ctx: r.ctx, group, version, plural, namespace: r.obj.metadata.namespace, name: r.obj.metadata.name }));
+                  if (a && b) openCompare(a, b);
+                }}
+              >
+                Compare 2
               </Button>
             )}
             {selectedRows.length > 0 && bulkRestartable && (

@@ -10,7 +10,16 @@ const diffLoading = (
   </Box>
 );
 
-export function DiffViewer(props: { left: string; right: string }) {
+export interface DiffViewerProps {
+  left: string;
+  right: string;
+  /** Collapse unchanged regions to a few context lines around each change. */
+  hideUnchanged?: boolean;
+  /** Number of changed blocks, reported after every diff computation. */
+  onChangeCount?: (count: number) => void;
+}
+
+export function DiffViewer(props: DiffViewerProps) {
   return (
     <Suspense fallback={diffLoading}>
       <DiffViewerImpl {...props} />

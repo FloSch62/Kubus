@@ -14,6 +14,19 @@ staging but not prod?" usually has its answer here.
   <figcaption>Two objects, side by side, with the differences highlighted.</figcaption>
 </figure>
 
+## Start from where you are
+
+You rarely need to fill in the pickers yourself:
+
+- **⋮ menu** → **Compare with…**, on any row or in the detail drawer, opens a new tab with
+  that object on the left. The right side starts as the same kind, namespace and name in
+  another cluster, preferring the clusters you have selected over the ones that are only
+  connected. If that cluster has no such object, or there is no other cluster, the page
+  says so and opens the right side's name picker for you.
+- Check exactly two rows in a list and press **Compare 2** in the bar above it. The first
+  row goes on the left and the second on the right. With two clusters selected, the same
+  Deployment in both is two clicks away.
+
 ## Picking two sides
 
 Open **Diff** from the nav (or ++ctrl+k++ → *Go to Diff*). For each side, choose:
@@ -26,14 +39,39 @@ Open **Diff** from the nav (or ++ctrl+k++ → *Go to Diff*). For each side, choo
 The two objects render in a Monaco diff view, the same side-by-side diff you know from VS
 Code.
 
+Changing a side's cluster keeps its kind and object, so you can point the right side at one
+cluster after another and compare the same object everywhere. The swap button at the end of
+the toolbar trades the two sides.
+
+Above the diff, each side has a title with its cluster, kind and name. Click it to open that
+object in its list with the detail drawer; ++ctrl++-click (++cmd++-click on macOS) or a
+middle-click opens it in a new tab and keeps the compare. The count at the right says how
+many blocks differ, or that the two sides are identical.
+
 ## Normalise the noise
 
 Server-set fields such as `resourceVersion`, `uid`, `creationTimestamp`, `status` and
-managed-fields make almost any two objects look different. The **Normalise** toggle (on by
-default) strips that noise so you see the differences that *matter*: spec, labels and the
-other things you actually set.
+managed-fields make almost any two objects look different. The **Ignore status &
+server-set metadata** switch (on by default) strips that noise so you see the differences
+that *matter*: spec, labels and the other things you actually set.
 
 Turn it off when you specifically want to compare status or server metadata.
+
+Two more controls narrow the view:
+
+- **Spec/data only** compares just the payload: `spec`, or `data` for ConfigMaps and
+  Secrets, `rules` for Roles, and so on. It leaves out `apiVersion`, `kind`, `metadata` and
+  `status`, which helps when labels and annotations differ between clusters for reasons you
+  don't care about.
+- **Only changes** folds away the unchanged lines and keeps three lines of context around
+  each difference. Click a fold to open it.
+
+## Reopen and share a compare
+
+Both sides and all three switches live in the page's URL. A page tab showing a compare comes
+back exactly as you left it after a reload, a restart or *Reopen closed tab*, and it is
+named after what it compares, such as *Diff: web*. In a browser, bookmark or share the
+address to hand someone the same compare.
 
 ## Good things to diff
 

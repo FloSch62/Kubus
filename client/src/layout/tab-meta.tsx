@@ -15,6 +15,7 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import { BUILTIN_NAV_GROUPS, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
+import { parseSide } from '../diff-state.js';
 
 /** Sidebar/tab icons per builtin nav group (shared by NavDrawer and TabsBar). */
 export const GROUP_ICONS: Record<string, React.ReactElement> = {
@@ -50,6 +51,13 @@ for (const navGroup of BUILTIN_NAV_GROUPS) {
  */
 export function tabMeta(path: string, discovered?: ResourceKindInfo[]): { title: string; icon: React.ReactElement } {
   const pathname = path.split('?')[0] ?? path;
+  if (pathname === '/diff') {
+    // A compare tab is named after what it compares.
+    const params = new URLSearchParams(path.slice(pathname.length));
+    const left = parseSide(params.get('left')).name;
+    const right = parseSide(params.get('right')).name;
+    if (left) return { title: `Diff: ${right && right !== left ? `${left} ↔ ${right}` : left}`, icon: <DifferenceOutlinedIcon /> };
+  }
   const staticPage = STATIC_PAGES[pathname];
   if (staticPage) return staticPage;
   if (pathname.startsWith('/helm/')) {

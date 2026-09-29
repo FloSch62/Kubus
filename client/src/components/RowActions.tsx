@@ -54,6 +54,7 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   resolveLogTargetPods,
@@ -86,6 +87,7 @@ import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
+import { diffSideFor, openCompare } from '../compare-link.js';
 import { labelSelectorMatches, type LabelSelector } from './detail/selectors.js';
 import { IS_WINDOWS } from '../platform.js';
 
@@ -759,6 +761,17 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
             <ContentCopyIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Copy kubectl get command</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            openCompare(diffSideFor({ ctx, group: target.group, version: target.version, plural: target.plural, namespace, name }));
+            close();
+          }}
+        >
+          <ListItemIcon>
+            <DifferenceOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Compare with…</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem
