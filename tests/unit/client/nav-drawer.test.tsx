@@ -256,4 +256,25 @@ describe('NavDrawer', () => {
     expect(screen.getByText('Overview')).toBeInTheDocument();
     hidden.unmount();
   });
+
+  it('shows a GitOps group only while Argo CD or Flux is installed, and reveals it on navigation', () => {
+    const rollouts = { group: 'argoproj.io', version: 'v1alpha1', plural: 'rollouts', kind: 'Rollout', namespaced: true, verbs: ['list'], custom: true };
+    queryMocks.resources = [...customResources, rollouts];
+    const plain = renderDrawer('/');
+    expect(screen.queryByText('GitOps')).not.toBeInTheDocument();
+    plain.unmount();
+
+    queryMocks.resources = [
+      ...customResources,
+      rollouts,
+      { group: 'argoproj.io', version: 'v1alpha1', plural: 'applications', kind: 'Application', namespaced: true, verbs: ['list'], custom: true },
+      { group: 'kustomize.toolkit.fluxcd.io', version: 'v1', plural: 'kustomizations', kind: 'Kustomization', namespaced: true, verbs: ['list'], custom: true },
+    ];
+    renderDrawer('/r/kustomize.toolkit.fluxcd.io/v1/kustomizations');
+    expect(screen.getByText('GitOps')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/r/argoproj.io/v1alpha1/applications');
+    expect(screen.getByRole('link', { name: /Kustomizations/ })).toHaveClass('Mui-selected');
+    // Rollouts are progressive delivery, not GitOps: they stay under Custom Resources only.
+    expect(screen.queryByRole('link', { name: /Rollouts/ })).not.toBeInTheDocument();
+  });
 });

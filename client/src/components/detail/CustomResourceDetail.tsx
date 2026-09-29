@@ -2,12 +2,13 @@ import { useMemo } from 'react';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { KubeObject } from '@kubus/shared';
-import { evalPrinterColumnPath } from '@kubus/shared';
+import { evalPrinterColumnPath, printerColumnText } from '@kubus/shared';
 import { RelativeTimeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { statusLikeName } from '../../kube-display.js';
 import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDetail.js';
 import { Fact, Facts } from './Facts.js';
+import { NestedConditionSections } from './NestedConditions.js';
 import { Section } from './Section.js';
 import { ReferencesSection, UsedBySection } from './UsedBySection.js';
 import { crdVersions } from './CrdDetail.js';
@@ -40,7 +41,6 @@ function normalizeName(name: string): string {
  * Last Change without any per-kind code.
  */
 export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObject; ctx: string; crd: KubeObject; version: string }) {
-  const names = useMemo(() => crdNames(crd), [crd]);
   const rows = useMemo<StatusRow[]>(() => {
     const versions = crdVersions(crd);
     const v = versions.find((entry) => entry.name === version) ?? versions[0];
@@ -50,8 +50,9 @@ export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObje
     for (const c of v?.additionalPrinterColumns ?? []) {
       if (!c.name || !c.jsonPath || c.jsonPath === '.metadata.creationTimestamp') continue;
       // Schema-defined fields stay visible even while unset ("—"), so a
-      // resource without status yet still shows what to expect.
-      const value = scalarText(evalPrinterColumnPath(obj, c.jsonPath)) ?? '';
+      // resource without status yet still shows what to expect. A column
+      // on a list (HTTPRoute Hostnames) reads as the joined list.
+      const value = printerColumnText(evalPrinterColumnPath(obj, c.jsonPath)) ?? '';
       covered.add(normalizeName(c.name));
       const pathLeaf = SIMPLE_PATH_LEAF_RE.exec(c.jsonPath)?.[1];
       if (pathLeaf) covered.add(normalizeName(pathLeaf));
@@ -82,16 +83,40 @@ export function CustomResourceDetail({ obj, ctx, crd, version }: { obj: KubeObje
         </Section>
       )}
       <ConditionsTable obj={obj} />
-      {names && (
-        <>
-          <ReferencesSection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
-          <UsedBySection target={{ ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace }} />
-        </>
-      )}
+      <NestedConditionSections obj={obj} />
+      <CustomResourceRelations obj={obj} ctx={ctx} crd={crd} version={version} />
       <MetadataSection obj={obj} ctx={ctx} />
       <KeyValueSection title="Labels" entries={obj.metadata.labels} />
       <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
     </Stack>
+  );
+}
+
+/** References and Used by for a custom object, keyed by its backing CRD. */
+export function CustomResourceRelations({ obj, ctx, crd, version }: { obj: KubeObject; ctx: string; crd: KubeObject; version: string }) {
+  const names = useMemo(() => crdNames(crd), [crd]);
+  if (!names) return null;
+  const target = { ctx, group: names.group, version, plural: names.plural, kind: obj.kind ?? names.kind, name: obj.metadata.name, namespace: obj.metadata.namespace };
+  return (
+    <>
+      <ReferencesSection target={target} />
+      <UsedBySection target={target} />
+    </>
+  );
+}
+
+/**
+ * The tail every dedicated custom-resource view shares, in the order the
+ * built-in views use: relations, then labels, annotations and metadata.
+ */
+export function CustomResourceFooter({ obj, ctx, crd, version }: { obj: KubeObject; ctx: string; crd: KubeObject; version: string }) {
+  return (
+    <>
+      <CustomResourceRelations obj={obj} ctx={ctx} crd={crd} version={version} />
+      <KeyValueSection title="Labels" entries={obj.metadata.labels} />
+      <KeyValueSection title="Annotations" entries={obj.metadata.annotations} defaultOpen={false} />
+      <MetadataSection obj={obj} ctx={ctx} defaultOpen={false} />
+    </>
   );
 }
 
@@ -114,6 +139,8 @@ function StatusRowValue({ row }: { row: StatusRow }) {
     // to collapse into a meaningless "0s ago".
     return <RelativeTimeCell timestamp={row.value} />;
   }
-  if (statusLikeName(row.label)) return <StatusChip status={row.value} />;
+  // A status word gets a chip; a status column holding a whole message
+  // (Flux's "stored artifact for revision …") reads as wrapped text.
+  if (statusLikeName(row.label) && row.value.length <= 32 && !/\s/.test(row.value)) return <StatusChip status={row.value} />;
   return <Typography variant="body2">{row.value}</Typography>;
 }

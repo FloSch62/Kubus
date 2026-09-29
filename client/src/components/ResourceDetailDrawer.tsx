@@ -36,7 +36,6 @@ import { PodDetail } from './detail/PodDetail.js';
 import { NodeDetail } from './detail/NodeDetail.js';
 import { ServiceDetail } from './detail/ServiceDetail.js';
 import { SecretDetail } from './detail/SecretDetail.js';
-import { CertificateDetail } from './detail/CertificateDetail.js';
 import { CrdDetail, CrdSchemaDetail, crdVersions } from './detail/CrdDetail.js';
 import { CustomResourceDetail } from './detail/CustomResourceDetail.js';
 import { NetworkPolicyDetail } from './detail/NetworkPolicyDetail.js';
@@ -44,6 +43,7 @@ import { PodDisruptionBudgetDetail } from './detail/PodDisruptionBudgetDetail.js
 import { ResourceQuotaDetail } from './detail/ResourceQuotaDetail.js';
 import { LimitRangeDetail } from './detail/LimitRangeDetail.js';
 import { NamespaceDetail } from './detail/NamespaceDetail.js';
+import { customKindEntry } from './detail/kinds/registry.js';
 import { CountPill } from './detail/Section.js';
 import { openNamespaceOverview } from '../namespace-link.js';
 import { ManifestView } from './detail/ManifestView.js';
@@ -257,6 +257,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
   useEffect(() => {
     if (!tabAvailable && (tab !== 'schema' || schemaSource)) setTab('overview');
   }, [tabAvailable, tab, schemaSource]);
+  const customKind = obj ? customKindEntry(obj.apiVersion, obj.kind) : undefined;
+  const CustomActions = customKind?.actions;
+  const statusWord = obj && (objGone ? 'Deleted' : (headerStatus(behaviorKind, obj) ?? customKind?.status?.(obj)));
   const drawerTopOffset = layout.topBarHeight;
   const drawerPaperSx = {
     top: `${drawerTopOffset}px`,
@@ -421,9 +424,9 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
                 <CopyValueButton text={sel.name} label={`Copy name ${sel.name}`} />
               </Stack>
             </Box>
-            {obj && (objGone || headerStatus(behaviorKind, obj)) && (
+            {statusWord && (
               <Box sx={{ flexShrink: 0, px: 0.5 }}>
-                <StatusChip status={objGone ? 'Deleted' : headerStatus(behaviorKind, obj)!} size="md" />
+                <StatusChip status={statusWord} size="md" />
               </Box>
             )}
             {(!inline || tab === 'map') && (
@@ -442,7 +445,12 @@ export function ResourceDetailDrawer({ sel, onClose, onBack, inline = false, ini
               Deleted from the cluster — showing the last known state.
             </Alert>
           )}
-          {obj && !objGone && <DetailQuickActions target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }} />}
+          {obj && !objGone && (
+            <DetailQuickActions
+              target={{ ctx: sel.ctx, group: sel.group, version: sel.version, plural: sel.plural, kind: sel.kind, obj }}
+              extra={CustomActions && <CustomActions ctx={sel.ctx} group={sel.group} version={sel.version} plural={sel.plural} obj={obj} />}
+            />
+          )}
           <Tabs
             value={tab}
             onChange={(_e, v) => (dataDirty ? guardLeave(() => switchTab(v as string)) : switchTab(v as string))}
@@ -691,15 +699,14 @@ const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, ver
       return <LimitRangeDetail obj={obj} ctx={ctx} />;
     case 'Namespace':
       return <NamespaceDetail obj={obj} ctx={ctx} />;
-    default:
-      // cert-manager Certificates get an expiry/renewal headline the printer
-      // columns don't surface.
-      if (crd?.metadata.name === 'certificates.cert-manager.io') {
-        return <CertificateDetail obj={obj} ctx={ctx} crd={crd} version={version} />;
-      }
-      // Custom resources with their backing CRD loaded get a status-aware
+    default: {
+      if (!crd) return <GenericDetail obj={obj} ctx={ctx} />;
+      // Well-known custom resources (cert-manager, Gateway API, Argo, External
+      // Secrets, Flux) have dedicated views; the rest get a status-aware
       // overview driven by the CRD's printer columns.
-      return crd ? <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} /> : <GenericDetail obj={obj} ctx={ctx} />;
+      const View = customKindEntry(obj.apiVersion, obj.kind)?.view;
+      return View ? <View obj={obj} ctx={ctx} crd={crd} version={version} /> : <CustomResourceDetail obj={obj} ctx={ctx} crd={crd} version={version} />;
+    }
   }
 });
 

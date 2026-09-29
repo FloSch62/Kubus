@@ -75,6 +75,15 @@ selected clusters and lists them under **Custom Resources**, grouped by API grou
 renders each CRD's own `additionalPrinterColumns` (the same extra columns you get from
 `kubectl get`) as real, sortable columns.
 
+A printer column that points at a list shows its items separated by commas, and a
+column path may escape dots inside a key the way `kubectl` does
+(`.metadata.labels.app\.kubernetes\.io/name`). An empty list offers **Open definition**,
+which opens the CRD behind it.
+
+When Argo CD or Flux is installed, their kinds (Applications, AppProjects, Kustomizations,
+HelmReleases and the Flux sources) also get a **GitOps** group of their own in the nav
+drawer.
+
 <figure markdown="span">
   ![A custom resource list with printer columns](../assets/screenshots/crd-list.png#only-light){ .shadow }
   ![A custom resource list with printer columns](../assets/screenshots/crd-list-dark.png#only-dark){ .shadow }

@@ -217,7 +217,7 @@ function NodeShellConfirmDialog({
 }
 
 /** Soft-tonal labeled button for the detail panel's quick-action bar. */
-function QuickActionButton({
+export function QuickActionButton({
   icon,
   label,
   onClick,
@@ -259,8 +259,9 @@ function QuickActionButton({
  * The detail panel's action bar: the two or three operations someone opens a
  * resource for, as labeled buttons, with everything else behind the `⋮` menu
  * at the right end. Kind-specific actions lead; the first one is emphasized.
+ * Custom resources bring their own through `extra` (Sync, Promote, Reconcile).
  */
-export function DetailQuickActions({ target }: { target: RowActionTarget }) {
+export function DetailQuickActions({ target, extra }: { target: RowActionTarget; extra?: ReactNode }) {
   const [dialog, setDialog] = useState<'forward' | 'scale' | 'trigger' | 'node-shell' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
@@ -362,6 +363,7 @@ export function DetailQuickActions({ target }: { target: RowActionTarget }) {
           }
         />
       )}
+      {extra}
       <Box sx={{ flex: 1 }} />
       <RowActions target={target} />
       <NodeShellConfirmDialog

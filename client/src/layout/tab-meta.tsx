@@ -15,6 +15,7 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import GppMaybeOutlinedIcon from '@mui/icons-material/GppMaybeOutlined';
 import ExtensionOutlinedIcon from '@mui/icons-material/ExtensionOutlined';
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
+import CommitOutlinedIcon from '@mui/icons-material/CommitOutlined';
 import { BUILTIN_NAV_GROUPS, MORE_BUILTIN_KINDS_TITLE, groupFromPath, gvkForResource, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { parseSide } from '../diff-state.js';
 
@@ -26,6 +27,7 @@ export const GROUP_ICONS: Record<string, React.ReactElement> = {
   Storage: <StorageOutlinedIcon />,
   Cluster: <HubOutlinedIcon />,
   'Access Control': <AdminPanelSettingsOutlinedIcon />,
+  GitOps: <CommitOutlinedIcon />,
   [MORE_BUILTIN_KINDS_TITLE]: <CategoryOutlinedIcon />,
 };
 

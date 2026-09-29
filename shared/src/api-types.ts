@@ -532,6 +532,35 @@ export interface RolloutPauseRequest {
   paused: boolean;
 }
 
+/**
+ * Operator actions on custom resources, each made the way the operator's own
+ * CLI makes it: Argo CD's refresh annotation and `operation.sync`, the Argo
+ * Rollouts plugin's status patches, the External Secrets `force-sync`
+ * annotation, Flux's `reconcile.fluxcd.io/requestedAt` and `spec.suspend`.
+ */
+export type OperatorAction =
+  | 'argocd-refresh'
+  | 'argocd-sync'
+  | 'rollout-promote'
+  | 'rollout-promote-full'
+  | 'rollout-abort'
+  | 'rollout-retry'
+  | 'eso-force-sync'
+  | 'flux-reconcile'
+  | 'flux-suspend'
+  | 'flux-resume';
+
+export interface OperatorActionRequest {
+  action: OperatorAction;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string;
+  name: string;
+  /** argocd-sync: also delete resources that are no longer in the source. */
+  prune?: boolean;
+}
+
 /** One entry of a workload's rollout history (ReplicaSet / ControllerRevision). */
 export interface RolloutRevision {
   revision: number;

@@ -44,9 +44,19 @@ const OPERATORS: OperatorDef[] = [
     name: 'Flux',
     resources: [
       { crd: 'gitrepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
+      { crd: 'ocirepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'helmrepositories.source.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'kustomizations.kustomize.toolkit.fluxcd.io', check: 'ready-condition' },
       { crd: 'helmreleases.helm.toolkit.fluxcd.io', check: 'ready-condition' },
+    ],
+  },
+  {
+    id: 'external-secrets',
+    name: 'External Secrets',
+    resources: [
+      { crd: 'externalsecrets.external-secrets.io', check: 'ready-condition' },
+      { crd: 'secretstores.external-secrets.io', check: 'ready-condition' },
+      { crd: 'clustersecretstores.external-secrets.io', check: 'ready-condition' },
     ],
   },
   {

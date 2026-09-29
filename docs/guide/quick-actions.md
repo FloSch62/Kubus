@@ -61,6 +61,28 @@ can see what you're rolling back to first.
 The **Drain** dialog streams progress as it evicts, so you can watch a node empty out in
 real time rather than staring at a spinner.
 
+## Operators
+
+Custom resources of a few operators get their actions as labelled buttons in the
+[details drawer](resource-details.md#operator-resources). Each one makes the same change
+the operator's own tooling makes, so the controller picks it up exactly as it would from
+there.
+
+| Action | Applies to | What it does |
+| --- | --- | --- |
+| **Sync…** | Argo CD Application | Starts a sync of the tracked revision, like `argocd app sync`. Tick *Prune* to also delete resources that left the source. Refused while another operation runs. |
+| **Refresh** | Argo CD Application | Asks Argo CD to compare against Git again now (the `argocd.argoproj.io/refresh` annotation). |
+| **Promote…** | Argo Rollout | Resumes a paused canary at its next step, or switches a blue-green rollout to the preview. |
+| **Promote full…** | Argo Rollout | Skips the remaining steps and makes the new revision stable. |
+| **Abort…** / **Retry…** | Argo Rollout | Sends traffic back to the stable revision, or starts an aborted update again. |
+| **Force refresh** | ExternalSecret | Syncs from the store now instead of at the next interval (the `force-sync` annotation). |
+| **Reconcile** | Flux Kustomization, HelmRelease and sources | Asks Flux to reconcile now (the `reconcile.fluxcd.io/requestedAt` annotation). |
+| **Suspend… / Resume…** | Flux Kustomization, HelmRelease and sources | Sets `spec.suspend`. Resuming also asks for a reconcile. |
+
+Actions that change what runs ask for confirmation first, and on a
+[protected cluster](production-guard.md) they want the object's name typed. Refresh and
+Reconcile only make the controller look again, so they run at once.
+
 ## Everything: delete
 
 **Delete…** is available on every kind. You'll always get a confirmation; on a

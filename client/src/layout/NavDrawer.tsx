@@ -47,6 +47,7 @@ import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
 import { moreBuiltinKinds } from './more-builtin-kinds.js';
+import { GITOPS_GROUP_TITLE, gitopsNavKinds } from './gitops-nav.js';
 import { TruncationTooltip } from '../components/truncation.js';
 
 const WIDTH = layout.navDrawerWidth;
@@ -880,6 +881,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
     return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [apiResources]);
   const customNav = useMemo(() => buildCustomNav(customKinds), [customKinds]);
+  // Argo CD and Flux kinds also get a GitOps group of their own, shown only
+  // while one of them is installed.
+  const gitopsKinds = useMemo(() => gitopsNavKinds(apiResources?.resources ?? []), [apiResources]);
   // Served built-in kinds without a fixed group (Leases, PriorityClasses, ...).
   const moreKinds = useMemo(() => moreBuiltinKinds(apiResources?.resources ?? []), [apiResources]);
 
@@ -897,12 +901,13 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       'Custom Resources',
       customKinds.flatMap(([, kinds]) => kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: k.kind }))),
     );
+    map.set(GITOPS_GROUP_TITLE, gitopsKinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })));
     map.set(
       MORE_BUILTIN_KINDS_TITLE,
       moreKinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
     );
     return map;
-  }, [customKinds, moreKinds]);
+  }, [customKinds, gitopsKinds, moreKinds]);
 
   // Tab switches restore pathname + search, but not the transient router state
   // attached to the original favorite click. Prefer any matching entry that is
@@ -944,8 +949,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         }
       }
     }
+    for (const k of gitopsKinds) map.set(kindPath(k.group, k.version, k.plural), [GITOPS_GROUP_TITLE]);
     return map;
-  }, [customNav, moreKinds]);
+  }, [customNav, gitopsKinds, moreKinds]);
 
   const listRef = useRef<HTMLUListElement | null>(null);
   // Bring the active entry into view. A just-expanded Collapse animates open,
@@ -1282,6 +1288,29 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               </Box>
             );
           })}
+          {gitopsKinds.length > 0 && (!f || matches(GITOPS_GROUP_TITLE) || gitopsKinds.some((k) => matches(pluralLabel(k.kind)))) && (
+            <Box>
+              <GroupHeader
+                title={GITOPS_GROUP_TITLE}
+                icon={GROUP_ICONS[GITOPS_GROUP_TITLE]}
+                open={isOpen(GITOPS_GROUP_TITLE)}
+                onClick={() => toggleGroup(GITOPS_GROUP_TITLE)}
+                favorite={{ active: isFav(`category:${GITOPS_GROUP_TITLE}`), onToggle: () => toggleCategory(GITOPS_GROUP_TITLE) }}
+              />
+              <Collapse unmountOnExit in={isOpen(GITOPS_GROUP_TITLE)}>
+                {gitopsKinds
+                  .filter((k) => !f || matches(GITOPS_GROUP_TITLE) || matches(pluralLabel(k.kind)))
+                  .map((k) => (
+                    <NavEntry
+                      key={`${k.group}/${k.plural}`}
+                      to={kindPath(k.group, k.version, k.plural)}
+                      label={pluralLabel(k.kind)}
+                      favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
+                    />
+                  ))}
+              </Collapse>
+            </Box>
+          )}
           {moreVisible.length > 0 && (
             <Box>
               <GroupHeader
@@ -1405,7 +1434,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       </Drawer>
     );
   }, [pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
-    favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, moreKinds, apiResources, contexts, selected,
+    favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, gitopsKinds, moreKinds, apiResources, contexts, selected,
     hotkeyByFavorite, activeFavoriteEntry, draggingFavoriteId, favoriteDropTarget, scopeMenu,
     addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews]);
 });

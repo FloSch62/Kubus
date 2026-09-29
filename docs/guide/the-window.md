@@ -29,7 +29,8 @@ The strip along the top is always available, whatever page you're on:
 
 The left drawer lists every resource kind, grouped into **Workloads, Network, Config,
 Storage, Cluster** and **Access Control**. A **Custom Resources** group is populated
-automatically from the CRDs discovered in your selected clusters.
+automatically from the CRDs discovered in your selected clusters, and a **GitOps** group
+appears when Argo CD or Flux is installed.
 
 Built-in kinds you reach for less often, such as PriorityClasses, Leases, IngressClasses,
 RuntimeClasses, CSIDrivers, VolumeAttachments, webhook configurations and

@@ -808,6 +808,7 @@ export function ResourceListPage() {
         onFilterChange={(value) => setQueryParam('q', value)}
         onLabelSelectorChange={(value) => setQueryParam('label', value)}
         onClearFilters={clearFilters}
+        onOpenDefinition={crdSelection ? () => pushDetail(crdSelection, { embedded: true }) : undefined}
         onRowClick={openRow}
         onRowActivate={(row) => {
           // Keyboard activation also moves focus into the panel; Escape there

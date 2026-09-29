@@ -26,6 +26,8 @@ anything destructive: you must **type the resource's name** to confirm.
 - **Drain** and **cordon** a node
 - **Node shell** (a privileged pod on the host) and **node debug containers**
 - **Restart pods**, Helm **rollback** and **uninstall**
+- Argo CD **Sync**, Argo Rollouts **Promote**, **Abort** and **Retry**, and Flux
+  **Suspend** and **Resume**
 
 Non-destructive actions stay one click away. The guard only stands in front of the things
 you can't undo.

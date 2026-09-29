@@ -27,6 +27,7 @@ import { handleGridRowKey } from './grid-row-keys.js';
 import type { RowKeyAction } from '../row-keys.js';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
+import SchemaOutlinedIcon from '@mui/icons-material/SchemaOutlined';
 
 interface Props {
   rows: ClusterRow[];
@@ -43,6 +44,8 @@ interface Props {
   onLabelSelectorChange?: (value: string) => void;
   /** Drop the text filter and label selector in one step (the empty state's Clear button). */
   onClearFilters?: () => void;
+  /** Custom kinds: the empty state links to the backing CRD. */
+  onOpenDefinition?: () => void;
   onRowClick?: (row: ClusterRow) => void;
   /** Keyboard activation (Enter on a cell); lets pages move focus along. */
   onRowActivate?: (row: ClusterRow) => void;
@@ -102,6 +105,7 @@ export function ResourceTable({
   onFilterChange,
   onLabelSelectorChange,
   onClearFilters,
+  onOpenDefinition,
   onRowClick,
   onRowActivate,
   onRowContextMenu,
@@ -359,6 +363,9 @@ export function ResourceTable({
     else setLocalFilter('');
     onLabelSelectorChange?.('');
   };
+  const openDefinitionRef = useRef(onOpenDefinition);
+  openDefinitionRef.current = onOpenDefinition;
+  const hasDefinition = !!onOpenDefinition;
   const NoRowsOverlay = useCallback(
     () => (
       <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', gap: 0.75 }}>
@@ -379,9 +386,14 @@ export function ResourceTable({
             Clear filters
           </Button>
         )}
+        {!anyFilter && hasDefinition && (
+          <Button size="small" variant="outlined" startIcon={<SchemaOutlinedIcon />} onClick={() => openDefinitionRef.current?.()} sx={{ pointerEvents: 'auto', mt: 0.5 }}>
+            Open definition
+          </Button>
+        )}
       </Stack>
     ),
-    [filteredOut, labelFiltered, anyFilter, kind],
+    [filteredOut, labelFiltered, anyFilter, kind, hasDefinition],
   );
   const slots = useMemo(() => ({ ...READ_ONLY_GRID_SLOTS, noRowsOverlay: NoRowsOverlay }), [NoRowsOverlay]);
   const getRowClassName = useCallback(

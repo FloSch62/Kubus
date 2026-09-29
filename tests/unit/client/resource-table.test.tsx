@@ -115,3 +115,21 @@ describe('ResourceTable row keys', () => {
     expect(onRowKey).toHaveBeenLastCalledWith(expect.anything(), 'delete');
   });
 });
+
+describe('ResourceTable empty state', () => {
+  it('links an empty custom resource list to its definition, but not while filters hide rows', async () => {
+    const columns = [{ field: 'name', valueGetter: (_value: unknown, current: ClusterRow) => current.obj.metadata.name }];
+    const openDefinition = vi.fn();
+    const { rerender } = render(<ResourceTable rows={[]} columns={columns} onOpenDefinition={openDefinition} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open definition' }));
+    expect(openDefinition).toHaveBeenCalledTimes(1);
+
+    rerender(<ResourceTable rows={[row('hidden')]} columns={columns} filter="nothing-matches" onOpenDefinition={openDefinition} />);
+    expect(await screen.findByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open definition' })).not.toBeInTheDocument();
+
+    rerender(<ResourceTable rows={[]} columns={columns} />);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Open definition' })).not.toBeInTheDocument());
+  });
+});
+

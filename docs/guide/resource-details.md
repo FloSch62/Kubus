@@ -86,8 +86,46 @@ collapsible sections hold the rest.
   ResourceQuotas as usage bars.
 - **ResourceQuotas** show used against hard per resource as bars, exhausted resources
   first. **LimitRanges** show one table per type with defaults, minimums and maximums.
+- **Custom resources** get an overview built from their CRD: the printer columns and the
+  plain status fields as facts (a column that points at a list, such as an HTTPRoute's
+  hostnames, reads as a comma-separated list), then the conditions. Status lists whose
+  items carry their own conditions, such as a route's `status.parents[].conditions` or a
+  Gateway's listeners, get one block per item, labelled with the parent or listener it
+  belongs to.
 - **Anything else** shows metadata, owner references, labels and annotations (searchable
   and copyable). The full spec and status live one tab over, in the Manifest tab.
+
+### Operator resources
+
+A few widely used operators get a dedicated overview on top of that, and their actions
+sit in the drawer's action bar next to the ⋮ menu (see
+[Quick actions](quick-actions.md#operators)).
+
+- **HTTPRoutes and GRPCRoutes** show a rules table: each rule's path, header, query or
+  gRPC method matches on the left, the backends they send traffic to on the right, with
+  each backend's weight and share of the traffic and a link to the Service. Filters such
+  as header changes and rewrites are listed under the backends. Every parent Gateway gets
+  its own block with its Accepted and ResolvedRefs conditions, and a banner explains a
+  parent that rejected the route, could not resolve a backend or has not reported yet.
+  TCP, TLS and UDP routes use the same view without the matches.
+- **Gateways** list their listeners with protocol, port, hostname, TLS certificates and
+  how many routes each one has attached, followed by the routes that name the Gateway as
+  a parent and whether it accepted them. **GatewayClasses** show their controller and
+  the Gateways built from them.
+- **Argo Rollouts** show the phase, strategy, current step and canary weight, the canary
+  step list with the current step marked, and the stable and canary images side by side.
+- **Argo CD Applications** show sync and health, the source repository and the revision
+  it synced, the auto-sync, prune and self-heal flags, the last operation, and every
+  managed resource with its own sync and health, the unhealthy ones first.
+- **External Secrets** show whether the last sync worked and when it ran, the store it
+  reads (a link), the Secret it writes (a link, or *not created yet*) and how remote keys
+  map onto Secret keys.
+- **Flux Kustomizations** show the ready state, the last applied revision, the source
+  (a link) and the inventory of objects they manage. **HelmReleases** show the chart and
+  version, the Helm release they manage (linked to its [Helm page](helm.md)) and the
+  release history. Every Flux object, sources included, can be reconciled, suspended and
+  resumed from the drawer.
+- **cert-manager Certificates** lead with when the certificate expires and renews.
 
 ### Why a pod is Pending
 
