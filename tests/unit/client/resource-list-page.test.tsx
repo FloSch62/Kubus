@@ -153,6 +153,12 @@ vi.mock('../../../client/src/components/BatchCreateDialog.js', () => ({
   ),
 }));
 
+vi.mock('../../../client/src/components/BulkScaleDialog.js', () => ({
+  BulkScaleDialog: ({ rows }: { rows: Row[] }) => (
+    <output data-testid="scale-rows">{rows.map((r) => `${r.obj.metadata.name}:${String((r.obj.spec as { replicas?: number }).replicas)}`).join(',')}</output>
+  ),
+}));
+
 function resource(group: string, version: string, plural: string, kind: string, custom = false, namespaced = true): ResourceKindInfo {
   return { group, version, plural, kind, custom, namespaced, verbs: ['get', 'list', 'create', 'delete'] };
 }
@@ -376,6 +382,39 @@ describe('ResourceListPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
     expect(useNavigationStore.getState().savedViews[0]?.grid?.labelColumns).toEqual([{ source: 'label', key: 'tier' }]);
+  });
+
+  it('acts on the checked rows as they are now, not as they were when checked', async () => {
+    const deployment = resource('apps', 'v1', 'deployments', 'Deployment');
+    fixtures.resources = [deployment];
+    fixtures.byContext = { dev: [deployment] };
+    const scaled = (name: string, replicas: number): Row => {
+      const r = row(name, 'dev', 'team-a', 'Deployment');
+      return { ...r, obj: { ...r.obj, spec: { replicas } } };
+    };
+    fixtures.rows = [scaled('api', 0), scaled('web', 1)];
+    // A fresh element per render, so the rerender below reaches the page.
+    const page = () => (
+      <MemoryRouter initialEntries={['/r/apps/v1/deployments']}>
+        <Routes>
+          <Route path="/r/:group/:version/:plural" element={<ResourceListPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = render(page());
+    fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
+    expect(screen.getByRole('region', { name: 'Selected rows' })).toHaveTextContent('2 selected');
+
+    // While checked: api is scaled up and web is deleted.
+    fixtures.rows = [scaled('api', 3)];
+    rerender(page());
+    expect(screen.getByRole('region', { name: 'Selected rows' })).toHaveTextContent('1 selected');
+    fireEvent.click(screen.getByRole('button', { name: 'Scale (1)' }));
+    expect(screen.getByTestId('scale-rows')).toHaveTextContent('api:3');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy rows (1)' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /As CSV/ }));
+    await waitFor(() => expect(effects.copy).toHaveBeenCalled());
+    expect(effects.copy.mock.calls[0]![0].trim().split('\n').map((line) => line.split(',')[0])).toEqual(['Name', 'api']);
   });
 
   it('keeps bulk scale to Deployments and StatefulSets', () => {

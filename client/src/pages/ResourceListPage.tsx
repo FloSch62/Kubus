@@ -20,6 +20,7 @@ import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
+import { useGridApiRef } from '@mui/x-data-grid';
 import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
 import { useApiResourcesForContexts, useClusterSignals, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
@@ -47,6 +48,7 @@ import { diffSideFor, openCompare } from '../compare-link.js';
 import { BulkScaleDialog } from '../components/BulkScaleDialog.js';
 import { BULK_SCALE_KINDS } from '../components/bulk-scale.js';
 import { CopyRowsButton } from '../components/CopyRowsButton.js';
+import { liveSelection } from '../components/live-selection.js';
 import { SelectionBar } from '../components/SelectionBar.js';
 import { LabelColumnsButton } from '../components/LabelColumnsButton.js';
 import { buildLabelColumns, insertLabelColumns } from '../components/label-columns.js';
@@ -450,7 +452,14 @@ export function ResourceListPage() {
   const isBatchCreate = group === 'batch' && (kind === 'Job' || kind === 'CronJob');
   const nsFilter = useClustersStore((s) => s.namespaces);
   const [apiResourceOpen, setApiResourceOpen] = useState(false);
-  const [selectedRows, setSelectedRows] = useState<ClusterRow[]>([]);
+  const [checkedRows, setCheckedRows] = useState<ClusterRow[]>([]);
+  // Every bulk action reads the checked rows as they are now, not as they were
+  // when checked (see liveSelection): the production guard must see a workload
+  // that was scaled up since, and copies must carry current values.
+  const selectedRows = useMemo(() => liveSelection(checkedRows, list.rows), [checkedRows, list.rows]);
+  // Copy rows follows the grid's on-screen sort.
+  const gridApiRef = useGridApiRef();
+  const sortedRowIds = useCallback(() => gridApiRef.current?.getSortedRowIds(), [gridApiRef]);
   // The row menu, opened by right-click, or mounted closed to run a row key
   // (`run`) through its dialogs; `seq` remounts it for every key press.
   const [contextAction, setContextAction] = useState<{ target: RowActionTarget; mouseX: number; mouseY: number; run?: RowKeyAction; seq?: number } | null>(null);
@@ -470,7 +479,7 @@ export function ResourceListPage() {
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
   // This page instance is reused across kinds — a selection must not survive
   // the switch to a different resource list.
-  useEffect(() => setSelectedRows([]), [group, version, plural]);
+  useEffect(() => setCheckedRows([]), [group, version, plural]);
 
   const bulkRestartable = kind === 'Deployment' || kind === 'StatefulSet' || kind === 'DaemonSet';
   const bulkScalable = !!behaviorKind && BULK_SCALE_KINDS.has(behaviorKind);
@@ -489,7 +498,7 @@ export function ResourceListPage() {
       const succeeded = new Set(
         rows.flatMap((row, i) => (results[i]?.status === 'fulfilled' ? [row.obj.metadata.uid] : [])),
       );
-      setSelectedRows((current) => current.filter((row) => !succeeded.has(row.obj.metadata.uid)));
+      setCheckedRows((current) => current.filter((row) => !succeeded.has(row.obj.metadata.uid)));
     }
     const failures = results
       .map((result, i) => ({ result, row: rows[i]! }))
@@ -824,12 +833,13 @@ export function ResourceListPage() {
         onRowKey={handleRowKey}
         checkboxSelection
         selectedRows={selectedRows}
-        onSelectionChange={setSelectedRows}
+        onSelectionChange={setCheckedRows}
+        apiRef={gridApiRef}
         hiddenFields={hiddenFields}
         activeRowId={activeRowId}
         selectionBar={
           selectedRows.length > 0 ? (
-            <SelectionBar count={selectedRows.length} onClear={() => setSelectedRows([])}>
+            <SelectionBar count={selectedRows.length} onClear={() => setCheckedRows([])}>
               {multiLogs && (
                 <Button
                   startIcon={<SubjectIcon />}
@@ -882,7 +892,7 @@ export function ResourceListPage() {
                   Restart ({selectedRows.length})
                 </Button>
               )}
-              <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} />
+              <CopyRowsButton rows={selectedRows} columns={columns} tableId={kindPath} hiddenFields={hiddenFields} sortedRowIds={sortedRowIds} />
               <Button startIcon={<DeleteOutlineIcon />} color="error" variant="outlined" onClick={() => setBulkDialog('delete')}>
                 Delete ({selectedRows.length})
               </Button>

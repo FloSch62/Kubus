@@ -5,29 +5,35 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import type { GridColDef } from '@mui/x-data-grid';
+import type { GridColDef, GridRowId } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { copyToClipboard } from '../clipboard.js';
 import { showToast } from '../state/toast.js';
 import { useUiPrefsStore } from '../state/prefs.js';
-import { copyColumns, serializeRows, type RowCopyFormat } from './row-copy.js';
+import { copyColumns, orderRows, serializeRows, type RowCopyFormat } from './row-copy.js';
 
 const NO_VISIBILITY: Record<string, boolean> = {};
 
+const rowUid = (row: ClusterRow) => row.obj.metadata.uid;
+
 /**
  * "Copy rows" for the multi-select bar: the checked rows with the columns on
- * screen, as TSV (pastes straight into a spreadsheet) or CSV.
+ * screen, in the order the grid shows them, as TSV (pastes straight into a
+ * spreadsheet) or CSV.
  */
 export function CopyRowsButton({
   rows,
   columns,
   tableId,
   hiddenFields,
+  sortedRowIds,
 }: {
   rows: ClusterRow[];
   columns: GridColDef<ClusterRow>[];
   tableId: string;
   hiddenFields?: string[];
+  /** The grid's row ids in on-screen order, read when copying. */
+  sortedRowIds?: () => readonly GridRowId[] | undefined;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const visibility = useUiPrefsStore((s) => s.columnVisibility[tableId] ?? NO_VISIBILITY);
@@ -35,7 +41,7 @@ export function CopyRowsButton({
   const copy = async (format: RowCopyFormat) => {
     setAnchor(null);
     const cols = copyColumns(columns, hiddenFields, visibility);
-    const ok = await copyToClipboard(serializeRows(rows, cols, format));
+    const ok = await copyToClipboard(serializeRows(orderRows(rows, rowUid, sortedRowIds?.()), cols, format));
     showToast(
       ok ? 'success' : 'error',
       ok ? `Copied ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} × ${cols.length} columns as ${format.toUpperCase()}` : 'Copy to clipboard failed',

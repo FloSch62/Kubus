@@ -1,4 +1,4 @@
-import type { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
+import type { GridColDef, GridRowId, GridValidRowModel } from '@mui/x-data-grid';
 import { cellCopyText } from './CellCopy.js';
 
 export type RowCopyFormat = 'tsv' | 'csv';
@@ -18,6 +18,20 @@ export function copyColumns<R extends GridValidRowModel>(
     if (!c.headerName || c.field.startsWith('_')) return false;
     return visibility[c.field] ?? !hiddenFields.includes(c.field);
   });
+}
+
+/**
+ * Put rows in the grid's on-screen order (`sortedIds`, from the grid API).
+ * Rows the grid does not show right now keep their relative order at the end.
+ */
+export function orderRows<R>(rows: R[], rowId: (row: R) => GridRowId, sortedIds: readonly GridRowId[] | undefined): R[] {
+  if (!sortedIds?.length || rows.length < 2) return rows;
+  const position = new Map(sortedIds.map((id, i) => [id, i]));
+  const rank = (row: R) => position.get(rowId(row)) ?? Number.MAX_SAFE_INTEGER;
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => rank(a.row) - rank(b.row) || a.i - b.i)
+    .map(({ row }) => row);
 }
 
 // Column value getters here only read the row; they never touch the grid API.

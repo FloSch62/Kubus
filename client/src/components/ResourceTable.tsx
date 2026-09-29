@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTheme } from '@mui/material/styles';
 import { layout, statusTextColor } from '../theme.js';
 import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
@@ -11,7 +11,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { READ_ONLY_GRID_SLOTS } from './ResourceGridCell.js';
 import { GridTooltips } from './CellTooltip.js';
-import { DataGrid, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
+import { DataGrid, type GridApi, type GridColDef, type GridColumnVisibilityModel, type GridRowParams, type GridRowSelectionModel, type GridSortModel } from '@mui/x-data-grid';
 import type { ClusterRow } from '../api/queries.js';
 import { matchesPlainText, matchesSmartFilter, parseSmartFilter } from '../smart-filter.js';
 import { joinLabelSelector, splitLabelSelector } from '../label-selector.js';
@@ -70,6 +70,8 @@ interface Props {
   activeRowId?: string;
   /** Remember the scroll position under this key and restore it when the table mounts again. */
   scrollKey?: string;
+  /** Lets the page read grid state, e.g. the sorted row order for Copy rows. */
+  apiRef?: RefObject<GridApi | null>;
 }
 
 const labelFilterOptions = createFilterOptions<string>({ limit: 100 });
@@ -121,6 +123,7 @@ export function ResourceTable({
   tableId,
   activeRowId,
   scrollKey,
+  apiRef,
 }: Props) {
   const tableRef = useRef<HTMLDivElement>(null);
   const [localFilter, setLocalFilter] = useState('');
@@ -563,6 +566,7 @@ export function ResourceTable({
           onCellKeyDown={handleCellKeyDown}
           sortModel={sortModel}
           onSortModelChange={handleSortChange}
+          apiRef={apiRef}
           sx={gridSx}
         />
       </GridTooltips>
