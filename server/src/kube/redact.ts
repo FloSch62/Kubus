@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import type { KubeObject } from '@kubus/shared';
 
 export const REDACTED = '••••••••';
@@ -20,6 +21,32 @@ export function redactSecretData<T extends KubeObject>(obj: T): T {
   }
   if (clone.stringData && typeof clone.stringData === 'object') {
     clone.stringData = Object.fromEntries(Object.keys(clone.stringData).map((k) => [k, REDACTED]));
+  }
+  return clone;
+}
+
+// Fingerprints are keyed per server process: two values compare equal within
+// one run, but a fingerprint can't be brute-forced offline for short secrets.
+const FINGERPRINT_KEY = randomBytes(32);
+
+/** Short keyed fingerprint of one Secret value, e.g. `•••••••• #3f9a1c2e`. */
+export function secretFingerprint(value: unknown): string {
+  const digest = createHmac('sha256', FINGERPRINT_KEY).update(typeof value === 'string' ? value : JSON.stringify(value ?? null)).digest('hex');
+  return `${REDACTED} #${digest.slice(0, 8)}`;
+}
+
+/**
+ * Like redactSecretData, but each value becomes a keyed fingerprint so a
+ * diff can tell which keys differ without either side's value leaving the
+ * server.
+ */
+export function fingerprintSecretData<T extends KubeObject>(obj: T): T {
+  const clone = { ...obj } as T & { data?: Record<string, unknown>; stringData?: Record<string, unknown> };
+  if (clone.data && typeof clone.data === 'object') {
+    clone.data = Object.fromEntries(Object.entries(clone.data).map(([k, v]) => [k, secretFingerprint(v)]));
+  }
+  if (clone.stringData && typeof clone.stringData === 'object') {
+    clone.stringData = Object.fromEntries(Object.entries(clone.stringData).map(([k, v]) => [k, secretFingerprint(v)]));
   }
   return clone;
 }

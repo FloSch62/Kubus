@@ -56,11 +56,20 @@ function useSideKind(side: DiffSide): { info?: SideKind; kinds?: ResourceKindInf
   return { info: info && { kind: info.kind, namespaced: info.namespaced }, kinds, unserved: !!kinds && !found };
 }
 
+function isSecretSide(side: DiffSide): boolean {
+  return !side.group && side.plural === 'secrets';
+}
+
 function useSideObject(side: DiffSide, namespaced: boolean | undefined) {
   const enabled = sideComplete(side, namespaced);
   return useQuery({
     queryKey: ['diff-object', side.ctx, side.group, side.version, side.plural, side.namespace, side.name],
-    queryFn: () => apiFetch<KubeObject>(resourceUrl(side.ctx!, side.group ?? '', side.version!, side.plural!, side.name!, side.namespace)),
+    // Secrets come back as keyed fingerprints: a changed value shows as a
+    // changed line without either value reaching the page.
+    queryFn: () =>
+      apiFetch<KubeObject>(
+        resourceUrl(side.ctx!, side.group ?? '', side.version!, side.plural!, side.name!, side.namespace, isSecretSide(side) ? { reveal: 'digest' } : undefined),
+      ),
     enabled,
     // A missing object is an answer, not a hiccup worth retrying.
     retry: (count, error) => !isResourceGone(error) && count < 1,

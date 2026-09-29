@@ -4,7 +4,7 @@ import { groupFromPath, type KubeObject, type ListResponse, type ResourceDryRunR
 import type { AppContext } from '../app.js';
 import { getPrinterColumns } from '../kube/printer-columns.js';
 import { KUBE_LARGE_RESPONSE_DEADLINE_MS, resourcePath } from '../kube/raw-client.js';
-import { maybeRedact } from '../kube/redact.js';
+import { fingerprintSecretData, isSecretGVR, maybeRedact } from '../kube/redact.js';
 import { HttpProblem, sendError } from '../util/errors.js';
 import { dumpYaml, loadYaml } from '../util/yaml.js';
 
@@ -130,7 +130,10 @@ export function registerResourceRoutes(app: FastifyInstance, ctx: AppContext): v
           name: req.params.name,
         });
         const obj = await handle.raw.json<KubeObject>(path);
-        return req.query.reveal === 'true' ? obj : maybeRedact(obj, group, req.params.plural);
+        if (req.query.reveal === 'true') return obj;
+        // Compare views ask for fingerprints: equal values match, none leaves the server.
+        if (req.query.reveal === 'digest' && isSecretGVR(group, req.params.plural)) return fingerprintSecretData(obj);
+        return maybeRedact(obj, group, req.params.plural);
       } catch (err) {
         sendError(reply, err);
         return reply;
