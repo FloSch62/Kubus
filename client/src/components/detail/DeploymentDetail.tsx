@@ -19,7 +19,8 @@ import { AgeCell } from '../AgeCell.js';
 import { ConditionRows, KeyValueSection, MetadataSection, hasUnhealthyCondition } from './GenericDetail.js';
 import { Fact, Facts, WarnValue } from './Facts.js';
 import { ContainerPanels, type ContainerPanelData } from './ContainerPanels.js';
-import { mountRows, probeRows, templateEnv, type ContainerSpec, type VolumeSpec } from './container-spec.js';
+import { mountRows, probeRows, templateEnv, type ContainerSpec, type VolumeRefKind, type VolumeSpec } from './container-spec.js';
+import type { EnvRefKind } from './EnvTable.js';
 import { PodMiniList } from './PodMiniList.js';
 import { ProblemBanner, type ProblemItem } from './ProblemBanner.js';
 import { ReplicaBar } from './ReplicaBar.js';
@@ -226,7 +227,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
         usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
         podCount: usage?.pods,
         probes: probeRows(c, undefined, false),
-        mounts: mountRows(c, template?.volumes),
+        mounts: mountRows(c, template?.volumes, template?.serviceAccountName),
         env: templateEnv(c),
         command: c.command,
         args: c.args,
@@ -281,7 +282,7 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
     });
   };
 
-  const openRef = (kind: 'ConfigMap' | 'Secret' | 'PersistentVolumeClaim', name: string) => {
+  const openRef = (kind: VolumeRefKind | EnvRefKind, name: string) => {
     const gvk = gvkForKind(kind);
     if (!gvk) return;
     push({ ctx, group: gvk.group, version: gvk.version, plural: gvk.plural, kind, name, namespace });

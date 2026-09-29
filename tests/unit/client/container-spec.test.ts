@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   containerState,
   mountRows,
+  probePort,
   probeRows,
   templateEnv,
   volumeInfo,
+  volumeLabel,
   type ContainerSpec,
   type ContainerStatus,
 } from '../../../client/src/components/detail/container-spec';
@@ -36,7 +38,7 @@ describe('probeRows', () => {
     const rows = probeRows(container, status, true);
     expect(rows.map((r) => [r.kind, r.target, r.state])).toEqual([
       ['readiness', 'HTTP /ready :8080', 'Ready'],
-      ['liveness', 'TCP :http', undefined],
+      ['liveness', 'TCP :http (undeclared)', undefined],
       ['startup', 'gRPC :9090', 'Pending'],
     ]);
     expect(rows[0]!.timing).toBe('delay 0s · period 5s · timeout 1s · fail 3×');
@@ -78,9 +80,73 @@ describe('volumeInfo', () => {
     expect(volumeInfo({ name: 'v', persistentVolumeClaim: { claimName: 'pvc' } })).toMatchObject({ refKind: 'PersistentVolumeClaim', refName: 'pvc' });
     expect(volumeInfo({ name: 'v', secret: { secretName: 's' } })).toMatchObject({ type: 'secret', refKind: 'Secret', refName: 's' });
     expect(volumeInfo({ name: 'v', hostPath: { path: '/var' } })).toEqual({ type: 'hostPath', detail: '/var' });
+    expect(volumeLabel({ type: 'hostPath', detail: '/var' })).toBe('hostPath /var');
+    expect(volumeLabel({ type: 'downwardAPI', detail: 'metadata.labels' })).toBe('downwardAPI (metadata.labels)');
+    expect(volumeLabel({ type: 'secret', detail: 's' })).toBe('secret/s');
+    expect(volumeLabel({ type: 'emptyDir' })).toBe('emptyDir');
     expect(volumeInfo({ name: 'v', image: { reference: 'img:1', pullPolicy: 'Always' } })).toEqual({ type: 'image', detail: 'img:1 (Always)' });
     expect(volumeInfo({ name: 'v', projected: {} })).toEqual({ type: 'projected' });
+    expect(volumeInfo({ name: 'v', downwardAPI: { items: [{ path: 'ns', fieldRef: { fieldPath: 'metadata.namespace' } }] } })).toEqual({ type: 'downwardAPI', detail: 'metadata.namespace' });
     expect(volumeInfo({ name: 'v' })).toEqual({ type: 'unknown' });
+  });
+});
+
+describe('named probe ports', () => {
+  it('resolves a named port against the container’s ports', () => {
+    const rows = probeRows(
+      {
+        name: 'web',
+        ports: [{ name: 'http', containerPort: 9898 }, { name: 'grpc', containerPort: 9999 }],
+        readinessProbe: { httpGet: { path: '/readyz', port: 'http' } },
+        livenessProbe: { tcpSocket: { port: 'metrics' } },
+        startupProbe: { httpGet: { path: '/', port: '8080' } },
+      },
+      undefined,
+      false,
+    );
+    expect(rows.map((r) => r.target)).toEqual(['HTTP /readyz :http (9898)', 'TCP :metrics (undeclared)', 'HTTP / :8080']);
+    expect(probePort(undefined, [])).toBe('');
+  });
+});
+
+describe('projected volumes', () => {
+  it('lists every source, linking the objects it reads', () => {
+    const info = volumeInfo(
+      {
+        name: 'bundle',
+        projected: {
+          sources: [
+            { secret: { name: 'tls' } },
+            { configMap: { name: 'settings', optional: true } },
+            { serviceAccountToken: { audience: 'vault', expirationSeconds: 3600, path: 'token' } },
+            { downwardAPI: { items: [{ path: 'labels', fieldRef: { fieldPath: 'metadata.labels' } }, { path: 'mem', resourceFieldRef: { resource: 'limits.memory' } }] } },
+            { clusterTrustBundle: { signerName: 'example.com/ca' } },
+          ],
+        },
+      },
+      'app-sa',
+    );
+    expect(info).toEqual({
+      type: 'projected',
+      sources: [
+        { label: 'secret/tls', refKind: 'Secret', refName: 'tls' },
+        { label: 'configMap/settings (optional)', refKind: 'ConfigMap', refName: 'settings' },
+        { label: 'serviceAccountToken/app-sa (audience vault, 3600s)', refKind: 'ServiceAccount', refName: 'app-sa' },
+        { label: 'downwardAPI (metadata.labels, limits.memory)' },
+        { label: 'clusterTrustBundle/example.com/ca' },
+      ],
+    });
+    // Without a service account name the pod runs as "default".
+    expect(volumeInfo({ name: 'kube-api-access', projected: { sources: [{ serviceAccountToken: { path: 'token' } }] } }).sources).toEqual([
+      { label: 'serviceAccountToken/default', refKind: 'ServiceAccount', refName: 'default' },
+    ]);
+  });
+
+  it('carries the sources onto the mount rows', () => {
+    const rows = mountRows({ name: 'app', volumeMounts: [{ name: 'bundle', mountPath: '/etc/bundle', readOnly: true }] }, [{ name: 'bundle', projected: { sources: [{ secret: { name: 'tls' } }] } }], 'app-sa');
+    expect(rows).toEqual([
+      { path: '/etc/bundle', volume: 'bundle', source: 'projected', note: 'read-only', refKind: undefined, refName: undefined, sources: [{ label: 'secret/tls', refKind: 'Secret', refName: 'tls' }] },
+    ]);
   });
 });
 

@@ -296,7 +296,7 @@ describe('PodDetail', () => {
     expect(screen.queryByText('HTTPS /ready :8080')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Probes for app' }));
     expect(screen.getByText('HTTPS /ready :8080')).toBeInTheDocument();
-    expect(screen.getByText('TCP :http')).toBeInTheDocument();
+    expect(screen.getByText('TCP :http (8080)')).toBeInTheDocument();
     expect(screen.getByText('gRPC :9090 health')).toBeInTheDocument();
     const probes = within(screen.getByText('HTTPS /ready :8080').closest('table')!);
     expect(probes.getByText('Ready')).toBeInTheDocument();

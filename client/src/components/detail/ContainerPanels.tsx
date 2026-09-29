@@ -30,7 +30,7 @@ import { ClampedText } from './ClampedText.js';
 import { EnvTable, type EnvRefKind } from './EnvTable.js';
 import { Fact, Facts } from './Facts.js';
 import { CountPill } from './Section.js';
-import type { MountRow, ProbeRow, VolumeRefKind } from './container-spec.js';
+import type { MountRow, ProbeRow, VolumeRefKind, VolumeSourceRef } from './container-spec.js';
 
 export interface ContainerPanelData {
   name: string;
@@ -370,7 +370,7 @@ function MountRows({ rows, onOpenRef }: { rows: MountRow[]; onOpenRef?: Containe
         {rows.map((m) => (
           <TableRow key={`${m.volume}:${m.path}`}>
             <TableCell sx={{ verticalAlign: 'top', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{m.path}</TableCell>
-            <TableCell sx={{ verticalAlign: 'top', width: '1%', whiteSpace: 'nowrap' }}>
+            <TableCell sx={m.sources ? { verticalAlign: 'top', width: '45%', wordBreak: 'break-word' } : { verticalAlign: 'top', width: '1%', whiteSpace: 'nowrap' }}>
               <Typography variant="body2" component="div" sx={{ fontSize: 12.5 }}>
                 {m.volume}
               </Typography>
@@ -384,11 +384,35 @@ function MountRows({ rows, onOpenRef }: { rows: MountRow[]; onOpenRef?: Containe
                 )}
                 {m.note && ` · ${m.note}`}
               </Typography>
+              {m.sources && <VolumeSources sources={m.sources} onOpenRef={onOpenRef} />}
             </TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/**
+ * A projected volume's sources, one per line under the volume, each opening
+ * the object it reads from. Shared with the Pod overview's Volumes table.
+ */
+export function VolumeSources({ sources, onOpenRef, variant = 'caption' }: { sources: VolumeSourceRef[]; onOpenRef?: ContainerActions['onOpenRef']; variant?: 'caption' | 'body2' }) {
+  if (!sources.length) return null;
+  return (
+    <Box component="ul" sx={{ m: 0, mt: 0.25, pl: 1.25, listStyle: 'none', borderLeft: '2px solid', borderColor: 'divider' }}>
+      {sources.map((src, i) => (
+        <Typography key={`${src.label}:${i}`} component="li" variant={variant} color="text.secondary" sx={{ display: 'block', wordBreak: 'break-word' }}>
+          {src.refKind && src.refName && onOpenRef ? (
+            <Link component="button" variant={variant} color="text.secondary" sx={{ textAlign: 'left', verticalAlign: 'baseline' }} onClick={() => onOpenRef(src.refKind!, src.refName!)}>
+              {src.label}
+            </Link>
+          ) : (
+            src.label
+          )}
+        </Typography>
+      ))}
+    </Box>
   );
 }
 

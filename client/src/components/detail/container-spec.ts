@@ -75,17 +75,83 @@ export interface VolumeSpec {
   [key: string]: unknown;
 }
 
-export type VolumeRefKind = 'ConfigMap' | 'Secret' | 'PersistentVolumeClaim';
+export type VolumeRefKind = 'ConfigMap' | 'Secret' | 'PersistentVolumeClaim' | 'ServiceAccount';
+
+/** One source of a projected volume: "secret/app-tls", "serviceAccountToken (audience vault, 3600s)". */
+export interface VolumeSourceRef {
+  label: string;
+  refKind?: VolumeRefKind;
+  refName?: string;
+}
 
 export interface VolumeInfo {
   type: string;
   detail?: string;
   refKind?: VolumeRefKind;
   refName?: string;
+  /** Projected volumes: each source it merges into the one directory. */
+  sources?: VolumeSourceRef[];
 }
 
-/** Human label + navigable reference for a pod volume. */
-export function volumeInfo(v: VolumeSpec): VolumeInfo {
+interface DownwardApiItem {
+  path?: string;
+  fieldRef?: { fieldPath?: string };
+  resourceFieldRef?: { resource?: string };
+}
+
+/** "metadata.labels, limits.memory" — the fields a downward API source exposes. */
+function downwardFields(items: DownwardApiItem[] | undefined): string {
+  return (items ?? [])
+    .map((i) => i.fieldRef?.fieldPath ?? i.resourceFieldRef?.resource ?? i.path ?? '')
+    .filter(Boolean)
+    .join(', ');
+}
+
+interface ProjectedSource {
+  secret?: { name?: string; optional?: boolean };
+  configMap?: { name?: string; optional?: boolean };
+  serviceAccountToken?: { audience?: string; expirationSeconds?: number; path?: string };
+  downwardAPI?: { items?: DownwardApiItem[] };
+  clusterTrustBundle?: { name?: string; signerName?: string };
+  podCertificate?: { signerName?: string };
+}
+
+/**
+ * The sources a projected volume merges. A service account token is minted
+ * for the pod's own service account, so it links there.
+ */
+function projectedSources(sources: ProjectedSource[] | undefined, serviceAccountName: string | undefined): VolumeSourceRef[] {
+  const out: VolumeSourceRef[] = [];
+  for (const src of sources ?? []) {
+    if (src.secret) {
+      out.push({ label: `secret/${src.secret.name ?? ''}${src.secret.optional ? ' (optional)' : ''}`, refKind: 'Secret', refName: src.secret.name });
+    } else if (src.configMap) {
+      out.push({ label: `configMap/${src.configMap.name ?? ''}${src.configMap.optional ? ' (optional)' : ''}`, refKind: 'ConfigMap', refName: src.configMap.name });
+    } else if (src.serviceAccountToken) {
+      const t = src.serviceAccountToken;
+      const account = serviceAccountName || 'default';
+      const facts = [t.audience ? `audience ${t.audience}` : undefined, t.expirationSeconds !== undefined ? `${t.expirationSeconds}s` : undefined].filter(Boolean);
+      out.push({ label: `serviceAccountToken/${account}${facts.length ? ` (${facts.join(', ')})` : ''}`, refKind: 'ServiceAccount', refName: account });
+    } else if (src.downwardAPI) {
+      const fields = downwardFields(src.downwardAPI.items);
+      out.push({ label: `downwardAPI${fields ? ` (${fields})` : ''}` });
+    } else if (src.clusterTrustBundle) {
+      out.push({ label: `clusterTrustBundle/${src.clusterTrustBundle.name ?? src.clusterTrustBundle.signerName ?? ''}` });
+    } else if (src.podCertificate) {
+      out.push({ label: `podCertificate/${src.podCertificate.signerName ?? ''}` });
+    } else {
+      const type = Object.keys(src)[0];
+      if (type) out.push({ label: type });
+    }
+  }
+  return out;
+}
+
+/**
+ * Human label + navigable reference for a pod volume. `serviceAccountName`
+ * is the pod's, for projected token sources.
+ */
+export function volumeInfo(v: VolumeSpec, serviceAccountName?: string): VolumeInfo {
   if (v.persistentVolumeClaim) {
     const claim = (v.persistentVolumeClaim as { claimName?: string }).claimName;
     return { type: 'persistentVolumeClaim', detail: claim, refKind: 'PersistentVolumeClaim', refName: claim };
@@ -99,12 +165,27 @@ export function volumeInfo(v: VolumeSpec): VolumeInfo {
     return { type: 'secret', detail: name, refKind: 'Secret', refName: name };
   }
   if (v.hostPath) return { type: 'hostPath', detail: (v.hostPath as { path?: string }).path };
+  if (v.projected) {
+    const sources = projectedSources((v.projected as { sources?: ProjectedSource[] }).sources, serviceAccountName);
+    return sources.length ? { type: 'projected', sources } : { type: 'projected' };
+  }
+  if (v.downwardAPI) {
+    const fields = downwardFields((v.downwardAPI as { items?: DownwardApiItem[] }).items);
+    return fields ? { type: 'downwardAPI', detail: fields } : { type: 'downwardAPI' };
+  }
   if (v.image) {
     const img = v.image as { reference?: string; pullPolicy?: string };
     return { type: 'image', detail: `${img.reference ?? ''}${img.pullPolicy ? ` (${img.pullPolicy})` : ''}` };
   }
   const type = Object.keys(v).find((k) => k !== 'name') ?? 'unknown';
   return { type };
+}
+
+/** "configMap/app-config", "hostPath /var/log", "downwardAPI (metadata.labels)". */
+export function volumeLabel(info: VolumeInfo): string {
+  if (!info.detail) return info.type;
+  if (info.type === 'downwardAPI') return `${info.type} (${info.detail})`;
+  return info.detail.startsWith('/') ? `${info.type} ${info.detail}` : `${info.type}/${info.detail}`;
 }
 
 export type ProbeKind = 'readiness' | 'liveness' | 'startup';
@@ -123,9 +204,21 @@ const PROBE_KINDS: Array<[ProbeKind, 'readinessProbe' | 'livenessProbe' | 'start
   ['startup', 'startupProbe'],
 ];
 
-export function probeTarget(p: Probe): string {
-  if (p.httpGet) return `${(p.httpGet.scheme ?? 'HTTP') === 'HTTPS' ? 'HTTPS' : 'HTTP'} ${p.httpGet.path ?? '/'} :${p.httpGet.port ?? ''}`;
-  if (p.tcpSocket) return `TCP :${p.tcpSocket.port ?? ''}`;
+/**
+ * A probe port as the kubelet will dial it: a named port resolves against
+ * the container's declared ports ("http (9898)"), and a name no port carries
+ * says so, since the probe can only fail.
+ */
+export function probePort(port: number | string | undefined, ports: ContainerSpec['ports']): string {
+  if (port === undefined) return '';
+  if (typeof port === 'number' || /^\d+$/.test(port)) return String(port);
+  const declared = (ports ?? []).find((p) => p.name === port);
+  return declared ? `${port} (${declared.containerPort})` : `${port} (undeclared)`;
+}
+
+export function probeTarget(p: Probe, ports?: ContainerSpec['ports']): string {
+  if (p.httpGet) return `${(p.httpGet.scheme ?? 'HTTP') === 'HTTPS' ? 'HTTPS' : 'HTTP'} ${p.httpGet.path ?? '/'} :${probePort(p.httpGet.port, ports)}`;
+  if (p.tcpSocket) return `TCP :${probePort(p.tcpSocket.port, ports)}`;
   if (p.grpc) return `gRPC :${p.grpc.port ?? ''}${p.grpc.service ? ` ${p.grpc.service}` : ''}`;
   if (p.exec) return `exec ${(p.exec.command ?? []).join(' ')}`;
   return '';
@@ -147,7 +240,7 @@ export function probeRows(c: ContainerSpec, st: ContainerStatus | undefined, liv
     const probe = c[key];
     if (!probe) continue;
     const state = !live || !st ? undefined : kind === 'readiness' ? (st.ready ? 'Ready' : 'NotReady') : kind === 'startup' ? (st.started ? 'Started' : 'Pending') : undefined;
-    rows.push({ kind, target: probeTarget(probe), timing: probeTiming(probe), state });
+    rows.push({ kind, target: probeTarget(probe, c.ports), timing: probeTiming(probe), state });
   }
   return rows;
 }
@@ -160,22 +253,25 @@ export interface MountRow {
   note?: string;
   refKind?: VolumeRefKind;
   refName?: string;
+  /** Projected volumes: the sources merged into the mount. */
+  sources?: VolumeSourceRef[];
 }
 
 /** The container's volume mounts joined with the pod's volume sources. */
-export function mountRows(c: ContainerSpec, volumes: VolumeSpec[] | undefined): MountRow[] {
+export function mountRows(c: ContainerSpec, volumes: VolumeSpec[] | undefined, serviceAccountName?: string): MountRow[] {
   const byName = new Map((volumes ?? []).map((v) => [v.name, v]));
   return (c.volumeMounts ?? []).map((m) => {
     const vol = byName.get(m.name);
-    const info = vol ? volumeInfo(vol) : undefined;
+    const info = vol ? volumeInfo(vol, serviceAccountName) : undefined;
     const note = [m.subPath ? `subPath ${m.subPath}` : undefined, m.readOnly ? 'read-only' : undefined].filter(Boolean).join(' · ');
     return {
       path: m.mountPath,
       volume: m.name,
-      source: info ? `${info.type}${info.detail ? `/${info.detail}` : ''}` : '',
+      source: info ? volumeLabel(info) : '',
       note: note || undefined,
       refKind: info?.refKind,
       refName: info?.refName,
+      ...(info?.sources && { sources: info.sources }),
     };
   });
 }

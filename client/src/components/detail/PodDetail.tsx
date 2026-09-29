@@ -19,8 +19,8 @@ import { PortForwardDialog } from '../PortForwardDialog.js';
 import { PodProblems } from './PodProblems.js';
 import { DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
-import { ContainerPanels, type ContainerPanelData } from './ContainerPanels.js';
-import { containerState, mountRows, probeRows, volumeInfo, type ContainerSpec, type ContainerStatus, type VolumeSpec } from './container-spec.js';
+import { ContainerPanels, VolumeSources, type ContainerPanelData } from './ContainerPanels.js';
+import { containerState, mountRows, probeRows, volumeInfo, volumeLabel, type ContainerSpec, type ContainerStatus, type VolumeSpec } from './container-spec.js';
 import { StatusChip } from '../StatusChip.js';
 import { AgeCell } from '../AgeCell.js';
 import { containerResources, ownerReference, podContainerNames, podDebugContainers, podSummary } from '../../kube-display.js';
@@ -76,6 +76,7 @@ function panelData(
   st: ContainerStatus | undefined,
   usage: ContainerUsage | undefined,
   volumes: VolumeSpec[] | undefined,
+  serviceAccountName: string | undefined,
   live: boolean,
   env: PodEnvVar[] | undefined,
   envLoading: boolean,
@@ -97,7 +98,7 @@ function panelData(
     resources: containerResources(c),
     usage: usage ? { cpuMilli: usage.cpuMilli, memBytes: usage.memBytes } : undefined,
     probes: probeRows(c, st, live),
-    mounts: mountRows(c, volumes),
+    mounts: mountRows(c, volumes, serviceAccountName),
     env,
     envLoading,
     command: c.command,
@@ -165,7 +166,7 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const sidecars = (spec?.initContainers ?? []).filter((c) => c.restartPolicy === 'Always');
   const inits = (spec?.initContainers ?? []).filter((c) => c.restartPolicy !== 'Always');
   const toPanel = (c: ContainerSpec, st: ContainerStatus | undefined, kind?: 'init' | 'sidecar') =>
-    panelData(c, st, usageByContainer.get(c.name), spec?.volumes, !terminal, envByContainer.get(c.name), envLoading, kind);
+    panelData(c, st, usageByContainer.get(c.name), spec?.volumes, spec?.serviceAccountName, !terminal, envByContainer.get(c.name), envLoading, kind);
   const mainPanels = [
     ...(spec?.containers ?? []).map((c) => toPanel(c, statusByName.get(c.name))),
     ...sidecars.map((c) => toPanel(c, initStatusByName.get(c.name), 'sidecar')),
@@ -402,18 +403,19 @@ function VolumesSection({ spec, onOpenRef }: { spec: PodSpec | undefined; onOpen
         </TableHead>
         <TableBody>
           {volumes.map((v) => {
-            const info = volumeInfo(v);
+            const info = volumeInfo(v, spec?.serviceAccountName);
             return (
               <TableRow key={v.name}>
                 <TableCell sx={{ verticalAlign: 'top', wordBreak: 'break-word' }}>{v.name}</TableCell>
-                <TableCell sx={{ verticalAlign: 'top' }}>
+                <TableCell sx={{ verticalAlign: 'top', wordBreak: 'break-word', minWidth: info.sources ? 240 : undefined }}>
                   {info.refKind && info.refName ? (
                     <Link component="button" variant="body2" sx={{ textAlign: 'left' }} onClick={() => onOpenRef(info.refKind!, info.refName!)}>
-                      {info.type}/{info.detail}
+                      {volumeLabel(info)}
                     </Link>
                   ) : (
-                    `${info.type}${info.detail ? `/${info.detail}` : ''}`
+                    volumeLabel(info)
                   )}
+                  {info.sources && <VolumeSources sources={info.sources} onOpenRef={onOpenRef} variant="body2" />}
                 </TableCell>
                 <TableCell sx={{ verticalAlign: 'top', wordBreak: 'break-word' }}>
                   {(mountsByVolume.get(v.name) ?? []).map((m, i) => (
