@@ -2,21 +2,36 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { KubeObject } from '@kubus/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
-import { bulkScaleScopes, bulkScaleTargets, commonReplicas, planBulkScale } from '../../../client/src/components/bulk-scale';
+import { bulkScaleScopes, bulkScaleTargets, commonReplicas, HPA_LOOKUPS_PER_CLUSTER, indexHpas, planBulkScale } from '../../../client/src/components/bulk-scale';
 import { BulkScaleDialog } from '../../../client/src/components/BulkScaleDialog';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useUiPrefsStore } from '../../../client/src/state/prefs';
 
 const mocks = vi.hoisted(() => ({
   hpas: {} as Record<string, KubeObject[]>,
+  /** Clusters whose cluster-wide HPA list fails. */
+  clusterWideDenied: new Set<string>(),
+  lookups: [] as string[],
   scale: vi.fn(async (_args: unknown) => ({ ok: true })),
   toast: vi.fn(),
 }));
 
-// HPA lookups answer from `mocks.hpas`, keyed by cluster and namespace.
+// HPA lookups answer from `mocks.hpas`, keyed by cluster and namespace; a
+// cluster-wide lookup (no namespace) returns every HPA of that cluster.
 vi.mock('@tanstack/react-query', () => ({
-  useQueries: (config: { queries: Array<{ queryKey: [string, { ctx: string; namespace: string }] }>; combine: (results: unknown[]) => unknown }) =>
-    config.combine(config.queries.map((q) => ({ data: { items: mocks.hpas[`${q.queryKey[1].ctx}/${q.queryKey[1].namespace}`] ?? [] }, isLoading: false }))),
+  useQueries: (config: { queries: Array<{ queryKey: [string, { ctx: string; namespace?: string }] }>; combine: (results: unknown[]) => unknown }) =>
+    config.combine(
+      config.queries.map((q) => {
+        const { ctx, namespace } = q.queryKey[1];
+        mocks.lookups.push(namespace === undefined ? `${ctx}/*` : `${ctx}/${namespace}`);
+        if (namespace === undefined) {
+          if (mocks.clusterWideDenied.has(ctx)) return { data: undefined, isLoading: false, isError: true };
+          const items = Object.entries(mocks.hpas).flatMap(([key, list]) => (key.startsWith(`${ctx}/`) ? list : []));
+          return { data: { items }, isLoading: false, isError: false };
+        }
+        return { data: { items: mocks.hpas[`${ctx}/${namespace}`] ?? [] }, isLoading: false, isError: false };
+      }),
+    ),
 }));
 vi.mock('../../../client/src/api/queries.js', () => ({ useScale: () => ({ mutateAsync: mocks.scale }) }));
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: mocks.toast }));
@@ -72,6 +87,39 @@ describe('bulk scale planning', () => {
     expect(commonReplicas(targets)).toBeUndefined();
     expect(commonReplicas(targets.slice(1))).toBe(3);
   });
+
+  it('marks skipped workloads by uid', () => {
+    expect([...planBulkScale(targets, 4, false, () => false).skippedUids]).toEqual(['dev-web']);
+    expect(planBulkScale(targets, 4, true, () => false).skippedUids.size).toBe(0);
+  });
+});
+
+describe('HPA lookups for many namespaces', () => {
+  const spread = (ctx: string, count: number) => Array.from({ length: count }, (_, i) => deployment(`app-${i}`, 1, ctx, `ns-${i}`));
+
+  it('lists once per cluster past a few namespaces, and per namespace below that', () => {
+    const rows = [...spread('big', HPA_LOOKUPS_PER_CLUSTER + 1), ...spread('small', HPA_LOOKUPS_PER_CLUSTER)];
+    const scopes = bulkScaleScopes(rows);
+    expect(scopes.filter((s) => s.ctx === 'big')).toEqual([{ ctx: 'big' }]);
+    expect(scopes.filter((s) => s.ctx === 'small')).toHaveLength(HPA_LOOKUPS_PER_CLUSTER);
+  });
+
+  it('falls back to per-namespace lookups for clusters that denied the cluster-wide list', () => {
+    const scopes = bulkScaleScopes(spread('big', 200), new Set(['big']));
+    expect(scopes).toHaveLength(200);
+    expect(scopes[0]).toEqual({ ctx: 'big', namespace: 'ns-0' });
+  });
+
+  it('splits a cluster-wide list by namespace', () => {
+    const lookup = indexHpas(
+      [{ ctx: 'big' }, { ctx: 'small', namespace: 'a' }, { ctx: 'failed', namespace: 'b' }],
+      [[hpa('web', { namespace: 'ns-1' }), hpa('api', { namespace: 'ns-2', uid: 'hpa-api' })], [hpa('db', { namespace: 'a' })], undefined],
+    );
+    expect(lookup('big', 'ns-1')?.map((h) => h.metadata.name)).toEqual(['web-hpa']);
+    expect(lookup('big', 'ns-9')).toEqual([]);
+    expect(lookup('small', 'a')?.map((h) => h.metadata.name)).toEqual(['db-hpa']);
+    expect(lookup('failed', 'b')).toBeUndefined();
+  });
 });
 
 function renderDialog(rows: ClusterRow[]) {
@@ -83,6 +131,8 @@ function renderDialog(rows: ClusterRow[]) {
 describe('BulkScaleDialog', () => {
   beforeEach(() => {
     mocks.hpas = { 'dev/gap-lists': [hpa('web')] };
+    mocks.clusterWideDenied = new Set();
+    mocks.lookups = [];
     mocks.scale.mockClear();
     mocks.toast.mockClear();
     useClustersStore.setState({ contextSettings: {} });
@@ -126,6 +176,41 @@ describe('BulkScaleDialog', () => {
     expect(scaleButton).toBeDisabled();
     fireEvent.change(within(dialog).getByPlaceholderText('scale 2 to 0'), { target: { value: 'scale 2 to 0' } });
     expect(scaleButton).toBeEnabled();
+  });
+
+  it('lists HPAs once for a selection across many namespaces and still finds the autoscaled one', async () => {
+    const rows = Array.from({ length: 6 }, (_, i) => deployment(`app-${i}`, 1, 'dev', `ns-${i}`));
+    mocks.hpas = { 'dev/ns-4': [hpa('app-4', { namespace: 'ns-4' })] };
+    renderDialog(rows);
+    const dialog = await screen.findByRole('dialog', { name: 'Scale 6 Deployments' });
+    expect(within(dialog).getByText(/managed by an autoscaler/)).toHaveTextContent('app-4 by HorizontalPodAutoscaler app-4-hpa');
+    expect(new Set(mocks.lookups)).toEqual(new Set(['dev/*']));
+  });
+
+  it('falls back to namespace lookups when the cluster-wide list is denied', async () => {
+    const rows = Array.from({ length: 6 }, (_, i) => deployment(`app-${i}`, 1, 'dev', `ns-${i}`));
+    mocks.hpas = { 'dev/ns-4': [hpa('app-4', { namespace: 'ns-4' })] };
+    mocks.clusterWideDenied = new Set(['dev']);
+    renderDialog(rows);
+    const dialog = await screen.findByRole('dialog', { name: 'Scale 6 Deployments' });
+    expect(await within(dialog).findByText(/managed by an autoscaler/)).toHaveTextContent('app-4 by HorizontalPodAutoscaler app-4-hpa');
+    expect(mocks.lookups).toContain('dev/ns-4');
+    expect(within(dialog).getByRole('button', { name: 'Scale 5 of 6' })).toBeEnabled();
+  });
+
+  it('guards against the live replica count, not the one seen when the rows were checked', async () => {
+    useClustersStore.setState({ contextSettings: { dev: { protected: true } } });
+    mocks.hpas = {};
+    const onClose = vi.fn();
+    const idle = deployment('api', 0);
+    const { rerender } = render(<BulkScaleDialog rows={[idle]} kind="Deployment" group="apps" version="v1" plural="deployments" title="Deployments" onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Scale 1 Deployment' });
+    fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Replicas' }), { target: { value: '0' } });
+    expect(within(dialog).queryByPlaceholderText('scale 1 to 0')).not.toBeInTheDocument();
+    // Someone scaled it up while the dialog was open.
+    rerender(<BulkScaleDialog rows={[deployment('api', 3)]} kind="Deployment" group="apps" version="v1" plural="deployments" title="Deployments" onClose={onClose} />);
+    expect(await within(dialog).findByPlaceholderText('scale 1 to 0')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Scale 1' })).toBeDisabled();
   });
 
   it('reports failures with the first error', async () => {

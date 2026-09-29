@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQueries, type UseQueryResult } from '@tanstack/react-query';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -21,13 +21,18 @@ import { apiFetch } from '../api/http.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
-import { bulkScaleScopes, bulkScaleTargets, commonReplicas, planBulkScale, type BulkScaleTarget } from './bulk-scale.js';
+import { bulkScaleGuarded, bulkScaleScopes, bulkScaleTargets, commonReplicas, indexHpas, splitBulkScale, type BulkScaleTarget } from './bulk-scale.js';
 
 const HPA_GVR = { group: 'autoscaling', version: 'v2', plural: 'horizontalpodautoscalers' } as const;
 
 // Module-level so useQueries only recombines when a lookup result changes.
 function combineHpaLookups(results: UseQueryResult<ListResponse>[]) {
-  return { pending: results.some((r) => r.isLoading), lists: results.map((r) => r.data?.items) };
+  return { pending: results.some((r) => r.isLoading), lists: results.map((r) => r.data?.items), failed: results.map((r) => r.isError) };
+}
+
+function hpaListUrl(ctx: string, namespace: string | undefined): string {
+  const path = `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(HPA_GVR.group)}/${HPA_GVR.version}/${HPA_GVR.plural}`;
+  return namespace === undefined ? path : `${path}?${new URLSearchParams({ namespace })}`;
 }
 
 /**
@@ -57,36 +62,47 @@ export function BulkScaleDialog({
   const scale = useScale();
   const contextSettings = useClustersStore((s) => s.contextSettings);
   const protectByDefault = useUiPrefsStore((s) => s.protectByDefault);
-  const scopes = useMemo(() => bulkScaleScopes(rows), [rows]);
+  // Clusters whose cluster-wide HPA list failed (RBAC may allow only some
+  // namespaces); they fall back to one lookup per namespace.
+  const [perNamespace, setPerNamespace] = useState<ReadonlySet<string>>(() => new Set());
+  const scopes = useMemo(() => bulkScaleScopes(rows, perNamespace), [rows, perNamespace]);
   // Same query keys as the single Scale dialog's lookup, so both share cache.
-  // A failed lookup counts as "no autoscaler", as it does there.
+  // A failed per-namespace lookup counts as "no autoscaler", as it does there.
   const hpaLookups = useQueries({
     queries: scopes.map(({ ctx, namespace }) => ({
       queryKey: ['resource-list', { ctx, ...HPA_GVR, namespace }],
-      queryFn: () =>
-        apiFetch<ListResponse>(
-          `/api/contexts/${encodeURIComponent(ctx)}/resources/${groupToPath(HPA_GVR.group)}/${HPA_GVR.version}/${HPA_GVR.plural}?${new URLSearchParams({ namespace })}`,
-        ),
+      queryFn: () => apiFetch<ListResponse>(hpaListUrl(ctx, namespace)),
       retry: false,
     })),
     combine: combineHpaLookups,
   });
-  const lookupPending = hpaLookups.pending;
-  const targets = useMemo(() => {
-    const byScope = new Map(scopes.map((scope, i) => [`${scope.ctx}\0${scope.namespace}`, hpaLookups.lists[i]]));
-    return bulkScaleTargets(rows, kind, group, (ctx, namespace) => byScope.get(`${ctx}\0${namespace}`));
-  }, [rows, kind, group, scopes, hpaLookups.lists]);
+  const failedClusterWide = scopes.filter((scope, i) => scope.namespace === undefined && hpaLookups.failed[i]).map((scope) => scope.ctx);
+  const failedKey = failedClusterWide.join('\0');
+  useEffect(() => {
+    if (!failedKey) return;
+    setPerNamespace((current) => new Set([...current, ...failedKey.split('\0')]));
+  }, [failedKey]);
+  // Until the fallback lookups land, a failed cluster-wide list still counts as pending.
+  const lookupPending = hpaLookups.pending || failedClusterWide.length > 0;
+  const targets = useMemo(
+    () => bulkScaleTargets(rows, kind, group, indexHpas(scopes, hpaLookups.lists)),
+    [rows, kind, group, scopes, hpaLookups.lists],
+  );
 
   const [replicas, setReplicas] = useState<number | ''>(() => commonReplicas(bulkScaleTargets(rows, kind, group, () => undefined)) ?? '');
   const [override, setOverride] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
-  const isProtected = (ctx: string) => contextSettings[ctx]?.protected ?? protectByDefault;
-  const plan = planBulkScale(targets, replicas === '' ? -1 : replicas, override, isProtected);
-  const autoscaled = targets.filter((t) => t.scaler);
+  const plan = useMemo(() => splitBulkScale(targets, override), [targets, override]);
+  const guarded = bulkScaleGuarded(plan.apply, replicas === '' ? -1 : replicas, (ctx) => contextSettings[ctx]?.protected ?? protectByDefault);
+  const autoscaled = useMemo(() => targets.filter((t) => t.scaler), [targets]);
+  const sharedReplicas = useMemo(() => commonReplicas(targets), [targets]);
   const confirmText = `scale ${plan.apply.length} to 0`;
-  const blocked = lookupPending || busy || replicas === '' || plan.apply.length === 0 || (plan.guarded && typed !== confirmText);
-  const multiCluster = new Set(rows.map((r) => r.ctx)).size > 1;
+  const blocked = lookupPending || busy || replicas === '' || plan.apply.length === 0 || (guarded && typed !== confirmText);
+  const multiCluster = useMemo(() => new Set(rows.map((r) => r.ctx)).size > 1, [rows]);
+  // The target list follows typing a beat behind, so keystrokes stay instant
+  // with hundreds of workloads selected.
+  const listReplicas = useDeferredValue(replicas);
 
   const run = async () => {
     if (replicas === '') return;
@@ -156,9 +172,11 @@ export function BulkScaleDialog({
           type="number"
           label="Replicas"
           value={replicas}
-          placeholder={commonReplicas(targets) === undefined ? 'Current counts differ' : undefined}
+          placeholder={sharedReplicas === undefined ? 'Current counts differ' : undefined}
           onChange={(e) => setReplicas(e.target.value === '' ? '' : Math.max(0, Math.floor(Number(e.target.value)) || 0))}
           sx={{
+            // Room for the outlined label when nothing sits above the field.
+            mt: 0.75,
             '& input[type=number]': { MozAppearance: 'textfield', textAlign: 'center' },
             '& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 },
           }}
@@ -183,16 +201,8 @@ export function BulkScaleDialog({
             },
           }}
         />
-        <Box
-          component="ul"
-          aria-label="Workloads to scale"
-          sx={{ mt: 2, mb: 0, p: 0, listStyle: 'none', maxHeight: 240, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}
-        >
-          {targets.map((t) => (
-            <TargetRow key={t.row.obj.metadata.uid} target={t} replicas={replicas} skipped={plan.skipped.includes(t)} multiCluster={multiCluster} />
-          ))}
-        </Box>
-        {plan.guarded && (
+        <TargetList targets={targets} replicas={listReplicas} skippedUids={plan.skippedUids} multiCluster={multiCluster} />
+        {guarded && (
           <>
             <Typography variant="body2" sx={{ mt: 2, mb: 1 }}>
               A protected cluster is in this selection and you are scaling running workloads to <b>0</b>. Type <b>{confirmText}</b> to confirm.
@@ -212,6 +222,30 @@ export function BulkScaleDialog({
     </Dialog>
   );
 }
+
+const TargetList = memo(function TargetList({
+  targets,
+  replicas,
+  skippedUids,
+  multiCluster,
+}: {
+  targets: BulkScaleTarget[];
+  replicas: number | '';
+  skippedUids: ReadonlySet<string>;
+  multiCluster: boolean;
+}) {
+  return (
+    <Box
+      component="ul"
+      aria-label="Workloads to scale"
+      sx={{ mt: 2, mb: 0, p: 0, listStyle: 'none', maxHeight: 240, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}
+    >
+      {targets.map((t) => (
+        <TargetRow key={t.row.obj.metadata.uid} target={t} replicas={replicas} skipped={skippedUids.has(t.row.obj.metadata.uid)} multiCluster={multiCluster} />
+      ))}
+    </Box>
+  );
+});
 
 function TargetRow({ target, replicas, skipped, multiCluster }: { target: BulkScaleTarget; replicas: number | ''; skipped: boolean; multiCluster: boolean }) {
   const { row, current } = target;
