@@ -85,6 +85,7 @@ When the dock is empty, ++ctrl+w++ / ++cmd+w++ closes the Kubus window as usual.
 | ++up++ / ++down++ | Move between results |
 | ++enter++ | Open / activate the selected result |
 | ++tab++ / ++right++ | Show actions for the selected resource |
+| ++right++ / ++enter++ | Expand a folded group of pods; ++left++ folds it again |
 | ++tab++ | Reveal the star to favourite a result |
 | `>` | Switch to **command** mode (app commands) |
 | ++esc++ | Step back, or close the palette |

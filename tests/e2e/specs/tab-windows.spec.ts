@@ -91,7 +91,7 @@ test('opens logs in a focused utility window without the Kubus application chrom
   const row = page.getByRole('row').filter({ hasText: 'logger' }).filter({ hasText: namespace }).first();
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.getByRole('checkbox').check();
-  await page.getByRole('button', { name: /^Logs/ }).click();
+  await page.getByRole('button', { name: /^Logs \(\d+\)$/ }).click();
   await expect(page.getByText('kubus-e2e log line').first()).toBeVisible({ timeout: 30_000 });
 
   const sourceDock = page.locator('.kubus-bottom-dock');

@@ -108,6 +108,8 @@ export const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: ShortcutRowDef
       { combos: [['Shift', 'Enter']], description: 'Open in a background tab' },
       { combos: [['Tab'], ['→']], description: 'Show actions for the selected resource' },
       { combos: [['Esc'], ['Backspace'], ['←']], description: 'Leave the actions list' },
+      { combos: [['Tab'], ['→'], ['Enter']], description: 'Expand a folded group of pods' },
+      { combos: [['←']], description: 'Fold the group again' },
     ],
   },
   {

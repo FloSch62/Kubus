@@ -104,7 +104,7 @@ function stickyColumnSx(theme: Theme, checkboxes: boolean) {
   const cells = (field: string) => `& .MuiDataGrid-cell[data-field="${field}"], & .MuiDataGrid-columnHeader[data-field="${field}"]`;
   const sticky = { position: 'sticky', zIndex: 3, backgroundColor: paper };
   const nameLeft = checkboxes ? GRID_CHECKBOX_SELECTION_COL_DEF.width ?? 50 : 0;
-  const edge = dark ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.10)';
+  const edge = dark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.18)';
   return {
     ...(checkboxes ? { [cells('__check__')]: { ...sticky, left: 0 } } : {}),
     [cells('name')]: { ...sticky, left: nameLeft },
@@ -116,8 +116,8 @@ function stickyColumnSx(theme: Theme, checkboxes: boolean) {
     '& .MuiDataGrid-row.Mui-selected .MuiDataGrid-cell[data-field="name"], & .MuiDataGrid-row.Mui-selected .MuiDataGrid-cell[data-field="_actions"], & .MuiDataGrid-row.Mui-selected .MuiDataGrid-cell[data-field="__check__"]':
       tint(dark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'),
     // Soft edges once content scrolls underneath.
-    '&.kubus-scrolled-x .MuiDataGrid-cell[data-field="name"], &.kubus-scrolled-x .MuiDataGrid-columnHeader[data-field="name"]': { boxShadow: `6px 0 6px -6px ${edge}` },
-    '&.kubus-more-x .MuiDataGrid-cell[data-field="_actions"], &.kubus-more-x .MuiDataGrid-columnHeader[data-field="_actions"]': { boxShadow: `-6px 0 6px -6px ${edge}` },
+    '&.kubus-scrolled-x .MuiDataGrid-cell[data-field="name"], &.kubus-scrolled-x .MuiDataGrid-columnHeader[data-field="name"]': { boxShadow: `8px 0 8px -8px ${edge}` },
+    '&.kubus-more-x .MuiDataGrid-cell[data-field="_actions"], &.kubus-more-x .MuiDataGrid-columnHeader[data-field="_actions"]': { boxShadow: `-8px 0 8px -8px ${edge}` },
   };
 }
 

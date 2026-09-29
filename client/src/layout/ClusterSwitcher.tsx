@@ -31,7 +31,9 @@ import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import TuneIcon from '@mui/icons-material/Tune';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import type { ContextHealth, ContextInfo } from '@kubus/shared';
+import { useTheme } from '@mui/material/styles';
 import { useConnectContext, useContexts, useReconnectContext } from '../api/queries.js';
+import { clusterColorIndexes, clusterTagColors } from '../cluster-color.js';
 import { watchClient, type ContextWatchIssue, type ContextWatchIssues } from '../api/ws/watch-client.js';
 import { HEALTH_COLOR, healthTitle } from '../components/ContextHealthDot.js';
 import { fuzzyMatch } from '../fuzzy.js';
@@ -285,6 +287,19 @@ export function ClusterSwitcher() {
   const connect = useConnectContext();
   const reconnect = useReconnectContext();
   const selected = useClustersStore((s) => s.selected);
+  const themeMode = useTheme().palette.mode;
+  // With several clusters selected, lists tag each row with a cluster colour;
+  // the picker shows the same colour so it doubles as the legend.
+  const tagColors = useMemo(() => (selected.length > 1 ? clusterColorIndexes(selected) : undefined), [selected]);
+  const tagSwatch = (name: string) => {
+    const index = tagColors?.get(name);
+    if (index === undefined) return null;
+    return (
+      <Tooltip title="Colour of this cluster's tag in lists">
+        <Box component="span" aria-hidden sx={{ display: 'inline-block', width: 8, height: 8, borderRadius: '2px', mr: 0.75, verticalAlign: 1, bgcolor: clusterTagColors(index, themeMode).fg }} />
+      </Tooltip>
+    );
+  };
   const toggleContext = useClustersStore((s) => s.toggleContext);
   const setSelected = useClustersStore((s) => s.setSelected);
   const seedKubeconfigNamespaces = useClustersStore((s) => s.seedKubeconfigNamespaces);
@@ -655,6 +670,7 @@ export function ClusterSwitcher() {
                   {icon}
                 </Box>
               )}
+              {tagSwatch(c.name)}
               <MatchText text={c.name} positions={matches.get(c.name)} />
             </>
           }
@@ -703,6 +719,7 @@ export function ClusterSwitcher() {
             </Tooltip>
           )}
           {icon && <Box component="span">{icon}</Box>}
+          {tagSwatch(c.name)}
           <Typography variant="body2" noWrap sx={{ flexGrow: 1, minWidth: 0 }}>
             <MatchText text={c.name} positions={matches.get(c.name)} />
           </Typography>
