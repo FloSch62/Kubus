@@ -181,12 +181,9 @@ export function WorkloadContainers({ ctx, kind, obj, pods, template }: { ctx: st
   }, [template, containerUsage, podByContainer]);
 
   // One container's logs across every pod of the workload; the picker still
-  // lists the rest, they just start unselected.
+  // lists the rest, they just start unselected. With no pods yet the tab
+  // waits: it follows the workload, so pods join as they start.
   const openContainerLogs = (container: string) => {
-    if (!pods.length) {
-      showToast('error', `No running pods for ${name}`);
-      return;
-    }
     addTab({
       kind: 'logs',
       id: dockTabId(),

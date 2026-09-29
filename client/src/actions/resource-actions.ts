@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 import { gvkForResource, type KubeObject, type LogTargetKind, type ResourceRef } from '@kubus/shared';
 import {
-  resolveLogTargetPods,
   useCordon,
   useCreateResource,
   useRerunJob,
@@ -11,6 +10,7 @@ import {
 import { apiFetch } from '../api/http.js';
 import { resourceUrl } from '../api/queries.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
+import { openLogsForTarget } from './open-logs.js';
 import { podContainerNames } from '../kube-display.js';
 import { manualJobYaml } from '../manual-job.js';
 import type { RowKeyAction } from '../row-keys.js';
@@ -80,29 +80,7 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
       const fetchObj = () => apiFetch<KubeObject>(resourceUrl(ref.ctx, ref.group, ref.version, ref.plural, ref.name, ref.namespace));
       switch (action.id) {
         case 'logs': {
-          const logKind = ref.kind as LogTargetKind;
-          const { pods } = await resolveLogTargetPods({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: logKind, namespace, name: ref.name });
-          if (!pods.length) throw new Error(`No pods found for ${ref.kind} ${namespace}/${ref.name}`);
-          const byNamespace = new Map<string, typeof pods>();
-          for (const pod of pods) {
-            const namespacePods = byNamespace.get(pod.namespace);
-            if (namespacePods) namespacePods.push(pod);
-            else byNamespace.set(pod.namespace, [pod]);
-          }
-          for (const [ns, namespacePods] of byNamespace) {
-            const podNames = namespacePods.map((pod) => pod.name);
-            addTab({
-              kind: 'logs',
-              id: dockTabId(),
-              title: pods.length === 1 ? `logs: ${podNames[0] ?? ref.name}` : `logs: ${ref.kind}/${ref.name}`,
-              ctx: ref.ctx,
-              namespace: ns,
-              pods: podNames,
-              sources: namespacePods.map((pod) => ({ pod: pod.name, containers: pod.containers })),
-              target: { kind: logKind, name: ref.name },
-              follow: true,
-            });
-          }
+          await openLogsForTarget({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: ref.kind as LogTargetKind, namespace, name: ref.name }, addTab);
           return `Streaming logs for ${ref.kind}/${ref.name}`;
         }
         case 'shell': {

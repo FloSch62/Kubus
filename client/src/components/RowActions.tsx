@@ -58,7 +58,6 @@ import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
-  resolveLogTargetPods,
   useCordon,
   useDebugImages,
   useDebugPod,
@@ -87,6 +86,7 @@ import { execTargetContainer, podContainerNames } from '../kube-display.js';
 import { isBuiltInDebugImage, mergeDebugPresets, normalizeDebugImageName } from '../debug-presets.js';
 import { splitImageRef } from '../image-ref.js';
 import { copyToClipboard } from '../clipboard.js';
+import { openLogsForTarget as openTargetLogs } from '../actions/open-logs.js';
 import { detailPathForRef, favoriteForRef, kindListPath, shareLinkForPath } from '../resource-links.js';
 import { kubectlGetCommand } from '../kubectl-command.js';
 import { diffSideFor, openCompare } from '../compare-link.js';
@@ -129,31 +129,9 @@ async function openLogsForTarget(target: RowActionTarget, addTab: (tab: DockTab)
   const { ctx, kind, obj } = target;
   const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === kind ? kind : undefined;
   if (!actionKind || !isLogTargetKind(actionKind)) return;
-  const name = obj.metadata.name;
   const namespace = obj.metadata.namespace;
   if (!namespace) throw new Error(`${kind} has no namespace`);
-  const { pods } = await resolveLogTargetPods({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name });
-  if (!pods.length) throw new Error(`No pods found for ${actionKind} ${namespace}/${name}`);
-  const byNamespace = new Map<string, typeof pods>();
-  for (const pod of pods) {
-    const namespacePods = byNamespace.get(pod.namespace);
-    if (namespacePods) namespacePods.push(pod);
-    else byNamespace.set(pod.namespace, [pod]);
-  }
-  for (const [ns, namespacePods] of byNamespace) {
-    const podNames = namespacePods.map((pod) => pod.name);
-    addTab({
-      kind: 'logs',
-      id: dockTabId(),
-      title: pods.length === 1 ? `logs: ${podNames[0] ?? name}` : `logs: ${actionKind}/${name}`,
-      ctx,
-      namespace: ns,
-      pods: podNames,
-      sources: namespacePods.map((pod) => ({ pod: pod.name, containers: pod.containers })),
-      target: { kind: actionKind, name },
-      follow: true,
-    });
-  }
+  await openTargetLogs({ ctx, group: target.group, version: target.version, plural: target.plural, kind: actionKind, namespace, name: obj.metadata.name }, addTab);
 }
 
 /** Inline quick action: stream logs without opening the actions menu. Renders nothing for kinds without logs. */

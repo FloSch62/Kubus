@@ -217,13 +217,20 @@ describe('DeploymentDetail', () => {
     expect(screen.getByRole('button', { name: 'Logs for container broken' })).toBeInTheDocument();
   });
 
-  it('reports when a container has no pods to stream at all', () => {
+  it('opens a waiting tab that follows the Deployment when no pod runs yet', () => {
     queries.pods = [];
     render(<DeploymentDetail obj={deployment()} ctx="dev" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Logs for container app' }));
-    expect(effects.toast).toHaveBeenCalledWith('error', expect.stringContaining('No running pods'));
-    expect(useDockStore.getState().tabs).toHaveLength(0);
+    expect(effects.toast).not.toHaveBeenCalledWith('error', expect.anything());
+    expect(useDockStore.getState().tabs.at(-1)).toMatchObject({
+      kind: 'logs',
+      pods: [],
+      sources: [],
+      container: 'app',
+      target: { kind: 'Deployment', name: 'web' },
+      follow: true,
+    });
   });
 
   it('stays quiet when every replica is ready', () => {
