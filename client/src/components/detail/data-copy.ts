@@ -14,10 +14,19 @@ export interface DataCopyResult {
 
 // Values made only of these characters survive every .env reader unquoted.
 const PLAIN_ENV_VALUE_RE = /^[^\s"'`#$\\]*$/;
+const DOUBLE_QUOTE_ESCAPES: Record<string, string> = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', $: '\\$' };
 
-function envValue(value: string): string {
-  // Double-quoted with backslash escapes (\n, \", \\), as dotenv readers expect.
-  return PLAIN_ENV_VALUE_RE.test(value) ? value : JSON.stringify(value);
+/**
+ * Quote a value for a .env file. Single quotes keep it literal everywhere
+ * (docker compose, dotenv-expand and shells interpolate `$` inside double
+ * quotes, so `pa$word` would lose `$word`). Values holding a single quote or
+ * a line break need double quotes; there `$`, quotes, backslashes and line
+ * breaks are escaped.
+ */
+export function envValue(value: string): string {
+  if (PLAIN_ENV_VALUE_RE.test(value)) return value;
+  if (!/['\n\r]/.test(value)) return `'${value}'`;
+  return `"${value.replace(/[\\"\n\r$]/g, (ch) => DOUBLE_QUOTE_ESCAPES[ch] ?? ch)}"`;
 }
 
 /**

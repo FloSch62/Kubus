@@ -1,6 +1,6 @@
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
-import { serializeDataEntries } from '../../../client/src/components/detail/data-copy';
+import { envValue, serializeDataEntries } from '../../../client/src/components/detail/data-copy';
 import type { DataEntry } from '../../../client/src/components/detail/data-editor';
 
 let nextId = 1;
@@ -23,10 +23,21 @@ describe('serializeDataEntries as KEY=value', () => {
       false,
     );
     expect(out.text).toBe(
-      ['LOG_LEVEL=debug', 'URL=https://example.com/a?b=c', 'GREETING="hello world"', 'MULTI="first\\nsecond"', 'QUOTED="say \\"hi\\" $HOME"', 'EMPTY=', ''].join('\n'),
+      ['LOG_LEVEL=debug', 'URL=https://example.com/a?b=c', "GREETING='hello world'", 'MULTI="first\\nsecond"', `QUOTED='say "hi" $HOME'`, 'EMPTY=', ''].join('\n'),
     );
     expect(out.count).toBe(6);
     expect(out.skipped).toEqual([]);
+  });
+
+  it('keeps $ literal: single quotes when possible, escaped inside double quotes otherwise', () => {
+    // dotenv-expand and docker compose interpolate $ inside double quotes.
+    expect(envValue('pa$word')).toBe("'pa$word'");
+    expect(envValue('${HOME}/x #1')).toBe("'${HOME}/x #1'");
+    expect(envValue('back\\slash')).toBe("'back\\slash'");
+    // A single quote or a line break rules out single quotes.
+    expect(envValue("it's $5")).toBe('"it\'s \\$5"');
+    expect(envValue('a\n$b "c" \\d')).toBe('"a\\n\\$b \\"c\\" \\\\d"');
+    expect(envValue('line\r\nend')).toBe('"line\\r\\nend"');
   });
 
   it('leaves out binary, removed and unnamed keys, reporting the binary ones', () => {
