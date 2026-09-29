@@ -60,19 +60,42 @@ function splitQuantity(q: string): { value: number; suffix: string } | undefined
   return Number.isFinite(value) ? { value, suffix: m[2] ?? '' } : undefined;
 }
 
+const BINARY_STEPS = ['Ei', 'Pi', 'Ti', 'Gi', 'Mi', 'Ki', ''];
+const DECIMAL_STEPS = ['E', 'P', 'T', 'G', 'M', 'k', '', 'm', 'u', 'n'];
+
+/** Units below `suffix` in its family, largest first: Gi → Mi, Ki, ''. */
+function smallerUnits(suffix: string): string[] {
+  const steps = suffix && BINARY[suffix] !== undefined ? BINARY_STEPS : DECIMAL_STEPS;
+  return steps.slice(steps.indexOf(suffix) + 1);
+}
+
+/** Whole numbers from 10 up, two significant digits below. */
+function roundForDisplay(value: number): number {
+  return Math.abs(value) >= 10 ? Math.round(value) : Number(value.toPrecision(2));
+}
+
 /**
  * The current quantity expressed in the target's unit, so the two read as
  * one comparison: "14360Ki" against "64Mi" becomes "14Mi", "0.25" against
- * "500m" becomes "250m". Anything unparsable is shown as the API wrote it.
+ * "500m" becomes "250m". A reading that would round away in the target's
+ * unit steps down to the first smaller unit where it is at least 1, so 40Mi
+ * against 1Gi stays "40Mi" and 4m against 10 stays "4m" instead of "0".
+ * Anything unparsable is shown as the API wrote it.
  */
-function inTargetUnit(current: string, target: string): string {
+export function inTargetUnit(current: string, target: string): string {
   const c = splitQuantity(current);
   const t = splitQuantity(target);
   if (!c || !t) return current;
   const factor = (s: string) => BINARY[s] ?? DECIMAL[s] ?? 1;
-  const converted = (c.value * factor(c.suffix)) / factor(t.suffix);
-  const rounded = Math.abs(converted) >= 10 ? Math.round(converted) : Math.round(converted * 10) / 10;
-  return `${rounded}${t.suffix}`;
+  const base = c.value * factor(c.suffix);
+  const converted = base / factor(t.suffix);
+  if (converted === 0) return `0${t.suffix}`;
+  if (Math.abs(converted) >= 0.1) return `${roundForDisplay(converted)}${t.suffix}`;
+  for (const unit of smallerUnits(t.suffix)) {
+    const value = base / factor(unit);
+    if (Math.abs(value) >= 1) return `${roundForDisplay(value)}${unit}`;
+  }
+  return current.trim();
 }
 
 function targetText(target: MetricTarget | undefined): string {
