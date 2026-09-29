@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { EXEC_SESSION_CLOSE_REASON } from '@kubus/shared';
 import type { AppContext } from '../../../server/src/app.js';
 import type { ClusterHandle } from '../../../server/src/kube/cluster-manager.js';
 import { createNodeDebugPod, NODE_DEBUG_COMMAND } from '../../../server/src/kube/node-shell.js';
@@ -168,4 +169,40 @@ it('the node-shell socket runs a login shell inside the debug image and deletes 
   upstream.emit('close');
   await waitFor(() => deleted(calls).length > 0);
   expect(deleted(calls)).toEqual([expect.stringContaining(`/pods/${created(calls)?.metadata.name}`)]);
+});
+
+it('deletes the debug pod when the terminal closes while the exec handshake is pending', async () => {
+  const routes = new Map<string, (socket: unknown, request: unknown) => unknown>();
+  const app = {
+    get(path: string, _options: unknown, handler: (socket: unknown, request: unknown) => unknown) {
+      routes.set(path, handler);
+    },
+    log: { warn() {} },
+  } as unknown as FastifyInstance;
+  const { calls, handle } = fakeCluster();
+  const upstream = new FakeSocket();
+  let finishHandshake: (() => void) | undefined;
+  Object.assign(handle, {
+    makeExec: () => ({
+      exec: () =>
+        new Promise((resolve) => {
+          finishHandshake = () => resolve(upstream);
+        }),
+    }),
+  });
+  const ctx = { clusters: { get: () => handle }, execSessions: new ExecSessionRegistry() } as unknown as AppContext;
+  registerNodeShellSocket(app, ctx);
+
+  const socket = new FakeSocket();
+  routes.get('/ws/node-shell')?.(socket, { query: { ctx: 'dev', node: 'worker-1', image: 'busybox:1.36' } });
+  await waitFor(() => finishHandshake !== undefined);
+
+  socket.readyState = 3;
+  socket.emit('close', 1000, Buffer.from(EXEC_SESSION_CLOSE_REASON));
+  await waitFor(() => deleted(calls).length > 0);
+  expect(deleted(calls)).toEqual([expect.stringContaining(`/pods/${created(calls)?.metadata.name}`)]);
+
+  finishHandshake?.();
+  await waitFor(() => upstream.readyState !== upstream.OPEN);
+  expect(deleted(calls)).toHaveLength(1);
 });
