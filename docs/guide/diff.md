@@ -43,6 +43,12 @@ Changing a side's cluster keeps its kind and object, so you can point the right 
 cluster after another and compare the same object everywhere. The swap button at the end of
 the toolbar trades the two sides.
 
+**Same kind on both sides** (on by default) keeps the two kind pickers together: pick a kind
+on one side and the other side switches to it as well, in its own cluster and namespace. To
+compare the ConfigMaps of two namespaces, pick the two namespaces, pick *ConfigMap* once and
+then the names. A side that gets its cluster before anything else starts on the other side's
+kind and namespace. Turn the switch off to compare objects of different kinds.
+
 Above the diff, each side has a title with its cluster, kind and name. Click it to open that
 object in its list with the detail drawer; ++ctrl++-click (++cmd++-click on macOS) or a
 middle-click opens it in a new tab and keeps the compare. The count at the right says how
@@ -66,9 +72,13 @@ Two more controls narrow the view:
 - **Only changes** folds away the unchanged lines and keeps three lines of context around
   each difference. Click a fold to open it.
 
+Secret values never reach the page, not even here. Each side shows a short fingerprint in
+place of every value, so a value that differs between the two Secrets still shows up as a
+changed line while neither value is revealed.
+
 ## Reopen and share a compare
 
-Both sides and all three switches live in the page's URL. A page tab showing a compare comes
+Both sides and all the switches live in the page's URL. A page tab showing a compare comes
 back exactly as you left it after a reload, a restart or *Reopen closed tab*, and it is
 named after what it compares, such as *Diff: web*. In a browser, bookmark or share the
 address to hand someone the same compare.

@@ -26,9 +26,11 @@ export interface DiffOptions {
   specOnly: boolean;
   /** Collapse unchanged regions in the diff view. */
   onlyChanges: boolean;
+  /** Picking a kind on one side picks it on the other too (on by default). */
+  syncKind: boolean;
 }
 
-export const DEFAULT_DIFF_OPTIONS: DiffOptions = { normalize: true, specOnly: false, onlyChanges: false };
+export const DEFAULT_DIFF_OPTIONS: DiffOptions = { normalize: true, specOnly: false, onlyChanges: false, syncKind: true };
 
 export interface DiffState {
   left: DiffSide;
@@ -66,6 +68,7 @@ export function readDiffState(params: URLSearchParams): DiffState {
       normalize: params.get('raw') !== '1',
       specOnly: params.get('scope') === 'spec',
       onlyChanges: params.get('changes') === 'only',
+      syncKind: params.get('kinds') !== 'separate',
     },
   };
 }
@@ -80,6 +83,7 @@ export function diffSearchParams(state: Partial<DiffState>): URLSearchParams {
   if (!options.normalize) params.set('raw', '1');
   if (options.specOnly) params.set('scope', 'spec');
   if (options.onlyChanges) params.set('changes', 'only');
+  if (!options.syncKind) params.set('kinds', 'separate');
   return params;
 }
 
@@ -104,6 +108,47 @@ export function defaultRightSide(left: DiffSide, clusters: { selected: readonly 
   if (other) return { ...left, ctx: other };
   const { name: _name, ...rest } = left;
   return rest;
+}
+
+/** A kind picked for a side, with the scope that decides whether it keeps a namespace. */
+export interface KindChoice {
+  group: string;
+  version: string;
+  plural: string;
+  namespaced: boolean;
+}
+
+export function sameKind(a: DiffSide, b: DiffSide): boolean {
+  return !!a.plural && (a.group ?? '') === (b.group ?? '') && a.version === b.version && a.plural === b.plural;
+}
+
+/** One side switched to `kind`: its name belonged to the old kind, and only namespaced kinds keep the namespace. */
+export function withKind(side: DiffSide, kind: KindChoice | null): DiffSide {
+  if (!kind) return side.ctx ? { ctx: side.ctx } : {};
+  return { ctx: side.ctx, group: kind.group, version: kind.version, plural: kind.plural, namespace: kind.namespaced ? side.namespace : undefined };
+}
+
+/**
+ * A kind picked on one side. With the kinds synced the other side follows,
+ * keeping its own cluster and namespace (comparing two namespaces, or two
+ * clusters, is then one kind pick); a side that already shows that kind
+ * keeps its object.
+ */
+export function pickKind(state: Pick<DiffState, 'left' | 'right' | 'options'>, which: 'left' | 'right', kind: KindChoice | null): Pick<DiffState, 'left' | 'right'> {
+  const picked = withKind(state[which], kind);
+  const otherKey = which === 'left' ? 'right' : 'left';
+  const other = state[otherKey];
+  const follow = state.options.syncKind && !!other.ctx && !(kind && sameKind(other, picked));
+  return { [which]: picked, [otherKey]: follow ? withKind(other, kind) : other } as Pick<DiffState, 'left' | 'right'>;
+}
+
+/**
+ * A side picked a cluster before any kind: with the kinds synced it starts on
+ * the other side's kind and namespace, so only the name is left to choose.
+ */
+export function adoptKind(side: DiffSide, other: DiffSide, syncKind: boolean): DiffSide {
+  if (!syncKind || !side.ctx || side.plural || !other.plural) return side;
+  return { ctx: side.ctx, group: other.group, version: other.version, plural: other.plural, namespace: other.namespace };
 }
 
 /** The object as the diff shows it, under the current options. */

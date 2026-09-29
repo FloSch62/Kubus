@@ -30,15 +30,20 @@ import { useClustersStore } from '../state/clusters.js';
 import { useTabsStore } from '../state/tabs.js';
 import { statusTextColor } from '../theme.js';
 import {
+  adoptKind,
   defaultRightSide,
   diffSearchParams,
   diffView,
+  pickKind,
   readDiffState,
+  sameKind,
   sideComplete,
   sideLabel,
+  withKind,
   type DiffOptions,
   type DiffSide,
   type DiffState,
+  type KindChoice,
 } from '../diff-state.js';
 
 interface SideKind {
@@ -179,6 +184,23 @@ export function DiffPage() {
             control={<Switch size="small" checked={options.onlyChanges} onChange={(e) => update({ options: { ...options, onlyChanges: e.target.checked } })} />}
             label={<Typography variant="body2">Only changes</Typography>}
           />
+          <Tooltip describeChild title="Picking a kind on one side picks it on the other too, so comparing two namespaces or two clusters takes one kind pick.">
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={options.syncKind}
+                  onChange={(e) => {
+                    const syncKind = e.target.checked;
+                    // Turning it on lines the right side up with the left.
+                    const align = syncKind && left.plural && right.ctx && !sameKind(right, left) && leftKind.info ? { right: withKind(right, { group: left.group ?? '', version: left.version!, plural: left.plural, namespaced: leftKind.info.namespaced }) } : {};
+                    update({ ...align, options: { ...options, syncKind } });
+                  }}
+                />
+              }
+              label={<Typography variant="body2">Same kind on both sides</Typography>}
+            />
+          </Tooltip>
           <Tooltip title="Swap sides">
             <span>
               <IconButton size="small" aria-label="Swap sides" disabled={!left.ctx && !right.ctx} onClick={() => update({ left: right, right: left })}>
@@ -190,10 +212,23 @@ export function DiffPage() {
       </PageHeader>
       <Grid container spacing={2} sx={{ mb: 1 }}>
         <Grid size={6}>
-          <SidePicker label="Left" side={left} onChange={(next) => update({ left: next })} missing={isResourceGone(leftObj.error)} />
+          <SidePicker
+            label="Left"
+            side={left}
+            onChange={(next) => update({ left: adoptKind(next, right, options.syncKind) })}
+            onKindChange={(kind) => update(pickKind(state, 'left', kind))}
+            missing={isResourceGone(leftObj.error)}
+          />
         </Grid>
         <Grid size={6}>
-          <SidePicker label="Right" side={right} onChange={(next) => update({ right: next })} missing={rightMissing} nameInputRef={rightNameRef} />
+          <SidePicker
+            label="Right"
+            side={right}
+            onChange={(next) => update({ right: adoptKind(next, left, options.syncKind) })}
+            onKindChange={(kind) => update(pickKind(state, 'right', kind))}
+            missing={rightMissing}
+            nameInputRef={rightNameRef}
+          />
         </Grid>
       </Grid>
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: 1, borderColor: 'divider', borderRadius: 1.5, overflow: 'hidden' }}>
@@ -349,12 +384,15 @@ function SidePicker({
   label,
   side,
   onChange,
+  onKindChange,
   missing,
   nameInputRef,
 }: {
   label: string;
   side: DiffSide;
   onChange: (s: DiffSide) => void;
+  /** A kind was picked (or cleared); the page decides whether the other side follows. */
+  onKindChange: (kind: KindChoice | null) => void;
   /** The picked object does not exist (its GET answered 404). */
   missing?: boolean;
   nameInputRef?: RefObject<HTMLInputElement | null>;
@@ -400,13 +438,7 @@ function SidePicker({
         getOptionLabel={(k) => (k.group ? `${k.kind} (${k.group})` : k.kind)}
         value={kindValue}
         isOptionEqualToValue={(a, b) => a.group === b.group && a.version === b.version && a.plural === b.plural}
-        onChange={(_e, kind) =>
-          onChange(
-            kind
-              ? { ctx: side.ctx, group: kind.group, version: kind.version, plural: kind.plural, namespace: kind.namespaced ? side.namespace : undefined }
-              : { ctx: side.ctx },
-          )
-        }
+        onChange={(_e, kind) => onKindChange(kind ? { group: kind.group, version: kind.version, plural: kind.plural, namespaced: kind.namespaced } : null)}
         renderInput={(p) => (
           <TextField
             {...p}

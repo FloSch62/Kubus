@@ -166,6 +166,21 @@ describe('DiffPage', () => {
     expect(within(await screen.findByRole('listbox')).queryByText('not found here')).not.toBeInTheDocument();
   });
 
+  it('picks a kind on both sides unless the kinds are kept separate', async () => {
+    renderAt(`?left=${encodeURIComponent(left)}&right=${encodeURIComponent('kind-b|core/v1/configmaps|staging|')}&kinds=separate`);
+    const sync = await screen.findByRole('switch', { name: 'Same kind on both sides' });
+    expect(sync).not.toBeChecked();
+
+    // Turning it on lines the right side up with the left, in its own namespace.
+    fireEvent.click(sync);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`?left=${left}&right=kind-b|apps/v1/deployments|staging|`));
+
+    // Now a kind picked on the left is picked on the right too.
+    fireEvent.mouseDown(screen.getAllByRole('combobox', { name: 'Kind' })[0]!);
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'ConfigMap' }));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('?left=kind-a|core/v1/configmaps|shop|&right=kind-b|core/v1/configmaps|staging|'));
+  });
+
   it('swaps the two sides', async () => {
     renderAt(`?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`);
     await waitFor(() => expect(screen.getByTestId('diff')).toBeInTheDocument());

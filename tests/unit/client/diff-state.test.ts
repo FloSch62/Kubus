@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
 import {
+  DEFAULT_DIFF_OPTIONS,
+  adoptKind,
   defaultRightSide,
   diffPath,
   diffView,
   encodeSide,
   parseSide,
+  pickKind,
   readDiffState,
+  sameKind,
   sideComplete,
   sideLabel,
+  withKind,
 } from '../../../client/src/diff-state';
 import { tabMeta } from '../../../client/src/layout/tab-meta';
 
@@ -42,20 +47,61 @@ describe('diff URL state', () => {
   });
 
   it('reads back every option it writes', () => {
-    const path = diffPath({ left: deploy, right: { ...deploy, ctx: 'kind-b' }, options: { normalize: false, specOnly: true, onlyChanges: true } });
+    const path = diffPath({ left: deploy, right: { ...deploy, ctx: 'kind-b' }, options: { normalize: false, specOnly: true, onlyChanges: true, syncKind: false } });
     const state = readDiffState(new URLSearchParams(path.slice('/diff'.length)));
     expect(state).toEqual({
       left: deploy,
       right: { ...deploy, ctx: 'kind-b' },
-      options: { normalize: false, specOnly: true, onlyChanges: true },
+      options: { normalize: false, specOnly: true, onlyChanges: true, syncKind: false },
     });
-    expect(readDiffState(new URLSearchParams()).options).toEqual({ normalize: true, specOnly: false, onlyChanges: false });
+    expect(path).toContain('kinds=separate');
+    expect(readDiffState(new URLSearchParams()).options).toEqual({ normalize: true, specOnly: false, onlyChanges: false, syncKind: true });
   });
 
   it('names a compare tab after what it compares', () => {
     expect(tabMeta(diffPath({ left: deploy, right: { ...deploy, ctx: 'kind-b' } })).title).toBe('Diff: web');
     expect(tabMeta(diffPath({ left: deploy, right: { ...deploy, name: 'api' } })).title).toBe('Diff: web ↔ api');
     expect(tabMeta('/diff').title).toBe('Diff');
+  });
+});
+
+describe('kind sync', () => {
+  const configmaps = { group: '', version: 'v1', plural: 'configmaps', namespaced: true };
+  const nodes = { group: '', version: 'v1', plural: 'nodes', namespaced: false };
+  const synced = { ...DEFAULT_DIFF_OPTIONS, syncKind: true };
+  const staging = { ...deploy, namespace: 'staging' };
+
+  it('picks the kind on the other side too, keeping its cluster and namespace', () => {
+    const next = pickKind({ left: deploy, right: { ...staging, ctx: 'kind-b' }, options: synced }, 'left', configmaps);
+    expect(next.left).toEqual({ ctx: 'kind-a', group: '', version: 'v1', plural: 'configmaps', namespace: 'shop' });
+    expect(next.right).toEqual({ ctx: 'kind-b', group: '', version: 'v1', plural: 'configmaps', namespace: 'staging' });
+  });
+
+  it('drops namespaces for a cluster-scoped kind and leaves a side on that kind alone', () => {
+    const next = pickKind({ left: deploy, right: { ctx: 'kind-b', group: '', version: 'v1', plural: 'nodes', name: 'n1' }, options: synced }, 'left', nodes);
+    expect(next.left).toEqual({ ctx: 'kind-a', group: '', version: 'v1', plural: 'nodes', namespace: undefined });
+    expect(next.right).toEqual({ ctx: 'kind-b', group: '', version: 'v1', plural: 'nodes', name: 'n1' });
+  });
+
+  it('touches only the picked side when the kinds are separate or the other side has no cluster', () => {
+    const right = { ...staging, ctx: 'kind-b' };
+    expect(pickKind({ left: deploy, right, options: { ...synced, syncKind: false } }, 'left', configmaps).right).toBe(right);
+    expect(pickKind({ left: deploy, right: {}, options: synced }, 'left', configmaps).right).toEqual({});
+    // Clearing the kind clears it on both sides.
+    expect(pickKind({ left: deploy, right, options: synced }, 'right', null)).toEqual({ left: { ctx: 'kind-a' }, right: { ctx: 'kind-b' } });
+  });
+
+  it('starts a side that just got its cluster on the other side’s kind and namespace', () => {
+    expect(adoptKind({ ctx: 'kind-b' }, deploy, true)).toEqual({ ctx: 'kind-b', group: 'apps', version: 'v1', plural: 'deployments', namespace: 'shop' });
+    expect(adoptKind({ ctx: 'kind-b' }, deploy, false)).toEqual({ ctx: 'kind-b' });
+    expect(adoptKind({ ctx: 'kind-b', group: '', version: 'v1', plural: 'pods' }, deploy, true).plural).toBe('pods');
+  });
+
+  it('compares kinds by group, version and plural', () => {
+    expect(sameKind(deploy, { ...deploy, ctx: 'kind-b', name: 'other' })).toBe(true);
+    expect(sameKind(deploy, { ...deploy, version: 'v2' })).toBe(false);
+    expect(sameKind({}, {})).toBe(false);
+    expect(withKind({ ctx: 'kind-a', name: 'web' }, null)).toEqual({ ctx: 'kind-a' });
   });
 });
 
