@@ -4,6 +4,7 @@ import {
   markSegs,
   parseFields,
   parseLine,
+  splitMessage,
   stripAnsi,
   type Seg,
 } from '../../../client/src/components/log-format';
@@ -287,5 +288,19 @@ describe('parseFields', () => {
     expect(parseFields('{not json')).toBeUndefined();
     expect(parseFields('{}')).toBeUndefined();
     expect(parseFields('only=one')).toBeUndefined();
+  });
+});
+
+describe('splitMessage', () => {
+  it('puts the message first and leaves out time and level fields', () => {
+    const parsed = parseFields('{"level":"info","ts":"2026-09-29T10:43:11Z","caller":"main.go:170","msg":"Starting podinfo","port":9898}')!;
+    const { message, rest } = splitMessage(parsed);
+    expect(message).toBe('Starting podinfo');
+    expect(rest.map((field) => field.key)).toEqual(['caller', 'port']);
+  });
+
+  it('uses the free text of a logfmt line when there is no message key', () => {
+    const parsed = parseFields('connection reset peer=10.0.0.4 retry=3')!;
+    expect(splitMessage(parsed)).toEqual({ message: 'connection reset', rest: parsed.fields });
   });
 });

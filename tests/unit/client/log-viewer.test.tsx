@@ -79,7 +79,7 @@ beforeEach(() => {
   MockWebSocket.instances = [];
   vi.stubGlobal('WebSocket', MockWebSocket);
   clipboard.copy.mockClear();
-  useLogPrefsStore.setState({ wrap: false, tsMode: 'off', highlight: true, enabledContainersByWorkload: {} });
+  useLogPrefsStore.setState({ wrap: false, tsMode: 'off', highlight: true, view: 'message', enabledContainersByWorkload: {} });
   useUiPrefsStore.setState({ monoFontSize: 12, defaultTailLines: 500 });
   useDockStore.setState({ maximized: false, tabs: [], open: false });
   Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
@@ -146,17 +146,23 @@ describe('LogViewer', () => {
     fireEvent.keyDown(view.container.firstElementChild!, { key: 'f', ctrlKey: true });
 
     // Stepping through matches held the live view; markers added while paused wait with the new lines.
-    fireEvent.click(screen.getByLabelText('Add visual log marker'));
+    const viewMenu = () => fireEvent.click(screen.getByRole('button', { name: 'Log view options' }));
+    viewMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Add marker/ }));
     expect(screen.getByText('Paused · 1 marker · resume')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Resume log view'));
-    fireEvent.click(screen.getByLabelText('Add visual log marker'));
+    viewMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Add marker/ }));
     fireEvent.keyDown(view.container.firstElementChild!, { key: ' ' });
     expect(screen.getAllByText(/Marker ·/).length).toBeGreaterThanOrEqual(2);
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Add visual log marker' }), { key: ' ' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Log view options' }), { key: ' ' });
 
-    fireEvent.click(screen.getByLabelText('Disable syntax highlighting'));
-    fireEvent.click(screen.getByLabelText('Wrap long lines'));
-    fireEvent.click(screen.getByLabelText('Timestamps: off'));
+    viewMenu();
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /^Syntax highlighting/ }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Wrap long lines' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Local time' }));
+    expect(screen.getByRole('menuitemradio', { name: 'Local time' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     fireEvent.click(screen.getByLabelText('Pause log view'));
     fireEvent.click(screen.getByLabelText('Resume log view'));
     expect(useLogPrefsStore.getState()).toMatchObject({ wrap: true, tsMode: 'local', highlight: false });
@@ -175,7 +181,8 @@ describe('LogViewer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download visible logs' }));
     fireEvent.click(screen.getByRole('menuitem', { name: /^Raw/ }));
     expect(URL.createObjectURL).toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear log buffer' }));
+    viewMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear buffer' }));
     expect(screen.getByText('0/0 lines')).toBeInTheDocument();
 
     view.unmount();
@@ -459,12 +466,46 @@ describe('LogViewer reading tools', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Collapse fields' }));
     expect(screen.queryByRole('table', { name: 'Log line fields' })).not.toBeInTheDocument();
     // Clicking the line itself toggles it too, unless text is being selected.
-    fireEvent.click(screen.getByText(/"served"/));
+    fireEvent.click(screen.getByText('served'));
     expect(screen.getByRole('table', { name: 'Log line fields' })).toBeInTheDocument();
     const selection = vi.spyOn(window, 'getSelection').mockReturnValue({ isCollapsed: false, toString: () => 'served' } as unknown as Selection);
-    fireEvent.click(screen.getByText(/"served"/));
+    // The open field table repeats the value; the log line comes first.
+    fireEvent.click(screen.getAllByText('served')[0]!);
     expect(screen.getByRole('table', { name: 'Log line fields' })).toBeInTheDocument();
     selection.mockRestore();
+  });
+
+  it('shows structured lines message first and switches to the raw text', () => {
+    render(<LogViewer tab={logsTab()} />);
+    act(() => socket().open());
+    sendLines([['2026-07-22T11:59:50.000Z', '{"level":"warn","ts":"2026-07-22T11:59:50Z","msg":"slow upstream","http":{"status":504}}']]);
+    const output = screen.getByLabelText('Log output');
+    expect(output.textContent).toContain('WARN  slow upstream  http.status=504');
+    expect(output.textContent).not.toContain('ts=');
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(useLogPrefsStore.getState().view).toBe('raw');
+    expect(output.textContent).toContain('"msg":"slow upstream"');
+    fireEvent.click(screen.getByRole('button', { name: 'Message' }));
+    expect(useLogPrefsStore.getState().view).toBe('message');
+  });
+
+  it('tags lines with the short pod suffix and keeps the full name in the tooltip', () => {
+    render(
+      <LogViewer
+        tab={logsTab({
+          pods: ['podinfo-5c7cdc845b-bp4xq', 'podinfo-5c7cdc845b-cpkl2'],
+          sources: [
+            { pod: 'podinfo-5c7cdc845b-bp4xq', containers: ['podinfo'] },
+            { pod: 'podinfo-5c7cdc845b-cpkl2', containers: ['podinfo'] },
+          ],
+        })}
+      />,
+    );
+    act(() => socket().open());
+    act(() => socket().message({ op: 'line', pod: 'podinfo-5c7cdc845b-bp4xq', container: 'podinfo', ts: '2026-07-22T11:59:50.000Z', line: 'ready' }));
+    flushLines();
+    const tag = screen.getByText('bp4xq');
+    expect(tag).toHaveAttribute('title', 'podinfo-5c7cdc845b-bp4xq/podinfo');
   });
 
   it('does not offer fields for plain lines', () => {

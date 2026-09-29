@@ -65,8 +65,11 @@ export function actionsForRef(ref: ResourceRef): PaletteAction[] {
   }
 }
 
-/** Execute a `run` palette action; resolves to a toast message. */
-export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) => Promise<string> {
+/**
+ * Execute a `run` palette action; resolves to a toast message, or undefined
+ * when the action's own result is on screen (a dock tab opened).
+ */
+export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) => Promise<string | undefined> {
   const restart = useRolloutRestart();
   const create = useCreateResource();
   const rerun = useRerunJob();
@@ -81,13 +84,13 @@ export function usePaletteRunner(): (action: PaletteAction, ref: ResourceRef) =>
       switch (action.id) {
         case 'logs': {
           await openLogsForTarget({ ctx: ref.ctx, group: ref.group, version: ref.version, plural: ref.plural, kind: ref.kind as LogTargetKind, namespace, name: ref.name }, addTab);
-          return `Streaming logs for ${ref.kind}/${ref.name}`;
+          return undefined;
         }
         case 'shell': {
           const obj = await fetchObj();
           const container = podContainerNames(obj)[0] ?? '';
           addTab({ kind: 'terminal', id: dockTabId(), title: `sh: ${ref.name}`, ctx: ref.ctx, namespace, pod: ref.name, container });
-          return `Shell opened for ${ref.name}`;
+          return undefined;
         }
         case 'restart':
           await restart.mutateAsync({ ctx: ref.ctx, body: { kind: ref.kind as 'Deployment', namespace, name: ref.name } });

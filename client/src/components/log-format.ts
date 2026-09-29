@@ -287,6 +287,21 @@ export function parseFields(line: string): LogFields | undefined {
   return { format: 'logfmt', fields, text: text || undefined };
 }
 
+const MESSAGE_KEYS = ['msg', 'message', 'log', 'event', '@m', '@message', 'M'];
+/** Keys the message view drops because the time column and the level already show them. */
+const SHOWN_ELSEWHERE = new Set(['time', 'timestamp', 'ts', '@timestamp', '@t', 't', 'T', 'level', 'lvl', 'severity', '@l', 'L', 'log.level']);
+
+/**
+ * Message-first view of a structured line: the human message, then the
+ * remaining fields. Timestamp and level fields are left out.
+ */
+export function splitMessage(parsed: LogFields): { message?: string; rest: LogField[] } {
+  const messageField = MESSAGE_KEYS.map((key) => parsed.fields.find((field) => field.key === key && field.kind === 'str')).find(Boolean);
+  const message = messageField?.value ?? parsed.text;
+  const rest = parsed.fields.filter((field) => field !== messageField && !SHOWN_ELSEWHERE.has(field.key));
+  return { message: message || undefined, rest };
+}
+
 /** Parse a raw log line into styled segments (ANSI > JSON > logfmt > plain). */
 export function parseLine(line: string): Seg[] {
   if (ANSI_RE.test(line)) return parseAnsi(line);
