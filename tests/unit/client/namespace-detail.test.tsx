@@ -1,19 +1,17 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KubeObject, NamespaceOverview, OperatorRollup } from '@kubus/shared';
-import { NamespaceDetail } from '../../../client/src/components/detail/NamespaceDetail';
+import type { InventoryProblem, KubeObject, NamespaceOverview } from '@kubus/shared';
+import { NamespaceDetail, problemsTone } from '../../../client/src/components/detail/NamespaceDetail';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useDetailStore } from '../../../client/src/state/detail';
 
 const fixtures = vi.hoisted(() => ({
   overview: undefined as NamespaceOverview | undefined,
-  operators: undefined as OperatorRollup[] | undefined,
   navigate: vi.fn(),
 }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useNamespaceOverview: () => ({ data: fixtures.overview, isLoading: !fixtures.overview, error: null }),
-  useOverviewOperators: () => ({ data: fixtures.operators }),
 }));
 vi.mock('../../../client/src/app-navigate.js', () => ({ appNavigate: fixtures.navigate }));
 
@@ -28,28 +26,14 @@ function entry(kind: string, group: string, plural: string, total: number, healt
   return { kind, group, version: 'v1', plural, total, health };
 }
 
+function problem(p: Omit<InventoryProblem, 'version' | 'namespace'>): InventoryProblem {
+  return { version: 'v1', namespace: 'gap', ...p };
+}
+
 beforeEach(() => {
   fixtures.navigate.mockClear();
   useClustersStore.setState({ selected: ['dev'], namespaces: [], namespacesByContext: {} });
   useDetailStore.setState({ stack: [], dataDirty: false });
-  fixtures.operators = [
-    {
-      id: 'cert-manager',
-      name: 'cert-manager',
-      resources: [
-        {
-          kind: 'Certificate',
-          group: 'cert-manager.io',
-          version: 'v1',
-          plural: 'certificates',
-          namespaced: true,
-          total: 1,
-          ready: 0,
-          issues: [{ kind: 'Certificate', namespace: 'gap', name: 'tls', reason: 'Failed', message: 'issuer not found' }],
-        },
-      ],
-    },
-  ];
   fixtures.overview = {
     namespaces: ['gap'],
     status: 'Active',
@@ -59,6 +43,12 @@ beforeEach(() => {
       entry('DaemonSet', 'apps', 'daemonsets', 0, { healthy: 0, degraded: 0, failed: 0 }),
       entry('ConfigMap', '', 'configmaps', 2),
       { ...entry('Certificate', 'cert-manager.io', 'certificates', 1, { healthy: 0, degraded: 0, failed: 1 }), custom: true },
+    ],
+    problems: [
+      problem({ kind: 'Pod', group: '', plural: 'pods', name: 'broken-abc', grade: 'failed', reason: 'ImagePullBackOff', message: 'registry.invalid not found' }),
+      problem({ kind: 'Deployment', group: 'apps', plural: 'deployments', name: 'broken', grade: 'failed', reason: 'Unavailable', ready: 0, desired: 1 }),
+      problem({ kind: 'Certificate', group: 'cert-manager.io', plural: 'certificates', name: 'tls', grade: 'failed', reason: 'Failed', message: 'issuer not found', custom: true }),
+      problem({ kind: 'Pod', group: '', plural: 'pods', name: 'starting', grade: 'degraded', reason: 'ContainerCreating' }),
     ],
     workloadHealth: [],
     issues: [{ kind: 'Deployment', namespace: 'gap', name: 'broken', ready: 0, desired: 1, reason: 'Unavailable' }],
@@ -99,6 +89,35 @@ describe('NamespaceDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Certificate tls' }));
     expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'Certificate', group: 'cert-manager.io', custom: true });
     expect(screen.getByText('issuer not found')).toBeInTheDocument();
+  });
+
+  it('explains a failed route that no workload check covers, and says so up top', () => {
+    fixtures.overview = {
+      ...fixtures.overview!,
+      inventory: [{ ...entry('HTTPRoute', 'gateway.networking.k8s.io', 'httproutes', 1, { healthy: 0, degraded: 0, failed: 1 }), custom: true }],
+      problems: [
+        problem({ kind: 'HTTPRoute', group: 'gateway.networking.k8s.io', plural: 'httproutes', name: 'orphan', grade: 'failed', reason: 'NoMatchingParent', message: 'Gateway missing-gw not found', custom: true }),
+      ],
+      issues: [],
+      failingPods: [],
+    };
+    render(<NamespaceDetail obj={namespace} ctx="dev" />);
+    const tile = screen.getByText('Problems', { selector: 'dt' }).closest('div')!;
+    expect(within(tile).getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('Gateway missing-gw not found')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'HTTPRoute orphan' }));
+    expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'HTTPRoute', group: 'gateway.networking.k8s.io', plural: 'httproutes', name: 'orphan', custom: true });
+  });
+
+  it('takes the problems tone from the same grades as the bars', () => {
+    expect(problemsTone([])).toBe('success');
+    expect(problemsTone([problem({ kind: 'Pod', group: '', plural: 'pods', name: 'a', grade: 'degraded', reason: 'NotReady' })])).toBe('warning');
+    expect(
+      problemsTone([
+        problem({ kind: 'Pod', group: '', plural: 'pods', name: 'a', grade: 'degraded', reason: 'NotReady' }),
+        problem({ kind: 'HTTPRoute', group: 'gateway.networking.k8s.io', plural: 'httproutes', name: 'r', grade: 'failed', reason: 'NoMatchingParent' }),
+      ]),
+    ).toBe('error');
   });
 
   it('shows quota usage inline and opens the quota', () => {

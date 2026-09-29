@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Divider from '@mui/material/Divider';
@@ -6,9 +6,9 @@ import Link from '@mui/material/Link';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { gvkForKind, type InventoryHealth, type KubeObject, type NamespaceInventoryEntry, type NamespaceOverview, type OperatorRollup } from '@kubus/shared';
-import { useNamespaceOverview, useOverviewOperators } from '../../api/queries.js';
-import { openNamespaceList, openNamespaceOverview } from '../../namespace-link.js';
+import type { InventoryProblem, KubeObject } from '@kubus/shared';
+import { useNamespaceOverview } from '../../api/queries.js';
+import { openNamespaceList } from '../../namespace-link.js';
 import { useDetailStore } from '../../state/detail.js';
 import type { ResourceSelection } from '../ResourceDetailDrawer.js';
 import { InventoryGrid, QuotaUsageList } from '../overview/InventoryGrid.js';
@@ -19,69 +19,26 @@ import { ConditionsTable, KeyValueSection, MetadataSection } from './GenericDeta
 import { DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
 
-/** Problem rows listed before the section points at the scoped overview for the rest. */
+/** Problem rows listed before the rest waits behind "Show more". */
 const MAX_PROBLEMS = 20;
 
-interface ProblemRow {
-  key: string;
-  title: string;
-  reason: string;
-  detail?: string;
-  message?: string;
-  selection?: ResourceSelection;
-}
-
-function sumHealth(entries: NamespaceInventoryEntry[]): InventoryHealth {
-  const total: InventoryHealth = { healthy: 0, degraded: 0, failed: 0 };
-  for (const e of entries) {
-    if (!e.health) continue;
-    total.healthy += e.health.healthy;
-    total.degraded += e.health.degraded;
-    total.failed += e.health.failed;
-  }
-  return total;
-}
-
 /**
- * Workload-health issues first (the root causes), then failing pods, then
- * not-ready operator resources, each opening its object in the drawer.
+ * The summary tone for a namespace's problems, from the same grades as the
+ * inventory bars: any failed object is an error, degraded ones a warning.
  */
-export function namespaceProblems(ctx: string, data: NamespaceOverview, operators: OperatorRollup[] | undefined): ProblemRow[] {
-  const issues = data.issues.map((i): ProblemRow => {
-    const gvk = gvkForKind(i.kind);
-    return {
-      key: `${i.kind}/${i.name}`,
-      title: `${i.kind} ${i.name}`,
-      reason: i.reason ?? 'Unhealthy',
-      detail: i.desired !== undefined ? `${i.ready ?? 0}/${i.desired} ready` : undefined,
-      message: i.message,
-      selection: gvk && { ctx, group: gvk.group, version: gvk.version, plural: gvk.plural, kind: i.kind, name: i.name, namespace: i.namespace },
-    };
-  });
-  const pods = data.failingPods.map(
-    (p): ProblemRow => ({
-      key: `Pod/${p.name}`,
-      title: `Pod ${p.name}`,
-      reason: p.reason,
-      detail: p.restarts ? `${p.restarts} restarts` : undefined,
-      message: p.message,
-      selection: { ctx, group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: p.name, namespace: p.namespace },
-    }),
-  );
-  const custom = (operators ?? []).flatMap((op) =>
-    op.resources.flatMap((r) =>
-      r.issues.map(
-        (i): ProblemRow => ({
-          key: `${r.group}/${r.kind}/${i.name}`,
-          title: `${r.kind} ${i.name}`,
-          reason: i.reason ?? 'NotReady',
-          message: i.message,
-          selection: { ctx, group: r.group, version: r.version, plural: r.plural, kind: r.kind, name: i.name, namespace: i.namespace, custom: true },
-        }),
-      ),
-    ),
-  );
-  return [...issues, ...pods, ...custom];
+export function problemsTone(problems: InventoryProblem[]): 'error' | 'warning' | 'success' {
+  if (problems.some((p) => p.grade === 'failed')) return 'error';
+  return problems.length ? 'warning' : 'success';
+}
+
+function problemSelection(ctx: string, p: InventoryProblem): ResourceSelection {
+  return { ctx, group: p.group, version: p.version, plural: p.plural, kind: p.kind, name: p.name, namespace: p.namespace || undefined, custom: p.custom };
+}
+
+function problemDetail(p: InventoryProblem): string | undefined {
+  if (p.desired !== undefined) return `${p.ready ?? 0}/${p.desired} ready`;
+  if (p.restarts) return `${p.restarts} restarts`;
+  return undefined;
 }
 
 /**
@@ -94,14 +51,13 @@ export function NamespaceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
   const name = obj.metadata.name;
   const namespaces = useMemo(() => [name], [name]);
   const { data, isLoading, error } = useNamespaceOverview(ctx, namespaces);
-  const { data: operators } = useOverviewOperators(ctx, namespaces);
   const push = useDetailStore((s) => s.push);
   const guard = useDetailStore((s) => s.guard);
+  const [showAll, setShowAll] = useState(false);
   const phase = (obj.status as { phase?: string } | undefined)?.phase;
 
   const pods = data?.inventory.find((e) => e.kind === 'Pod' && !e.custom);
-  const health = data ? sumHealth(data.inventory) : undefined;
-  const problems = data ? namespaceProblems(ctx, data, operators) : [];
+  const problems = data?.problems ?? [];
   const worstQuota = data?.quotas.flatMap((q) => q.resources).reduce<number | undefined>((max, r) => (r.pct === undefined ? max : Math.max(max ?? 0, r.pct)), undefined);
   const kindsInUse = data?.inventory.filter((e) => e.total > 0).length;
 
@@ -119,8 +75,8 @@ export function NamespaceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
           data && {
             label: 'Problems',
             value: String(problems.length),
-            tone: problems.length ? (health?.failed ? 'error' : 'warning') : 'success',
-            hint: 'Unhealthy workloads, claims, budgets and quotas, failing pods and not-ready operator resources.',
+            tone: problemsTone(problems),
+            hint: 'Objects counted as degraded or failed in the inventory bars below.',
           },
           data && { label: 'Kinds in use', value: String(kindsInUse ?? 0), hint: 'Kinds in the inventory with at least one object here.' },
           worstQuota !== undefined && { label: 'Quota use', value: `${worstQuota.toFixed(0)}%`, tone: usageColor(worstQuota), hint: 'The most used resource across the namespace quotas.' },
@@ -137,14 +93,13 @@ export function NamespaceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
       {problems.length > 0 && (
         <Section title="Problems" count={problems.length} flush>
           <Stack divider={<Divider />}>
-            {problems.slice(0, MAX_PROBLEMS).map((p) => {
-              const selection = p.selection;
-              return <ProblemRowView key={p.key} row={p} onOpen={selection ? () => push(selection) : undefined} />;
-            })}
-            {problems.length > MAX_PROBLEMS && (
+            {(showAll ? problems : problems.slice(0, MAX_PROBLEMS)).map((p) => (
+              <ProblemRowView key={`${p.group}/${p.kind}/${p.namespace}/${p.name}`} problem={p} onOpen={() => push(problemSelection(ctx, p))} />
+            ))}
+            {!showAll && problems.length > MAX_PROBLEMS && (
               <Box sx={{ px: 1.5, py: 1 }}>
-                <Link component="button" variant="body2" underline="hover" onClick={() => guard(() => openNamespaceOverview(ctx, name))}>
-                  {problems.length - MAX_PROBLEMS} more on the namespace overview
+                <Link component="button" variant="body2" underline="hover" onClick={() => setShowAll(true)}>
+                  Show {problems.length - MAX_PROBLEMS} more
                 </Link>
               </Box>
             )}
@@ -167,27 +122,23 @@ export function NamespaceDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) 
   );
 }
 
-function ProblemRowView({ row, onOpen }: { row: ProblemRow; onOpen?: () => void }) {
+function ProblemRowView({ problem, onOpen }: { problem: InventoryProblem; onOpen: () => void }) {
+  const detail = problemDetail(problem);
   return (
     <Box sx={{ px: 1.5, py: 1, minWidth: 0 }}>
       <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
-        {onOpen ? (
-          <Link component="button" variant="body2" underline="hover" onClick={onOpen} sx={{ fontWeight: 600, textAlign: 'left', overflowWrap: 'anywhere' }}>
-            {row.title}
-          </Link>
-        ) : (
-          <Typography variant="body2" sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
-            {row.title}
-          </Typography>
-        )}
-        <StatusChip status={row.reason} />
-        {row.detail && (
+        <Link component="button" variant="body2" underline="hover" onClick={onOpen} sx={{ fontWeight: 600, textAlign: 'left', overflowWrap: 'anywhere' }}>
+          {problem.kind} {problem.name}
+        </Link>
+        {/* Colored by grade, like the bar segment it stands for; the reason is the text. */}
+        <StatusChip status={problem.grade === 'failed' ? 'Failed' : 'Warning'} label={problem.reason} />
+        {detail && (
           <Typography variant="caption" color="text.secondary">
-            {row.detail}
+            {detail}
           </Typography>
         )}
       </Stack>
-      {row.message && <ClampedText text={row.message} lines={2} sx={{ mt: 0.25, color: 'text.secondary' }} />}
+      {problem.message && <ClampedText text={problem.message} lines={2} sx={{ mt: 0.25, color: 'text.secondary' }} />}
     </Box>
   );
 }

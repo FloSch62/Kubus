@@ -34,6 +34,8 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
     !isPlaceholderData &&
     data.issues.length === 0 &&
     data.failingPods.length === 0 &&
+    // Nothing amber or red in the inventory bars either.
+    data.problems.length === 0 &&
     data.warningEvents.length === 0 &&
     !!certificates &&
     certificates.expiring.length === 0 &&

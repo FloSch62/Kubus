@@ -992,7 +992,7 @@ export interface OperatorResourceRollup {
 }
 
 export interface OperatorRollup {
-  /** Stable slug: cert-manager, argo, flux, keda, karpenter. */
+  /** Stable slug: cert-manager, argo, flux, external-secrets, keda, gateway-api, karpenter. */
   id: string;
   /** Display name. */
   name: string;
@@ -1125,11 +1125,36 @@ export interface NamespaceQuotaStatus {
   resources: NamespaceQuotaResource[];
 }
 
+/**
+ * One object the inventory counts as degraded or failed, with the reason.
+ * Per kind these add up to the degraded and failed parts of its health bar.
+ */
+export interface InventoryProblem {
+  kind: string;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string;
+  name: string;
+  grade: 'degraded' | 'failed';
+  reason: string;
+  message?: string;
+  /** Replica-shaped kinds only. */
+  ready?: number;
+  desired?: number;
+  /** Pods only. */
+  restarts?: number;
+  /** Counted from an installed CRD rather than a builtin API. */
+  custom?: boolean;
+}
+
 export interface NamespaceOverview {
   namespaces: string[];
   /** Namespace phase (Active/Terminating) — only when a single namespace is scoped. */
   status?: string;
   inventory: NamespaceInventoryEntry[];
+  /** Every object behind the degraded and failed parts of the inventory's bars, failed first. */
+  problems: InventoryProblem[];
   workloadHealth: OverviewKindHealth[];
   issues: OverviewWorkloadIssue[];
   failingPods: OverviewProblemPod[];

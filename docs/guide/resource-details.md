@@ -81,8 +81,8 @@ collapsible sections hold the rest.
 - **Namespaces** show what lives inside: every kind with objects in the namespace as a
   tile with its count and a healthy, degraded and failed bar, custom resources included.
   A tile opens that kind's list with the namespace filter set to this namespace. Below
-  the inventory come the problems behind the bars (unhealthy workloads, failing pods,
-  not-ready operator resources), each opening in the drawer, and the namespace's
+  the inventory come the problems behind the bars: every object a bar counts as degraded
+  or failed, with its reason, each opening in the drawer. Last come the namespace's
   ResourceQuotas as usage bars.
 - **ResourceQuotas** show used against hard per resource as bars, exhausted resources
   first. **LimitRanges** show one table per type with defaults, minimums and maximums.
