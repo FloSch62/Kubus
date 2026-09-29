@@ -236,6 +236,20 @@ export function looksLikeName(value: string): boolean {
   return OBJECT_NAME_RE.test(value);
 }
 
+// Last words of field names that hold something other than an object name:
+// `spec.hostnames` carries podinfo.example.com, which is a valid DNS
+// subdomain and so passes `looksLikeName`, but names a host, not an object.
+// (Terms are as `tokens` singularizes them: addresses → addresse.)
+const NON_NAME_FIELD_TERMS = new Set(['host', 'hostname', 'domain', 'addres', 'addresse', 'url', 'uri', 'email', 'ip', 'ips', 'cidr', 'fqdn', 'path', 'image']);
+
+/** Whether a field's own name says its values are hosts, addresses, URLs, paths or images rather than object names. */
+export function holdsNonNameValues(path: string): boolean {
+  const leaf = path.replace(ARRAY_INDEX_RE, '').split('.').filter(Boolean).at(-1);
+  if (!leaf) return false;
+  const last = tokens(leaf).at(-1);
+  return !!last && NON_NAME_FIELD_TERMS.has(last);
+}
+
 /** Reduce an object to the hints that can name a known kind plus its selectors; everything else is dropped. */
 export function digestObject(obj: KubeObject, namesKind: (path: string) => boolean): ReferenceDigest {
   const body = { spec: obj.spec, status: obj.status };
@@ -249,7 +263,7 @@ export function digestObject(obj: KubeObject, namesKind: (path: string) => boole
       }
       continue;
     }
-    if (!looksLikeName(hint.value)) continue;
+    if (!looksLikeName(hint.value) || holdsNonNameValues(hint.path)) continue;
     if (!hint.referenceKind && !namesKind(hint.path)) continue;
     const kept: RelationHint = { path: hint.path, value: hint.value };
     if (hint.referenceKind) kept.referenceKind = hint.referenceKind;
@@ -295,13 +309,19 @@ export function textNamesKind(text: string, kind: string): boolean {
 
 const REFERENCE_CUE_RE = /\b(refer(?:ence|ences|enced|s|ring)?|names? of|to use|used for|select(?:s|ed|or|ors)?|associated|object)\b/i;
 
+// Sentence ends, blank lines and list bullets: the pieces a cue and a kind must share.
+const SENTENCE_BREAK_RE = /(?<=[.!?])\s+|\n\s*\n|\n\s*[*-]\s+/;
+
 /**
  * Whether a field description says the field points at a kind, as opposed
  * to merely mentioning it: "Reference to a TopoNode" and "Label selector
- * used to select Toponodes" do, "The version of the TopoNode" does not.
+ * used to select Toponodes" do, "The version of the TopoNode" does not. The
+ * cue and the kind must sit in the same sentence, so a long description
+ * that says "the name of the HTTP query param" and, paragraphs later,
+ * "the Gateway API" names no Gateway.
  */
 export function descriptionNamesKind(description: string, kind: string): boolean {
-  return REFERENCE_CUE_RE.test(description) && textNamesKind(description, kind);
+  return description.split(SENTENCE_BREAK_RE).some((sentence) => REFERENCE_CUE_RE.test(sentence) && textNamesKind(sentence, kind));
 }
 
 export function collectMetadataRelationHints(obj: KubeObject): RelationHint[] {

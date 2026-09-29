@@ -2,6 +2,7 @@ import type { KubeObject } from '@kubus/shared';
 import { describe, expect, it } from 'vitest';
 import type { ClusterHandle } from '../../../server/src/kube/cluster-manager';
 import { computeReferences, kindsForHint } from '../../../server/src/kube/references';
+import { holdsNonNameValues } from '../../../server/src/kube/relation-hints';
 
 const object = (properties: Record<string, unknown>, description?: string) => ({ type: 'object', properties, ...(description ? { description } : {}) });
 const string = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) });
@@ -26,6 +27,10 @@ const CRDS = [
   crd('fabrics.example.com', 'Fabric', 'fabrics', object({ leafs: object({ leafNodeSelectors: list(string(), 'Label selector used to select Toponodes.') }), credentialSecret: string() })),
   crd('interfaces.example.com', 'Interface', 'interfaces', object({ members: list(object({ node: string() })) })),
   crd('services.example.com', 'VirtualNetwork', 'virtualnetworks', object({ vlans: list(object({ name: string() })) })),
+  crd('gateway.networking.k8s.io', 'HTTPRoute', 'httproutes', object({
+    hostnames: list(string(), 'Hostnames defines a set of hostnames that should match against the HTTP Host header to select a HTTPRoute used to process the request.'),
+    rules: list(object({ backendRefs: list(object({ name: string('Name is the name of the referent.'), port: { type: 'integer' } })) })),
+  })),
 ];
 
 interface Fixture {
@@ -310,5 +315,60 @@ describe('computeReferences', () => {
     const early = await computeReferences(loading.handle, { group: 'fabrics.example.com', version: 'v1', plural: 'fabrics', kind: 'Fabric', name: 'fab1', namespace: 'eda' });
     expect(early.items).toEqual([]);
     expect(early.partial).toEqual(['TopoNode']);
+  });
+});
+
+describe('HTTPRoute hostnames', () => {
+  const GATEWAY = 'gateway.networking.k8s.io';
+  const HOSTNAMES_DESCRIPTION = 'Hostnames defines a set of hostnames that should match against the HTTP Host header to select a HTTPRoute used to process the request.';
+  const kinds = [
+    { group: GATEWAY, version: 'v1', plural: 'httproutes', kind: 'HTTPRoute', namespaced: true, custom: true },
+    { group: '', version: 'v1', plural: 'services', kind: 'Service', namespaced: true, custom: false },
+  ];
+
+  it('ignores a description that only describes the object\'s own kind', () => {
+    const route = { group: GATEWAY, kind: 'HTTPRoute' };
+    expect(kindsForHint({ path: 'spec.hostnames[0]', value: 'podinfo.example.com' }, kinds, route, HOSTNAMES_DESCRIPTION)).toEqual({ kinds: [], certain: false });
+    // The same prose on another kind's field still points at HTTPRoutes.
+    expect(kindsForHint({ path: 'spec.targets[0]', value: 'podinfo' }, kinds, { group: 'policy.example.com', kind: 'RoutePolicy' }, HOSTNAMES_DESCRIPTION)).toMatchObject({ certain: true, kinds: [{ kind: 'HTTPRoute' }] });
+  });
+
+  it('needs the cue and the kind in the same sentence', () => {
+    const route = { group: GATEWAY, kind: 'HTTPRoute' };
+    const gatewayKinds = [...kinds, { group: GATEWAY, version: 'v1', plural: 'gateways', kind: 'Gateway', namespaced: true, custom: true }];
+    const queryParam = 'Name is the name of the HTTP query param to be matched.\n\nIf a query param is repeated, it is recommended to match the first value, as this behavior is expected in other load balancing contexts outside of the Gateway API.';
+    const sectionName = 'SectionName is the name of a section within the target resource. In the\nfollowing resources, SectionName is interpreted as the following:\n\n* Gateway: Listener name. When both Port and SectionName\nare specified, the name and port of the selected listener must match.';
+    expect(kindsForHint({ path: 'spec.rules[0].matches[0].queryParams[0].name', value: 'canary' }, gatewayKinds, route, queryParam)).toMatchObject({ certain: false });
+    expect(kindsForHint({ path: 'spec.parentRefs[0].sectionName', value: 'http' }, gatewayKinds, route, sectionName)).toMatchObject({ certain: false });
+    expect(kindsForHint({ path: 'spec.parentRefs[0].name', value: 'web' }, gatewayKinds, route, 'Name of the Gateway this route attaches to.')).toMatchObject({ certain: true, kinds: [{ kind: 'Gateway' }] });
+  });
+
+  it('lets a sibling kind vouch for the reference name, not for its other fields', () => {
+    const route = { group: GATEWAY, kind: 'HTTPRoute' };
+    const gatewayKinds = [...kinds, { group: GATEWAY, version: 'v1', plural: 'gateways', kind: 'Gateway', namespaced: true, custom: true }];
+    const parent = { referenceKind: 'Gateway', referenceGroup: GATEWAY };
+    expect(kindsForHint({ path: 'spec.parentRefs[0].name', value: 'web', ...parent }, gatewayKinds, route)).toMatchObject({ certain: true, kinds: [{ kind: 'Gateway' }] });
+    expect(kindsForHint({ path: 'spec.parentRefs[0].sectionName', value: 'http', ...parent }, gatewayKinds, route)).toEqual({ kinds: [], certain: false });
+  });
+
+  it('treats host, address, URL, path and image fields as holding no object names', () => {
+    for (const path of ['spec.hostnames[0]', 'spec.hostname', 'status.addresses[0].value', 'spec.address', 'spec.loadBalancerIP', 'spec.issuerURL', 'spec.domains[1]', 'spec.image']) {
+      expect(holdsNonNameValues(path.endsWith('.value') ? 'status.addresses[0]' : path), path).toBe(true);
+    }
+    for (const path of ['spec.rules[0].backendRefs[0].name', 'spec.secretName', 'spec.ipAddressPool', 'spec.nodeProfile', 'spec.hostPathClass']) {
+      expect(holdsNonNameValues(path), path).toBe(false);
+    }
+  });
+
+  it('does not list a hostname as a missing HTTPRoute', async () => {
+    const focus = {
+      ...cr('HTTPRoute', 'httproutes', 'podinfo', 'demo', { hostnames: ['podinfo.example.com'], rules: [{ backendRefs: [{ name: 'podinfo', port: 9898 }] }] }),
+      apiVersion: `${GATEWAY}/v1`,
+    };
+    const { handle, gets } = handleWith({ focus, custom: {} });
+    const result = await computeReferences(handle, { group: GATEWAY, version: 'v1', plural: 'httproutes', kind: 'HTTPRoute', name: 'podinfo', namespace: 'demo' });
+    expect(result.items.map((item) => `${item.ref.kind}/${item.ref.name}`)).not.toContain('HTTPRoute/podinfo.example.com');
+    expect(result.items.filter((item) => item.missing)).toEqual([]);
+    expect(gets.some((path) => path.includes('podinfo.example.com'))).toBe(false);
   });
 });
