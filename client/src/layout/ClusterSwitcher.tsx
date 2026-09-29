@@ -12,6 +12,8 @@ import InputAdornment from '@mui/material/InputAdornment';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
@@ -21,6 +23,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import CircleIcon from '@mui/icons-material/Circle';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import GridViewIcon from '@mui/icons-material/GridView';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import ShieldIcon from '@mui/icons-material/Shield';
@@ -212,6 +215,71 @@ function CustomizePopover({
   );
 }
 
+/**
+ * One context's actions behind its ⋮ button: reconnect, protection and
+ * customization, each named, instead of three unlabeled icons per row.
+ */
+function ContextActionsMenu({
+  target,
+  active,
+  isProtected,
+  reconnecting,
+  onReconnect,
+  onToggleProtected,
+  onCustomize,
+  onClose,
+}: {
+  target: { ctx: string; anchor: HTMLElement } | null;
+  active: boolean;
+  isProtected: boolean;
+  reconnecting: boolean;
+  onReconnect: () => void;
+  onToggleProtected: () => void;
+  onCustomize: () => void;
+  onClose: () => void;
+}) {
+  const rowSx = { minHeight: 40, gap: 1.25, alignItems: 'flex-start', py: 0.75 } as const;
+  const iconSx = { fontSize: 18, mt: 0.25, color: 'text.secondary' } as const;
+  return (
+    <Menu
+      open={!!target}
+      anchorEl={target?.anchor}
+      onClose={onClose}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      slotProps={{ list: { dense: true, sx: { width: 300 } } }}
+    >
+      {active && (
+        <MenuItem disabled={reconnecting} sx={rowSx} onClick={onReconnect}>
+          <RestartAltIcon sx={iconSx} />
+          <ListItemText primary="Reconnect" secondary="Rebuild the session with fresh credentials, discovery and watches" slotProps={{ secondary: { sx: { whiteSpace: 'normal' } } }} />
+        </MenuItem>
+      )}
+      <MenuItem sx={rowSx} onClick={onToggleProtected}>
+        {isProtected ? <ShieldIcon sx={{ ...iconSx, color: 'warning.main' }} /> : <ShieldOutlinedIcon sx={iconSx} />}
+        <ListItemText
+          primary={isProtected ? 'Remove protection' : 'Protect this cluster'}
+          secondary="Protected clusters ask for typed confirmation before destructive actions"
+          slotProps={{ secondary: { sx: { whiteSpace: 'normal' } } }}
+        />
+      </MenuItem>
+      <MenuItem sx={rowSx} onClick={onCustomize}>
+        <TuneIcon sx={iconSx} />
+        <ListItemText primary="Customize icon and group…" secondary="Pick an emoji and a group for the picker" slotProps={{ secondary: { sx: { whiteSpace: 'normal' } } }} />
+      </MenuItem>
+    </Menu>
+  );
+}
+
+/** Shield shown on protected contexts, so the state stays visible without opening the menu. */
+function ProtectedMark({ size = 16 }: { size?: number }) {
+  return (
+    <Tooltip title="Protected: destructive actions require typed confirmation">
+      <ShieldIcon aria-label="Protected" color="warning" sx={{ fontSize: size, mx: 0.5, flexShrink: 0 }} />
+    </Tooltip>
+  );
+}
+
 export function ClusterSwitcher() {
   const { data: contexts } = useContexts();
   const connect = useConnectContext();
@@ -231,6 +299,7 @@ export function ClusterSwitcher() {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [customize, setCustomize] = useState<{ ctx: string; anchor: HTMLElement } | null>(null);
+  const [actionsMenu, setActionsMenu] = useState<{ ctx: string; anchor: HTMLElement } | null>(null);
   const [dragName, setDragName] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ name: string; before: boolean } | null>(null);
   const [watchIssues, setWatchIssues] = useState<ContextWatchIssues>(() => new Map());
@@ -319,8 +388,25 @@ export function ClusterSwitcher() {
 
   const closePicker = () => {
     setCustomize(null);
+    setActionsMenu(null);
     setAnchor(null);
   };
+
+  const actionsButton = (name: string, size: 'row' | 'card') => (
+    <Tooltip title="Cluster actions">
+      <IconButton
+        aria-label={`Actions for ${name}`}
+        size="small"
+        sx={size === 'card' ? { p: 0.25 } : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          setActionsMenu({ ctx: name, anchor: e.currentTarget });
+        }}
+      >
+        <MoreVertIcon sx={{ fontSize: size === 'card' ? 14 : 16 }} />
+      </IconButton>
+    </Tooltip>
+  );
 
   /** Make `names` the selection, connecting/disconnecting only the deltas. */
   const applySelection = (names: string[]) => {
@@ -496,8 +582,7 @@ export function ClusterSwitcher() {
   const renderRow = (c: ContextInfo, idx: number) => {
     const isProtected = !!contextSettings[c.name]?.protected;
     const icon = contextSettings[c.name]?.icon;
-    const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
-    const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
+    const busy = (connect.isPending && connect.variables?.ctx === c.name) || (reconnect.isPending && reconnect.variables === c.name);
     const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
     const isDropTarget = !!dropHint && dropHint.name === c.name && dragName !== c.name;
     return (
@@ -580,44 +665,8 @@ export function ClusterSwitcher() {
             </Typography>
           }
         />
-        {c.active && (
-          <Tooltip title="Reconnect: rebuild this session with fresh credentials, discovery, and watches">
-            <IconButton
-              aria-label={`Reconnect ${c.name}`}
-              size="small"
-              disabled={isReconnecting}
-              onClick={(e) => {
-                e.stopPropagation();
-                reconnect.mutate(c.name);
-              }}
-            >
-              <RestartAltIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-          </Tooltip>
-        )}
-        <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextSetting(c.name, { protected: !isProtected });
-            }}
-          >
-            {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 16 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 16 }} />}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Customize icon & group">
-          <IconButton
-            aria-label={`Customize ${c.name}`}
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCustomize({ ctx: c.name, anchor: e.currentTarget });
-            }}
-          >
-            <TuneIcon sx={{ fontSize: 16 }} />
-          </IconButton>
-        </Tooltip>
+        {isProtected && <ProtectedMark />}
+        {actionsButton(c.name, 'row')}
       </ListItemButton>
     );
   };
@@ -625,23 +674,8 @@ export function ClusterSwitcher() {
   const renderCard = (c: ContextInfo, idx: number) => {
     const isProtected = !!contextSettings[c.name]?.protected;
     const icon = contextSettings[c.name]?.icon;
-    const isReconnecting = reconnect.isPending && reconnect.variables === c.name;
-    const busy = (connect.isPending && connect.variables?.ctx === c.name) || isReconnecting;
+    const busy = (connect.isPending && connect.variables?.ctx === c.name) || (reconnect.isPending && reconnect.variables === c.name);
     const watchIssue = selected.includes(c.name) ? watchIssues.get(c.name) : undefined;
-    const protectButton = (
-      <Tooltip title={isProtected ? 'Protected: destructive actions require typed confirmation' : 'Mark as protected (e.g. production)'}>
-        <IconButton
-          size="small"
-          sx={{ p: 0.25 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setContextSetting(c.name, { protected: !isProtected });
-          }}
-        >
-          {isProtected ? <ShieldIcon color="warning" sx={{ fontSize: 14 }} /> : <ShieldOutlinedIcon sx={{ fontSize: 14 }} />}
-        </IconButton>
-      </Tooltip>
-    );
     return (
       <Box
         key={c.name}
@@ -688,39 +722,10 @@ export function ClusterSwitcher() {
             {c.server ?? c.cluster}
             {c.kubernetesVersion ? ` · ${c.kubernetesVersion}` : ''}
           </Typography>
+          {isProtected && <ProtectedMark size={14} />}
           <Box className="ctx-card-actions" sx={{ display: 'flex', gap: 0.25 }}>
-            {c.active && (
-              <Tooltip title="Reconnect: rebuild this session with fresh credentials, discovery, and watches">
-                <IconButton
-                  aria-label={`Reconnect ${c.name}`}
-                  size="small"
-                  sx={{ p: 0.25 }}
-                  disabled={isReconnecting}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    reconnect.mutate(c.name);
-                  }}
-                >
-                  <RestartAltIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-            )}
-            {!isProtected && protectButton}
-            <Tooltip title="Customize icon & group">
-              <IconButton
-                aria-label={`Customize ${c.name}`}
-                size="small"
-                sx={{ p: 0.25 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCustomize({ ctx: c.name, anchor: e.currentTarget });
-                }}
-              >
-                <TuneIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
+            {actionsButton(c.name, 'card')}
           </Box>
-          {isProtected && protectButton}
         </Box>
       </Box>
     );
@@ -753,7 +758,24 @@ export function ClusterSwitcher() {
 
   return (
     <>
-      <Button variant="outlined" color="inherit" endIcon={<KeyboardArrowDownIcon />} onClick={(e) => setAnchor(e.currentTarget)}>
+      <Button
+        variant="outlined"
+        color="inherit"
+        endIcon={<KeyboardArrowDownIcon />}
+        onClick={(e) => setAnchor(e.currentTarget)}
+        sx={{
+          // Same height, border and fill as the namespace filter beside it.
+          height: 34,
+          px: 1.25,
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+          borderRadius: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          fontWeight: 500,
+          '&:hover': { borderColor: 'text.secondary', bgcolor: 'background.paper' },
+        }}
+      >
         {selectedConnectivity && (
           <Tooltip title={selectedHasConnectivityIssue ? 'Connectivity issue' : selected.length === 1 ? `Connectivity: ${selectedConnectivity}` : `Selected clusters: ${selectedConnectivity}`}>
             <CircleIcon color={selectedHasConnectivityIssue ? 'warning' : HEALTH_COLOR[selectedConnectivity]} sx={{ fontSize: 10, mr: 1 }} />
@@ -887,6 +909,25 @@ export function ClusterSwitcher() {
         </Box>
       </Popover>
       <CustomizePopover target={customize} groups={groupNames} onClose={() => setCustomize(null)} />
+      <ContextActionsMenu
+        target={actionsMenu}
+        active={!!contexts?.find((c) => c.name === actionsMenu?.ctx)?.active}
+        isProtected={!!(actionsMenu && contextSettings[actionsMenu.ctx]?.protected)}
+        reconnecting={reconnect.isPending && reconnect.variables === actionsMenu?.ctx}
+        onReconnect={() => {
+          if (actionsMenu) reconnect.mutate(actionsMenu.ctx);
+          setActionsMenu(null);
+        }}
+        onToggleProtected={() => {
+          if (actionsMenu) setContextSetting(actionsMenu.ctx, { protected: !contextSettings[actionsMenu.ctx]?.protected });
+          setActionsMenu(null);
+        }}
+        onCustomize={() => {
+          if (actionsMenu) setCustomize(actionsMenu);
+          setActionsMenu(null);
+        }}
+        onClose={() => setActionsMenu(null)}
+      />
     </>
   );
 }

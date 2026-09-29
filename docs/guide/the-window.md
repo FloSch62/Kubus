@@ -20,17 +20,28 @@ The strip along the top is always available, whatever page you're on:
 | Control | What it does |
 | --- | --- |
 | **Cluster switcher** | Select which kubeconfig contexts are active. [More →](clusters.md) |
-| **Namespace filter** | Restrict every list to one or more namespaces. [More →](clusters.md#filtering-by-namespace) |
-| **Search** (++ctrl+k++) | Open the [command palette](command-palette.md) to find and act on anything. |
-| **Theme toggle** | Flip between light and dark. |
+| **Namespace filter** (`ns`) | Restrict every list to one or more namespaces. [More →](clusters.md#filtering-by-namespace) |
+| **Search or jump to…** (++ctrl+k++) | The search field in the middle opens the [command palette](command-palette.md) to find and act on anything. |
+| **Dock** (:material-console:) | Show or hide the [bottom dock](#bottom-dock). It appears once a log or shell tab is open. |
+| **Keyboard shortcuts** (:material-keyboard-outline:) | The [shortcut cheatsheet](../reference/keyboard-shortcuts.md). |
+| **Theme toggle** | Flip between light, dark and your system theme. |
 | **Settings** (:material-cog:) | Appearance, refresh rate, log and terminal preferences. [More →](settings.md) |
 
 ## :material-dock-left: Navigation drawer
 
-The left drawer lists every resource kind, grouped into **Workloads, Network, Config,
-Storage, Cluster** and **Access Control**. A **Custom Resources** group is populated
-automatically from the CRDs discovered in your selected clusters, and a **GitOps** group
-appears when Argo CD or Flux is installed.
+The left drawer starts with the **Overview** and your favorites, then lists every
+resource kind, grouped into **Workloads, Network, Config, Storage, Cluster** and **Access
+Control**. A **Custom Resources** group is populated automatically from the CRDs
+discovered in your selected clusters, and a **GitOps** group appears when Argo CD or Flux
+is installed. The pages that span the cluster sit in a **Tools** group at the bottom:
+**Events, Topology, Metrics, Network Metrics, Helm Releases, Port Forwards, Security
+Audit** and **Diff**.
+
+Only **Workloads** and **Tools** start open. Open or close any group and Kubus remembers
+it; the group holding the page you are on opens by itself. Kinds with problems carry a
+badge with the count: red when something is failing, amber when it is degraded. A
+collapsed group shows the sum of its kinds, so a badge on **Storage** tells you to look
+there. The badges follow the namespace filter, like the lists do.
 
 Built-in kinds you reach for less often, such as PriorityClasses, Leases, IngressClasses,
 RuntimeClasses, CSIDrivers, VolumeAttachments, webhook configurations and
@@ -38,11 +49,10 @@ ValidatingAdmissionPolicies, sit in a collapsed **More built-in kinds** group. K
 builds it from discovery, so it only lists the kinds your selected clusters actually
 serve.
 
-- Type in the **filter box** at the top to jump to a kind. It searches collapsed
+- Type in the **Filter kinds** box at the top to jump to a kind. It searches collapsed
   groups too, so typing `lease` finds Leases without opening **More built-in kinds**.
+  To find a resource by name, use the search field in the top bar instead.
 - **Saved views** appear under their kind once you save a filtered list.
-- Dedicated pages sit alongside the resource groups: **Overview, Events, Helm,
-  Port Forwards, Diff** and **Topology**.
 
 [More on the nav & saved views :octicons-arrow-right-24:](browsing-resources.md#saved-views)
 

@@ -10,37 +10,56 @@ on fire?" It summarises the health of every selected cluster on one screen.
 <figure markdown="span">
   ![The Overview dashboard](../assets/screenshots/overview.png#only-light){ .shadow }
   ![The Overview dashboard](../assets/screenshots/overview-dark.png#only-dark){ .shadow }
-  <figcaption>One card stack per cluster, showing counts, usage and what's broken.</figcaption>
+  <figcaption>One section per cluster: what needs attention first, then the inventory and the details.</figcaption>
 </figure>
 
-## What each cluster card shows
+## What each cluster section shows
 
-For every selected cluster you get:
+For every selected cluster you get, from the top:
 
-- **Counts**: nodes, namespaces, pods (running / total) and deployments.
-- **Failing pods**: anything not Running/Ready, such as crash-loops, image-pull errors or
-  pending pods.
-- **Warnings (last hour)**: a rollup of recent `Warning` events.
-- **Node usage**: a CPU/memory table when [metrics-server](metrics.md) is available.
+- **Needs attention**: one tile per kind of trouble, and only for trouble that exists.
+  Failing pods (with a breakdown such as `4 ImagePull · 3 CrashLoop · 2 Pending`),
+  unhealthy workloads by kind, warnings of the last hour with their most frequent
+  reasons, certificates that expire within 30 days, and operator resources that are not
+  ready. Red tiles mean something is down, amber ones mean it is degraded. Each tile says
+  where it takes you: **Show pods** opens the Pods list narrowed to the broken ones,
+  **Jump to list** scrolls to the section below that lists them. When nothing needs
+  attention, a single line says so.
+- **Inventory**: buttons for nodes, namespaces, pods (running out of all), deployments,
+  persistent volumes, CRDs and the metrics page, each opening its list. The CPU and
+  memory use of the whole cluster sits at the end of the heading once
+  [metrics-server](metrics.md) reports.
+- **Unhealthy workloads**: every Deployment, StatefulSet, DaemonSet, Job, CronJob,
+  PersistentVolumeClaim, autoscaler, disruption budget or quota that isn't healthy, with
+  the actual reason. Kubus reads it from the workload's pods and events, so you see
+  `ImagePullBackOff · registry.invalid/app:1: registry host not found` or
+  `FailedCreate · quota gpu-quota caps requests.nvidia.com/gpu at 0` instead of a bare
+  *Unavailable*. The heading lists the counts per kind (`Deployments 3/18`), each linking
+  to that list narrowed to the unhealthy ones.
+- **Node usage** per node, when the cluster has more than one.
+- Operator rollups, expiring certificates, pod usage against requests and limits,
+  failing pods with their messages, recent restarts and warning events.
 
-The failing-pods and warnings panels are **lists you can click**: selecting an entry jumps
-you straight to that pod or to the [Events](events.md) page, filtered to the problem.
+Names are links: a workload, pod or event object opens in the details drawer.
 
 ## Scoped to a namespace
 
 Pick one or more namespaces in the [namespace filter](clusters.md#filtering-by-namespace)
-and a cluster's card turns into a `kubectl get all -n` for those namespaces, and more:
+and a cluster's section keeps the same layout, scoped to those namespaces:
 
-- **Inventory**: one tile per kind with objects in it, including the popular custom
-  resources you have installed (cert-manager, Argo, Flux, KEDA, Gateway API routes and
-  others). Kinds with a notion of health get a bar split into healthy (green), degraded
-  (amber) and failed (red), with the failed and degraded counts spelled out underneath.
-  Empty kinds are listed on one line below the tiles.
-- **Workload health**, operator rollups, expiring certificates, **resource quotas** as
-  usage bars, pod usage against requests and limits, failing pods and warning events.
+- **Needs attention** counts only what lives there. It adds a tile for other resources
+  that aren't healthy when a kind outside the usual checks has problems (a failing custom
+  resource without an operator rollup, for example).
+- **Inventory** becomes a `kubectl get all -n`: one button per kind with objects in it,
+  including the popular custom resources you have installed (cert-manager, Argo, Flux,
+  KEDA, Gateway API routes and others). Kinds with a notion of health show how many
+  objects are failed (red) or degraded (amber) next to the count. **Show N empty kinds**
+  lists the kinds with nothing in them.
+- **Unhealthy workloads**, operator rollups, expiring certificates, **resource quotas**
+  as usage bars, pod usage against requests and limits, failing pods and warning events.
 
-Every tile opens that kind's list. The list keeps the same namespace filter, so you land
-on exactly the objects the tile counted.
+Every inventory button opens that kind's list. The list keeps the same namespace filter,
+so you land on exactly the objects the button counted.
 
 What counts as degraded or failed:
 
@@ -54,7 +73,7 @@ What counts as degraded or failed:
 | HorizontalPodAutoscalers, PodDisruptionBudgets | Cannot scale, or blocks every eviction | |
 | Custom resources | `Ready` still unknown, Argo sync drift or a progressing rollout | `Ready` is `False`, Argo health degraded, or a route a gateway rejected |
 
-The same inventory, with its bars, heads the Overview tab of a **Namespace** in the
+The same inventory heads the Overview tab of a **Namespace** in the
 [details drawer](resource-details.md), so opening a namespace from the Namespaces list
 shows what lives inside it.
 
@@ -69,12 +88,14 @@ shows what lives inside it.
 
 !!! tip "Multi-cluster triage"
 
-    With several clusters selected, the Overview becomes a single pane of glass. Scan the
-    cards top to bottom; the one with red numbers is where to start.
+    With several clusters selected, the Overview stacks one section per cluster. Scan the
+    **Needs attention** rows top to bottom; the one with red tiles is where to start. The
+    nav shows the same problems as badges next to Pods, Deployments and the other kinds.
 
 ## No metrics yet?
 
-If the node-usage table says metrics are unavailable, install metrics-server:
+If the inventory says CPU and memory usage are unavailable, click **Install
+metrics-server** next to the message, or install it yourself:
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml

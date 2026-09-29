@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useState } from 'react';
 import { layout } from '../theme.js';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
+import ButtonBase from '@mui/material/ButtonBase';
 import IconButton from '@mui/material/IconButton';
 import MenuIcon from '@mui/icons-material/Menu';
 import Stack from '@mui/material/Stack';
@@ -18,7 +19,7 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import { useClustersStore } from '../state/clusters.js';
 import { useDockStore } from '../state/dock.js';
 import { useUiStore } from '../state/ui.js';
-import { HOTKEY_MOD_LABEL } from '../platform.js';
+import { HOTKEY_MOD_LABEL, IS_MAC } from '../platform.js';
 import { toggleNavRail } from '../shortcuts.js';
 import { ShortcutHelpDialog } from '../components/ShortcutHelpDialog.js';
 import { ClusterSwitcher } from './ClusterSwitcher.js';
@@ -30,6 +31,65 @@ const loadSearchDialog = () => import('./SearchDialog.js');
 const loadSettingsDialog = () => import('../components/settings/SettingsDialog.js');
 const SearchDialog = lazy(() => loadSearchDialog().then((m) => ({ default: m.SearchDialog })));
 const SettingsDialog = lazy(() => loadSettingsDialog().then((m) => ({ default: m.SettingsDialog })));
+
+/**
+ * The global search entry point, drawn as a field so it reads as "type
+ * here" rather than one more icon. It opens the command palette.
+ */
+function SearchField({ onOpen }: { onOpen: () => void }) {
+  return (
+    <ButtonBase
+      aria-label="Search"
+      onClick={onOpen}
+      onMouseEnter={() => void loadSearchDialog()}
+      onFocus={() => void loadSearchDialog()}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        height: 34,
+        width: 'clamp(180px, 26vw, 340px)',
+        minWidth: 0,
+        px: 1.25,
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1,
+        bgcolor: 'background.paper',
+        color: 'text.secondary',
+        justifyContent: 'flex-start',
+        transition: 'border-color 120ms ease',
+        '&:hover': { borderColor: 'text.secondary' },
+        '&.Mui-focusVisible': { outline: 2, outlineColor: 'primary.main', outlineOffset: 1 },
+      }}
+    >
+      <SearchIcon sx={{ fontSize: 18, flexShrink: 0 }} />
+      <Typography component="span" variant="body2" noWrap sx={{ flex: 1, minWidth: 0, textAlign: 'left', color: 'inherit' }}>
+        Search or jump to…
+      </Typography>
+      <Box
+        component="kbd"
+        aria-hidden
+        sx={{
+          flexShrink: 0,
+          fontFamily: 'monospace',
+          fontSize: 11,
+          fontWeight: 600,
+          lineHeight: 1,
+          px: 0.625,
+          py: 0.375,
+          border: 1,
+          borderColor: 'divider',
+          borderBottomWidth: 2,
+          borderRadius: 0.75,
+          color: 'text.secondary',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {IS_MAC ? '⌘K' : 'Ctrl K'}
+      </Box>
+    </ButtonBase>
+  );
+}
 
 export const TopBar = memo(function TopBar() {
   const mode = useClustersStore((s) => s.themeMode);
@@ -99,18 +159,19 @@ export const TopBar = memo(function TopBar() {
           </Stack>
           <ClusterSwitcher />
           <NamespaceFilter />
-          <Box sx={{ flex: 1 }} />
-          <Tooltip title={`Search (${HOTKEY_MOD_LABEL}K)`}>
-            <IconButton size="small" aria-label="Search" onClick={() => setSearchOpen(true)} onMouseEnter={() => void loadSearchDialog()} onFocus={() => void loadSearchDialog()}>
-              <SearchIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          {dockTabCount > 0 && (
-            <Tooltip title={dockOpen ? `Hide dock (${HOTKEY_MOD_LABEL}J)` : `Show dock — ${dockTabCount} tabs (${HOTKEY_MOD_LABEL}J)`}>
+          <Box sx={{ flex: 1, minWidth: 8 }} />
+          <SearchField onOpen={() => setSearchOpen(true)} />
+          <Box sx={{ flex: 1, minWidth: 8 }} />
+          {/* The dock toggle keeps its slot while there is nothing to show, so
+              the icons beside it never move when the first log or shell opens. */}
+          {dockTabCount > 0 ? (
+            <Tooltip title={dockOpen ? `Hide dock (${HOTKEY_MOD_LABEL}J)` : `Show dock: ${dockTabCount} ${dockTabCount === 1 ? 'tab' : 'tabs'} (${HOTKEY_MOD_LABEL}J)`}>
               <IconButton size="small" aria-label={dockOpen ? 'Hide dock' : 'Show dock'} onClick={() => setDockOpen(!dockOpen)} color={dockOpen ? 'primary' : 'default'}>
                 <TerminalIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+          ) : (
+            <Box aria-hidden sx={{ width: 28, height: 28, flexShrink: 0 }} />
           )}
           <Tooltip title="Keyboard shortcuts (?)">
             <IconButton size="small" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(true)}>

@@ -1131,6 +1131,37 @@ export function useOverview(ctx: string) {
   });
 }
 
+/**
+ * Overviews of several clusters at a slower pace, for the nav's problem
+ * badges. Shares the Overview page's cache entries, so while that page is
+ * open both read the same 10s poll.
+ */
+export function useOverviews(contexts: string[]) {
+  const interval = useRefetchInterval(30_000);
+  const contextsKey = contexts.join('\n');
+  const queries = useMemo(
+    () =>
+      (contextsKey ? contextsKey.split('\n') : []).map((ctx) => ({
+        queryKey: ['overview', ctx] as const,
+        queryFn: () => apiFetch<ClusterOverview>(`/api/contexts/${encodeURIComponent(ctx)}/overview`),
+        refetchInterval: interval,
+      })),
+    [contextsKey, interval],
+  );
+  const combine = useCallback(
+    (results: Array<{ data?: ClusterOverview }>) => {
+      const ctxs = contextsKey ? contextsKey.split('\n') : [];
+      const data = new Map<string, ClusterOverview>();
+      results.forEach((result, i) => {
+        if (result.data) data.set(ctxs[i]!, result.data);
+      });
+      return { data };
+    },
+    [contextsKey],
+  );
+  return useQueries({ queries, combine });
+}
+
 /** Overview sections that warm up slowly stream in behind the core payload. */
 function overviewSectionQuery(ctx: string, section: 'operators' | 'certificates', namespaces?: string[]) {
   const key = namespaces && namespaces.length > 0 ? [...namespaces].sort().join(',') : '';

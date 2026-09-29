@@ -59,13 +59,15 @@ beforeEach(() => {
 });
 
 describe('NamespaceDetail', () => {
-  it('shows each kind with a health bar split and the empty kinds as links', () => {
+  it('shows each kind with its health split and the empty kinds behind a toggle', () => {
     render(<NamespaceDetail obj={namespace} ctx="dev" />);
     expect(screen.getByRole('button', { name: 'Pods: 4, 2 healthy, 1 degraded, 1 failed' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deployments: 3, 2 healthy, 1 failed' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ConfigMaps: 2' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Certificates: 1, 1 failed' })).toBeInTheDocument();
     expect(screen.getByText('Custom resources')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'DaemonSets' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Show \d+ empty kinds?$/ }));
     expect(screen.getByRole('button', { name: 'DaemonSets' })).toBeInTheDocument();
     expect(screen.getByText('2 / 4')).toBeInTheDocument();
   });
@@ -76,6 +78,7 @@ describe('NamespaceDetail', () => {
     expect(useClustersStore.getState().namespacesByContext.dev).toEqual(['gap']);
     expect(fixtures.navigate).toHaveBeenCalledWith('/r/apps/v1/deployments');
 
+    fireEvent.click(screen.getByRole('button', { name: /^Show \d+ empty kinds?$/ }));
     fireEvent.click(screen.getByRole('button', { name: 'DaemonSets' }));
     expect(fixtures.navigate).toHaveBeenLastCalledWith('/r/apps/v1/daemonsets');
   });

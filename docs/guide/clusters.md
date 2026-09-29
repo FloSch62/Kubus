@@ -24,6 +24,15 @@ Your selection is remembered between sessions. To point Kubus at a *different* k
 file entirely, launch it with `--kubeconfig` or set `KUBECONFIG`. See
 [command-line flags](../reference/cli.md).
 
+Each context has a **⋮** menu in the switcher:
+
+- **Reconnect** rebuilds the session with fresh credentials, discovery and watches, which
+  helps after you renewed a token or the cluster came back from maintenance.
+- **Protect this cluster** turns on the [production guard](#protecting-risky-clusters). A
+  shield next to the name shows which contexts are protected.
+- **Customize icon and group…** gives the context an emoji and a group, so a long list
+  sorts itself into sections such as *prod* and *staging*.
+
 ## Working across many clusters
 
 This is where Kubus earns its keep. When two or more clusters are selected:
@@ -188,9 +197,10 @@ come back with an actionable message (unreachable host, key not loaded, changed 
 
 ## Protecting risky clusters
 
-Some clusters you'd rather not fat-finger. Mark a cluster as **protected** and Kubus
-requires you to type the resource name before any destructive action (delete, scale to
-zero, drain…). See [Production guard & secrets](production-guard.md).
+Some clusters you'd rather not fat-finger. Mark a cluster as **protected** (**⋮ → Protect
+this cluster** in the switcher, or in [Settings → Clusters](settings.md#clusters)) and
+Kubus requires you to type the resource name before any destructive action (delete, scale
+to zero, drain…). See [Production guard & secrets](production-guard.md).
 
 ## See also
 

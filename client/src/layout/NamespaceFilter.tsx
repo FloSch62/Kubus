@@ -2,6 +2,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
+import InputAdornment from '@mui/material/InputAdornment';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { useNamespaces } from '../api/queries.js';
@@ -11,6 +12,10 @@ export const namespaceFilterSx = {
   minWidth: 260,
   maxWidth: 480,
   WebkitAppRegion: 'no-drag',
+  // Same height, border and fill as the cluster switcher beside it: the two
+  // read as one pair of scope controls.
+  '&& .MuiOutlinedInput-root': { minHeight: 34, py: '5px', pl: '6px', bgcolor: 'background.paper' },
+  '&& .MuiOutlinedInput-root .MuiAutocomplete-input': { py: '1px' },
 } as const;
 
 export function NamespaceFilter() {
@@ -50,12 +55,34 @@ export function NamespaceFilter() {
             key={option}
             label={option}
             size="small"
-            title={uneven ? `${option} — ${clustersFor(option).join(', ')}` : undefined}
+            title={uneven ? `${option} (${clustersFor(option).join(', ')})` : undefined}
             variant={uneven && clustersFor(option).length !== selected.length ? 'outlined' : 'filled'}
           />
         ))
       }
-      renderInput={(params) => <TextField {...params} placeholder={namespaces.length ? '' : 'All namespaces'} variant="outlined" />}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          placeholder={namespaces.length ? '' : 'All namespaces'}
+          variant="outlined"
+          slotProps={{
+            ...params.slotProps,
+            input: {
+              ...params.slotProps.input,
+              startAdornment: (
+                <>
+                  <InputAdornment position="start" sx={{ ml: 0.25, mr: 0.5 }}>
+                    <Typography component="span" variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                      ns
+                    </Typography>
+                  </InputAdornment>
+                  {params.slotProps.input.startAdornment}
+                </>
+              ),
+            },
+          }}
+        />
+      )}
       // Electron/macOS computes native title-bar hit regions from the painted
       // Autocomplete root. Marking only its input as no-drag leaves the root
       // draggable and swallows physical pointer clicks.
