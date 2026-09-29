@@ -2,7 +2,7 @@ import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk-api.js';
 import ElkWorker from 'elkjs/lib/elk-worker.min.js?worker';
 import type { GraphEdge, GraphNode, RelationshipGraph } from '@kubus/shared';
 
-export const NODE_WIDTH = 236;
+export const NODE_WIDTH = 160;
 
 export const LAYERS: GraphNode['layer'][] = ['entry', 'route', 'service', 'workload', 'replicaset', 'pod', 'storage', 'node', 'operator', 'other'];
 
@@ -10,11 +10,11 @@ export const LAYERS: GraphNode['layer'][] = ['entry', 'route', 'service', 'workl
 // both its parse cost and the layout computation off the main thread.
 const elk = new ELK({ workerFactory: () => new ElkWorker() });
 
-const layerSpacing = 150;
-const nodeSpacing = 48;
+const layerSpacing = 60;
+const nodeSpacing = 40;
 const graphGap = 140;
-const routePadding = 18;
-const routeEndpointOffset = 34;
+const routePadding = 14;
+const routeEndpointOffset = 20;
 const routeOuterMargin = 160;
 const routeBendPenalty = 42;
 
@@ -48,11 +48,63 @@ export interface TopologyLayout {
   problemNodes: GraphNode[];
 }
 
-// Mirrors the rendered TopologyNode: chip row + title, plus optional
+// Mirrors the rendered TopologyNode: kind caption + title, plus optional
 // sublabel/reason rows. Only used to size layout/routing obstacle boxes,
 // so being a few pixels off is harmless.
 export function estimateNodeHeight(node: GraphNode): number {
-  return 58 + (node.sublabel ? 20 : 0) + (node.reason ? 22 : 0);
+  return 50 + (node.sublabel ? 17 : 0) + (node.reason ? 17 : 0);
+}
+
+/** Id prefix of the placeholder that stands in for a workload's folded idle ReplicaSets. */
+export const FOLDED_REPLICASETS_PREFIX = 'folded-replicasets:';
+
+export function isFoldedReplicaSets(node: GraphNode): boolean {
+  return node.id.startsWith(FOLDED_REPLICASETS_PREFIX);
+}
+
+// A Deployment keeps up to revisionHistoryLimit old ReplicaSets around with
+// zero pods. They carry no current information but add a node and an edge
+// each, so they fold into one placeholder per owner. Only healthy idle
+// ReplicaSets fold, and only when the owner still has a ReplicaSet with pods:
+// a new ReplicaSet that cannot create pods, or a workload scaled to zero,
+// stays fully visible.
+export function foldIdleReplicaSets(graph: RelationshipGraph): RelationshipGraph {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const ownsPods = new Set<string>();
+  const ownerOf = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== 'owns') continue;
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    if (source?.layer === 'replicaset' && target?.layer === 'pod') ownsPods.add(source.id);
+    if (source?.layer === 'workload' && target?.layer === 'replicaset') ownerOf.set(target.id, source.id);
+  }
+  const foldedByOwner = new Map<string, GraphNode[]>();
+  for (const [replicaSetId, ownerId] of ownerOf) {
+    const replicaSet = byId.get(replicaSetId)!;
+    if (ownsPods.has(replicaSetId) || replicaSet.status === 'warning' || replicaSet.status === 'error') continue;
+    const siblings = [...ownerOf].filter(([id, owner]) => owner === ownerId && id !== replicaSetId);
+    if (!siblings.some(([id]) => ownsPods.has(id))) continue;
+    foldedByOwner.set(ownerId, [...(foldedByOwner.get(ownerId) ?? []), replicaSet]);
+  }
+  if (foldedByOwner.size === 0) return graph;
+
+  const hidden = new Set([...foldedByOwner.values()].flat().map((node) => node.id));
+  const nodes = graph.nodes.filter((node) => !hidden.has(node.id));
+  const edges = graph.edges.filter((edge) => !hidden.has(edge.source) && !hidden.has(edge.target));
+  for (const [ownerId, folded] of foldedByOwner) {
+    const id = `${FOLDED_REPLICASETS_PREFIX}${ownerId}`;
+    nodes.push({
+      id,
+      ref: folded[0]!.ref,
+      label: `${folded.length} old ReplicaSet${folded.length === 1 ? '' : 's'}`,
+      sublabel: 'No pods · click to show',
+      layer: 'replicaset',
+      status: 'unknown',
+    });
+    edges.push({ id: `${id}:owns`, source: ownerId, target: id, kind: 'owns' });
+  }
+  return { ...graph, nodes, edges };
 }
 
 export function topologyNodeBox(id: string, position: RoutePoint, node: GraphNode): LayoutBox {
@@ -72,18 +124,20 @@ function degreeMap(edges: GraphEdge[]): Map<string, number> {
 // across refetches with identical data and across remounts, so keying on the
 // reference lets remounts (tab switches, drawer reopens) reuse the finished
 // layout instead of re-running ELK and the edge router.
-const layoutCache = new WeakMap<RelationshipGraph[], Map<boolean, TopologyLayout>>();
+const layoutCache = new WeakMap<RelationshipGraph[], Map<string, TopologyLayout>>();
 
-export function cachedTopologyLayout(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean): TopologyLayout | undefined {
-  return graphs ? layoutCache.get(graphs)?.get(hideDisconnected) : undefined;
+const layoutKey = (hideDisconnected: boolean, foldReplicaSets: boolean) => `${hideDisconnected}|${foldReplicaSets}`;
+
+export function cachedTopologyLayout(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean, foldReplicaSets = false): TopologyLayout | undefined {
+  return graphs ? layoutCache.get(graphs)?.get(layoutKey(hideDisconnected, foldReplicaSets)) : undefined;
 }
 
 // Lays out each graph with ELK (layered, semantic layers pinned via
 // partitioning so columns keep their entry→…→other order), stacks the graphs
 // vertically, then routes every edge orthogonally around the node boxes so
 // lines never run underneath panels.
-export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean): Promise<TopologyLayout> {
-  const cached = cachedTopologyLayout(graphs, hideDisconnected);
+export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hideDisconnected: boolean, foldReplicaSets = false): Promise<TopologyLayout> {
+  const cached = cachedTopologyLayout(graphs, hideDisconnected, foldReplicaSets);
   if (cached) return cached;
   const placed: PlacedNode[] = [];
   const keptEdges: GraphEdge[] = [];
@@ -91,7 +145,8 @@ export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hi
   const problemNodes: GraphNode[] = [];
   let yOffset = 0;
 
-  for (const [graphIdx, graph] of (graphs ?? []).entries()) {
+  for (const [graphIdx, rawGraph] of (graphs ?? []).entries()) {
+    const graph = foldReplicaSets ? foldIdleReplicaSets(rawGraph) : rawGraph;
     warnings.push(...graph.warnings.map((w) => `${graph.ctx}: ${w}`));
     const degree = degreeMap(graph.edges);
     const kept: GraphNode[] = [];
@@ -114,6 +169,10 @@ export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hi
         'elk.direction': 'RIGHT',
         'elk.edgeRouting': 'ORTHOGONAL',
         'elk.partitioning.activate': 'true',
+        // Lay every component out in the same layer columns instead of
+        // packing components side by side: a namespace-wide map then reads as
+        // entry → route → service → workload → … columns from the top left.
+        'elk.separateConnectedComponents': 'false',
         'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
         'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
         'elk.layered.layering.strategy': 'NETWORK_SIMPLEX',
@@ -164,7 +223,7 @@ export async function layoutTopology(graphs: RelationshipGraph[] | undefined, hi
       byMode = new Map();
       layoutCache.set(graphs, byMode);
     }
-    byMode.set(hideDisconnected, layout);
+    byMode.set(layoutKey(hideDisconnected, foldReplicaSets), layout);
   }
   return layout;
 }

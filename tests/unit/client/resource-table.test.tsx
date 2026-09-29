@@ -133,3 +133,23 @@ describe('ResourceTable empty state', () => {
   });
 });
 
+describe('ResourceTable header and footer', () => {
+  const columns = [{ field: 'name', valueGetter: (_value: unknown, current: ClusterRow) => current.obj.metadata.name }];
+
+  it('hands the page header the shown and total row counts', async () => {
+    const header = vi.fn(({ shown, total }: { shown: number; total: number }) => <output>{`${shown} of ${total}`}</output>);
+    render(<ResourceTable rows={[row('web-1'), row('api-1')]} columns={columns} filter="web" renderHeader={header} />);
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument();
+  });
+
+  it('hides the pagination footer while one page holds every row', async () => {
+    const { container, rerender } = render(<ResourceTable rows={[row('a'), row('b')]} columns={columns} />);
+    await screen.findByText('a');
+    expect(container.querySelector('.MuiDataGrid-footerContainer')).toBeNull();
+
+    const many = Array.from({ length: 101 }, (_, i) => row(`pod-${i}`));
+    rerender(<ResourceTable rows={many} columns={columns} />);
+    await waitFor(() => expect(container.querySelector('.MuiDataGrid-footerContainer')).not.toBeNull());
+  });
+});
+

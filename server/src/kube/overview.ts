@@ -1,5 +1,6 @@
 import type { ClusterOverview, KubeObject, OverviewWarningEvent, ResourceKindInfo } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
+import { attachWorkloadCauses } from './workload-causes.js';
 import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
 
 const RECENT_MS = 60 * 60 * 1000; // 1h window for restarts/events
@@ -86,10 +87,10 @@ export async function computeOverview(handle: ClusterHandle): Promise<ClusterOve
       return { spec, items: result.items, unavailable: result.unavailable };
     });
     const health = computeWorkloadHealth(healthKinds);
-    overview.workloadHealth = health.kinds;
-    overview.unavailableWorkloads = health.issues;
-
     const now = Date.now();
+    overview.workloadHealth = health.kinds;
+    overview.unavailableWorkloads = attachWorkloadCauses(health.issues, pods, events, now);
+
     for (const pod of pods) {
       const status = pod.status as { phase?: string; containerStatuses?: ContainerStatus[] } | undefined;
       if (status?.phase === 'Running') overview.counts.podsRunning += 1;

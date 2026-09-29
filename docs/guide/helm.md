@@ -143,17 +143,20 @@ correctly. Helm values schema validation also runs while rendering.
   <figcaption>Values, computed values, manifest, history and notes.</figcaption>
 </figure>
 
-The header names the release, its status and cluster, and carries the actions: **Upgrade**
-(labelled with the newest version when one is available, or *Retry / recover* after a
-failure), **Roll back** with a menu of the revisions Helm can return to, **Diff** against
-the previous revision, and **Uninstall**. The summary strip below answers the first
-questions at a glance: status, revision, chart and app version, how many of the release's
-objects are ready, whether an update is available, and when it was last changed. The page
+The header names the release, its status, namespace and cluster, and carries the actions:
+**Upgrade** (labelled with the newest version when one is available, or *Retry / recover*
+after a failure), **Roll back** with a menu of the revisions Helm can return to, and
+**Diff** against the previous revision. Roll back and Diff only show once the release has
+an earlier revision; until then the ⋮ menu lists them greyed out with the reason.
+**Uninstall** lives in the ⋮ menu. The summary strip below answers the first questions at
+a glance: the chart and app version with a link to the chart's source, the revision and
+when it was deployed, how many of the release's objects are ready, whether an update is
+available, and whether the chart's tests passed the last time `helm test` ran. The page
 updates itself like the list does.
 
 | Tab | Shows |
 | --- | --- |
-| **Overview** | The release's objects resolved against the cluster, each with its live state, plus the release details (first deployed, chart sources, dependencies, hooks, shipped CRDs, storage driver). |
+| **Overview** | The release's objects resolved against the cluster, each with its live state, plus the release details (description, first and last deployed, storage driver, dependencies, hooks, shipped CRDs, chart sources). |
 | **Values** | The values *you* supplied at install/upgrade. |
 | **Computed values** | The fully-merged values Helm actually used (your values + chart defaults). |
 | **Manifest** | The rendered Kubernetes manifests for the release. |
@@ -161,7 +164,9 @@ updates itself like the list does.
 | **Notes** | The release `NOTES.txt`, if the chart provides one. |
 
 The **Resources** section on the Overview tab lists every object the current revision
-renders, in install order, together with the hooks stored in the release. Deployments,
+renders, in install order. The hooks stored in the release fold into one row at the end,
+such as *3 test hooks … not present until helm test runs*; expand it to see them. It
+opens by itself when a hook is running or has failed. Deployments,
 StatefulSets, DaemonSets, Jobs, Pods and PVCs show their rollout state (*Ready*,
 *Progressing* or *Failed*, with the reason on hover); other kinds show *Present* or
 *Missing*. Click any row to open that object's details drawer. The section re-checks the

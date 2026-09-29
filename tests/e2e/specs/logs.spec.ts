@@ -8,7 +8,7 @@ test('selecting a pod streams its live logs', async ({ page }) => {
   await expect(row.first()).toBeVisible({ timeout: 20_000 });
   await row.first().getByRole('checkbox').check();
 
-  await page.getByRole('button', { name: /^Logs/ }).click();
+  await page.getByRole('button', { name: /^Logs \(\d+\)$/ }).click();
 
   // The fixture pod emits a numbered line every 2s over the log socket.
   await expect(page.getByText('kubus-e2e log line').first()).toBeVisible({ timeout: 30_000 });

@@ -56,6 +56,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined';
 import { gvkForResource, type DebugProfile, type KubeObject, type LogTargetKind } from '@kubus/shared';
 import {
   useCordon,
@@ -76,6 +77,7 @@ import { watchClient } from '../api/ws/watch-client.js';
 import { useDockStore, dockTabId, type DockTab } from '../state/dock.js';
 import { useIsProtected } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
+import { selKeyOf, useDetailStore } from '../state/detail.js';
 import { showErrorToast, showToast } from '../state/toast.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { findOwningScaler, type OwningScaler } from './owning-scaler.js';
@@ -233,6 +235,20 @@ export function QuickActionButton({
   );
 }
 
+/** Kinds whose detail panel carries labeled quick actions beyond the ⋮ menu. */
+const QUICK_ACTION_KINDS = new Set(['Pod', 'Node', 'CronJob', 'Job', 'Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'ConfigMap', 'Secret']);
+
+/**
+ * Whether the detail panel has an action bar for this object. Kinds without
+ * one (a Role, an Ingress) put their ⋮ menu in the title row instead of
+ * spending a row on it.
+ */
+export function hasDetailQuickActions(target: RowActionTarget): boolean {
+  const actionKind = gvkForResource(target.group, target.version, target.plural)?.kind === target.kind ? target.kind : undefined;
+  if (!actionKind) return false;
+  return QUICK_ACTION_KINDS.has(actionKind) || isLogTargetKind(actionKind) || isForwardableKind(actionKind);
+}
+
 /**
  * The detail panel's action bar: the two or three operations someone opens a
  * resource for, as labeled buttons, with everything else behind the `⋮` menu
@@ -240,9 +256,10 @@ export function QuickActionButton({
  * Custom resources bring their own through `extra` (Sync, Promote, Reconcile).
  */
 export function DetailQuickActions({ target, extra }: { target: RowActionTarget; extra?: ReactNode }) {
-  const [dialog, setDialog] = useState<'forward' | 'scale' | 'trigger' | 'node-shell' | null>(null);
+  const [dialog, setDialog] = useState<'forward' | 'scale' | 'trigger' | 'node-shell' | 'drain' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
   const addTab = useDockStore((s) => s.addTab);
+  const requestTab = useDetailStore((s) => s.requestTab);
   const restart = useRolloutRestart();
   const rerun = useRerunJob();
   const suspendCj = useSuspendCronJob();
@@ -267,6 +284,7 @@ export function DetailQuickActions({ target, extra }: { target: RowActionTarget;
   const scalable = actionKind === 'Deployment' || actionKind === 'StatefulSet' || actionKind === 'ReplicaSet';
   const unschedulable = isNode && !!(obj.spec as { unschedulable?: boolean })?.unschedulable;
   const cjSuspended = isCronJob && !!(obj.spec as { suspend?: boolean })?.suspend;
+  const editsData = actionKind === 'ConfigMap' || actionKind === 'Secret';
 
   const openLogs = () => {
     setLogsBusy(true);
@@ -289,6 +307,14 @@ export function DetailQuickActions({ target, extra }: { target: RowActionTarget;
       )}
       {isNode && <QuickActionButton emphasis icon={<TerminalIcon />} label="Shell" onClick={() => setDialog('node-shell')} />}
       {isCronJob && <QuickActionButton emphasis icon={<PlayArrowIcon />} label="Trigger" onClick={() => setDialog('trigger')} />}
+      {editsData && (
+        <QuickActionButton
+          emphasis
+          icon={<EditNoteOutlinedIcon />}
+          label="Edit data"
+          onClick={() => requestTab(selKeyOf({ ctx, group: target.group, version: target.version, plural: target.plural, kind, name, namespace }), 'data')}
+        />
+      )}
       {canViewLogs && (
         <QuickActionButton emphasis={!isPod} icon={<SubjectIcon />} label="Logs" disabled={logsBusy} onClick={openLogs} />
       )}
@@ -341,6 +367,7 @@ export function DetailQuickActions({ target, extra }: { target: RowActionTarget;
           }
         />
       )}
+      {isNode && <QuickActionButton icon={<DownhillSkiingIcon />} label="Drain" onClick={() => setDialog('drain')} />}
       {extra}
       <Box sx={{ flex: 1 }} />
       <RowActions target={target} />
@@ -357,6 +384,7 @@ export function DetailQuickActions({ target, extra }: { target: RowActionTarget;
       {dialog === 'trigger' && <TriggerCronJobDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} onDone={ok} />}
       {dialog === 'scale' && <ScaleDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'forward' && <PortForwardDialog ctx={ctx} kind={actionKind ?? kind} obj={obj} onClose={() => setDialog(null)} />}
+      {dialog === 'drain' && <DrainDialog target={target} onClose={() => setDialog(null)} />}
     </Stack>
   );
 }

@@ -28,10 +28,13 @@ click it and the [details drawer](resource-details.md) opens, ready for you to f
 
 ## Working the report
 
-- **Severity chips** (critical / high / medium / low) filter the report with one click.
+- **Severity toggles** (critical / high / medium / low, each with its count) filter the
+  report. Turn on one or several; a pressed toggle is shaded, and **All severities**
+  clears them.
 - **Free-text filter** narrows by resource, namespace, message or check.
-- **Dismiss a check** you've decided to accept. It moves to a *Dismissed checks* list at
-  the bottom and stays out of the report until you restore it. Dismissals persist.
+- **Ignore a check** you've decided to accept with the **Ignore** button on its row. It
+  moves to an *Ignored checks* list at the bottom and stays out of the report until you
+  restore it. Ignored checks persist.
 - **Multi-cluster** selections put findings from every selected cluster in one report,
   each tagged with its cluster.
 

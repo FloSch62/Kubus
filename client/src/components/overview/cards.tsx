@@ -1,7 +1,4 @@
 import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import Grid from '@mui/material/Grid';
 import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
@@ -10,10 +7,10 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
-import { alpha } from '@mui/material/styles';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { gvkForKind, type OverviewProblemPod, type OverviewWarningEvent } from '@kubus/shared';
 import { AgeCell } from '../AgeCell.js';
+import { CountPill } from '../detail/Section.js';
 import { StatusChip } from '../StatusChip.js';
 import { useApiResources } from '../../api/queries.js';
 import { kindListPath } from '../../resource-links.js';
@@ -25,7 +22,7 @@ export function FailingPodsCard({ ctx, pods, hideNamespace }: { ctx: string; pod
   const navigate = useNavigate();
   if (pods.length === 0) return null;
   return (
-    <ProblemCard title="Failing pods">
+    <ProblemCard title="Failing pods" count={pods.length} flush>
       <Table size="small">
         <TableHead>
           <TableRow>
@@ -50,9 +47,7 @@ export function FailingPodsCard({ ctx, pods, hideNamespace }: { ctx: string; pod
                 <StatusChip status={p.reason} />
               </TableCell>
               <TableCell>{p.restarts}</TableCell>
-              <TableCell title={p.message}>
-                <Box sx={{ maxWidth: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.message ?? ''}</Box>
-              </TableCell>
+              <TableCell sx={{ minWidth: 240, maxWidth: 560, overflowWrap: 'anywhere', color: 'text.secondary' }}>{p.message ?? ''}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -71,7 +66,7 @@ export function WarningEventsCard({ ctx, events }: { ctx: string; events: Overvi
     return byKind.find((k) => !k.custom) ?? byKind[0];
   };
   return (
-    <ProblemCard title="Warning events (1h)">
+    <ProblemCard title="Warning events (1h)" count={events.length}>
       <Stack spacing={0.5}>
         {events.slice(0, 15).map((e) => {
           const gvr = e.involvedGvr ?? gvkForKind(e.involvedKind) ?? kindFromDiscovery(e.involvedKind);
@@ -112,101 +107,54 @@ export function WarningEventsCard({ ctx, events }: { ctx: string; events: Overvi
   );
 }
 
-export function StatCard({
-  label,
-  value,
-  sub,
-  warn,
-  icon,
-  onClick,
+/**
+ * An overview section: outlined card with a heading row (title, optional
+ * count and one-line summary, right-aligned controls) and a body. `flush`
+ * runs tables edge to edge. Not collapsible, so its title stays a real
+ * heading for screen readers and tests.
+ */
+export function ProblemCard({
+  title,
+  count,
+  description,
+  action,
+  flush = false,
+  anchor,
+  children,
 }: {
-  label: string;
-  value: React.ReactNode;
-  sub?: string;
-  warn?: boolean;
-  icon?: React.ReactElement;
-  onClick?: () => void;
+  title: string;
+  count?: number;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  flush?: boolean;
+  /** In-page jump target for the attention tiles (`data-anchor`). */
+  anchor?: string;
+  children: React.ReactNode;
 }) {
-  // Six-up only on wide screens; mid widths get four-up so the values never
-  // ellipsize before the labels do.
   return (
-    <Grid size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
-      <Card
-        variant="outlined"
-        onClick={onClick}
-        role={onClick ? 'button' : undefined}
-        tabIndex={onClick ? 0 : undefined}
-        onKeyDown={(event) => {
-          if (!onClick) return;
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onClick();
-          }
+    <Box data-anchor={anchor} sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5, bgcolor: 'background.paper', scrollMarginTop: 8 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.75, rowGap: 0.5, minHeight: 42, px: 1.5, py: 0.75 }}>
+        <Typography variant="subtitle2" component="h3" sx={{ flexShrink: 0 }}>
+          {title}
+        </Typography>
+        {count !== undefined && <CountPill value={count} />}
+        {description && (
+          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0, ml: 0.25 }}>
+            {description}
+          </Typography>
+        )}
+        {action && <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>{action}</Box>}
+      </Box>
+      <Box
+        sx={{
+          borderTop: 1,
+          borderColor: 'divider',
+          p: flush ? 0 : 1.5,
+          ...(flush && { overflowX: 'auto', '& .MuiTableRow-root:last-child .MuiTableCell-body': { borderBottom: 0 } }),
         }}
-        sx={(theme) => ({
-          height: '100%',
-          cursor: onClick ? 'pointer' : 'default',
-          borderColor: warn ? 'warning.main' : undefined,
-          transition: 'border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease',
-          ...(onClick && {
-            '&:hover': {
-              borderColor: warn ? 'warning.main' : 'primary.main',
-              transform: 'translateY(-1px)',
-              boxShadow: `0 4px 14px ${alpha(theme.palette.common.black, theme.palette.mode === 'dark' ? 0.35 : 0.08)}`,
-            },
-          }),
-        })}
       >
-        <CardContent sx={{ py: '12px !important', display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          {icon && (
-            <Box
-              sx={(theme) => {
-                const main = warn ? theme.palette.warning.main : theme.palette.primary.main;
-                return {
-                  width: 36,
-                  height: 36,
-                  borderRadius: 1.5,
-                  flexShrink: 0,
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: main,
-                  bgcolor: alpha(main, theme.palette.mode === 'dark' ? 0.14 : 0.08),
-                  '& svg': { fontSize: 20 },
-                };
-              }}
-            >
-              {icon}
-            </Box>
-          )}
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
-              {label}
-            </Typography>
-            <Typography variant="h6" color={warn ? 'warning.main' : undefined} noWrap>
-              {value}
-              {sub && (
-                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                  {sub}
-                </Typography>
-              )}
-            </Typography>
-          </Box>
-        </CardContent>
-      </Card>
-    </Grid>
-  );
-}
-
-export function ProblemCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <Card variant="outlined" sx={{ mb: 2 }}>
-      <CardContent sx={{ py: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, gap: 1 }}>
-          <Typography variant="subtitle2">{title}</Typography>
-          {action}
-        </Box>
         {children}
-      </CardContent>
-    </Card>
+      </Box>
+    </Box>
   );
 }

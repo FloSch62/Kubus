@@ -49,6 +49,7 @@ vi.mock('../../../client/src/components/grid-prefs.js', () => ({
   useGridPrefs: (_id: string, columns: unknown[]) => ({ columns, density: 'compact', onColumnWidthChange: vi.fn() }),
 }));
 vi.mock('../../../client/src/state/toast.js', () => ({ showToast: effects.toast }));
+vi.mock('../../../client/src/components/HelmInstallDialog.js', () => ({ default: () => <p>Install chart dialog</p> }));
 
 function release(name = 'web'): ReleaseRow {
   return {
@@ -90,9 +91,9 @@ function LocationProbe() {
   );
 }
 
-function renderPage() {
+function renderPage(path = '/helm') {
   return render(
-    <MemoryRouter initialEntries={['/helm']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route
           path="*"
@@ -248,5 +249,12 @@ describe('HelmPage live list', () => {
     expect(screen.getByText('No Helm releases in the selected clusters')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Install a chart' })).toBeInTheDocument();
     expect(screen.getByLabelText('Helm updates: Live')).toBeInTheDocument();
+  });
+
+  it('opens the install dialog from ?install=1 and drops the parameter', async () => {
+    renderPage('/helm?install=1');
+
+    expect(await screen.findByText('Install chart dialog')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/helm$/));
   });
 });

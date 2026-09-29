@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLabelTerm, joinLabelSelector, splitLabelSelector } from '../../../client/src/label-selector';
+import { addLabelTerm, collectLabelPairs, joinLabelSelector, labelTermFromInput, labelTermSuggestions, looksLikeLabelSelector, splitLabelSelector } from '../../../client/src/label-selector';
 
 describe('splitLabelSelector', () => {
   it('splits on top-level commas', () => {
@@ -62,5 +62,51 @@ describe('addLabelTerm', () => {
   it('handles set-based terms with commas', () => {
     expect(addLabelTerm('env in (a,b)', 'tier=web')).toBe('env in (a,b),tier=web');
     expect(addLabelTerm('env in (a,b),tier=web', 'env in (a,b)')).toBe('env in (a,b),tier=web');
+  });
+});
+
+describe('label terms typed into the search field', () => {
+  it('reads label: prefixed input as a selector term', () => {
+    expect(labelTermFromInput('label:app=web')).toBe('app=web');
+    expect(labelTermFromInput('  Label: env!=prod ')).toBe('env!=prod');
+    expect(labelTermFromInput('label:')).toBeUndefined();
+    expect(labelTermFromInput('app=web')).toBeUndefined();
+  });
+
+  it('recognizes raw selector terms', () => {
+    for (const term of ['app=web', 'app==web', 'env!=prod', '!canary', 'env in (a,b)', 'tier notin (x)', 'app.kubernetes.io/name=podinfo']) {
+      expect(looksLikeLabelSelector(term)).toBe(true);
+    }
+    for (const text of ['web', 'app=', 'two words', 'a=b=c', '']) expect(looksLikeLabelSelector(text)).toBe(false);
+  });
+});
+
+describe('labelTermSuggestions', () => {
+  const pairs = collectLabelPairs([{ app: 'web', tier: 'frontend' }, { app: 'api', 'pod-template-hash': 'abc' }, undefined, { app: 'web' }]);
+
+  it('collects each key with the values seen for it', () => {
+    expect([...pairs.keys()]).toEqual(['app', 'tier', 'pod-template-hash']);
+    expect([...pairs.get('app')!]).toEqual(['web', 'api']);
+  });
+
+  it('ranks exact, then prefix, then substring matches, shorter first', () => {
+    expect(labelTermSuggestions(pairs, 'app', [])).toEqual([
+      { term: 'app', kind: 'key' },
+      { term: 'app=api', kind: 'pair' },
+      { term: 'app=web', kind: 'pair' },
+    ]);
+    expect(labelTermSuggestions(pairs, 'web', []).map((s) => s.term)).toEqual(['app=web']);
+  });
+
+  it('leaves out terms already in the selector and caps the list', () => {
+    expect(labelTermSuggestions(pairs, 'app', ['app=web']).map((s) => s.term)).toEqual(['app', 'app=api']);
+    expect(labelTermSuggestions(pairs, 'a', [], 2)).toHaveLength(2);
+  });
+
+  it('offers a typed selector as-is on top, and strips a label: prefix', () => {
+    expect(labelTermSuggestions(pairs, 'env!=prod', [])[0]).toEqual({ term: 'env!=prod', kind: 'selector' });
+    expect(labelTermSuggestions(pairs, 'label:tier', []).map((s) => s.term)).toEqual(['tier', 'tier=frontend']);
+    // A selector that is also a seen pair is offered once, as the pair.
+    expect(labelTermSuggestions(pairs, 'app=web', [])).toEqual([{ term: 'app=web', kind: 'pair' }]);
   });
 });

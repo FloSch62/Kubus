@@ -16,6 +16,8 @@ import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { alpha, type Theme } from '@mui/material/styles';
+import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -37,12 +39,15 @@ import CheckIcon from '@mui/icons-material/Check';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import { NavLink, useLocation, useNavigate } from 'react-router';
 import { BUILTIN_NAV_GROUPS, MORE_BUILTIN_KINDS_TITLE, groupToPath, gvkForResource, gvkLabel, pluralLabel, type FavoriteItem, type ResourceKindInfo, type SavedView } from '@kubus/shared';
-import { useApiResourcesForContexts, useContexts } from '../api/queries.js';
+import { useApiResourcesForContexts, useContexts, useOverviews } from '../api/queries.js';
 import { favoriteContext, favoriteScopes, resolveFavorites } from '../favorite-scope.js';
 import { preferVersion, preferredKind } from '../kind-versions.js';
 import { HOTKEY_MOD_LABEL } from '../platform.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useNavigationStore } from '../state/navigation.js';
+import { useShellPrefsStore } from '../state/shell-prefs.js';
+import { statusTextColor } from '../theme.js';
+import { EVENTS_PAGE_PATH, groupBadge, navBadges, type NavBadge, type NavBadges } from './nav-badges.js';
 import { useTabsStore } from '../state/tabs.js';
 import { applySavedViewGridState } from '../state/saved-view.js';
 import { GROUP_ICONS } from './tab-meta.js';
@@ -176,6 +181,43 @@ function FavStar({ active, onToggle, onManage, label }: { active: boolean; onTog
 // user shows intent instead of unconditionally at idle for every session.
 const preloadTopology = () => void import('../components/TopologyGraphImpl.js');
 
+const TOOLS_GROUP_TITLE = 'Tools';
+
+/** Cluster-wide pages, grouped below the kinds. */
+const TOOLS: Array<{ to: string; label: string; icon: React.ReactElement; onIntent?: () => void }> = [
+  { to: EVENTS_PAGE_PATH, label: 'Events', icon: <NotificationsNoneOutlinedIcon /> },
+  { to: '/topology', label: 'Topology', icon: <AccountTreeOutlinedIcon />, onIntent: preloadTopology },
+  { to: '/metrics', label: 'Metrics', icon: <QueryStatsOutlinedIcon /> },
+  { to: '/network', label: 'Network Metrics', icon: <NetworkCheckOutlinedIcon /> },
+  { to: '/helm', label: 'Helm Releases', icon: <SailingOutlinedIcon /> },
+  { to: '/forwards', label: 'Port Forwards', icon: <CableOutlinedIcon /> },
+  { to: '/audit', label: 'Security Audit', icon: <GppMaybeOutlinedIcon /> },
+  { to: '/diff', label: 'Diff', icon: <DifferenceOutlinedIcon /> },
+];
+
+/** Kind groups in the order people reach for them; Cluster sits below the everyday kinds. */
+const KIND_GROUP_ORDER = ['Workloads', 'Network', 'Config', 'Storage', 'Cluster', 'Access Control'];
+
+/**
+ * Built-in nav groups in display order. Events are left out of Cluster:
+ * the Events page under Tools is the one place for them.
+ */
+const NAV_KIND_GROUPS = [...BUILTIN_NAV_GROUPS]
+  .sort((a, b) => (KIND_GROUP_ORDER.indexOf(a.title) + 1 || 99) - (KIND_GROUP_ORDER.indexOf(b.title) + 1 || 99))
+  .map((group) => ({ ...group, kinds: group.kinds.filter((k) => k.kind !== 'Event') }));
+
+/**
+ * Groups that start collapsed until the user opens them: every kind group
+ * but Workloads, where most visits land. The group holding the current page
+ * opens on its own when you navigate there.
+ */
+const DEFAULT_COLLAPSED = [
+  ...NAV_KIND_GROUPS.map((g) => g.title).filter((title) => title !== 'Workloads'),
+  GITOPS_GROUP_TITLE,
+  MORE_BUILTIN_KINDS_TITLE,
+  'Custom Resources',
+];
+
 function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   const byKind = new Map<string, ResourceKindInfo>();
   for (const kind of kinds) {
@@ -230,6 +272,54 @@ function buildCustomNav(customKinds: Array<[string, ResourceKindInfo[]]>): Custo
   return nodes.sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/**
+ * The active entry: a primary tint with primary text and icon. The theme's
+ * neutral selected pill stays for menus and pickers elsewhere.
+ */
+const ACTIVE_ENTRY_SX = {
+  '&.Mui-selected': {
+    bgcolor: (theme: Theme) => alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.16 : 0.09),
+    '&:hover': { bgcolor: (theme: Theme) => alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.22 : 0.13) },
+    '& .MuiListItemText-primary': { color: 'primary.main' },
+    '& .MuiListItemIcon-root': { color: 'primary.main' },
+  },
+} as const;
+
+/** Problem count beside a nav entry. Decorative for screen readers: the title explains it on hover. */
+function NavBadgePill({ badge, className, title }: { badge: NavBadge; className?: string; title: string }) {
+  return (
+    <Box
+      component="span"
+      className={className}
+      aria-hidden
+      title={title}
+      sx={(theme) => ({
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 18,
+        height: 17,
+        px: 0.6,
+        ml: 0.75,
+        flexShrink: 0,
+        borderRadius: 999,
+        fontSize: 10.5,
+        fontWeight: 700,
+        fontVariantNumeric: 'tabular-nums',
+        lineHeight: 1,
+        color: statusTextColor(badge.tone)(theme),
+        bgcolor: alpha(theme.palette[badge.tone].main, theme.palette.mode === 'dark' ? 0.2 : 0.1),
+      })}
+    >
+      {badge.count > 99 ? '99+' : badge.count}
+    </Box>
+  );
+}
+
+function badgeTitle(badge: NavBadge, subject: string): string {
+  return badge.tone === 'error' ? `${badge.count} ${subject} failing or unavailable` : `${badge.count} ${subject} need attention`;
+}
+
 function NavEntry({
   to,
   label,
@@ -242,6 +332,7 @@ function NavEntry({
   onIntent,
   indent,
   inFavorites = false,
+  badge,
 }: {
   to: string;
   label: string;
@@ -259,6 +350,8 @@ function NavEntry({
   indent?: string;
   /** This copy lives in Favorites; navigating it must not reveal its canonical panel entry. */
   inFavorites?: boolean;
+  /** Problem count for this kind or page. */
+  badge?: NavBadge;
 }) {
   const location = useLocation();
   const fromFavorite = isFavoriteNavigation(location.state);
@@ -289,7 +382,7 @@ function NavEntry({
         onMouseEnter={onIntent}
         onFocus={onIntent}
         {...newTabHandlers}
-        sx={{ pl: icon ? 1.5 : (indent ?? ITEM_INDENT), py: subtitle ? 0.25 : 0.375, pr: hasFavorite ? (favoriteAction ? 7 : 4) : undefined }}
+        sx={{ pl: icon ? 1.5 : (indent ?? ITEM_INDENT), py: subtitle ? 0.25 : 0.375, pr: hasFavorite ? (favoriteAction ? 7 : 4) : undefined, ...ACTIVE_ENTRY_SX }}
       >
         {icon && (
           <ListItemIcon sx={{ minWidth: 26, color: 'text.secondary', '& svg': { fontSize: 17 } }}>{icon}</ListItemIcon>
@@ -305,6 +398,7 @@ function NavEntry({
             }}
           />
         </TruncationTooltip>
+        {badge && !hasFavorite && <NavBadgePill badge={badge} title={badgeTitle(badge, 'items')} />}
       </ListItemButton>
     );
     if (!hasFavorite) return button;
@@ -320,6 +414,11 @@ function NavEntry({
               label={`${onManageFavorite ? 'Remove or edit' : isFav ? 'Remove' : 'Add'} favorite ${label}`}
               onToggle={toggleFavorite}
             />
+            {badge && !hotkey && (
+              <Box sx={{ position: 'absolute', right: 6, display: 'flex', pointerEvents: 'none' }}>
+                <NavBadgePill badge={badge} className="fav-hotkey" title={badgeTitle(badge, label)} />
+              </Box>
+            )}
             {hotkey && (
               <Typography
                 className="fav-hotkey"
@@ -345,7 +444,7 @@ function NavEntry({
         {button}
       </ListItem>
     );
-  }, [to, label, subtitle, icon, hasFavorite, favoriteAction, onManageFavorite, hotkey, onIntent, indent, inFavorites, active, isFav, toggleFavorite, newTabHandlers]);
+  }, [to, label, subtitle, icon, hasFavorite, favoriteAction, onManageFavorite, hotkey, onIntent, indent, inFavorites, active, isFav, toggleFavorite, newTabHandlers, badge]);
 }
 
 const PreferFavoriteContext = createContext(false);
@@ -397,7 +496,7 @@ function SavedViewEntry({ view, onDelete }: { view: SavedView; onDelete: (id: st
         onAuxClick={(e) => {
           newTabHandlers.onAuxClick(e);
         }}
-        sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5 }}
+        sx={{ pl: ITEM_INDENT, py: 0.375, pr: 4.5, ...ACTIVE_ENTRY_SX }}
       >
         <ListItemText primary={view.title} slotProps={{ primary: { variant: 'body2', noWrap: true } }} />
       </ListItemButton>
@@ -412,6 +511,7 @@ function GroupHeader({
   onClick,
   favorite,
   favoriteAction,
+  badge,
 }: {
   title: string;
   icon?: React.ReactElement;
@@ -419,6 +519,8 @@ function GroupHeader({
   onClick: () => void;
   favorite?: { active: boolean; onToggle: () => void; onManage?: (e: React.MouseEvent) => void };
   favoriteAction?: ReactNode;
+  /** Summed problem count of the group's entries, shown while it is collapsed. */
+  badge?: NavBadge;
 }) {
   return (
     <ListItem
@@ -458,6 +560,7 @@ function GroupHeader({
           primary={title}
           slotProps={{ primary: { variant: 'body2', sx: { fontWeight: 600, fontSize: 12.5, color: 'text.secondary' } } }}
         />
+        {badge && !open && <NavBadgePill badge={badge} title={badgeTitle(badge, `items in ${title}`)} />}
         <ExpandMoreIcon
           sx={{ fontSize: 16, opacity: 0.6, transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 120ms ease' }}
         />
@@ -813,14 +916,26 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   const removeFavorite = useNavigationStore((s) => s.removeFavorite);
   const moveFavorite = useNavigationStore((s) => s.moveFavorite);
   // Favorited categories ('fav:<title>') start collapsed so they show as a
-  // single entry rather than flooding Favorites with every kind.
+  // single entry rather than flooding Favorites with every kind. Groups the
+  // user opened or closed by hand come back that way.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const set = new Set<string>(['Custom Resources', MORE_BUILTIN_KINDS_TITLE]);
+    const set = new Set<string>(DEFAULT_COLLAPSED);
     for (const fav of useNavigationStore.getState().favorites) {
       if (fav.id.startsWith('category:')) set.add(`fav:${fav.title}`);
     }
+    for (const [title, open] of Object.entries(useShellPrefsStore.getState().navGroups)) {
+      if (open) set.delete(title);
+      else set.add(title);
+    }
     return set;
   });
+  const setNavGroup = useShellPrefsStore((s) => s.setNavGroup);
+  // Problem badges ride on the overview payloads; serialized so an unchanged
+  // poll result keeps the memoized tree below.
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
+  const { data: overviews } = useOverviews(selected);
+  const badgesKey = JSON.stringify(navBadges(overviews, namespacesByContext));
+  const badges = useMemo<NavBadges>(() => JSON.parse(badgesKey) as NavBadges, [badgesKey]);
   const [filter, setFilter] = useState('');
   const [draggingFavoriteId, setDraggingFavoriteId] = useState<string | null>(null);
   const [favoriteDropTarget, setFavoriteDropTarget] = useState<FavoriteDropTarget | null>(null);
@@ -891,7 +1006,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // favorited category inline and to recognize its entries during tab changes.
   const categoryKindsMap = useMemo(() => {
     const map = new Map<string, NavKind[]>();
-    for (const group of BUILTIN_NAV_GROUPS) {
+    for (const group of NAV_KIND_GROUPS) {
       map.set(
         group.title,
         group.kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
@@ -935,9 +1050,10 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // the entry for the active resource after a cross-kind jump.
   const groupChainByPath = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const group of BUILTIN_NAV_GROUPS) {
+    for (const group of NAV_KIND_GROUPS) {
       for (const k of group.kinds) map.set(kindPath(k.group, k.version, k.plural), [group.title]);
     }
+    for (const tool of TOOLS) map.set(tool.to, [TOOLS_GROUP_TITLE]);
     map.set(CRD_LIST_PATH, ['Custom Resources']);
     for (const k of moreKinds) map.set(kindPath(k.group, k.version, k.plural), [MORE_BUILTIN_KINDS_TITLE]);
     for (const node of customNav) {
@@ -1041,13 +1157,17 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // Selection/detail-tab URL changes still reach NavEntry's location observer,
   // but must not rebuild every category, star, tooltip and collapsed tree.
   return useMemo(() => {
-    const toggleGroup = (title: string) =>
+    const toggleGroup = (title: string) => {
+      // Custom-group keys are an explicit open override (open means present);
+      // every other title is open when absent. Only the latter are remembered.
+      if (!title.startsWith(CUSTOM_GROUP_PREFIX)) setNavGroup(title, collapsed.has(title));
       setCollapsed((prev) => {
         const next = new Set(prev);
         if (next.has(title)) next.delete(title);
         else next.add(title);
         return next;
       });
+    };
 
     const isFav = (id: string) => favorites.some((fav) => fav.id === id);
     const toggleCategory = (title: string) => {
@@ -1113,6 +1233,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       );
 
     const moreVisible = moreKinds.filter((k) => matches(pluralLabel(k.kind)) || matches(k.kind));
+    const toolsVisible = TOOLS.filter((tool) => matches(tool.label));
     const railHidden = !overlay && hidden;
     return (
       <Drawer
@@ -1145,7 +1266,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         <Box sx={{ p: 1.25, pb: 0.5 }}>
           <TextField
             fullWidth
-            placeholder="Filter resources…"
+            placeholder="Filter kinds…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={(e) => {
@@ -1164,7 +1285,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                 endAdornment: filter ? (
                   <InputAdornment position="end">
                     <IconButton
-                      aria-label="Clear resource filter"
+                      aria-label="Clear kind filter"
                       edge="end"
                       size="small"
                       onMouseDown={(e) => e.preventDefault()}
@@ -1182,14 +1303,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         <PreferFavoriteContext value={activeFavoriteEntry}>
           <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
             <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
-            <NavEntry to="/events" label="Events" icon={<NotificationsNoneOutlinedIcon />} />
-            <NavEntry to="/audit" label="Security Audit" icon={<GppMaybeOutlinedIcon />} />
-            <NavEntry to="/topology" label="Topology" icon={<AccountTreeOutlinedIcon />} onIntent={preloadTopology} />
-            <NavEntry to="/metrics" label="Metrics" icon={<QueryStatsOutlinedIcon />} />
-            <NavEntry to="/network" label="Network Metrics" icon={<NetworkCheckOutlinedIcon />} />
-            <NavEntry to="/helm" label="Helm Releases" icon={<SailingOutlinedIcon />} />
-            <NavEntry to="/forwards" label="Port Forwards" icon={<CableOutlinedIcon />} />
-            <NavEntry to="/diff" label="Diff" icon={<DifferenceOutlinedIcon />} />
           {visibleFavs.length > 0 && (
             <Box>
               <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
@@ -1263,9 +1376,10 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               </Collapse>
             </Box>
           )}
-          {BUILTIN_NAV_GROUPS.map((group) => {
-            const visible = group.kinds.filter((k) => matches(k.kind));
+          {NAV_KIND_GROUPS.map((group) => {
+            const visible = group.kinds.filter((k) => matches(k.kind) || matches(pluralLabel(k.kind)));
             if (!visible.length) return null;
+            const paths = visible.map((k) => kindPath(k.group, k.version, k.plural));
             return (
               <Box key={group.title}>
                 <GroupHeader
@@ -1274,14 +1388,16 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                   open={isOpen(group.title)}
                   onClick={() => toggleGroup(group.title)}
                   favorite={{ active: isFav(`category:${group.title}`), onToggle: () => toggleCategory(group.title) }}
+                  badge={groupBadge(badges, paths)}
                 />
                 <Collapse unmountOnExit in={isOpen(group.title)}>
-                  {visible.map((k) => (
+                  {visible.map((k, i) => (
                     <NavEntry
                       key={k.plural}
-                      to={kindPath(k.group, k.version, k.plural)}
+                      to={paths[i]!}
                       label={pluralLabel(k.kind)}
                       favorite={kindFavorite({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })}
+                      badge={badges[paths[i]!]}
                     />
                   ))}
                 </Collapse>
@@ -1422,6 +1538,22 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               </Collapse>
             </>
           )}
+          {toolsVisible.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <GroupHeader
+                title={TOOLS_GROUP_TITLE}
+                icon={<BuildOutlinedIcon />}
+                open={isOpen(TOOLS_GROUP_TITLE)}
+                onClick={() => toggleGroup(TOOLS_GROUP_TITLE)}
+                badge={groupBadge(badges, toolsVisible.map((t) => t.to))}
+              />
+              <Collapse unmountOnExit in={isOpen(TOOLS_GROUP_TITLE)}>
+                {toolsVisible.map((tool) => (
+                  <NavEntry key={tool.to} to={tool.to} label={tool.label} icon={tool.icon} onIntent={tool.onIntent} badge={badges[tool.to]} />
+                ))}
+              </Collapse>
+            </Box>
+          )}
           </List>
         </PreferFavoriteContext>
         <FavoriteScopeMenu
@@ -1436,5 +1568,5 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   }, [pathname, groupChainByPath, overlay, hidden, open, onClose, filter, deferredFilter, collapsed,
     favorites, visibleFavs, categoryKindsMap, customNav, customKinds.length, gitopsKinds, moreKinds, apiResources, contexts, selected,
     hotkeyByFavorite, activeFavoriteEntry, draggingFavoriteId, favoriteDropTarget, scopeMenu,
-    addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews]);
+    addFavorite, removeFavorite, moveFavorite, removeSavedView, savedViews, badges, setNavGroup]);
 });

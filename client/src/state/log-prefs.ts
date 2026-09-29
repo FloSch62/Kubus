@@ -4,15 +4,20 @@ import { kubusStateStorage } from './persist-storage.js';
 
 export type TsMode = 'off' | 'local' | 'utc';
 
+/** How JSON and logfmt lines render: message first, or exactly as written. */
+export type LogView = 'message' | 'raw';
+
 interface LogPrefsState {
   wrap: boolean;
   tsMode: TsMode;
   highlight: boolean;
+  view: LogView;
   enabledContainersByWorkload: Record<string, string[]>;
   setWrap: (wrap: boolean) => void;
   cycleTsMode: () => void;
   setTsMode: (tsMode: TsMode) => void;
   setHighlight: (highlight: boolean) => void;
+  setView: (view: LogView) => void;
   rememberEnabledContainers: (workloadKey: string, containers: string[]) => void;
 }
 
@@ -24,11 +29,13 @@ export const useLogPrefsStore = create<LogPrefsState>()(
       wrap: false,
       tsMode: 'off',
       highlight: true,
+      view: 'message',
       enabledContainersByWorkload: {},
       setWrap: (wrap) => set({ wrap }),
       cycleTsMode: () => set((s) => ({ tsMode: TS_CYCLE[s.tsMode] })),
       setTsMode: (tsMode) => set({ tsMode }),
       setHighlight: (highlight) => set({ highlight }),
+      setView: (view) => set({ view }),
       rememberEnabledContainers: (workloadKey, containers) =>
         set((s) => ({
           enabledContainersByWorkload: {

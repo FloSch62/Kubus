@@ -6,12 +6,11 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { gvkForKind, type KubeObject } from '@kubus/shared';
-import { openNamespaceOverview } from '../../namespace-link.js';
 import { UsedBySection } from './UsedBySection.js';
 import { AgeCell } from '../AgeCell.js';
 import { StatusChip } from '../StatusChip.js';
 import { ClampedText } from './ClampedText.js';
-import { Fact, FactLink, Facts } from './Facts.js';
+import { Fact, Facts } from './Facts.js';
 import { DetailStack, Section } from './Section.js';
 
 export function KeyValueChips({ title, entries }: { title: string; entries: Record<string, string> | undefined }) {
@@ -144,22 +143,25 @@ export function ConditionRows({ conditions, goodWhen }: { conditions: Condition[
   );
 }
 
-export function MetadataSection({ obj, ctx, defaultOpen = true }: { obj: KubeObject; ctx: string; defaultOpen?: boolean }) {
+/**
+ * What the drawer header does not already say: name, namespace, cluster and
+ * kind sit in the title, so this keeps the API version, creation time and UID.
+ */
+export function MetadataSection({ obj, defaultOpen = true }: { obj: KubeObject; ctx?: string; defaultOpen?: boolean }) {
+  const created = obj.metadata.creationTimestamp;
   return (
     <Section title="Metadata" defaultOpen={defaultOpen}>
       <Facts>
-        <Fact label="Name">{obj.metadata.name}</Fact>
-        <Fact label="Namespace">
-          {obj.metadata.namespace && (
-            <FactLink title={`Open the ${obj.metadata.namespace} namespace overview`} onClick={() => openNamespaceOverview(ctx, obj.metadata.namespace!)}>
-              {obj.metadata.namespace}
-            </FactLink>
-          )}
+        <Fact label="API version" mono>
+          {obj.apiVersion}
         </Fact>
-        <Fact label="Cluster">{ctx}</Fact>
-        <Fact label="Kind">{[obj.kind, obj.apiVersion ? `(${obj.apiVersion})` : undefined].filter(Boolean).join(' ')}</Fact>
         <Fact label="Created">
-          <AgeCell timestamp={obj.metadata.creationTimestamp} /> ago
+          {created && (
+            <>
+              <AgeCell timestamp={created} /> ago
+              <Box component="span" sx={{ color: 'text.secondary' }}>{` · ${new Date(created).toLocaleString()}`}</Box>
+            </>
+          )}
         </Fact>
         <Fact label="UID" mono>
           {obj.metadata.uid}

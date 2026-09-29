@@ -9,6 +9,7 @@ import Link from '@mui/material/Link';
 import { CellTooltip as Tooltip } from '../components/CellTooltip.js';
 import StopIcon from '@mui/icons-material/Stop';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
+import AddIcon from '@mui/icons-material/Add';
 import CableOutlinedIcon from '@mui/icons-material/CableOutlined';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
@@ -19,14 +20,22 @@ import { useGridPrefs } from '../components/grid-prefs.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { PortForwardPicker } from '../components/PortForwardPicker.js';
+import { Kbd } from '../components/Kbd.js';
+import { useClustersStore } from '../state/clusters.js';
+import Typography from '@mui/material/Typography';
 
 const forwardsGridSx = { border: 0, ...copyCellGridSx };
+/** Rows per grid page (the DataGrid default); the footer only shows once there is more than one page. */
+const PAGE_SIZE = 100;
 
 export function PortForwardsPage() {
   const { data, isLoading } = usePortForwards();
   const { mutate: stop } = useStopPortForward();
   const stopAll = useStopAllPortForwards();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const hasClusters = useClustersStore((s) => s.selected.length > 0);
   const gridRootRef = useRef<HTMLDivElement>(null);
 
   const columns: GridColDef<PortForwardInfo>[] = useMemo(() => {
@@ -97,6 +106,11 @@ export function PortForwardsPage() {
           </Button>
         )}
         {(data?.length ?? 0) > 0 && (
+          <Button size="small" variant="contained" startIcon={<AddIcon />} disabled={!hasClusters} onClick={() => setPickerOpen(true)}>
+            Start a forward…
+          </Button>
+        )}
+        {(data?.length ?? 0) > 0 && (
           <Button
             size="small"
             variant="outlined"
@@ -113,11 +127,15 @@ export function PortForwardsPage() {
         )}
       </PageHeader>
       {(data?.length ?? 0) === 0 && !isLoading ? (
-        <EmptyState
-          icon={<CableOutlinedIcon />}
-          title="No active forwards"
-          subtitle="Start one from a Pod, Service or workload row menu (⋮ → Port forward…), or from the ports listed in a resource's details."
-        />
+        <EmptyState icon={<CableOutlinedIcon />} title="No active forwards" subtitle="Reach a pod or service on localhost.">
+          <Button variant="contained" startIcon={<AddIcon />} disabled={!hasClusters} onClick={() => setPickerOpen(true)}>
+            Start a forward…
+          </Button>
+          <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', maxWidth: 420 }}>
+            Pick a service or pod and its port. You can also press <Kbd>F</Kbd> on a focused row in any Pods, Services or workload list,
+            or use the forward button next to a port in a resource's details.
+          </Typography>
+        </EmptyState>
       ) : (
         <GridTooltips rootRef={gridRootRef}>
           <DataGrid
@@ -142,11 +160,13 @@ export function PortForwardsPage() {
             }}
             onColumnWidthChange={grid.onColumnWidthChange}
             onCellKeyDown={handleCopyCellKeyDown}
+            hideFooter={(data?.length ?? 0) <= PAGE_SIZE}
             sx={forwardsGridSx}
           />
         </GridTooltips>
       )}
       <CellCopyOverlay rootRef={gridRootRef} />
+      {pickerOpen && <PortForwardPicker onClose={() => setPickerOpen(false)} />}
     </Box>
   );
 }

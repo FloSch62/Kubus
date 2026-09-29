@@ -1,15 +1,18 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClusterOverview } from '@kubus/shared';
 import { NavDrawer } from '../../../client/src/layout/NavDrawer';
 import { useClustersStore } from '../../../client/src/state/clusters';
 import { useNavigationStore } from '../../../client/src/state/navigation';
+import { useShellPrefsStore } from '../../../client/src/state/shell-prefs';
 import { useTabsStore } from '../../../client/src/state/tabs';
 
 const queryMocks = vi.hoisted(() => ({
   resources: [] as Array<Record<string, unknown>>,
   byContext: {} as Record<string, Array<Record<string, unknown>>>,
   contexts: [] as Array<Record<string, unknown>>,
+  overviews: undefined as Map<string, ClusterOverview> | undefined,
 }));
 const scrollIntoViewMock = vi.fn();
 
@@ -18,6 +21,7 @@ vi.mock('../../../client/src/api/queries.js', () => ({
     data: { resources: queryMocks.resources, byContext: queryMocks.byContext, errors: {} },
   }),
   useContexts: () => ({ data: queryMocks.contexts }),
+  useOverviews: () => ({ data: queryMocks.overviews }),
 }));
 
 function LocationProbe() {
@@ -38,6 +42,8 @@ beforeEach(() => {
   queryMocks.resources = customResources;
   queryMocks.byContext = {};
   queryMocks.contexts = [{ name: 'dev' }, { name: 'eda' }];
+  queryMocks.overviews = undefined;
+  useShellPrefsStore.setState({ navGroups: {} });
   useClustersStore.setState({ selected: ['dev'], namespaces: [] });
   useNavigationStore.setState({
     favorites: [
@@ -85,11 +91,11 @@ describe('NavDrawer', () => {
     fireEvent.click(screen.getByText('appstore.eda'));
     expect(screen.getByText('Widget')).toBeInTheDocument();
 
-    const filter = screen.getByPlaceholderText('Filter resources…');
+    const filter = screen.getByPlaceholderText('Filter kinds…');
     fireEvent.change(filter, { target: { value: 'widget' } });
     await waitFor(() => expect(screen.queryByText('Services')).not.toBeInTheDocument());
     expect(screen.getByText('Widget')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Clear resource filter'));
+    fireEvent.click(screen.getByLabelText('Clear kind filter'));
     expect(filter).toHaveValue('');
     fireEvent.keyDown(filter, { key: 'Escape' });
     fireEvent.change(filter, { target: { value: 'pod' } });
@@ -225,7 +231,7 @@ describe('NavDrawer', () => {
     expect(screen.queryByText('Leases')).not.toBeInTheDocument();
 
     // The nav filter finds them without opening the group first.
-    const filter = screen.getByPlaceholderText('Filter resources…');
+    const filter = screen.getByPlaceholderText('Filter kinds…');
     fireEvent.change(filter, { target: { value: 'lease' } });
     expect(await screen.findByRole('link', { name: 'Leases' })).toHaveAttribute('href', '/r/coordination.k8s.io/v1/leases');
     expect(screen.queryByText('PriorityClasses')).not.toBeInTheDocument();
@@ -255,6 +261,84 @@ describe('NavDrawer', () => {
     const hidden = renderDrawer('/', { hidden: true, open: false });
     expect(screen.getByText('Overview')).toBeInTheDocument();
     hidden.unmount();
+  });
+
+  it('keeps the tool pages in a Tools group below the kinds and lists Events only there', () => {
+    renderDrawer('/');
+    const tools = screen.getByRole('button', { name: 'Tools' });
+    expect(tools).toHaveAttribute('aria-expanded', 'true');
+    for (const label of ['Events', 'Topology', 'Metrics', 'Network Metrics', 'Helm Releases', 'Port Forwards', 'Security Audit', 'Diff']) {
+      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    }
+    // The Cluster group lost its duplicate Events entry.
+    fireEvent.click(screen.getByRole('button', { name: 'Cluster' }));
+    expect(screen.getByRole('link', { name: 'Nodes' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Events' })).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Events' })).toHaveAttribute('href', '/events');
+    // Tools come after the kind groups (the first Workloads is the favorited category).
+    const order = screen.getAllByRole('button', { name: /^(Workloads|Cluster|Tools)$/ }).map((b) => b.textContent);
+    expect(order).toEqual(['Workloads', 'Workloads', 'Cluster', 'Tools']);
+  });
+
+  it('starts kind groups collapsed except Workloads and remembers what the user opens', () => {
+    const first = renderDrawer('/');
+    // The last Workloads header is the kind group; the first is the favorited category.
+    expect(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Network' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Network' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)!);
+    expect(useShellPrefsStore.getState().navGroups).toMatchObject({ Network: true, Workloads: false });
+    first.unmount();
+
+    renderDrawer('/');
+    expect(screen.getByRole('button', { name: 'Network' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('shows problem badges from the overviews, scoped by the namespace filter', () => {
+    const overview = (over: Partial<ClusterOverview>): ClusterOverview => ({
+      counts: {} as ClusterOverview['counts'],
+      failingPods: [],
+      unavailableWorkloads: [],
+      recentRestarts: [],
+      warningEvents: [],
+      workloadHealth: [
+        { kind: 'Deployment', group: 'apps', version: 'v1', plural: 'deployments', total: 3, unhealthy: 2 },
+        { kind: 'PersistentVolumeClaim', group: '', version: 'v1', plural: 'persistentvolumeclaims', total: 1, unhealthy: 1 },
+      ],
+      ...over,
+    });
+    queryMocks.overviews = new Map([
+      [
+        'dev',
+        overview({
+          failingPods: [
+            { namespace: 'a', name: 'p1', reason: 'CrashLoopBackOff', restarts: 3 },
+            { namespace: 'b', name: 'p2', reason: 'Pending', restarts: 0 },
+          ],
+          unavailableWorkloads: [
+            { kind: 'Deployment', namespace: 'a', name: 'd1', ready: 1, desired: 2 },
+            { kind: 'Deployment', namespace: 'a', name: 'd2', ready: 1, desired: 2 },
+            { kind: 'PersistentVolumeClaim', namespace: 'a', name: 'data', reason: 'Pending' },
+          ],
+          warningEvents: [{ namespace: 'b', reason: 'BackOff', message: 'm', involvedKind: 'Pod', involvedName: 'p2', count: 1 }],
+        }),
+      ],
+    ]);
+    const view = renderDrawer('/');
+    const pods = screen.getAllByRole('link', { name: 'Pods' }).at(-1)!;
+    expect(pods.closest('li')).toHaveTextContent('Pods2');
+    expect(screen.getByTitle('2 Pods failing or unavailable')).toBeInTheDocument();
+    expect(screen.getByTitle('2 Deployments need attention')).toBeInTheDocument();
+    // Storage is collapsed: its badge sits on the group header.
+    expect(screen.getByTitle('1 items in Storage need attention')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Events' })).toHaveTextContent('Events1');
+    view.unmount();
+
+    useClustersStore.setState({ namespacesByContext: { dev: ['a'] } });
+    renderDrawer('/');
+    expect(screen.getByTitle('1 Pods failing or unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Events' })).toHaveTextContent(/^Events$/);
   });
 
   it('shows a GitOps group only while Argo CD or Flux is installed, and reveals it on navigation', () => {

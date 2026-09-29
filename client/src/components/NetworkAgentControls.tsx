@@ -5,7 +5,14 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
+import IconButton from '@mui/material/IconButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import type { NetworkAgentStatus } from '@kubus/shared';
@@ -77,16 +84,46 @@ export function InstallNetworkAgentButton({ ctx, size = 'small' }: { ctx: string
   );
 }
 
-export function UninstallNetworkAgentButton({ ctx, status }: { ctx: string; status?: NetworkAgentStatus }) {
+/**
+ * Uninstall with confirmation. `trigger="menu"` renders a ⋮ button whose menu
+ * holds the (destructive) uninstall item, for page headers where a red button
+ * would be the loudest thing on screen.
+ */
+export function UninstallNetworkAgentButton({ ctx, status, trigger = 'button' }: { ctx: string; status?: NetworkAgentStatus; trigger?: 'button' | 'menu' }) {
   const [open, setOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const uninstall = useUninstallNetworkAgent();
   const isProtected = useIsProtected(ctx);
 
   return (
     <>
-      <Button size="small" color="error" variant="outlined" startIcon={<DeleteOutlinedIcon />} onClick={() => setOpen(true)}>
-        Uninstall
-      </Button>
+      {trigger === 'menu' ? (
+        <>
+          <Tooltip title="More actions">
+            <IconButton size="small" aria-label={`More network agent actions for ${ctx}`} onClick={(e) => setMenuAnchor(e.currentTarget)}>
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
+            <MenuItem
+              onClick={() => {
+                setMenuAnchor(null);
+                setOpen(true);
+              }}
+              sx={{ color: 'error.main' }}
+            >
+              <ListItemIcon sx={{ color: 'inherit' }}>
+                <DeleteOutlinedIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Uninstall network agent…</ListItemText>
+            </MenuItem>
+          </Menu>
+        </>
+      ) : (
+        <Button size="small" color="error" variant="outlined" startIcon={<DeleteOutlinedIcon />} onClick={() => setOpen(true)}>
+          Uninstall
+        </Button>
+      )}
       <ConfirmDialog
         open={open}
         title={`Uninstall network agent from ${ctx}`}

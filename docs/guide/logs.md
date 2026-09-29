@@ -71,8 +71,10 @@ Pick how far back to read, from the toolbar:
 
 ## Make sense of the stream
 
-- **Per-pod colour**: every pod gets a distinct colour, so you can tell who said what in
-  an aggregated stream.
+- **Per-pod colour and tag**: every pod gets a distinct colour, and its lines start with
+  a short tag, usually the random suffix of the pod name (`bp4xq` rather than
+  `podinfo-5c7cdc845b-bp4xq`). Hover a tag for the full pod and container name. The pod
+  picker shows the same colours, so it doubles as the legend.
 - **Time order**: lines from different pods are merged by their timestamps, so the
   backlog each pod sends when the tab opens reads as one timeline.
 - **Log levels**: Kubus detects each line's severity (JSON, logfmt, klog and plain
@@ -96,15 +98,21 @@ Pick how far back to read, from the toolbar:
   Scrolling up in a live tail pauses the same way, and scrolling back to the bottom
   resumes. Stepping through find results or jumping from the histogram pauses too, so
   the line you are looking at stays put.
-- **Structured lines**: JSON and logfmt lines have a **›** toggle in front. Click it, or
-  the line, to see its fields as a table, with nested JSON keys flattened to paths such
-  as `http.method`. Copy a single value, or the whole line as formatted JSON.
-- **Markers**: press ++space++ or click the flag to drop a marker line, for example right
-  before you reproduce a bug.
-- **Wrap**: wrap long lines instead of scrolling sideways.
-- **Timestamps**: off, local time, or UTC.
-- **Syntax highlighting**: Kubus recognises JSON and logfmt and highlights levels
-  (`error`, `warn`, …) so problems stand out.
+- **Structured lines**: JSON and logfmt lines show their level and message first, with
+  the remaining fields dimmed after them as `key=value`. Timestamp and level fields are
+  left out because the time column and the level already show them. Switch to **Raw** in
+  the toolbar to see the lines exactly as the containers wrote them. Each structured
+  line also has a **›** toggle in front: click it, or the line, to see its fields as a
+  table, with nested JSON keys flattened to paths such as `http.method`. Copy a single
+  value, or the whole line as formatted JSON.
+- **View menu**: the **View** button holds the display settings and buffer actions:
+    - **Syntax highlighting**: Kubus recognises JSON and logfmt and highlights levels
+      (`error`, `warn`, …) so problems stand out.
+    - **Wrap long lines** instead of scrolling sideways.
+    - **Timestamps**: off, local time, or UTC.
+    - **Add marker** drops a marker line, for example right before you reproduce a bug.
+      ++space++ does the same from anywhere in the log panel.
+    - **Clear buffer** empties the on-screen buffer to start fresh.
 
 Defaults for tail length, wrapping, timestamps and highlighting live in
 [Settings → Logs & terminal](settings.md#logs-terminal).
@@ -116,12 +124,11 @@ formats. Each menu entry shows a sample of the format built from your last visib
 
 | Format | What you get |
 | --- | --- |
-| **As shown** | Source, time and markers as on screen. |
+| **As shown** | The full pod and container name, time and markers, one line each. |
 | **Raw** | Only the lines, exactly as the containers wrote them, colour codes included. |
 | **With timestamps** | The RFC 3339 timestamp from Kubernetes and the `[pod/container]` source before each line. |
 | **NDJSON** | One JSON object per line with `ts`, `pod`, `container`, `level` and `message`, ready for `jq`. |
 
-- **Clear** empties the on-screen buffer to start fresh.
 - **Maximise** the dock from its title bar when you need room to read.
 
 ## See also

@@ -118,7 +118,8 @@ export function DeploymentDetail({ obj, ctx }: { obj: KubeObject; ctx: string })
           { label: 'Ready', value: workloadReady(obj), tone: readyTone },
           { label: 'Updated', value: String(dstatus?.updatedReplicas ?? 0), hint: 'Replicas running the current pod template.' },
           { label: 'Available', value: String(dstatus?.availableReplicas ?? 0), hint: 'Replicas ready for at least minReadySeconds.' },
-          { label: 'Unavailable', value: String(dstatus?.unavailableReplicas ?? 0), tone: dstatus?.unavailableReplicas ? 'warning' : undefined },
+          // Same fact as Ready from the other side, so the same tone: red when nothing is up.
+          { label: 'Unavailable', value: String(dstatus?.unavailableReplicas ?? 0), tone: dstatus?.unavailableReplicas ? (ready === 0 ? 'error' : 'warning') : undefined },
         ]}
       />
       <ReplicaBar desired={desired} ready={ready} total={dstatus?.replicas ?? 0} updated={dstatus?.updatedReplicas ?? 0} paused={spec?.paused} />

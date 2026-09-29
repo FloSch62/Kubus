@@ -34,6 +34,10 @@ interface LogSourceSelectorProps {
   /** "Deployment web" when the tab follows a workload's pods. */
   following?: string;
   podNotes: ReadonlyMap<string, string>;
+  /** Per-pod line colours; shown as a legend when lines carry a pod tag. */
+  podColors?: ReadonlyMap<string, string>;
+  /** The short tag each pod's lines carry (see shortPodLabels). */
+  podLabels?: ReadonlyMap<string, string>;
   onApply: (pods: ReadonlySet<string>, containers: ReadonlySet<string>) => void;
 }
 
@@ -44,6 +48,8 @@ export const LogSourceSelector = memo(function LogSourceSelector({
   enabledContainers,
   following,
   podNotes,
+  podColors,
+  podLabels,
   onApply,
 }: LogSourceSelectorProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -94,7 +100,20 @@ export const LogSourceSelector = memo(function LogSourceSelector({
         <Button
           size="small"
           variant="outlined"
-          startIcon={<TuneIcon fontSize="small" />}
+          startIcon={
+            podColors ? (
+              <Box component="span" aria-hidden sx={{ display: 'inline-flex', gap: '3px' }}>
+                {livePods
+                  .filter((source) => enabledPods.has(source.pod))
+                  .slice(0, 4)
+                  .map((source) => (
+                    <Box key={source.pod} component="span" sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: podColors.get(source.pod) ?? 'text.disabled' }} />
+                  ))}
+              </Box>
+            ) : (
+              <TuneIcon fontSize="small" />
+            )
+          }
           onClick={(event) => openSelector(event.currentTarget)}
           aria-label="Select log pods and containers"
           aria-haspopup="menu"
@@ -127,7 +146,17 @@ export const LogSourceSelector = memo(function LogSourceSelector({
               return (
                 <MenuItem key={source.pod} dense disabled={source.gone || (checked && draftPods.size === 1)} onClick={() => togglePod(source.pod)}>
                   <Checkbox size="small" checked={checked && !source.gone} />
-                  <ListItemText primary={source.pod} secondary={note ? `${containers} · ${note}` : containers} />
+                  <ListItemText
+                    primary={
+                      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                        {podColors ? (
+                          <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: '2px', flexShrink: 0, bgcolor: podColors.get(source.pod) ?? 'text.disabled' }} />
+                        ) : null}
+                        {source.pod}
+                      </Box>
+                    }
+                    secondary={[podLabels && podLabels.get(source.pod) !== source.pod ? `shown as ${podLabels.get(source.pod)}` : '', containers, note].filter(Boolean).join(' · ')}
+                  />
                 </MenuItem>
               );
             })}

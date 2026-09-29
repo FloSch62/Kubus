@@ -26,8 +26,19 @@ Press ++ctrl+k++ (++cmd+k++ on macOS), or click the search box in the top bar.
     selected cluster), **kinds**, and **pages**. Use ++up++ / ++down++ to move and
     ++enter++ to open.
 
-    With nothing typed, it shows your **favourites**. Star a result (press ++tab++ to
-    reveal the star) to pin things you open a lot.
+    Results are grouped the way the sidebar is (Workloads, Network, Config, Storage, Helm
+    & GitOps, custom resources, kinds, pages), with the group holding the best match on
+    top. Each row shows the kind's icon, the namespace, and for pods, workloads, nodes and
+    claims a live status such as `Running`, `3/3` or `CrashLoopBackOff`. The part of the
+    name that matched your text is highlighted.
+
+    Pods that share an owner collapse into one row (`podinfo-5c7cd…`, 3 Pods, 3 Running).
+    Press ++enter++ or ++right++ to expand it, ++left++ to fold it again.
+
+    With nothing typed, the palette lists your **favourites**, the resources you opened
+    recently, the pages you jump to most (with their `g` shortcut), and a few common
+    actions: switch cluster, change namespace, install a Helm chart. Star a result to pin
+    things you open a lot.
 
 === "Actions (++tab++)"
 
@@ -45,6 +56,9 @@ Press ++ctrl+k++ (++cmd+k++ on macOS), or click the search box in the top bar.
 
     | Command | Does |
     | --- | --- |
+    | Switch cluster… | Pick a cluster from a list; ++enter++ switches to it, ++ctrl+enter++ adds or removes it |
+    | Change namespace… | Pick a namespace filter; ++enter++ shows only that one, ++ctrl+enter++ adds or removes it |
+    | Install a Helm chart… | Open the Helm page with the install dialog |
     | Toggle dark / light mode | Flip the theme |
     | Toggle terminal dock | Show/hide the bottom dock |
     | Go to Overview | Jump to the dashboard |

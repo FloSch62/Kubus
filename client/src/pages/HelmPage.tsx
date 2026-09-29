@@ -1,6 +1,6 @@
 import { READ_ONLY_GRID_SLOTS } from '../components/ResourceGridCell.js';
 import { GridTooltips } from '../components/CellTooltip.js';
-import { Suspense, lazy, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -27,8 +27,8 @@ import SailingOutlinedIcon from '@mui/icons-material/SailingOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import SystemUpdateAltOutlinedIcon from '@mui/icons-material/SystemUpdateAltOutlined';
 import UpgradeIcon from '@mui/icons-material/Upgrade';
-import { useNavigate } from 'react-router';
-import type { GridColDef } from '@mui/x-data-grid';
+import { useNavigate, useSearchParams } from 'react-router';
+import type { GridColDef, GridPaginationModel } from '@mui/x-data-grid';
 import { DataGrid } from '@mui/x-data-grid';
 import type { HelmChartUpdate, HelmOperation, HelmReleaseSummary } from '@kubus/shared';
 import { useAppInfo, useHelmOperations, useHelmReleases, useHelmUninstall, useHelmUpdates } from '../api/queries.js';
@@ -61,7 +61,8 @@ interface ReleaseContextMenu {
 
 type ReleaseFilter = 'all' | 'attention' | 'updates';
 
-const releasesGridSx = { flex: 1, minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx };
+// Sized to its rows (up to the space left), not stretched over the page.
+const releasesGridSx = { flex: '0 1 auto', height: 'auto', maxHeight: '100%', minHeight: 0, border: 0, '& .MuiDataGrid-row': { cursor: 'pointer' }, ...copyCellGridSx };
 /** Helm statuses that mean "done and fine"; everything else deserves a look. */
 const SETTLED_STATUSES = new Set(['deployed', 'superseded']);
 
@@ -110,9 +111,27 @@ export function HelmPage() {
   const [uninstallTarget, setUninstallTarget] = useState<Row | null>(null);
   const [filterText, setFilterText] = useState('');
   const [filter, setFilter] = useState<ReleaseFilter>('all');
+  // The footer only appears once the releases need more than one page.
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 100 });
   const deferredFilterText = useDeferredValue(filterText);
   const gridRootRef = useRef<HTMLDivElement>(null);
-  const helmEngine = useAppInfo().data?.helmEngine ?? false;
+  const appInfo = useAppInfo().data;
+  const helmEngine = appInfo?.helmEngine ?? false;
+  // `?install=1` (the command palette's "Install a Helm chart…") opens the
+  // install dialog once the app info says the Helm engine is available.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const installRequested = searchParams.get('install') === '1';
+  useEffect(() => {
+    if (!installRequested || !appInfo) return;
+    if (appInfo.helmEngine) setInstallOpen(true);
+    setSearchParams(
+      (params) => {
+        params.delete('install');
+        return params;
+      },
+      { replace: true },
+    );
+  }, [installRequested, appInfo, setSearchParams]);
   const operations = useHelmOperations();
   const uninstall = useHelmUninstall();
   const uninstallTargetProtected = useIsProtected(uninstallTarget?.ctx ?? '');
@@ -384,6 +403,9 @@ export function HelmPage() {
             }
           }}
           sx={releasesGridSx}
+          paginationModel={paginationModel}
+          onPaginationModelChange={setPaginationModel}
+          hideFooter={rows.length <= paginationModel.pageSize}
           initialState={{ sorting: { sortModel: [{ field: 'name', sort: 'asc' }] } }}
         />
       </GridTooltips>

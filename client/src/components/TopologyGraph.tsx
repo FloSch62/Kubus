@@ -12,7 +12,20 @@ export interface TopologyGraphProps {
   namespaces: TopologyNamespaces;
   focus?: TopologyFocus;
   hideDisconnected?: boolean;
+  /** Fold idle old ReplicaSets into one placeholder per workload. Uncontrolled (on) when omitted. */
+  foldReplicaSets?: boolean;
+  onFoldReplicaSetsChange?: (fold: boolean) => void;
+  /** Receives the visible counts; the graph then leaves them out of its own footer. */
+  onStats?: (stats: TopologyStats) => void;
   emptyTitle?: string;
+}
+
+export interface TopologyStats {
+  resources: number;
+  links: number;
+  issues: number;
+  /** Placeholders standing in for folded ReplicaSets. */
+  folded: number;
 }
 
 const loadImpl = () => import('./TopologyGraphImpl.js');

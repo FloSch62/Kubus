@@ -49,6 +49,7 @@ import { fetchAppLogs, formatLogEntry } from '../../api/logs.js';
 import { exportFilename, saveTextFile } from '../../save-file.js';
 import { showErrorToast } from '../../state/toast.js';
 import { useUiStore } from '../../state/ui.js';
+import { useShellPrefsStore } from '../../state/shell-prefs.js';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -610,7 +611,13 @@ function DebugSection() {
 const TABS = ['Kubeconfig', 'Clusters', 'Appearance', 'Data & refresh', 'Logs & terminal', 'Debug containers', 'Diagnostics', 'About'];
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState(0);
+  // Reopens where you left it; most visits come back to the same tab.
+  const setSettingsTab = useShellPrefsStore((s) => s.setSettingsTab);
+  const [tab, setTabState] = useState(() => Math.max(0, TABS.indexOf(useShellPrefsStore.getState().settingsTab ?? '')));
+  const setTab = (index: number) => {
+    setTabState(index);
+    setSettingsTab(TABS[index] ?? TABS[0]!);
+  };
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>Settings</DialogTitle>

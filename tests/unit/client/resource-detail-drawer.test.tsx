@@ -168,6 +168,9 @@ vi.mock('../../../client/src/components/MetricsChart.js', () => ({ MetricsChart:
 vi.mock('../../../client/src/components/TopologyGraph.js', () => ({ TopologyGraph: ({ focus }: { focus: { name: string } }) => <div>Topology {focus.name}</div> }));
 vi.mock('../../../client/src/components/RowActions.js', () => ({
   DetailQuickActions: ({ target }: { target: { obj: KubeObject } }) => <button>Quick actions {target.obj.metadata.name}</button>,
+  RowActions: ({ target }: { target: { obj: KubeObject } }) => <button>Row menu {target.obj.metadata.name}</button>,
+  hasDetailQuickActions: ({ kind }: { kind: string }) =>
+    ['Pod', 'Node', 'Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job', 'CronJob', 'ConfigMap', 'Secret', 'Service'].includes(kind),
 }));
 vi.mock('../../../client/src/components/AgeCell.js', () => ({ useNow: () => Date.now(), AgeCell: ({ timestamp }: { timestamp?: string }) => <span>{timestamp ? 'age' : 'unknown age'}</span> }));
 vi.mock('../../../client/src/components/truncation.js', () => ({ TruncationTooltip: ({ children }: { children: ReactNode }) => <>{children}</> }));
@@ -545,6 +548,22 @@ describe('ResourceDetailDrawer', () => {
     expect(screen.getByText('Pod overview pod-a')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Manifest' }));
     expect(screen.getByText('read-only')).toBeInTheDocument();
+  });
+
+  it('puts the ⋮ menu in the title row for kinds without quick actions', () => {
+    const role = selection('Role', { group: 'rbac.authorization.k8s.io', plural: 'roles' });
+    queries.current = objectFor(role);
+    render(<ResourceDetailPanel sel={role} onClose={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Row menu role-a' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Quick actions role-a' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the action bar, with its own ⋮ menu, for kinds that have quick actions', () => {
+    const cm = selection('ConfigMap');
+    queries.current = objectFor(cm);
+    render(<ResourceDetailPanel sel={cm} onClose={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Quick actions configmap-a' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Row menu configmap-a' })).not.toBeInTheDocument();
   });
 
   it('guards dirty ConfigMap data before changing tabs or closing', () => {

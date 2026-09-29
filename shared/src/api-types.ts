@@ -974,6 +974,30 @@ export interface OverviewWorkloadIssue {
   /** Short machine-ish cause: Unavailable, Failed, Pending, NoDisruptionsAllowed, AtQuota… */
   reason?: string;
   message?: string;
+  /** What is behind it, read from the workload's pods or its latest Warning event. */
+  cause?: WorkloadIssueCause;
+}
+
+/**
+ * The first concrete reason a workload is unhealthy: a pod's waiting state
+ * (CrashLoopBackOff, ImagePullBackOff…), the scheduler's refusal, or a
+ * controller or volume event (FailedCreate, ProvisioningFailed…).
+ */
+export interface WorkloadIssueCause {
+  /** Kubernetes reason: CrashLoopBackOff, ImagePullBackOff, Unschedulable, FailedCreate, ProvisioningFailed… */
+  reason: string;
+  /** The raw message behind it (kubelet, scheduler or event text). */
+  message?: string;
+  /** Object the cause was read from: one of the workload's pods, its ReplicaSet, or the object itself. */
+  source?: { kind: string; name: string };
+  /** Pods of the workload in this state. */
+  pods?: number;
+  /** Lifetime restarts of the source pod. */
+  restarts?: number;
+  /** Exit code of the source container's last termination. */
+  exitCode?: number;
+  /** Image the source container fails to pull. */
+  image?: string;
 }
 
 /** Per-kind rollup for the unified workload-health section. */
@@ -1244,6 +1268,8 @@ export interface HelmReleaseDetail extends HelmReleaseSummary {
   chartDependencies: number;
   /** Number of hooks stored in the release record. */
   hookCount: number;
+  /** `helm test` hooks and the latest run Helm recorded for them (absent: never run). */
+  tests?: { count: number; lastRun?: { phase: string; startedAt?: string; completedAt?: string } };
   /** CRDs shipped in the chart's crds/ directory — offered for optional cleanup on uninstall. */
   chartCrds: string[];
 }

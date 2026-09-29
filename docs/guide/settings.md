@@ -4,8 +4,8 @@ icon: lucide/settings
 
 # Settings
 
-Open settings from the **:material-cog: gear** in the top bar. Nearly everything here is
-stored in your browser/app profile. The one exception is the debug image catalog, which
+Open settings from the **:material-cog: gear** in the top bar. The dialog reopens on the
+tab you used last. Nearly everything here is stored in your browser/app profile. The one exception is the debug image catalog, which
 the server keeps in `settings.json` so the images are available from any window.
 
 <figure markdown="span">

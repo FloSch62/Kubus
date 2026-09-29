@@ -2,13 +2,13 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
-import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
@@ -16,10 +16,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
-import WrapTextIcon from '@mui/icons-material/WrapText';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import PaletteOutlinedIcon from '@mui/icons-material/PaletteOutlined';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -27,7 +23,6 @@ import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import FilterAltOutlinedIcon from '@mui/icons-material/FilterAltOutlined';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
-import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -37,7 +32,7 @@ import { wsUrl } from '../api/http.js';
 import type { LogsTab } from '../state/dock.js';
 import { copyToClipboard } from '../clipboard.js';
 import { exportFilename, saveTextFile } from '../save-file.js';
-import { useLogPrefsStore, type TsMode } from '../state/log-prefs.js';
+import { useLogPrefsStore, type LogView, type TsMode } from '../state/log-prefs.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { showToast } from '../state/toast.js';
 import { isTextEntryTarget } from '../text-entry.js';
@@ -51,6 +46,7 @@ import {
   rowAt,
   rowsHeight,
   rowTop,
+  shortPodLabels,
   textMatcher,
   type HistogramLevel,
   type LogEntry,
@@ -64,6 +60,7 @@ import { LogExportMenu } from './LogExportMenu.js';
 import { LogHistogram } from './LogHistogram.js';
 import { fieldsOf, fmtTs, levelOf, LineRow, localLogTime, LOG_ROW_CSS, MARKER_COLOR, strippedOf } from './LogLineRow.js';
 import { LogSourceSelector, type LogSource } from './LogSourceSelector.js';
+import { LogViewMenu } from './LogViewMenu.js';
 
 type LogConnectionState = 'connecting' | 'streaming' | 'reconnecting' | 'complete' | 'disconnected';
 
@@ -302,9 +299,11 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
   const wrap = useLogPrefsStore((s) => s.wrap);
   const tsMode = useLogPrefsStore((s) => s.tsMode);
   const highlight = useLogPrefsStore((s) => s.highlight);
+  const view = useLogPrefsStore((s) => s.view);
   const setWrap = useLogPrefsStore((s) => s.setWrap);
-  const cycleTsMode = useLogPrefsStore((s) => s.cycleTsMode);
+  const setTsMode = useLogPrefsStore((s) => s.setTsMode);
   const setHighlight = useLogPrefsStore((s) => s.setHighlight);
+  const setView = useLogPrefsStore((s) => s.setView);
   const rememberEnabledContainers = useLogPrefsStore((s) => s.rememberEnabledContainers);
   const monoFontSize = useUiPrefsStore((s) => s.monoFontSize);
   const defaultTailLines = useUiPrefsStore((s) => s.defaultTailLines);
@@ -316,6 +315,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     if (!podColorsRef.current.has(source.pod)) podColorsRef.current.set(source.pod, POD_COLORS[podColorsRef.current.size % POD_COLORS.length]!);
   }
   const podColors = podColorsRef.current;
+  const podLabels = useMemo(() => shortPodLabels(sources.map((source) => source.pod)), [sources]);
 
   const enabledContainers = useMemo(() => containerChoice ?? new Set(allContainerNames), [allContainerNames, containerChoice]);
   const enabledPods = useMemo(
@@ -896,6 +896,16 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
   const currentMatch = matches.length ? matches[cursor] : undefined;
   const showPod = sources.length > 1 || !!followTarget;
   const showSource = showPod || allContainerNames.length > 1;
+  // The Message / Raw switch only matters when the tab has JSON or logfmt lines.
+  const hasStructured = useMemo(() => {
+    for (let index = deferredVisible.length - 1, seen = 0; index >= 0 && seen < 400; index -= 1) {
+      const entry = deferredVisible[index]!;
+      if (entry.kind !== 'line') continue;
+      seen += 1;
+      if (fieldsOf(entry)) return true;
+    }
+    return false;
+  }, [deferredVisible]);
   const connectionTooltip =
     displayState === 'waiting'
       ? noPods
@@ -960,6 +970,8 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
           enabledContainers={enabledContainers}
           following={following}
           podNotes={podNotes}
+          podColors={showPod ? podColors : undefined}
+          podLabels={podLabels}
           onApply={applySourceSelection}
         />
         <TextField
@@ -967,7 +979,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={clearOnEscape(filter, setFilter)}
-          sx={{ width: 200 }}
+          sx={{ width: 180 }}
           slotProps={{
             htmlInput: { 'aria-label': 'Show only lines matching' },
             input: {
@@ -1002,7 +1014,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
           value={exclude}
           onChange={(e) => setExclude(e.target.value)}
           onKeyDown={clearOnEscape(exclude, setExclude)}
-          sx={{ width: 175 }}
+          sx={{ width: 160 }}
           slotProps={{
             htmlInput: { 'aria-label': 'Hide lines matching' },
             input: {
@@ -1040,7 +1052,7 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
               }
             }
           }}
-          sx={{ width: 220 }}
+          sx={{ width: 190 }}
           slotProps={{
             htmlInput: { 'aria-label': 'Find in logs' },
             input: {
@@ -1067,6 +1079,33 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
         />
         <Box sx={{ flex: 1 }} />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {hasStructured && (
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={view}
+              onChange={(_event, next: LogView | null) => next && setView(next)}
+              aria-label="Structured line display"
+              sx={{ mr: 0.5, '& .MuiToggleButton-root': { py: 0.25, px: 1, fontSize: 12.5 } }}
+            >
+              <Tooltip describeChild title="JSON and logfmt lines: level and message first, other fields dimmed">
+                <ToggleButton value="message">Message</ToggleButton>
+              </Tooltip>
+              <Tooltip describeChild title="Lines exactly as the containers wrote them">
+                <ToggleButton value="raw">Raw</ToggleButton>
+              </Tooltip>
+            </ToggleButtonGroup>
+          )}
+          <LogViewMenu
+            highlight={highlight}
+            wrap={wrap}
+            tsMode={tsMode}
+            onHighlightChange={setHighlight}
+            onWrapChange={setWrap}
+            onTsModeChange={setTsMode}
+            onAddMarker={addVisualMarker}
+            onClear={resetBuffer}
+          />
           <Tooltip title={paused ? `Resume${pendingCount ? ` (${pendingCount.toLocaleString()} new lines)` : ''}` : 'Pause: freeze the view, keep collecting'}>
             <ToggleButton
               value="pause"
@@ -1079,42 +1118,8 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
               {paused ? <PlayArrowIcon fontSize="small" /> : <PauseIcon fontSize="small" />}
             </ToggleButton>
           </Tooltip>
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-          <Tooltip title={highlight ? 'Disable syntax highlighting' : 'Enable syntax highlighting (ANSI / JSON / logfmt)'}>
-            <ToggleButton
-              value="highlight"
-              selected={highlight}
-              size="small"
-              aria-label={highlight ? 'Disable syntax highlighting' : 'Enable syntax highlighting'}
-              onChange={() => setHighlight(!highlight)}
-              sx={{ p: 0.5 }}
-            >
-              <PaletteOutlinedIcon fontSize="small" />
-            </ToggleButton>
-          </Tooltip>
-          <Tooltip title={wrap ? 'Disable line wrap' : 'Wrap long lines'}>
-            <ToggleButton value="wrap" selected={wrap} size="small" aria-label={wrap ? 'Disable line wrap' : 'Wrap long lines'} onChange={() => setWrap(!wrap)} sx={{ p: 0.5 }}>
-              <WrapTextIcon fontSize="small" />
-            </ToggleButton>
-          </Tooltip>
-          <Tooltip title={`Timestamps: ${tsMode}`}>
-            <ToggleButton value="ts" selected={tsMode !== 'off'} size="small" aria-label={`Timestamps: ${tsMode}`} onChange={cycleTsMode} sx={{ p: 0.5 }}>
-              <AccessTimeIcon fontSize="small" />
-            </ToggleButton>
-          </Tooltip>
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-          <Tooltip title="Add visual marker (Space)">
-            <IconButton size="small" aria-label="Add visual log marker" onClick={addVisualMarker}>
-              <FlagOutlinedIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
           <LogExportMenu verb="Copy" icon={<ContentCopyIcon fontSize="small" />} lineCount={visibleLineCount} preview={exportPreview} onExport={(format) => void copyVisible(format)} />
           <LogExportMenu verb="Download" icon={<DownloadIcon fontSize="small" />} lineCount={visibleLineCount} preview={exportPreview} onExport={download} />
-          <Tooltip title="Clear">
-            <IconButton size="small" aria-label="Clear log buffer" onClick={resetBuffer}>
-              <DeleteSweepIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
         </Box>
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, pt: 0.25, pb: 0.5, borderBottom: 1, borderColor: 'divider', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -1251,8 +1256,11 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
                   wrap={wrap}
                   showPod={showPod}
                   showSource={showSource}
+                  showContainer={allContainerNames.length > 1}
+                  podLabel={l.kind === 'line' ? podLabels.get(l.pod) : undefined}
                   podColor={l.kind === 'line' && showSource ? (podColors.get(l.pod) ?? '#888') : undefined}
                   tsMode={tsMode}
+                  view={view}
                   highlight={highlight}
                   find={find}
                   isCurrent={idx === currentMatch}

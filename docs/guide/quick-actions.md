@@ -8,7 +8,11 @@ Most of what you'd reach for `kubectl` to do, Kubus does from a menu. Every list
 **⋮ menu**, and the same actions are available from the [details drawer](resource-details.md)
 and the [command palette](command-palette.md).
 
-Actions only appear where they make sense. You'll never see *Cordon* on a ConfigMap.
+Actions only appear where they make sense. You'll never see *Cordon* on a ConfigMap. The
+drawer puts the most common ones in a labeled action bar: **Logs**, **Shell** and
+**Forward** for pods, **Scale** and **Restart** for workloads, **Cordon** and **Drain** for
+nodes, **Edit data** for ConfigMaps and Secrets. Kinds without any keep only the ⋮ menu,
+in the drawer's title row.
 
 ## Workloads
 

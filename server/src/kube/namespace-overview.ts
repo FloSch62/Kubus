@@ -11,6 +11,7 @@ import { gradeBuiltinKind, gradeCustomKind } from './inventory-health.js';
 import { resolveCrd } from './operator-rollups.js';
 import { collectWarningEvents, optionalItems, podFailure } from './overview.js';
 import { parseQuantity } from './quantity.js';
+import { attachWorkloadCauses } from './workload-causes.js';
 import { HEALTH_KINDS, computeWorkloadHealth, type HealthKindItems } from './workload-health.js';
 
 /**
@@ -84,6 +85,7 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
 
     const now = Date.now();
     const pods = itemsByKind.get('Pod')?.items ?? [];
+    const events = eventsWatcher.watcher.items().filter(inNamespace);
     const failingPods = pods
       .flatMap((pod) => {
         const failure = podFailure(pod, now);
@@ -170,7 +172,6 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
     });
 
     const nsObject = scope.size === 1 ? namespacesWatcher.watcher.items().find((n) => scope.has(n.metadata.name)) : undefined;
-    const events = eventsWatcher.watcher.items().filter(inNamespace);
 
     return {
       namespaces,
@@ -178,7 +179,7 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
       inventory,
       problems,
       workloadHealth: health.kinds,
-      issues: health.issues,
+      issues: attachWorkloadCauses(health.issues, pods, events, now),
       failingPods,
       quotas,
       warningEvents: collectWarningEvents(events, now, await handle.discovery.getResources().catch(() => [])),

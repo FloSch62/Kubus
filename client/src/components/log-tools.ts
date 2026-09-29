@@ -104,7 +104,7 @@ export function textMatcher(pattern: string, matchCase: boolean): ((text: string
 export type LogExportFormat = 'shown' | 'raw' | 'timestamps' | 'ndjson';
 
 export const LOG_EXPORT_FORMATS: ReadonlyArray<{ value: LogExportFormat; label: string; hint: string; ext: string; mime: string }> = [
-  { value: 'shown', label: 'As shown', hint: 'Source, time and markers as on screen', ext: 'log', mime: 'text/plain' },
+  { value: 'shown', label: 'As shown', hint: 'Full pod and container, time and markers', ext: 'log', mime: 'text/plain' },
   { value: 'raw', label: 'Raw', hint: 'Only the lines, exactly as the containers wrote them', ext: 'log', mime: 'text/plain' },
   { value: 'timestamps', label: 'With timestamps', hint: 'RFC 3339 timestamp and source before each line', ext: 'log', mime: 'text/plain' },
   { value: 'ndjson', label: 'NDJSON', hint: 'One JSON object per line, for jq and log tools', ext: 'ndjson', mime: 'application/x-ndjson' },
@@ -118,6 +118,33 @@ export interface LogExportOptions {
   /** Timestamp as displayed, or undefined when timestamps are hidden. */
   formatTs?: (ts: string) => string;
   levelOf: (line: LogLine) => LogLevel | undefined;
+}
+
+/**
+ * Short labels for the pods of one log tab. A workload's pods share their
+ * name up to a random suffix, so the shortest unique tail (whole dash
+ * segments, at least 3 characters) is enough to tell them apart on screen.
+ * Short names stay whole.
+ */
+export function shortPodLabels(pods: readonly string[]): Map<string, string> {
+  const unique = [...new Set(pods)];
+  const labels = new Map<string, string>();
+  for (const pod of unique) {
+    let label = pod;
+    if (pod.length > 16) {
+      const parts = pod.split('-');
+      for (let take = 1; take < parts.length; take += 1) {
+        const tail = parts.slice(-take).join('-');
+        if (tail.length < 3) continue;
+        if (!unique.some((other) => other !== pod && (other === tail || other.endsWith(`-${tail}`)))) {
+          label = tail;
+          break;
+        }
+      }
+    }
+    labels.set(pod, label);
+  }
+  return labels;
 }
 
 function sourceOf(line: LogLine, showPod: boolean): string {

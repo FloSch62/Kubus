@@ -71,8 +71,17 @@ describe('ClusterSwitcher', () => {
 
     fireEvent.click(screen.getByLabelText('Select prod-eu'));
     expect(queryMocks.connect.mutate).toHaveBeenCalledWith({ ctx: 'prod-eu', connect: true });
-    fireEvent.click(screen.getByLabelText('Reconnect dev-eu'));
+    // Row actions live behind one named menu per context.
+    fireEvent.click(screen.getByLabelText('Actions for dev-eu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Reconnect/ }));
     expect(queryMocks.reconnect.mutate).toHaveBeenCalledWith('dev-eu');
+    fireEvent.click(screen.getByLabelText('Actions for dev-eu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Protect this cluster/ }));
+    expect(useClustersStore.getState().contextSettings['dev-eu']?.protected).toBe(true);
+    expect(screen.getAllByLabelText('Protected').length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByLabelText('Actions for dev-eu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Remove protection/ }));
+    expect(useClustersStore.getState().contextSettings['dev-eu']?.protected).toBe(false);
 
     fireEvent.change(search, { target: { value: 'prod' } });
     expect(screen.getByText('Select matches (1)')).toBeInTheDocument();
@@ -111,7 +120,8 @@ describe('ClusterSwitcher', () => {
     fireEvent.keyDown(search, { key: 'ArrowUp' });
     fireEvent.click(screen.getByLabelText('List layout'));
 
-    fireEvent.click(screen.getByLabelText('Customize dev-eu'));
+    fireEvent.click(screen.getByLabelText('Actions for dev-eu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Customize icon and group/ }));
     expect(await screen.findByText('Icon')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'No icon' }));
     expect(useClustersStore.getState().contextSettings['dev-eu']?.icon).toBeUndefined();

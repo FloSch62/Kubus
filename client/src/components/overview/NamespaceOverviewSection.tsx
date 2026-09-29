@@ -1,24 +1,32 @@
 import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useNavigate } from 'react-router';
-import type { NamespaceInventoryEntry, NamespaceQuotaStatus } from '@kubus/shared';
+import type { InventoryProblem, NamespaceInventoryEntry, NamespaceQuotaStatus, OperatorRollup, OverviewWorkloadIssue } from '@kubus/shared';
 import { useNamespaceOverview, useOverviewCertificates, useOverviewOperators } from '../../api/queries.js';
+import { useClustersStore } from '../../state/clusters.js';
 import { StatusChip } from '../StatusChip.js';
+import { AttentionTiles, OverviewLabel } from './Attention.js';
+import { attentionItems } from './attention-items.js';
 import { CertExpiryCard } from './CertExpiryCard.js';
 import { FailingPodsCard, ProblemCard, WarningEventsCard, kindListPath } from './cards.js';
 import { InventoryGrid, QuotaUsageList } from './InventoryGrid.js';
 import { OperatorSection } from './OperatorSection.js';
 import { PodUsagePanels } from './PodUsagePanels.js';
-import { WorkloadHealthSection } from './WorkloadHealthSection.js';
+import { WorkloadHealthSection, unhealthyListPath } from './WorkloadHealthSection.js';
+
+/** Kinds the server's workload-health checkers cover (their problems show as unhealthy workloads). */
+const HEALTH_KIND_NAMES = ['Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'HorizontalPodAutoscaler', 'PersistentVolumeClaim', 'PodDisruptionBudget', 'ResourceQuota'];
 
 /**
- * The overview body while the global namespace filter is active: a
+ * The overview body while the global namespace filter is active, in the
+ * same shape as the cluster view: what needs attention first, then a
  * `kubectl get all -n`-style inventory (builtins + installed popular CRDs),
- * unified workload health, operator rollups, quota usage, pod usage panels,
- * failing pods and warning events — all scoped to the selected namespaces.
- * List links inherit the same global filter.
+ * the unhealthy workloads with their causes, operator rollups, quotas, pod
+ * usage, failing pods and warning events, all scoped to the selected
+ * namespaces. List links inherit the same global filter.
  */
 export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; namespaces: string[] }) {
   const { data, isLoading, error, isPlaceholderData } = useNamespaceOverview(ctx, namespaces);
@@ -26,21 +34,9 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
   // all-secrets watcher) — they stream in behind the inventory and health.
   const { data: operators } = useOverviewOperators(ctx, namespaces);
   const { data: certificates } = useOverviewCertificates(ctx, namespaces);
+  const multiCluster = useClustersStore((s) => s.selected.length > 1);
+  const navigate = useNavigate();
   const single = namespaces.length === 1;
-  // The success alert must agree with every problem card above it — and never
-  // judge a stale previous-scope placeholder against fresh operators/certs.
-  const healthy =
-    !!data &&
-    !isPlaceholderData &&
-    data.issues.length === 0 &&
-    data.failingPods.length === 0 &&
-    // Nothing amber or red in the inventory bars either.
-    data.problems.length === 0 &&
-    data.warningEvents.length === 0 &&
-    !!certificates &&
-    certificates.expiring.length === 0 &&
-    !!operators &&
-    operators.every((op) => op.resources.every((r) => r.issues.length === 0 && r.ready >= r.total));
 
   return (
     <>
@@ -56,17 +52,36 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
 
       {isLoading && !data && (
         <Stack spacing={1.5}>
+          <Skeleton variant="rounded" height={78} />
           <Skeleton variant="rounded" height={110} />
-          <Skeleton variant="rounded" height={180} />
         </Stack>
       )}
       {error && <Alert severity="error">{error.message}</Alert>}
 
       {data && (
-        <>
+        <Stack spacing={2}>
+          <Box>
+            <OverviewLabel>Needs attention</OverviewLabel>
+            <AttentionTiles
+              // Never judge a stale previous-scope placeholder against fresh operators/certs.
+              pending={isPlaceholderData || !certificates || !operators}
+              healthyText={`No failing pods, unhealthy workloads, warnings in the last hour or expiring certificates in ${single ? 'this namespace' : 'these namespaces'}.`}
+              items={attentionItems({
+                failingPods: data.failingPods,
+                issues: data.issues,
+                warningEvents: data.warningEvents,
+                certificates,
+                operators,
+                otherProblems: otherProblems(data.problems, data.issues, operators),
+                openPods: () => void navigate(unhealthyListPath({ group: '', version: 'v1', plural: 'pods' }, ctx, multiCluster)),
+                openEvents: () => void navigate('/events'),
+              })}
+            />
+          </Box>
+
           <InventoryCard inventory={data.inventory} />
 
-          <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.issues} scoped hideNamespace={single} />
+          <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.issues} hideNamespace={single} />
 
           {operators && <OperatorSection ctx={ctx} operators={operators} scoped />}
 
@@ -79,24 +94,34 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
           <FailingPodsCard ctx={ctx} pods={data.failingPods} hideNamespace={single} />
 
           <WarningEventsCard ctx={ctx} events={data.warningEvents} />
-
-          {healthy && (
-            <Alert severity="success" variant="outlined">
-              No problems detected in {single ? 'this namespace' : 'these namespaces'}.
-            </Alert>
-          )}
-        </>
+        </Stack>
       )}
     </>
   );
 }
 
+/**
+ * Inventory problems the other tiles don't already count: not pods (failing
+ * pods), not the checked workload kinds (unhealthy workloads) and not custom
+ * resources an operator rollup covers.
+ */
+function otherProblems(problems: InventoryProblem[], issues: OverviewWorkloadIssue[], operators: OperatorRollup[] | undefined): InventoryProblem[] {
+  const covered = new Set(['Pod', ...HEALTH_KIND_NAMES, ...issues.map((i) => i.kind)]);
+  const operatorKinds = new Set((operators ?? []).flatMap((op) => op.resources.map((r) => `${r.group}/${r.plural}`)));
+  // A ReplicaSet short of replicas is its Deployment's problem, already listed.
+  const deployments = issues.filter((i) => i.kind === 'Deployment');
+  const ownedByListed = (p: InventoryProblem) =>
+    p.kind === 'ReplicaSet' && deployments.some((d) => d.namespace === p.namespace && p.name.startsWith(`${d.name}-`));
+  return problems.filter((p) => !covered.has(p.kind) && !operatorKinds.has(`${p.group}/${p.plural}`) && !ownedByListed(p));
+}
+
 function InventoryCard({ inventory }: { inventory: NamespaceInventoryEntry[] }) {
   const navigate = useNavigate();
   return (
-    <ProblemCard title="Inventory">
+    <Box data-anchor="inventory">
+      <OverviewLabel>Inventory</OverviewLabel>
       <InventoryGrid inventory={inventory} onOpen={(e) => navigate(kindListPath(e))} />
-    </ProblemCard>
+    </Box>
   );
 }
 
@@ -110,7 +135,7 @@ function QuotasCard({ ctx, namespaces, quotas }: { ctx: string; namespaces: stri
     void navigate(kindListPath({ group: '', version: 'v1', plural: 'resourcequotas' }, { sel: { ctx, namespace, name } }));
   };
   return (
-    <ProblemCard title="Resource quotas">
+    <ProblemCard title="Resource quotas" count={quotas.length}>
       <QuotaUsageList quotas={quotas} onOpen={open} />
     </ProblemCard>
   );

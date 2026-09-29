@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography';
 import { useNavigate } from 'react-router';
 import type { OverviewCertificates } from '@kubus/shared';
 import { RelativeTimeCell } from '../AgeCell.js';
+import { statusTextColor } from '../../theme.js';
 import { ProblemCard, kindListPath } from './cards.js';
 
 const API_SERVER_WARN_MS = 30 * 24 * 60 * 60 * 1000;
@@ -23,7 +24,7 @@ export function CertExpiryCard({ ctx, certificates, hideNamespace }: { ctx: stri
   if (certificates.expiring.length === 0 && !apiServerSoon) return null;
 
   return (
-    <ProblemCard title="Certificates expiring soon">
+    <ProblemCard title="Certificates expiring soon" count={certificates.expiring.length + (apiServerSoon ? 1 : 0)} anchor="certificates" flush>
       <Table size="small">
         <TableHead>
           <TableRow>
@@ -65,7 +66,7 @@ export function CertExpiryCard({ ctx, certificates, hideNamespace }: { ctx: stri
         </TableBody>
       </Table>
       {!apiServerSoon && certificates.apiServerNotAfter && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 1.5, py: 1 }}>
           API server certificate expires <RelativeTimeCell timestamp={certificates.apiServerNotAfter} variant="caption" />.
         </Typography>
       )}
@@ -76,7 +77,7 @@ export function CertExpiryCard({ ctx, certificates, hideNamespace }: { ctx: stri
 function ExpiryCell({ notAfter }: { notAfter: string }) {
   const expired = Date.parse(notAfter) <= Date.now();
   return (
-    <Typography variant="body2" component="span" sx={{ fontWeight: 600, color: expired ? 'error.main' : 'warning.main' }}>
+    <Typography variant="body2" component="span" sx={{ fontWeight: 600, color: statusTextColor(expired ? 'error' : 'warning') }}>
       {expired ? 'expired ' : ''}
       <RelativeTimeCell timestamp={notAfter} />
     </Typography>

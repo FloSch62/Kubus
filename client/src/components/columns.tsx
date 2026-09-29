@@ -18,6 +18,10 @@ import { useUiPrefsStore } from '../state/prefs.js';
 import { UsageMeter } from './UsageMeter.js';
 import { withoutCellCopy } from './CellCopy.js';
 import { statusTextColor } from '../theme.js';
+import { MiddleEllipsis } from './truncation.js';
+import { ClusterTag } from './ClusterTag.js';
+import { statusColor } from './StatusChip.js';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 export type MetricsLookup = (ctx: string, namespace: string | undefined, name: string) => { cpuMilli: number; memBytes: number; cpuCapacityMilli?: number; memCapacityBytes?: number } | undefined;
 export type NodeAllocationLookup = (ctx: string, nodeName: string) => NodeAllocationSummary;
@@ -35,6 +39,10 @@ interface ColumnBuildOptions {
   signalKind?: string;
   /** Clicking a label chip adds that `key=value` term to the label filter. */
   onLabelClick?: (term: string) => void;
+  /** Palette slot per context for the Cluster tag (see clusterColorIndexes). */
+  clusterColors?: ReadonlyMap<string, number>;
+  /** Contexts whose metrics-server is unreachable: their CPU/Memory cells explain the dash. */
+  metricsUnavailable?: readonly string[];
 }
 
 export interface NodeAllocationSummary {
@@ -98,12 +106,15 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
         .join(' '),
     renderCell: (params) => <LabelsCell labels={obj(params.row).metadata.labels} onLabelClick={opts.onLabelClick} />,
   }),
+  // The table sizes Name to its longest value (see ResourceTable); when it
+  // still has to cut, the middle goes and the distinguishing end stays.
   name: () => ({
     field: 'name',
     headerName: 'Name',
     flex: 1.4,
     minWidth: 180,
     valueGetter: (_v, row) => obj(row).metadata.name,
+    renderCell: (params) => <MiddleEllipsis text={obj(params.row).metadata.name} />,
   }),
   namespace: () => ({
     field: 'namespace',
@@ -111,11 +122,12 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     width: 130,
     valueGetter: (_v, row) => obj(row).metadata.namespace ?? '',
   }),
-  cluster: () => ({
+  cluster: (opts) => ({
     field: 'cluster',
     headerName: 'Cluster',
-    width: 140,
+    width: 118,
     valueGetter: (_v, row) => row.ctx,
+    renderCell: (params) => <ClusterTag ctx={params.row.ctx} colorIndex={opts.clusterColors?.get(params.row.ctx) ?? 0} />,
   }),
   age: () => ({
     field: 'age',
@@ -172,10 +184,11 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     type: 'number',
     headerAlign: 'left',
     align: 'left',
+    ...metricsUnavailableHeader('CPU', opts.metricsUnavailable),
     valueGetter: (_v, row) => opts.metrics?.(row.ctx, obj(row).metadata.namespace, obj(row).metadata.name)?.cpuMilli ?? null,
     renderCell: (params) => {
       const m = opts.metrics?.(params.row.ctx, obj(params.row).metadata.namespace, obj(params.row).metadata.name);
-      if (!m) return '—';
+      if (!m) return missingMetric(params.row.ctx, opts.metricsUnavailable);
       // Workload lookups carry summed pod requests as capacity; Pod rows
       // read requests off their own spec.
       const max = m.cpuCapacityMilli ?? (podRequestTotals(obj(params.row)).cpuMilli || undefined);
@@ -189,10 +202,11 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     type: 'number',
     headerAlign: 'left',
     align: 'left',
+    ...metricsUnavailableHeader('Memory', opts.metricsUnavailable),
     valueGetter: (_v, row) => opts.metrics?.(row.ctx, obj(row).metadata.namespace, obj(row).metadata.name)?.memBytes ?? null,
     renderCell: (params) => {
       const m = opts.metrics?.(params.row.ctx, obj(params.row).metadata.namespace, obj(params.row).metadata.name);
-      if (!m) return '—';
+      if (!m) return missingMetric(params.row.ctx, opts.metricsUnavailable);
       const max = m.memCapacityBytes ?? (podRequestTotals(obj(params.row)).memoryBytes || undefined);
       return <UsageMeter value={m.memBytes} max={max} format={formatBytes} placeholder emptyHint="no memory requests set" />;
     },
@@ -206,9 +220,11 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     renderCell: (params) => {
       const summary = opts.nodeAllocation?.(params.row.ctx, obj(params.row).metadata.name) ?? EMPTY_NODE_ALLOCATION;
       const podCapacity = nodeAllocatablePods(obj(params.row));
-      const text = `${summary.podCount}${summary.daemonSetPodCount ? ` (${summary.daemonSetPodCount} ds)` : ''}`;
+      // Same count as the node's Pods tile: pods not yet finished, against the pods it accepts.
+      const text = podCapacity ? `${summary.podCount} / ${podCapacity}` : String(summary.podCount);
+      const split = summary.daemonSetPodCount ? `, ${summary.daemonSetPodCount} from DaemonSets` : '';
       return (
-        <Tooltip title={podCapacity ? `${summary.podCount} / ${podCapacity} allocatable pods` : text}>
+        <Tooltip title={`${summary.podCount} pods running or waiting${split}${podCapacity ? ` · ${podCapacity} allowed` : ''}`}>
           <Typography variant="body2" noWrap>
             {text}
           </Typography>
@@ -221,6 +237,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'CPU Usage',
     width: 130,
     type: 'number',
+    ...metricsUnavailableHeader('CPU Usage', opts.metricsUnavailable),
     valueGetter: (_v, row) => {
       const m = opts.metrics?.(row.ctx, undefined, obj(row).metadata.name);
       const capacity = m?.cpuCapacityMilli ?? nodeAllocatableCpuMilli(obj(row));
@@ -228,6 +245,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     },
     renderCell: (params) => {
       const m = opts.metrics?.(params.row.ctx, undefined, obj(params.row).metadata.name);
+      if (!m && opts.metricsUnavailable?.includes(params.row.ctx)) return missingMetric(params.row.ctx, opts.metricsUnavailable);
       const capacity = m?.cpuCapacityMilli ?? nodeAllocatableCpuMilli(obj(params.row));
       return (
         <RatioBarCell
@@ -242,6 +260,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     headerName: 'Memory Usage',
     width: 145,
     type: 'number',
+    ...metricsUnavailableHeader('Memory Usage', opts.metricsUnavailable),
     valueGetter: (_v, row) => {
       const m = opts.metrics?.(row.ctx, undefined, obj(row).metadata.name);
       const capacity = m?.memCapacityBytes ?? nodeAllocatableMemoryBytes(obj(row));
@@ -249,6 +268,7 @@ const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
     },
     renderCell: (params) => {
       const m = opts.metrics?.(params.row.ctx, undefined, obj(params.row).metadata.name);
+      if (!m && opts.metricsUnavailable?.includes(params.row.ctx)) return missingMetric(params.row.ctx, opts.metricsUnavailable);
       const capacity = m?.memCapacityBytes ?? nodeAllocatableMemoryBytes(obj(params.row));
       return (
         <RatioBarCell
@@ -732,19 +752,17 @@ function signalWeight(signal: ObjectSignal | undefined): number | null {
   return warnings + restarts || null;
 }
 
-/**
- * The row marker: an amber triangle for recent warning events, a restart
- * arrow when only restarts happened. The tooltip carries the reasons, so
- * the answer to "what is wrong with this one" is a hover, not a click.
- */
-function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
-  if (!signal || (!signal.warnings.length && !signal.restarts?.length)) return null;
+function hasSignal(signal: ObjectSignal | undefined): signal is ObjectSignal {
+  return !!signal && (signal.warnings.length > 0 || !!signal.restarts?.length);
+}
+
+function signalTitle(signal: ObjectSignal) {
   const warningTotal = signal.warnings.reduce((sum, w) => sum + w.count, 0);
   const lines = [
     ...signal.warnings.slice(0, 4).map((w) => `${w.reason}${w.count > 1 ? ` ×${w.count}` : ''}${w.total && w.total > w.count ? ` (${w.total} in its lifetime)` : ''}: ${w.message.length > 140 ? `${w.message.slice(0, 140)}…` : w.message}`),
     ...(signal.restarts ?? []).slice(0, 3).map((r) => `${r.container} restarted${r.reason ? ` (${r.reason})` : ''}${r.total && r.total > r.restarts ? `, ${r.total} times in its lifetime` : ''}`),
   ];
-  const title = (
+  return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
       <Typography variant="caption" sx={{ fontWeight: 700 }}>
         {warningTotal ? `${warningTotal} warning event${warningTotal === 1 ? '' : 's'} in the last hour` : 'Restarted in the last hour'}
@@ -756,11 +774,127 @@ function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
       ))}
     </Box>
   );
+}
+
+function SignalIcon({ signal }: { signal: ObjectSignal }) {
   return (
-    <Tooltip title={title} placement="right">
-      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: statusTextColor('warning'), cursor: 'help' }} aria-label={warningTotal ? 'Recent warning events' : 'Recent restarts'}>
+    <Tooltip title={signalTitle(signal)} placement="right">
+      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: statusTextColor('warning'), cursor: 'help' }} aria-label={signal.warnings.length ? 'Recent warning events' : 'Recent restarts'}>
         {signal.warnings.length ? <WarningAmberRoundedIcon sx={{ fontSize: 16 }} /> : <ReplayRoundedIcon sx={{ fontSize: 16 }} />}
       </Box>
+    </Tooltip>
+  );
+}
+
+/**
+ * The row marker: an amber triangle for recent warning events, a restart
+ * arrow when only restarts happened. The tooltip carries the reasons, so
+ * the answer to "what is wrong with this one" is a hover, not a click.
+ */
+function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
+  return hasSignal(signal) ? <SignalIcon signal={signal} /> : null;
+}
+
+/**
+ * Status-like columns that carry the warning marker for their row, so it
+ * doesn't need a column of its own beside the name. CRD printer columns named
+ * like a status (Ready, Phase, …) qualify too.
+ */
+const SIGNAL_HOST_FIELDS = new Set(['podStatus', 'jobStatus', 'nodeStatus', 'pvcStatus', 'pvStatus', 'nsStatus', 'crdStatus', 'workloadReady', 'dsReady']);
+
+export function signalHostField(columns: readonly Col[]): string | undefined {
+  return columns.find((c) => SIGNAL_HOST_FIELDS.has(c.field) || (c.field.startsWith('crd_') && statusLikeName(c.headerName ?? '')))?.field;
+}
+
+/** A status the cell already shows as a problem (red/amber, or fewer ready than wanted). */
+function isProblemValue(value: unknown): boolean {
+  const text = typeof value === 'string' ? value.trim() : '';
+  const ready = /^(\d+)\/(\d+)$/.exec(text);
+  if (ready) return Number(ready[1]) < Number(ready[2]);
+  const tone = statusColor(text);
+  return tone === 'error' || tone === 'warning';
+}
+
+/**
+ * The warning marker folded into a status cell. When the status already
+ * reads as a problem, the reasons ride on it as a tooltip (dotted underline
+ * as the cue) instead of a second warning glyph; a healthy-looking status
+ * with recent warnings or restarts gets the small marker after it.
+ */
+function SignalHost({ signal, problem, children }: { signal: ObjectSignal; problem: boolean; children: React.ReactNode }) {
+  if (!problem) {
+    return (
+      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+        {children}
+        <SignalIcon signal={signal} />
+      </Box>
+    );
+  }
+  return (
+    <Tooltip title={signalTitle(signal)} placement="right">
+      <Box
+        component="span"
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          minWidth: 0,
+          cursor: 'help',
+          textDecorationLine: 'underline',
+          textDecorationStyle: 'dotted',
+          textDecorationColor: 'currentColor',
+          textUnderlineOffset: '3px',
+          '& > *': { textDecoration: 'inherit' },
+        }}
+      >
+        {children}
+      </Box>
+    </Tooltip>
+  );
+}
+
+/** Wrap a status-like column so its cells carry the row's warning marker. */
+export function withSignalMarker(column: Col, signals: SignalsLookup, signalKind: string): Col {
+  const original = column.renderCell;
+  return {
+    ...column,
+    renderCell: (params) => {
+      const inner = original ? original(params) : String(params.formattedValue ?? params.value ?? '');
+      const o = obj(params.row);
+      const signal = signals(params.row.ctx, signalKind, o.metadata.namespace, o.metadata.name, o.metadata.uid);
+      if (!hasSignal(signal)) return inner;
+      return (
+        <SignalHost signal={signal} problem={isProblemValue(params.value)}>
+          {inner}
+        </SignalHost>
+      );
+    },
+  };
+}
+
+function metricsUnavailableHeader(name: string, contexts: readonly string[] | undefined): Partial<Col> {
+  if (!contexts?.length) return {};
+  return { renderHeader: () => <MetricsUnavailableHeader name={name} contexts={contexts} /> };
+}
+
+/** Column title plus a small ⓘ that says which clusters have no metrics. */
+function MetricsUnavailableHeader({ name, contexts }: { name: string; contexts: readonly string[] }) {
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+      <span className="MuiDataGrid-columnHeaderTitle">{name}</span>
+      <Tooltip title={`metrics-server is not reachable in ${contexts.join(', ')}, so rows from ${contexts.length === 1 ? 'that cluster' : 'those clusters'} have no ${name} figures.`}>
+        <InfoOutlinedIcon aria-label={`${name} unavailable in ${contexts.join(', ')}`} sx={{ fontSize: 14, color: 'info.main', cursor: 'help' }} />
+      </Tooltip>
+    </Box>
+  );
+}
+
+function missingMetric(ctx: string, unavailable: readonly string[] | undefined) {
+  if (!unavailable?.includes(ctx)) return '—';
+  return (
+    <Tooltip title={`metrics-server is not reachable in ${ctx}`}>
+      <Typography variant="body2" color="text.disabled" sx={{ cursor: 'help' }}>
+        —
+      </Typography>
     </Tooltip>
   );
 }

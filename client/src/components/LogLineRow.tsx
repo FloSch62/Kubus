@@ -6,8 +6,8 @@ import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
-import type { TsMode } from '../state/log-prefs.js';
-import { detectLevel, markSegs, parseFields, parseLine, stripAnsi, type LogFields, type LogLevel, type Seg } from './log-format.js';
+import type { LogView, TsMode } from '../state/log-prefs.js';
+import { detectLevel, markSegs, parseFields, parseLine, splitMessage, stripAnsi, type LogFields, type LogLevel, type Seg } from './log-format.js';
 import type { LogEntry, LogLine, LogMarkerTone } from './log-tools.js';
 import { LogFieldsTable } from './LogFields.js';
 
@@ -24,7 +24,26 @@ const CLS_COLORS: Record<NonNullable<Seg['cls']>, string> = {
   punct: '#6b7089',
 };
 
+/** Level word colours on the dark log body (the toolbar chips use theme-aware ones). */
+export const LEVEL_TEXT_COLOR: Record<LogLevel, string> = {
+  error: '#f7768e',
+  warn: '#e0af68',
+  info: '#7aa2f7',
+  debug: '#9aa0b5',
+  trace: '#6b7089',
+};
+
+const FIELD_KEY_COLOR = '#6b7089';
+const FIELD_VALUE_COLOR: Record<'str' | 'num' | 'bool' | 'null' | 'json', string> = {
+  str: '#a9b1d6',
+  num: '#e0af68',
+  bool: '#bb9af7',
+  null: '#6b7089',
+  json: '#a9b1d6',
+};
+
 const segCache = new WeakMap<LogLine, Seg[]>();
+const messageSegCache = new WeakMap<LogLine, Seg[]>();
 const stripCache = new WeakMap<LogLine, string>();
 const levelCache = new WeakMap<LogLine, LogLevel | null>();
 const fieldsCache = new WeakMap<LogLine, LogFields | null>();
@@ -77,6 +96,25 @@ export function levelOf(l: LogLine): LogLevel | undefined {
     levelCache.set(l, level);
   }
   return level ?? undefined;
+}
+
+/**
+ * Message view of a JSON or logfmt line: level word, the message, then the
+ * other fields as dimmed key=value pairs. Plain lines keep their raw text.
+ */
+function messageSegsOf(l: LogLine, fields: LogFields, level: LogLevel | undefined): Seg[] {
+  let segs = messageSegCache.get(l);
+  if (!segs) {
+    const { message, rest } = splitMessage(fields);
+    segs = [];
+    if (level) segs.push({ text: level.toUpperCase().padEnd(6), fg: LEVEL_TEXT_COLOR[level], bold: true });
+    if (message) segs.push({ text: message });
+    for (const field of rest) {
+      segs.push({ text: segs.length ? '  ' : '' }, { text: `${field.key}=`, fg: FIELD_KEY_COLOR }, { text: field.value, fg: FIELD_VALUE_COLOR[field.kind] });
+    }
+    messageSegCache.set(l, segs);
+  }
+  return segs;
 }
 
 export function fieldsOf(l: LogLine): LogFields | undefined {
@@ -135,8 +173,13 @@ interface LineRowProps {
   wrap: boolean;
   showPod: boolean;
   showSource: boolean;
+  /** Container name next to the pod (only when the tab spans several containers). */
+  showContainer: boolean;
+  /** Short unique label for the line's pod (see shortPodLabels). */
+  podLabel?: string;
   podColor?: string;
   tsMode: TsMode;
+  view: LogView;
   highlight: boolean;
   find: string;
   isCurrent: boolean;
@@ -203,8 +246,11 @@ export const LineRow = memo(function LineRow({
   wrap,
   showPod,
   showSource,
+  showContainer,
+  podLabel,
   podColor,
   tsMode,
+  view,
   highlight,
   find,
   isCurrent,
@@ -238,12 +284,19 @@ export const LineRow = memo(function LineRow({
     );
   }
 
-  const segs = highlight ? segsOf(line) : [{ text: strippedOf(line) }];
-  const marked = find ? markSegs(segs, find) : segs;
   const level = levelOf(line);
-  const tint = level === 'error' || level === 'warn' ? ` kl-tint-${level}` : '';
-  const sourceLabel = showPod ? [line.pod, line.container].filter(Boolean).join('/') : line.container;
   const fields = fieldsOf(line);
+  const messageView = view === 'message' && !!fields;
+  const segs = messageView
+    ? highlight
+      ? messageSegsOf(line, fields, level)
+      : [{ text: messageSegsOf(line, fields, level).map((seg) => seg.text).join('') }]
+    : highlight
+      ? segsOf(line)
+      : [{ text: strippedOf(line) }];
+  const marked = find ? markSegs(segs, find) : segs;
+  const tint = level === 'error' || level === 'warn' ? ` kl-tint-${level}` : '';
+  const sourceLabel = showPod ? [podLabel ?? line.pod, showContainer ? line.container : ''].filter(Boolean).join('/') : line.container;
   const toggle = (event: React.MouseEvent) => {
     event.stopPropagation();
     onToggle(line);
@@ -264,7 +317,7 @@ export const LineRow = memo(function LineRow({
         ) : null}
       </span>
       {showSource && (
-        <span className="kl-src" style={{ color: podColor }}>
+        <span className="kl-src" style={{ color: podColor }} title={showPod ? `${line.pod}/${line.container}` : undefined}>
           {sourceLabel}
         </span>
       )}

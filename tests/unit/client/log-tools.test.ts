@@ -10,6 +10,7 @@ import {
   rowAt,
   rowsHeight,
   rowTop,
+  shortPodLabels,
   textMatcher,
   type LogEntry,
   type LogLine,
@@ -187,5 +188,21 @@ describe('row offsets', () => {
     expect(rowAt(230, 20, tall)).toBe(5);
     expect(rowAt(265, 20, tall)).toBe(6);
     expect(rowAt(-5, 20, [])).toBe(0);
+  });
+});
+
+describe('shortPodLabels', () => {
+  it('tags a workload by the random suffix and keeps short names whole', () => {
+    const labels = shortPodLabels(['podinfo-5c7cdc845b-bp4xq', 'podinfo-5c7cdc845b-cpkl2', 'web-0', 'web-1']);
+    expect(labels.get('podinfo-5c7cdc845b-bp4xq')).toBe('bp4xq');
+    expect(labels.get('podinfo-5c7cdc845b-cpkl2')).toBe('cpkl2');
+    expect(labels.get('web-0')).toBe('web-0');
+  });
+
+  it('takes more segments when the last one is too short or not unique', () => {
+    const labels = shortPodLabels(['elasticsearch-master-0', 'elasticsearch-master-1', 'frontend-api-5c7c-abcde', 'backend-api-9f8e-abcde']);
+    expect(labels.get('elasticsearch-master-0')).toBe('master-0');
+    expect(labels.get('frontend-api-5c7c-abcde')).toBe('5c7c-abcde');
+    expect(labels.get('backend-api-9f8e-abcde')).toBe('9f8e-abcde');
   });
 });

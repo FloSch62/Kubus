@@ -13,6 +13,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import ViewWeekOutlinedIcon from '@mui/icons-material/ViewWeekOutlined';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import type { LabelColumnSpec } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { useUiPrefsStore } from '../state/prefs.js';
@@ -26,7 +27,19 @@ const keyFilterOptions = createFilterOptions<{ key: string; count: number }>({ l
  * (suggested from the keys present in the list, with how many rows carry
  * it) and it becomes a column, stored with the table's other column prefs.
  */
-export function LabelColumnsButton({ tableId, rows }: { tableId: string; rows: ClusterRow[] }) {
+export function LabelColumnsButton({
+  tableId,
+  rows,
+  compact = false,
+  onManageColumns,
+}: {
+  tableId: string;
+  rows: ClusterRow[];
+  /** Icon-only toolbar button (the count of added columns rides next to the icon). */
+  compact?: boolean;
+  /** Opens the grid's own show/hide panel; offered at the bottom of the picker. */
+  onManageColumns?: () => void;
+}) {
   const columns = useUiPrefsStore((s) => s.labelColumns[tableId] ?? EMPTY);
   const setLabelColumns = useUiPrefsStore((s) => s.setLabelColumns);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -54,17 +67,37 @@ export function LabelColumnsButton({ tableId, rows }: { tableId: string; rows: C
 
   return (
     <>
-      <Tooltip title="Add a column for any label or annotation key">
-        <Button
-          variant="outlined"
-          startIcon={<ViewWeekOutlinedIcon />}
-          aria-haspopup="dialog"
-          aria-expanded={open ? 'true' : undefined}
-          onClick={(e) => setAnchor(e.currentTarget)}
-        >
-          Columns{columns.length ? ` (${columns.length})` : ''}
-        </Button>
-      </Tooltip>
+      {compact ? (
+        <Tooltip title={`Columns${columns.length ? ` (${columns.length} added)` : ''}: add a label or annotation column, show or hide columns`}>
+          <Button
+            variant="outlined"
+            aria-label="Columns"
+            aria-haspopup="dialog"
+            aria-expanded={open ? 'true' : undefined}
+            onClick={(e) => setAnchor(e.currentTarget)}
+            sx={{ minWidth: 34, height: 34, px: 0.875, gap: 0.5, flexShrink: 0 }}
+          >
+            <ViewWeekOutlinedIcon sx={{ fontSize: 18 }} />
+            {columns.length > 0 && (
+              <Box component="span" sx={{ fontSize: 12, fontWeight: 600 }}>
+                {columns.length}
+              </Box>
+            )}
+          </Button>
+        </Tooltip>
+      ) : (
+        <Tooltip title="Add a column for any label or annotation key">
+          <Button
+            variant="outlined"
+            startIcon={<ViewWeekOutlinedIcon />}
+            aria-haspopup="dialog"
+            aria-expanded={open ? 'true' : undefined}
+            onClick={(e) => setAnchor(e.currentTarget)}
+          >
+            Columns{columns.length ? ` (${columns.length})` : ''}
+          </Button>
+        </Tooltip>
+      )}
       <Popover
         open={open}
         anchorEl={anchor}
@@ -157,6 +190,21 @@ export function LabelColumnsButton({ tableId, rows }: { tableId: string; rows: C
                 </Box>
               ))}
             </Box>
+          )}
+          {onManageColumns && (
+            <>
+              <Divider sx={{ my: 1.25 }} />
+              <Button
+                size="small"
+                startIcon={<VisibilityOutlinedIcon />}
+                onClick={() => {
+                  setAnchor(null);
+                  onManageColumns();
+                }}
+              >
+                Show or hide columns…
+              </Button>
+            </>
           )}
         </Box>
       </Popover>

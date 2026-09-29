@@ -17,6 +17,7 @@ import { ConditionsTable, KeyValueChips, KeyValueSection, MetadataSection } from
 import { Fact, FactLink, Facts } from './Facts.js';
 import { PortForwardDialog } from '../PortForwardDialog.js';
 import { PodProblems } from './PodProblems.js';
+import { diagnosePod } from './pod-diagnosis.js';
 import { DetailStack, Section } from './Section.js';
 import { SummaryStrip } from './SummaryStrip.js';
 import { ContainerPanels, VolumeSources, type ContainerPanelData } from './ContainerPanels.js';
@@ -81,6 +82,7 @@ function panelData(
   env: PodEnvVar[] | undefined,
   envLoading: boolean,
   kind?: 'init' | 'sidecar',
+  diagnosed?: boolean,
 ): ContainerPanelData {
   const state = containerState(st);
   const last = st?.lastState?.terminated;
@@ -89,7 +91,8 @@ function panelData(
     image: c.image,
     kind,
     state: state.state,
-    stateMessage: state.message,
+    // The problems banner already explains a diagnosed container in words.
+    stateMessage: diagnosed ? undefined : state.message,
     ready: st?.ready,
     shellable: state.shellable,
     restarts: st?.restartCount,
@@ -165,8 +168,10 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   // containers, so they list with them; one-shot inits get their own section.
   const sidecars = (spec?.initContainers ?? []).filter((c) => c.restartPolicy === 'Always');
   const inits = (spec?.initContainers ?? []).filter((c) => c.restartPolicy !== 'Always');
+  const diagnoses = useMemo(() => diagnosePod(obj), [obj]);
+  const diagnosed = new Set(diagnoses.map((d) => d.container));
   const toPanel = (c: ContainerSpec, st: ContainerStatus | undefined, kind?: 'init' | 'sidecar') =>
-    panelData(c, st, usageByContainer.get(c.name), spec?.volumes, spec?.serviceAccountName, !terminal, envByContainer.get(c.name), envLoading, kind);
+    panelData(c, st, usageByContainer.get(c.name), spec?.volumes, spec?.serviceAccountName, !terminal, envByContainer.get(c.name), envLoading, kind, diagnosed.has(c.name));
   const mainPanels = [
     ...(spec?.containers ?? []).map((c) => toPanel(c, statusByName.get(c.name))),
     ...sidecars.map((c) => toPanel(c, initStatusByName.get(c.name), 'sidecar')),
@@ -177,7 +182,18 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const initsActive = initPanels.some((p) => p.state !== 'Completed');
 
   const allReady = !summary.ready.startsWith('0/') && summary.ready.split('/')[0] === summary.ready.split('/')[1];
-  const readyTone = terminal ? undefined : allReady ? 'success' : 'warning';
+  // Restarts are the loudest signal of a crash loop; an old restart on a
+  // healthy pod is history and stays neutral.
+  const crashLooping = [...(status?.containerStatuses ?? []), ...(status?.initContainerStatuses ?? [])].some((c) => c.state?.waiting?.reason === 'CrashLoopBackOff');
+  const restartTone = terminal || allReady || summary.restarts === 0 ? undefined : crashLooping || summary.restarts >= 5 ? 'error' : 'warning';
+  // Nothing ready because a container is failing (crash, image, config) is an error, not a wait.
+  const failing = diagnoses.some((d) => d.severity === 'error');
+  const readyTone = terminal ? undefined : allReady ? 'success' : summary.ready.startsWith('0/') && failing ? 'error' : 'warning';
+  const lastRestartAt = [...(status?.containerStatuses ?? []), ...(status?.initContainerStatuses ?? [])]
+    .map((c) => c.lastState?.terminated?.finishedAt)
+    .filter((t): t is string => !!t)
+    .sort()
+    .at(-1);
   const extraIps = (status?.podIPs ?? []).map((p) => p.ip).filter((ip) => ip !== status?.podIP);
 
   return (
@@ -185,7 +201,16 @@ export function PodDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       <SummaryStrip
         items={[
           { label: 'Ready', value: summary.ready, tone: readyTone },
-          { label: 'Restarts', value: String(summary.restarts), tone: summary.restarts > 0 && !allReady && !terminal ? 'warning' : undefined },
+          {
+            label: 'Restarts',
+            value: String(summary.restarts),
+            tone: restartTone,
+            detail: summary.restarts > 0 && lastRestartAt ? (
+              <>
+                last <AgeCell timestamp={lastRestartAt} variant="caption" /> ago
+              </>
+            ) : undefined,
+          },
           {
             span: 2,
             label: 'Node',

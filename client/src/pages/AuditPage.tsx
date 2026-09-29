@@ -12,6 +12,9 @@ import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import type { Theme } from '@mui/material/styles';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -39,6 +42,10 @@ const SEVERITY_COLOR: Record<AuditSeverity, 'error' | 'warning' | 'info' | 'defa
   medium: 'info',
   low: 'default',
 };
+
+/** Dot color for a severity in the filter toggles. */
+const severityDot = (s: AuditSeverity) => (theme: Theme) =>
+  s === 'low' ? theme.palette.text.disabled : theme.palette[SEVERITY_COLOR[s] as 'error' | 'warning' | 'info'].main;
 
 interface CheckGroup {
   checkId: string;
@@ -150,15 +157,6 @@ export function AuditPage() {
     return <EmptyState icon={<CircularProgress size={40} />} title="Auditing…" subtitle={`Running security checks across ${selected.join(', ')}`} />;
   }
 
-  const toggleSeverity = (s: AuditSeverity) => {
-    setSeverityFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  };
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'auto', px: 1.5, pt: 1.5, pb: 2 }}>
       <PageHeader title="Security Audit" icon={<GppMaybeOutlinedIcon />}>
@@ -186,17 +184,27 @@ export function AuditPage() {
       </PageHeader>
 
       <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-        {SEVERITIES.map((s) => (
-          <Chip
-            key={s}
-            label={`${s} ${severityCounts[s]}`}
-            color={SEVERITY_COLOR[s]}
-            variant={severityFilter.size === 0 || severityFilter.has(s) ? 'filled' : 'outlined'}
-            onClick={() => toggleSeverity(s)}
-            size="small"
-            sx={{ textTransform: 'capitalize' }}
-          />
-        ))}
+        <ToggleButtonGroup
+          size="small"
+          value={[...severityFilter]}
+          onChange={(_e, value: AuditSeverity[]) => setSeverityFilter(new Set(value))}
+          aria-label="Show only these severities"
+        >
+          {SEVERITIES.map((s) => (
+            <ToggleButton key={s} value={s} sx={{ px: 1.25, gap: 0.75, textTransform: 'capitalize' }}>
+              <Box component="span" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: severityDot(s) }} />
+              {s}
+              <Box component="span" sx={{ fontWeight: 600, color: 'text.primary', fontVariantNumeric: 'tabular-nums' }}>
+                {severityCounts[s]}
+              </Box>
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+        {severityFilter.size > 0 && (
+          <Button size="small" onClick={() => setSeverityFilter(new Set())}>
+            All severities
+          </Button>
+        )}
         <TextField
           placeholder="Filter findings…"
           value={textFilter}
@@ -248,17 +256,21 @@ export function AuditPage() {
                   <Chip label={group.findings.length} size="small" variant="outlined" />
                   <Chip label={group.category} size="small" variant="outlined" sx={{ color: 'text.secondary' }} />
                   <Box sx={{ flex: 1 }} />
-                  <Tooltip title="Dismiss this check (hidden until restored)">
-                    <IconButton
+                  <Tooltip title="Hide this check until you restore it below">
+                    <Button
                       size="small"
-                      aria-label={`Dismiss check ${group.checkId}`}
+                      color="inherit"
+                      startIcon={<VisibilityOffOutlinedIcon fontSize="small" />}
+                      aria-label={`Ignore check ${group.checkId}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         dismissCheck(group.checkId);
                       }}
+                      onFocus={(e) => e.stopPropagation()}
+                      sx={{ color: 'text.secondary', flexShrink: 0 }}
                     >
-                      <VisibilityOffOutlinedIcon fontSize="small" />
-                    </IconButton>
+                      Ignore
+                    </Button>
                   </Tooltip>
                 </Stack>
               </AccordionSummary>
@@ -306,11 +318,13 @@ export function AuditPage() {
       {dismissedWithCounts.length > 0 && (
         <Box sx={{ mt: 2 }}>
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Dismissed checks
+            Ignored checks
           </Typography>
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
             {dismissedWithCounts.map(({ id, count }) => (
-              <Chip key={id} label={`${id} (${count})`} size="small" onDelete={() => restoreCheck(id)} deleteIcon={<RefreshIcon />} />
+              <Tooltip key={id} title="Restore this check">
+                <Chip label={`${id} (${count})`} size="small" onDelete={() => restoreCheck(id)} deleteIcon={<RefreshIcon aria-label={`Restore check ${id}`} />} />
+              </Tooltip>
             ))}
           </Stack>
         </Box>

@@ -19,6 +19,8 @@ export interface SummaryItem {
   title?: string;
   /** Grid columns to take — for values that need the room (node names). */
   span?: number;
+  /** Small muted line under the value ("last 4m ago", "+4 completed"). */
+  detail?: ReactNode;
 }
 
 /**
@@ -71,6 +73,11 @@ export function SummaryStrip({ items }: { items: Array<SummaryItem | false | nul
             >
               {item.value ?? '—'}
             </Typography>
+            {item.detail && (
+              <Typography component="dd" variant="caption" color="text.secondary" noWrap sx={{ display: 'block', m: 0, lineHeight: 1.4, mt: 0.125 }}>
+                {item.detail}
+              </Typography>
+            )}
           </Box>
         );
       })}
