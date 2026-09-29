@@ -90,12 +90,12 @@ export function useWorkloadProblems({ ctx, kind, obj, pods, active, conditions, 
     const items = [
       ...(conditions && goodWhen ? conditionProblems(conditions, goodWhen) : []),
       // A Deployment reports refused pods as ReplicaFailure; the others only as events.
-      ...(kind === 'Deployment' ? [] : controllerEventProblems(warningsFor(kind, obj.metadata.name))),
+      ...(kind === 'Deployment' ? [] : controllerEventProblems(warningsFor(kind, obj.metadata.name), obj.metadata.uid)),
       ...podProblems(pods, warningsFor),
     ];
     const problems = items.map(({ nodes, ...item }) => ({ ...item, links: problemLinksFor(item.message, nodes, namespace, (selection) => push(selection(ctx))) }));
     return { problems, issues };
-  }, [signals, pods, active, conditions, goodWhen, kind, obj.metadata.name, namespace, ctx, push]);
+  }, [signals, pods, active, conditions, goodWhen, kind, obj.metadata.name, obj.metadata.uid, namespace, ctx, push]);
 }
 
 /**

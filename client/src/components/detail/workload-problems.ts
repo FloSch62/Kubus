@@ -120,11 +120,13 @@ const CREATE_FAILURES = new Set(['FailedCreate', 'FailedPlacement', 'FailedDaemo
 /**
  * A StatefulSet's or DaemonSet's own create failures. They have no
  * ReplicaFailure condition, so a refused pod ("exceeded quota") is only
- * ever an event on the controller.
+ * ever an event on the controller. Events of an earlier object with the
+ * same name (uninstalled and reinstalled within the signal window) are not
+ * this one's problem.
  */
-export function controllerEventProblems(warnings: ObjectSignal['warnings'] | undefined): WorkloadProblem[] {
+export function controllerEventProblems(warnings: ObjectSignal['warnings'] | undefined, uid: string | undefined): WorkloadProblem[] {
   return (warnings ?? [])
-    .filter((w) => CREATE_FAILURES.has(w.reason))
+    .filter((w) => CREATE_FAILURES.has(w.reason) && (!w.uid || !uid || w.uid === uid))
     .map((w) => ({ title: w.reason, message: w.message, count: w.total ?? w.count, at: w.lastTimestamp }));
 }
 

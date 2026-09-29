@@ -123,10 +123,22 @@ describe('podProblems', () => {
   it('reports a controller’s create failures with their lifetime count', () => {
     const quota = 'create Pod db-0 in StatefulSet db failed error: pods "db-0" is forbidden: exceeded quota: gpu-quota';
     expect(
-      controllerEventProblems([
-        { reason: 'FailedCreate', message: quota, count: 1, total: 14, lastTimestamp: '2026-09-29T10:00:00Z' },
-        { reason: 'FailedUpdate', message: 'conflict', count: 1 },
-      ]),
+      controllerEventProblems(
+        [
+          { reason: 'FailedCreate', message: quota, count: 1, total: 14, lastTimestamp: '2026-09-29T10:00:00Z', uid: 'sts-2' },
+          { reason: 'FailedUpdate', message: 'conflict', count: 1 },
+        ],
+        'sts-2',
+      ),
     ).toEqual([{ title: 'FailedCreate', message: quota, count: 14, at: '2026-09-29T10:00:00Z' }]);
+  });
+
+  it('ignores the create failures of an earlier object with the same name', () => {
+    const quota = 'pods "db-0" is forbidden: exceeded quota: gpu-quota';
+    const warnings = [{ reason: 'FailedCreate', message: quota, count: 1, total: 3, uid: 'sts-1' }];
+    expect(controllerEventProblems(warnings, 'sts-2')).toEqual([]);
+    expect(controllerEventProblems(warnings, 'sts-1')).toHaveLength(1);
+    // An event without an involved uid can't be told apart, so it stays.
+    expect(controllerEventProblems([{ reason: 'FailedCreate', message: quota, count: 1 }], 'sts-2')).toHaveLength(1);
   });
 });
