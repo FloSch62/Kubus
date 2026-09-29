@@ -1,8 +1,10 @@
 import { nanoid } from 'nanoid';
-import type { KubeObject } from '@kubus/shared';
+import type { DebugProfile, KubeObject } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
 import { resourcePath } from './raw-client.js';
 import { waitForContainerRunning } from './pod-wait.js';
+import { PROFILE_SECURITY_CONTEXT } from './debug.js';
+import { HttpProblem } from '../util/errors.js';
 
 export const DEBUG_NAMESPACE = 'kubus-debug';
 const NODE_SHELL_LABEL = 'kubus.io/node-shell';
@@ -54,15 +56,33 @@ async function gcNodeShellPods(handle: ClusterHandle): Promise<void> {
   }
 }
 
+function podSuffix(): string {
+  return nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x');
+}
+
+interface NodePodWait {
+  timeoutMs?: number;
+  onWaiting?: (reason: string) => void;
+  /** Aborts the startup wait (the terminal went away); the pod is deleted. */
+  signal?: AbortSignal;
+}
+
 /**
- * Start a privileged pod pinned to the node, host namespaces shared. The
- * shell then nsenters into PID 1, i.e. a root shell with the host's own
- * tools. activeDeadlineSeconds caps orphans if cleanup never runs.
+ * Create the pod and wait for its container. A pod that never starts (bad
+ * image, abandoned terminal) is deleted right away rather than left to
+ * activeDeadlineSeconds.
  */
-export async function createNodeShellPod(handle: ClusterHandle, node: string): Promise<{ namespace: string; pod: string; container: string }> {
+async function startNodePod(
+  handle: ClusterHandle,
+  node: string,
+  name: string,
+  container: string,
+  annotations: Record<string, string>,
+  spec: object,
+  wait: NodePodWait = {},
+): Promise<{ namespace: string; pod: string; container: string }> {
   await ensureDebugNamespace(handle);
   void gcNodeShellPods(handle);
-  const name = `kubus-node-shell-${nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`;
   await handle.raw.json(resourcePath('', 'v1', 'pods', { namespace: DEBUG_NAMESPACE }), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -73,7 +93,7 @@ export async function createNodeShellPod(handle: ClusterHandle, node: string): P
         name,
         namespace: DEBUG_NAMESPACE,
         labels: { [NODE_SHELL_LABEL]: 'true', 'app.kubernetes.io/managed-by': 'kubus' },
-        annotations: { 'kubus.io/node': node },
+        annotations: { 'kubus.io/node': node, ...annotations },
       },
       spec: {
         nodeName: node,
@@ -83,19 +103,78 @@ export async function createNodeShellPod(handle: ClusterHandle, node: string): P
         restartPolicy: 'Never',
         activeDeadlineSeconds: 3600,
         tolerations: [{ operator: 'Exists' }],
-        containers: [
-          {
-            name: 'shell',
-            image: NODE_SHELL_IMAGE,
-            command: ['sleep', '3600'],
-            securityContext: { privileged: true },
-          },
-        ],
+        ...spec,
       },
     }),
   });
-  await waitForContainerRunning(handle, DEBUG_NAMESPACE, name, 'shell');
-  return { namespace: DEBUG_NAMESPACE, pod: name, container: 'shell' };
+  try {
+    await waitForContainerRunning(handle, DEBUG_NAMESPACE, name, container, wait);
+  } catch (err) {
+    await deleteNodeShellPod(handle, name).catch(() => undefined);
+    throw err;
+  }
+  return { namespace: DEBUG_NAMESPACE, pod: name, container };
+}
+
+/**
+ * Start a privileged pod pinned to the node, host namespaces shared. The
+ * shell then nsenters into PID 1, i.e. a root shell with the host's own
+ * tools. activeDeadlineSeconds caps orphans if cleanup never runs.
+ */
+export async function createNodeShellPod(handle: ClusterHandle, node: string, signal?: AbortSignal): Promise<{ namespace: string; pod: string; container: string }> {
+  return startNodePod(handle, node, `kubus-node-shell-${podSuffix()}`, 'shell', {}, {
+    containers: [
+      {
+        name: 'shell',
+        image: NODE_SHELL_IMAGE,
+        command: ['sleep', '3600'],
+        securityContext: { privileged: true },
+      },
+    ],
+  }, { signal });
+}
+
+export const NODE_DEBUG_CONTAINER = 'debugger';
+export const NODE_DEBUG_ROOT = '/host';
+
+export interface NodeDebugOptions {
+  image: string;
+  profile?: DebugProfile;
+  /** Reports each new waiting reason (image pull, container creation) while the pod starts. */
+  onWaiting?: (reason: string) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * kubectl-debug-node equivalent: a pod with the chosen image pinned to the
+ * node, sharing its PID/network/IPC namespaces, with the node's root
+ * filesystem mounted at /host. Unlike the node shell the tools come from the
+ * image, and the profile decides how much of the host they may touch.
+ */
+export async function createNodeDebugPod(handle: ClusterHandle, node: string, opts: NodeDebugOptions): Promise<{ namespace: string; pod: string; container: string }> {
+  const image = opts.image.trim();
+  if (!image) throw new HttpProblem(422, 'image is required');
+  if (/\s/.test(image)) throw new HttpProblem(422, 'image must be a reference without whitespace');
+  const profile = opts.profile ?? 'general';
+  if (!Object.hasOwn(PROFILE_SECURITY_CONTEXT, profile)) throw new HttpProblem(422, `unknown debug profile ${String(profile)}`);
+  // Host namespaces and a hostPath mount are exactly what restricted forbids.
+  if (profile === 'restricted') throw new HttpProblem(422, 'the restricted profile cannot debug a node; use general, netadmin or sysadmin');
+  const annotations = { 'kubus.io/image': image, 'kubus.io/debug-profile': profile };
+  // Debug images run to hundreds of MB; a cold pull easily outlasts the default wait.
+  const wait = { timeoutMs: 300_000, onWaiting: opts.onWaiting, signal: opts.signal };
+  return startNodePod(handle, node, `kubus-node-debug-${podSuffix()}`, NODE_DEBUG_CONTAINER, annotations, {
+    volumes: [{ name: 'host-root', hostPath: { path: '/' } }],
+    containers: [
+      {
+        name: NODE_DEBUG_CONTAINER,
+        image,
+        command: ['sleep', '3600'],
+        terminationMessagePolicy: 'File',
+        securityContext: PROFILE_SECURITY_CONTEXT[profile],
+        volumeMounts: [{ name: 'host-root', mountPath: NODE_DEBUG_ROOT }],
+      },
+    ],
+  }, wait);
 }
 
 export async function deleteNodeShellPod(handle: ClusterHandle, pod: string): Promise<void> {
@@ -105,3 +184,6 @@ export async function deleteNodeShellPod(handle: ClusterHandle, pod: string): Pr
 
 /** nsenter into the host's PID 1 namespaces — a root shell on the node. */
 export const NODE_SHELL_COMMAND = ['nsenter', '-t', '1', '-m', '-u', '-i', '-n', '-p', '--', 'sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'];
+
+/** Login shell inside the debug image, like a pod shell (debug images set up helpers in /etc/profile.d). */
+export const NODE_DEBUG_COMMAND = ['/bin/sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l'];

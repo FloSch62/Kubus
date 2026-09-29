@@ -395,7 +395,7 @@ export function RowActions({ target }: { target: RowActionTarget }) {
 }
 
 export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose }: RowActionMenuProps) {
-  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'files' | 'trigger' | null>(null);
+  const [dialog, setDialog] = useState<'delete' | 'scale' | 'forward' | 'drain' | 'restart-rs' | 'set-image' | 'debug' | 'node-shell' | 'node-debug' | 'files' | 'trigger' | null>(null);
   const [logsBusy, setLogsBusy] = useState(false);
 
   const del = useDeleteResource();
@@ -694,6 +694,19 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
         {isNode && (
           <MenuItem
             onClick={() => {
+              setDialog('node-debug');
+              close();
+            }}
+          >
+            <ListItemIcon>
+              <BugReportOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Debug container…</ListItemText>
+          </MenuItem>
+        )}
+        {isNode && (
+          <MenuItem
+            onClick={() => {
               setDialog('drain');
               close();
             }}
@@ -838,6 +851,7 @@ export function RowActionMenu({ target, anchorEl, anchorPosition, open, onClose 
       {dialog === 'trigger' && <TriggerCronJobDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} onDone={ok} />}
       {dialog === 'scale' && <ScaleDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'debug' && <DebugDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
+      {dialog === 'node-debug' && <NodeDebugDialog target={target} onClose={() => setDialog(null)} />}
       {dialog === 'files' && <FileCopyDialog ctx={ctx} obj={obj} onClose={() => setDialog(null)} />}
       {dialog === 'set-image' && <SetImageDialog target={target} onClose={() => setDialog(null)} onDone={ok} onError={fail} />}
       {dialog === 'forward' && <PortForwardDialog ctx={ctx} kind={actionKind ?? kind} obj={obj} onClose={() => setDialog(null)} />}
@@ -1150,29 +1164,135 @@ export function SetImageDialog({
   );
 }
 
-const DEBUG_PROFILES: Array<{ value: DebugProfile; label: string; hint: string }> = [
+interface DebugProfileOption {
+  value: DebugProfile;
+  label: string;
+  hint: string;
+}
+
+const DEBUG_PROFILES: DebugProfileOption[] = [
   { value: 'general', label: 'General', hint: 'No extra privileges — inherits the namespace defaults.' },
   { value: 'restricted', label: 'Restricted', hint: 'Non-root, all capabilities dropped — for PodSecurity-restricted namespaces (needs a non-root image).' },
   { value: 'netadmin', label: 'Network admin', hint: 'Adds NET_ADMIN and NET_RAW — tcpdump, iptables, ping.' },
   { value: 'sysadmin', label: 'System admin', hint: 'Privileged container — full access, rejected in restricted namespaces.' },
 ];
 
-function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
-  const debug = useDebugPod();
-  const addTab = useDockStore((s) => s.addTab);
-  const containers = podContainerNames(target.obj);
+/** Restricted forbids the host namespaces and /host mount a node debug pod exists for. */
+const NODE_DEBUG_PROFILES: DebugProfileOption[] = [
+  { value: 'general', label: 'General', hint: "Runs with the container runtime's default capabilities." },
+  { value: 'netadmin', label: 'Network admin', hint: "Adds NET_ADMIN and NET_RAW for tcpdump and iptables on the node's interfaces." },
+  { value: 'sysadmin', label: 'System admin', hint: 'Privileged container with full control of the node (nsenter, mount, sysctl).' },
+];
+
+/** Image + profile selection shared by the pod and node debug dialogs. */
+function useDebugImageChoice(profiles: DebugProfileOption[]) {
   const debugImages = useDebugImages();
   const presets = mergeDebugPresets(debugImages.data);
   const [selection, setSelection] = useState<string | null>('busybox');
   const [customImage, setCustomImage] = useState('');
-  const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
   const [profileOverride, setProfileOverride] = useState<DebugProfile>();
-  const name = target.obj.metadata.name;
   const isCustom = selection === null;
   const normalizedSelection = selection === null ? null : normalizeDebugImageName(selection);
   const selectedPreset = normalizedSelection === null ? undefined : presets.find((p) => normalizeDebugImageName(p.name) === normalizedSelection);
   const image = isCustom ? customImage.trim() : (selectedPreset?.image ?? '');
-  const profile = profileOverride ?? selectedPreset?.profile ?? 'general';
+  const wanted = profileOverride ?? selectedPreset?.profile ?? 'general';
+  const profile = profiles.some((p) => p.value === wanted) ? wanted : 'general';
+  return {
+    loaded: debugImages.data !== undefined,
+    presets,
+    isCustom,
+    normalizedSelection,
+    customImage,
+    setCustomImage,
+    image,
+    profile,
+    setProfile: setProfileOverride,
+    select: (name: string | null) => {
+      setSelection(name);
+      if (name !== null) setProfileOverride(undefined);
+    },
+  };
+}
+
+type DebugImageChoice = ReturnType<typeof useDebugImageChoice>;
+
+function DebugImageCatalog({ choice, profiles }: { choice: DebugImageChoice; profiles: DebugProfileOption[] }) {
+  return (
+    <>
+      <List dense sx={{ py: 0, maxHeight: 280, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        {choice.presets.map((p) => (
+          <ListItemButton key={p.name} selected={!choice.isCustom && choice.normalizedSelection === normalizeDebugImageName(p.name)} onClick={() => choice.select(p.name)}>
+            <ListItemText
+              primary={
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <Typography variant="body2">{p.name}</Typography>
+                  {!isBuiltInDebugImage(p.name) && <Chip size="small" variant="outlined" label="custom" sx={{ height: 18, fontSize: 10 }} />}
+                  {p.profile && p.profile !== 'general' && profiles.some((d) => d.value === p.profile) && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={profiles.find((d) => d.value === p.profile)?.label ?? p.profile}
+                      sx={{ height: 18, fontSize: 10 }}
+                    />
+                  )}
+                </Stack>
+              }
+              secondary={p.description ? `${p.image} — ${p.description}` : p.image}
+              slotProps={{ secondary: { sx: { fontSize: 11 } } }}
+            />
+          </ListItemButton>
+        ))}
+        <ListItemButton selected={choice.isCustom} onClick={() => choice.select(null)}>
+          <ListItemText
+            primary={<Typography variant="body2">Custom image…</Typography>}
+            secondary="Any image reference from any registry"
+            slotProps={{ secondary: { sx: { fontSize: 11 } } }}
+          />
+        </ListItemButton>
+      </List>
+      {choice.isCustom && (
+        <TextField
+          autoFocus
+          fullWidth
+          size="small"
+          label="Image"
+          placeholder="registry.example.com/debug:tag"
+          value={choice.customImage}
+          onChange={(e) => choice.setCustomImage(e.target.value)}
+        />
+      )}
+    </>
+  );
+}
+
+function DebugProfileSelect({ choice, profiles }: { choice: DebugImageChoice; profiles: DebugProfileOption[] }) {
+  return (
+    <>
+      <FormControl size="small" fullWidth>
+        <InputLabel id="debug-profile">Profile</InputLabel>
+        <Select labelId="debug-profile" label="Profile" value={choice.profile} onChange={(e) => choice.setProfile(e.target.value as DebugProfile)}>
+          {profiles.map((p) => (
+            <MenuItem key={p.value} value={p.value}>
+              {p.label}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+        {profiles.find((p) => p.value === choice.profile)?.hint}
+      </Typography>
+    </>
+  );
+}
+
+function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTarget; onClose: () => void; onDone: (t: string) => void; onError: (e: unknown) => void }) {
+  const debug = useDebugPod();
+  const addTab = useDockStore((s) => s.addTab);
+  const containers = podContainerNames(target.obj);
+  const choice = useDebugImageChoice(DEBUG_PROFILES);
+  const [targetContainer, setTargetContainer] = useState(containers[0] ?? '');
+  const name = target.obj.metadata.name;
+  const { image, profile } = choice;
   return (
     <Dialog open onClose={debug.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Debug container — {name}</DialogTitle>
@@ -1181,55 +1301,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           Attaches an ephemeral debug container to the running pod (like <code>kubectl debug</code>) and opens a shell into it. The
           container stays in the pod spec until the pod is recreated.
         </Typography>
-        <List dense sx={{ py: 0, maxHeight: 280, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}>
-          {presets.map((p) => (
-            <ListItemButton
-              key={p.name}
-              selected={!isCustom && normalizedSelection === normalizeDebugImageName(p.name)}
-              onClick={() => {
-                setSelection(p.name);
-                setProfileOverride(undefined);
-              }}
-            >
-              <ListItemText
-                primary={
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <Typography variant="body2">{p.name}</Typography>
-                    {!isBuiltInDebugImage(p.name) && <Chip size="small" variant="outlined" label="custom" sx={{ height: 18, fontSize: 10 }} />}
-                    {p.profile && p.profile !== 'general' && (
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={DEBUG_PROFILES.find((d) => d.value === p.profile)?.label ?? p.profile}
-                        sx={{ height: 18, fontSize: 10 }}
-                      />
-                    )}
-                  </Stack>
-                }
-                secondary={p.description ? `${p.image} — ${p.description}` : p.image}
-                slotProps={{ secondary: { sx: { fontSize: 11 } } }}
-              />
-            </ListItemButton>
-          ))}
-          <ListItemButton selected={isCustom} onClick={() => setSelection(null)}>
-            <ListItemText
-              primary={<Typography variant="body2">Custom image…</Typography>}
-              secondary="Any image reference from any registry"
-              slotProps={{ secondary: { sx: { fontSize: 11 } } }}
-            />
-          </ListItemButton>
-        </List>
-        {isCustom && (
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            label="Image"
-            placeholder="registry.example.com/debug:tag"
-            value={customImage}
-            onChange={(e) => setCustomImage(e.target.value)}
-          />
-        )}
+        <DebugImageCatalog choice={choice} profiles={DEBUG_PROFILES} />
         <FormControl size="small" fullWidth>
           <InputLabel id="debug-target">Target container (shared process namespace)</InputLabel>
           <Select labelId="debug-target" label="Target container (shared process namespace)" value={targetContainer} onChange={(e) => setTargetContainer(e.target.value)}>
@@ -1241,19 +1313,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" fullWidth>
-          <InputLabel id="debug-profile">Profile</InputLabel>
-          <Select labelId="debug-profile" label="Profile" value={profile} onChange={(e) => setProfileOverride(e.target.value as DebugProfile)}>
-            {DEBUG_PROFILES.map((p) => (
-              <MenuItem key={p.value} value={p.value}>
-                {p.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-          {DEBUG_PROFILES.find((p) => p.value === profile)?.hint}
-        </Typography>
+        <DebugProfileSelect choice={choice} profiles={DEBUG_PROFILES} />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={debug.isPending}>
@@ -1261,7 +1321,7 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
         </Button>
         <Button
           variant="contained"
-          disabled={debug.isPending || debugImages.data === undefined || !image}
+          disabled={debug.isPending || !choice.loaded || !image}
           onClick={() =>
             debug.mutate(
               { ctx: target.ctx, body: { namespace: target.obj.metadata.namespace ?? '', pod: name, image, target: targetContainer || undefined, profile } },
@@ -1280,6 +1340,61 @@ function DebugDialog({ target, onClose, onDone, onError }: { target: RowActionTa
           }
         >
           {debug.isPending ? 'Starting…' : 'Start'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/**
+ * kubectl-debug-node: a pod with the chosen debug image on the node. The
+ * server creates it when the terminal connects and deletes it when the
+ * terminal closes, the same lifecycle as the node shell.
+ */
+function NodeDebugDialog({ target, onClose }: { target: RowActionTarget; onClose: () => void }) {
+  const addTab = useDockStore((s) => s.addTab);
+  const isProtected = useIsProtected(target.ctx);
+  const choice = useDebugImageChoice(NODE_DEBUG_PROFILES);
+  const [typed, setTyped] = useState('');
+  const name = target.obj.metadata.name;
+  const blocked = isProtected && typed !== name;
+  const start = () => {
+    if (!choice.loaded || !choice.image || blocked) return;
+    onClose();
+    addTab({ kind: 'node-shell', id: dockTabId(), title: `debug: ${name}`, ctx: target.ctx, node: name, image: choice.image, profile: choice.profile });
+  };
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Debug container — {name}</DialogTitle>
+      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+        <Typography variant="body2" color="text.secondary">
+          Starts a pod with the chosen image on <b>{name}</b> (like <code>kubectl debug node</code>). It shares the node&apos;s process, network and IPC
+          namespaces, and the node&apos;s root filesystem is mounted at <code>/host</code>. The pod is deleted when the terminal closes.
+        </Typography>
+        <DebugImageCatalog choice={choice} profiles={NODE_DEBUG_PROFILES} />
+        <DebugProfileSelect choice={choice} profiles={NODE_DEBUG_PROFILES} />
+        {isProtected && (
+          <Box>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Type <b>{name}</b> to confirm.
+            </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder={name}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') start();
+              }}
+            />
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" disabled={!choice.loaded || !choice.image || blocked} onClick={start}>
+          Start
         </Button>
       </DialogActions>
     </Dialog>

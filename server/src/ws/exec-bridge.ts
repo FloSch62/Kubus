@@ -72,12 +72,29 @@ export async function runExecBridge(socket: WebSocket, handle: ClusterHandle, op
     }
   });
 
+  // Registered before the exec handshake: sockets emit close only once, so a
+  // browser leaving mid-handshake would otherwise skip cleanup for good.
+  let closeUpstream: (() => void) | undefined;
+  socket.on('close', () => {
+    try {
+      closeUpstream?.();
+    } catch {
+      /* already closed */
+    }
+    cleanup();
+  });
+
   try {
     const upstream = await handle.makeExec().exec(opts.namespace, opts.pod, opts.container, opts.command, stdout, stderr, stdin, true, (status) => {
       const exitCode = status.details?.causes?.find((c) => c.reason === 'ExitCode')?.message;
       const code = status.status === 'Success' ? 0 : exitCode ? Number(exitCode) : 1;
       sendControl({ op: 'exit', code, message: status.message });
     });
+    if (closed) {
+      upstream.close();
+      return;
+    }
+    closeUpstream = () => upstream.close();
     // Keepalive pings on both hops: idle exec sessions otherwise get culled
     // by intermediaries (SSH tunnels, LBs, kubelet idle timeout, dev proxy).
     keepalive = setInterval(() => {
@@ -88,14 +105,6 @@ export async function runExecBridge(socket: WebSocket, handle: ClusterHandle, op
       sendControl({ op: 'exit' });
       cleanup();
       socket.close();
-    });
-    socket.on('close', () => {
-      try {
-        upstream.close();
-      } catch {
-        /* already closed */
-      }
-      cleanup();
     });
   } catch (err) {
     sendControl({ op: 'exit', code: 1, message: err instanceof Error ? err.message : String(err) });
