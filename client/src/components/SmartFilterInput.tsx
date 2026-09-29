@@ -1,6 +1,7 @@
 import { useMemo, useState, type MouseEvent, type RefObject } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -8,12 +9,23 @@ import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import type { SxProps, Theme } from '@mui/material/styles';
+import CancelIcon from '@mui/icons-material/Cancel';
 import ClearIcon from '@mui/icons-material/Clear';
 import SearchIcon from '@mui/icons-material/Search';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined';
 import type { ClusterRow } from '../api/queries.js';
 import { smartFilterSuggestions, type FilterSuggestion } from '../smart-filter.js';
 import { podSummary } from '../kube-display.js';
+import { collectLabelPairs, labelTermFromInput, labelTermSuggestions } from '../label-selector.js';
+
+/** A suggestion row: a smart-filter completion, or a label term to add as a token. */
+type Suggestion = FilterSuggestion & { labelTerm?: string };
+
+/** Label tokens shown inside the field; the rest collapse into a +N chip. */
+const VISIBLE_LABEL_TOKENS = 3;
+
+const NO_TERMS: string[] = [];
 
 const HELP_PANEL_ID = 'smart-filter-help';
 
@@ -50,6 +62,7 @@ const HELP_SECTIONS = [
 ] as const;
 
 const filterHelpPanel = <FilterHelpPanel />;
+const filterHelpPanelWithLabels = <FilterHelpPanel labels />;
 
 interface Props {
   value: string;
@@ -57,16 +70,30 @@ interface Props {
   kind: string;
   rows: ClusterRow[];
   inputRef?: RefObject<HTMLInputElement | null>;
+  /**
+   * Label selector terms (server-side), shown as removable tokens inside the
+   * field. Picking a label suggestion, or typing `label:app=web` and Enter,
+   * adds one; Backspace in an empty field removes the last.
+   */
+  labelTerms?: string[];
+  onLabelTermsChange?: (terms: string[]) => void;
+  /** Root sizing; defaults to a fixed 320px field. */
+  sx?: SxProps<Theme>;
 }
+
+const DEFAULT_SX = { width: 320 };
 
 /**
  * Table search box. Plain text by default; a leading `/` switches to
- * smart-filter syntax with token autocomplete.
+ * smart-filter syntax with token autocomplete. With `onLabelTermsChange` it
+ * also holds the list's label selector as tokens.
  */
-export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Props) {
+export function SmartFilterInput({ value, onChange, kind, rows, inputRef, labelTerms, onLabelTermsChange, sx }: Props) {
   const [focused, setFocused] = useState(false);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const helpOpen = Boolean(helpAnchor);
+  const terms = labelTerms ?? NO_TERMS;
+  const labelsEnabled = !!onLabelTermsChange;
 
   const toggleHelp = (event: MouseEvent<HTMLElement>) => {
     setHelpAnchor((current) => (current ? null : event.currentTarget));
@@ -110,23 +137,44 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
     };
   }, [rows, kind]);
 
-  // Suggestions only exist in smart mode (leading `/`); the slash is stripped
-  // for the suggester and re-attached to the completions it returns.
-  const options = useMemo(
-    () =>
-      focused && value.startsWith('/')
-        ? smartFilterSuggestions(value.slice(1), kind, dynamicValues).map((s) => ({ ...s, completion: `/${s.completion}` }))
-        : [],
-    [focused, value, kind, dynamicValues],
+  // The label index is only built while the field has focus.
+  const labelPairs = useMemo(
+    () => (labelsEnabled && focused ? collectLabelPairs(rows.map((r) => r.obj.metadata.labels)) : undefined),
+    [labelsEnabled, focused, rows],
   );
 
+  // Smart mode (leading `/`) completes clauses; the slash is stripped for the
+  // suggester and re-attached to the completions it returns. Plain text
+  // offers matching labels once two characters are typed (or after `label:`).
+  const options = useMemo<Suggestion[]>(() => {
+    if (!focused) return [];
+    if (value.startsWith('/')) return smartFilterSuggestions(value.slice(1), kind, dynamicValues).map((s) => ({ ...s, completion: `/${s.completion}` }));
+    if (!labelPairs) return [];
+    const explicit = /^label:/i.test(value.trim());
+    if (!explicit && value.trim().length < 2) return [];
+    return labelTermSuggestions(labelPairs, value, terms).map((s) => ({
+      completion: '',
+      labelTerm: s.term,
+      hint: s.kind === 'key' ? 'has label' : s.kind === 'selector' ? 'label selector' : 'label',
+    }));
+  }, [focused, value, kind, dynamicValues, labelPairs, terms]);
+
+  const addLabelTerm = (term: string) => {
+    if (!onLabelTermsChange) return;
+    if (!terms.includes(term)) onLabelTermsChange([...terms, term]);
+    onChange('');
+  };
+
+  const visibleTerms = terms.slice(0, VISIBLE_LABEL_TOKENS);
+  const hiddenTerms = terms.slice(VISIBLE_LABEL_TOKENS);
+
   return (
-    <Autocomplete<FilterSuggestion, false, true, true>
+    <Autocomplete<Suggestion, false, true, true>
       freeSolo
       disableClearable
       options={options}
       filterOptions={(x) => x}
-      getOptionLabel={(o) => (typeof o === 'string' ? o : o.completion)}
+      getOptionLabel={(o) => (typeof o === 'string' ? o : o.labelTerm ? value : o.completion)}
       inputValue={value}
       onInputChange={(_e, newValue, reason) => {
         // `reset` fires when MUI syncs inputValue after selection — the
@@ -134,19 +182,29 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
         if (reason !== 'reset') onChange(newValue);
       }}
       onChange={(_e, selected) => {
-        if (typeof selected === 'string') return;
-        if (selected) onChange(/[:><=]$/.test(selected.completion) ? selected.completion : `${selected.completion} `);
+        if (typeof selected === 'string') {
+          // Enter on `label:app=web` (no suggestion highlighted) adds the term.
+          const typed = labelsEnabled ? labelTermFromInput(selected) : undefined;
+          if (typed) addLabelTerm(typed);
+          return;
+        }
+        if (!selected) return;
+        if (selected.labelTerm) {
+          addLabelTerm(selected.labelTerm);
+          return;
+        }
+        onChange(/[:><=]$/.test(selected.completion) ? selected.completion : `${selected.completion} `);
       }}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
-      sx={{ width: 320 }}
+      sx={sx ?? DEFAULT_SX}
       renderOption={(props, option) => (
-        <Box component="li" {...props} key={option.completion} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-            {option.completion.slice(option.completion.lastIndexOf(' ') + 1)}
+        <Box component="li" {...props} key={option.labelTerm ? `label:${option.labelTerm}` : option.completion} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace', minWidth: 0, overflowWrap: 'anywhere' }}>
+            {option.labelTerm ?? option.completion.slice(option.completion.lastIndexOf(' ') + 1)}
           </Typography>
           {option.hint && (
-            <Typography variant="caption" color="text.secondary" noWrap>
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ ml: option.labelTerm ? 'auto' : undefined, flexShrink: 0 }}>
               {option.hint}
             </Typography>
           )}
@@ -156,8 +214,16 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
         <TextField
           {...params}
           inputRef={inputRef}
-          placeholder="Search… type / for smart filter"
+          placeholder={terms.length ? undefined : 'Search… type / for filters'}
           onKeyDown={(e) => {
+            if (e.key === 'Backspace' && labelsEnabled && terms.length && !value) {
+              const input = e.target as HTMLInputElement;
+              if (input.selectionStart === 0 && input.selectionEnd === 0) {
+                e.preventDefault();
+                onLabelTermsChange?.(terms.slice(0, -1));
+              }
+              return;
+            }
             if (e.key !== 'Escape') return;
             const input = e.target as HTMLElement;
             // With the suggestion popup open, Escape only closes it (MUI).
@@ -179,19 +245,36 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
             input: {
               ...params.slotProps.input,
               startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ fontSize: 18 }} />
+                <InputAdornment position="start" sx={{ gap: 0.5, maxWidth: '62%', overflow: 'hidden', flexShrink: 0 }}>
+                  <SearchIcon sx={{ fontSize: 18, flexShrink: 0 }} />
+                  {visibleTerms.map((term) => (
+                    <Chip
+                      key={term}
+                      size="small"
+                      label={term}
+                      title={`Label selector: ${term}`}
+                      onDelete={() => onLabelTermsChange?.(terms.filter((t) => t !== term))}
+                      onMouseDown={(e) => e.preventDefault()}
+                      sx={{ height: 22, fontSize: 12, fontFamily: 'monospace', maxWidth: 220, flexShrink: 1, minWidth: 0 }}
+                      deleteIcon={<CancelIcon aria-label={`Remove label filter ${term}`} />}
+                    />
+                  ))}
+                  {hiddenTerms.length > 0 && (
+                    <Tooltip title={hiddenTerms.join(', ')}>
+                      <Chip size="small" label={`+${hiddenTerms.length}`} sx={{ height: 22, fontSize: 12, flexShrink: 0 }} />
+                    </Tooltip>
+                  )}
                 </InputAdornment>
               ),
               endAdornment: (
                 <InputAdornment position="end">
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                    {value && (
+                    {(value || terms.length > 0) && (
                       <IconButton
-                        aria-label="Clear table search"
+                        aria-label={value ? 'Clear table search' : 'Clear label filters'}
                         size="small"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => onChange('')}
+                        onClick={() => (value ? onChange('') : onLabelTermsChange?.([]))}
                       >
                         <ClearIcon sx={{ fontSize: 16 }} />
                       </IconButton>
@@ -232,7 +315,7 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
                         },
                       }}
                     >
-                      {filterHelpPanel}
+                      {labelsEnabled ? filterHelpPanelWithLabels : filterHelpPanel}
                     </Popover>
                   </Box>
                 </InputAdornment>
@@ -245,7 +328,17 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef }: Prop
   );
 }
 
-function FilterHelpPanel() {
+const LABEL_HELP = {
+  title: 'Label selector (filters on the server)',
+  items: [
+    ['app=web', 'Type part of a label and pick a suggestion to add it as a token'],
+    ['label:env!=prod', 'Or type any selector after label: and press Enter'],
+    ['Backspace', 'In an empty field, removes the last label token'],
+  ],
+} as const;
+
+function FilterHelpPanel({ labels = false }: { labels?: boolean }) {
+  const sections = labels ? [...HELP_SECTIONS, LABEL_HELP] : HELP_SECTIONS;
   return (
     <Box sx={{ p: 1.5 }}>
       <Box sx={{ mb: 1 }}>
@@ -256,7 +349,7 @@ function FilterHelpPanel() {
       </Box>
       <Divider sx={{ mb: 1.25 }} />
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-        {HELP_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <Box key={section.title}>
             <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600, color: 'text.primary' }}>
               {section.title}

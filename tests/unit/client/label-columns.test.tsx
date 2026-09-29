@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { KubeObject } from '@kubus/shared';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
 import { buildLabelColumns, insertLabelColumns, labelColumnField, labelKeyCounts } from '../../../client/src/components/label-columns';
 import { LabelColumnsButton } from '../../../client/src/components/LabelColumnsButton';
@@ -118,6 +118,17 @@ describe('LabelColumnsButton', () => {
     fireEvent.change(input, { target: { value: 'team' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(useUiPrefsStore.getState().columnVisibility.t).toEqual({ 'label:team': true, name: true });
+  });
+
+  it('has an icon-only toolbar variant that can open the show/hide panel', async () => {
+    useUiPrefsStore.setState({ labelColumns: { t: [{ source: 'label', key: 'app' }, { source: 'label', key: 'team' }] } });
+    const onManageColumns = vi.fn();
+    render(<LabelColumnsButton tableId="t" rows={rows} compact onManageColumns={onManageColumns} />);
+    const button = screen.getByRole('button', { name: 'Columns' });
+    expect(button).toHaveTextContent('2');
+    fireEvent.click(button);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show or hide columns…' }));
+    expect(onManageColumns).toHaveBeenCalledTimes(1);
   });
 
   it('flags a key that is already a column', async () => {

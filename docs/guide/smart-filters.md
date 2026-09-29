@@ -74,9 +74,12 @@ the object. On the Events list it also matches the UID of the object an event is
 
 ## Filtering by label
 
-Next to the search box, the **Labels** dropdown filters server-side by label selector.
-It lists every label key and `key=value` pair present in the rows. Tick as many as you
-like (they're ANDed together), or type a raw selector like `env!=prod` and press ++enter++.
+The search box also holds a server-side label selector, shown as tokens at its start.
+Type part of a label and the suggestions list the matching keys and `key=value` pairs
+present in the rows; pick one to add it as a token. For any other selector, type it after
+`label:` (for example `label:env!=prod`) and press ++enter++. Tokens are ANDed together.
+Click a token's ✕ to remove it, or press ++backspace++ in the empty field to remove the
+last one.
 
 Every row also shows its labels as chips in the **Labels column**. Hover to see them
 all, and click a chip to add it to the label filter.

@@ -25,8 +25,20 @@ own, so you can leave a list open all day and trust what it shows.
 
 Each built-in kind has hand-picked columns. Pods show readiness, status, restarts, CPU,
 memory, node and age; Deployments show ready/up-to-date/available; Services show type and
-ports. When several clusters are selected, a **Cluster** column is added automatically.
+ports. When several clusters are selected, a **Cluster** column is added automatically. It
+shows each cluster as a short colored tag (`kind-dev` reads `dev`), and the clusters you
+have selected never share a color. Hover a tag for the full context name.
 
+The page header shows how many rows the list holds (`12 of 62` while the search box
+hides some) next to the kind's API version. Click the API version to open the resource's
+API details. **Create** sits at the right of the header.
+
+- **Names get the room they need.** The Name column is as wide as the longest name in the
+  list, up to about half the table. When a name still doesn't fit, Kubus cuts its
+  middle and keeps the end, so `broken-deploy-6c5…-2gvhg` and its sibling stay
+  different. Hover a name to see it in full.
+- **The name and the ⋮ menu stay put.** Scroll a wide list sideways and the checkbox and
+  Name columns stay at the left edge while the row actions stay at the right.
 - **Sort** by clicking a column header. Names sort the way you read them: `worker-2`
   comes before `worker-10`, and a StatefulSet's pods line up as `web-1`, `web-2`, ...,
   `web-12`.
@@ -35,13 +47,14 @@ ports. When several clusters are selected, a **Cluster** column is added automat
   `/status:crash ns:prod restarts>3`, with autocomplete.
 - **Labels** get their own column. Each row shows its first labels as chips with a
   `+N` overflow; hover to see them all, or click a chip to filter by that label.
-- **Add a column for any label or annotation.** Click **Columns** in the toolbar, pick
-  Label or Annotation, and choose a key. The picker suggests the keys present in the
+- **Add a column for any label or annotation.** Click the **Columns** button (the column
+  icon next to the search box), pick Label or Annotation, and choose a key. The picker suggests the keys present in the
   list and shows how many rows carry each one, and you can type any other key too. The
   new column shows that key's value per row, and you sort and filter it like any other
   column. Kubus keeps it with the list's other column settings (widths, visibility, sort),
   so it is still there after a reload, and a saved view brings it back. Remove it from
-  the same **Columns** menu.
+  the same **Columns** menu. **Show or hide columns…** at the bottom of that menu hides
+  or brings back any of the kind's own columns.
 - **Copy a value** with the copy button that appears when you hover a cell, or focus a
   cell and press ++ctrl+c++ (++cmd+c++ on macOS). The shortcut always copies that one
   cell, even while rows are checked. To copy whole rows, use **Copy rows** (below).
@@ -51,11 +64,17 @@ ports. When several clusters are selected, a **Cluster** column is added automat
 - **Secret values are redacted** by default. Kubus never shows secret data in a list.
   [Reveal them deliberately](production-guard.md#secrets-are-redacted-by-default) in the
   details drawer.
-- **Warnings find you.** A small amber marker next to the name flags any object with
-  warning events or container restarts in the last hour; hover it for the reasons. Sort
-  by that column and the noisiest objects come first. The same signal puts a count on the
+- **Warnings find you.** Objects with warning events or container restarts in the last
+  hour are flagged in their Status (or Ready) column. When the status already reads as a
+  problem, such as `CrashLoopBackOff`, it gets a dotted underline: hover it for the
+  reasons. A healthy-looking status gets a small amber marker after it instead. Kinds
+  without a status column show the marker in a narrow column next to the name; sort by
+  that column and the noisiest objects come first. The same signal puts a count on the
   drawer's Events tab and a dot on a page tab whose object turned unhealthy while you
   were looking elsewhere.
+- **Missing metrics are explained.** When metrics-server can't be reached in one of the
+  selected clusters, the CPU and Memory headers get a small ⓘ that names the cluster,
+  and its rows show a dash you can hover.
 
 ## Kubus remembers where you were
 
@@ -103,9 +122,12 @@ list. Leave it empty for all namespaces; it applies across all selected clusters
 ## Saved views
 
 If there's a list you keep coming back to, such as *failing pods in `prod`* or *all
-Ingresses in `team-a`*, save it. The current kind plus its namespace and cluster filters
-become a **saved view** that appears in the nav drawer right under its kind, one click
-away. Delete a saved view from the same spot when you're done with it.
+Ingresses in `team-a`*, save it: open **Views** next to the search box and choose **Save
+view**. The current kind, its filter and label selector, the namespace filter and the
+table's columns, widths and sort become a **saved view** that appears in the nav drawer
+right under its kind, one click away. The same **Views** menu lists the views saved for
+this kind, and **Reset view** clears the filters and puts the columns and sort back to
+their defaults. Delete a saved view from the nav drawer when you're done with it.
 
 ## Acting on a row
 

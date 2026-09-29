@@ -7,9 +7,13 @@ import ButtonBase from '@mui/material/ButtonBase';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
-import Link from '@mui/material/Link';
+import Divider from '@mui/material/Divider';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import ListSubheader from '@mui/material/ListSubheader';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
-import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -18,17 +22,25 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import SubjectIcon from '@mui/icons-material/Subject';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
+import BookmarksOutlinedIcon from '@mui/icons-material/BookmarksOutlined';
+import BookmarkBorderOutlinedIcon from '@mui/icons-material/BookmarkBorderOutlined';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SettingsBackupRestoreOutlinedIcon from '@mui/icons-material/SettingsBackupRestoreOutlined';
 import DifferenceOutlinedIcon from '@mui/icons-material/DifferenceOutlined';
-import { useLocation, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
-import { useGridApiRef } from '@mui/x-data-grid';
-import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo } from '@kubus/shared';
+import { useLocation, useNavigate, useParams, useSearchParams, type SetURLSearchParams } from 'react-router';
+import { GridPreferencePanelsValue, useGridApiRef } from '@mui/x-data-grid';
+import { columnsForKind, groupFromPath, groupToPath, gvkForResource, gvkLabel, pluralLabel, type ResourceKindInfo, type SavedView } from '@kubus/shared';
 import { useApiResourcesForContexts, useClusterSignals, useCrdColumns, useCreateResource, useDeleteResource, useDryRunResource, useFilteredList, useResourceMetrics, useRolloutRestart, useWatchedList, type ClusterRow } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { useUiPrefsStore } from '../state/prefs.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
-import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, signalHostField, withSignalMarker, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { tabMeta } from '../layout/tab-meta.js';
+import { clusterColorIndexes } from '../cluster-color.js';
+import { applySavedViewGridState } from '../state/saved-view.js';
 import { ResourceDetailPanel, type ResourceSelection } from '../components/ResourceDetailDrawer.js';
 import { clampDetailWidth, DEFAULT_DETAIL_WIDTH, selKeyOf, useDetailStore } from '../state/detail.js';
 import { isLogTargetKind, RowActionMenu, RowActions, RowLogsButton, type RowActionTarget } from '../components/RowActions.js';
@@ -436,7 +448,9 @@ export function ResourceListPage() {
   const isWorkloadMetricsKind = !!behaviorKind && WORKLOAD_METRIC_KINDS.has(behaviorKind);
   const wantsMetrics = behaviorKind === 'Pod' || behaviorKind === 'Node' || isWorkloadMetricsKind;
   const { data: podMetrics } = useResourceMetrics(wantsMetrics ? selected : [], behaviorKind === 'Node' ? 'nodes' : 'pods');
-  const metricsUnavailable = wantsMetrics ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false && podMetrics.get(ctx)?.probed !== false) : [];
+  const metricsUnavailableKey = wantsMetrics ? selected.filter((ctx) => podMetrics?.get(ctx)?.available === false && podMetrics.get(ctx)?.probed !== false).join('\n') : '';
+  // Explained in the CPU/Memory column headers instead of a banner row.
+  const metricsUnavailable = useMemo(() => (metricsUnavailableKey ? metricsUnavailableKey.split('\n') : []), [metricsUnavailableKey]);
   // Node lists watch all pods for allocation totals; workload lists watch them
   // to attribute per-pod usage to the owning workload.
   const auxPods = useWatchedList(behaviorKind === 'Node' || isWorkloadMetricsKind ? selected : [], '', 'v1', 'pods');
@@ -523,6 +537,8 @@ export function ResourceListPage() {
 
   const kindPath = `/r/${groupToPath(group)}/${version}/${plural}`;
   const setListState = useUiPrefsStore((s) => s.setListState);
+  // The header shows the same icon as the page's tab and nav group.
+  const kindIcon = useMemo(() => tabMeta(kindPath, apiResources?.resources).icon, [kindPath, apiResources]);
 
   // `replace` keeps filter typing from flooding the history stack. The value
   // is remembered per kind so the next nav click restores it.
@@ -610,9 +626,10 @@ export function ResourceListPage() {
   // Static columns are built without the metrics/allocation lookups so the
   // 20 s metrics poll (or, on Node lists, any pod churn) doesn't hand the
   // grid a full set of fresh defs — that re-renders every visible cell.
+  const clusterColors = useMemo(() => clusterColorIndexes(selected), [selected]);
   const staticColumns = useMemo(() => {
     const ids = columnIds.filter((id) => !METRIC_COLUMN_IDS.has(id));
-    const opts = { multiCluster: selected.length > 1, onLabelClick: addLabelFilter };
+    const opts = { multiCluster: selected.length > 1, onLabelClick: addLabelFilter, clusterColors };
     const cols = buildColumns(ids, opts);
     if (isCustomKind && printerCols?.length) {
       const crdIdx = cols.findIndex((c) => c.field === 'age');
@@ -636,26 +653,34 @@ export function ResourceListPage() {
       ),
     });
     return cols;
-  }, [columnIds, selected.length, addLabelFilter, isCustomKind, printerCols, rowActionTarget, behaviorKind]);
+  }, [columnIds, selected.length, clusterColors, addLabelFilter, isCustomKind, printerCols, rowActionTarget, behaviorKind]);
 
   const metricColumns = useMemo(() => {
     const ids = columnIds.filter((id) => METRIC_COLUMN_IDS.has(id));
     if (!ids.length) return [];
-    return buildColumns(ids, { multiCluster: false, metrics: metricsLookup, nodeAllocation });
-  }, [columnIds, metricsLookup, nodeAllocation]);
+    return buildColumns(ids, { multiCluster: false, metrics: metricsLookup, nodeAllocation, metricsUnavailable });
+  }, [columnIds, metricsLookup, nodeAllocation, metricsUnavailable]);
 
+  // Warning markers ride on the row's status cell where the kind has one;
+  // other kinds keep the marker in a narrow column after the name.
+  const signalKind = behaviorKind && behaviorKind !== 'Event' ? behaviorKind : undefined;
+  const signalHost = useMemo(() => signalHostField(staticColumns), [staticColumns]);
   const signalColumn = useMemo(
-    () => (signalsLookup && behaviorKind && behaviorKind !== 'Event' ? buildColumns([SIGNALS_COLUMN_ID], { multiCluster: false, signals: signalsLookup, signalKind: behaviorKind })[0] : undefined),
-    [signalsLookup, behaviorKind],
+    () => (signalsLookup && signalKind && !signalHost ? buildColumns([SIGNALS_COLUMN_ID], { multiCluster: false, signals: signalsLookup, signalKind })[0] : undefined),
+    [signalsLookup, signalKind, signalHost],
   );
+  const signalHostColumns = useMemo(() => {
+    if (!signalsLookup || !signalKind || !signalHost) return staticColumns;
+    return staticColumns.map((col) => (col.field === signalHost ? withSignalMarker(col, signalsLookup, signalKind) : col));
+  }, [staticColumns, signalsLookup, signalKind, signalHost]);
 
   // Label and annotation columns the user added to this list.
   const labelColumnSpecs = useUiPrefsStore((s) => s.labelColumns[kindPath]);
   const labelColumns = useMemo(() => buildLabelColumns(labelColumnSpecs ?? []), [labelColumnSpecs]);
 
   const gridColumns = useMemo(() => {
-    if (!metricColumns.length && !signalColumn) return staticColumns;
-    const merged = [...staticColumns];
+    if (!metricColumns.length && !signalColumn) return signalHostColumns;
+    const merged = [...signalHostColumns];
     if (signalColumn) {
       const nameIdx = merged.findIndex((c) => c.field === 'name');
       merged.splice(nameIdx === -1 ? 0 : nameIdx + 1, 0, signalColumn);
@@ -677,7 +702,7 @@ export function ResourceListPage() {
       merged.splice(insertAt, 0, col);
     }
     return merged;
-  }, [staticColumns, metricColumns, columnIds, signalColumn]);
+  }, [signalHostColumns, metricColumns, columnIds, signalColumn]);
   const columns = useMemo(() => insertLabelColumns(gridColumns, labelColumns), [gridColumns, labelColumns]);
   const hiddenFields = useMemo(
     () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
@@ -743,6 +768,12 @@ export function ResourceListPage() {
     return true;
   };
 
+  const resetView = () => {
+    clearFilters();
+    useUiPrefsStore.getState().applyTableState(kindPath, { labelColumns: [] });
+    showToast('success', `${resourceTitle} list reset to its default columns and sort`);
+  };
+
   const saveCurrentView = () => {
     const params = new URLSearchParams();
     if (textFilter.trim()) params.set('q', textFilter.trim());
@@ -751,9 +782,11 @@ export function ResourceListPage() {
     // Snapshot the grid so restoring brings back the exact table, not just
     // the query. tableId for this grid is kindPath.
     const prefs = useUiPrefsStore.getState();
+    const title = `${resourceTitle}${textFilter || labelSelector ? ' view' : ''}`;
+    showToast('success', `Saved "${title}" to Saved views in the navigation`);
     addSavedView({
       id: `view:${path}`,
-      title: `${resourceTitle}${textFilter || labelSelector ? ' view' : ''}`,
+      title,
       path,
       textFilter: textFilter.trim() || undefined,
       labelSelector: labelSelector.trim() || undefined,
@@ -773,38 +806,6 @@ export function ResourceListPage() {
       <RememberedFilters kindPath={kindPath} />
       <CreateShortcut onCreate={openCreate} />
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
-      <Box sx={{ px: 1.5, pt: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-          <Link
-            component="button"
-            variant="h6"
-            underline="hover"
-            color="primary"
-            title={`Open API resource ${resourceGvk}`}
-            onClick={() => setApiResourceOpen(true)}
-          >
-            {resourceTitle}
-          </Link>
-          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            {resourceGvk}
-          </Typography>
-        </Box>
-        {unavailable.map(([ctx, s]) => (
-          <Alert key={ctx} severity="info" sx={{ mt: 0.5 }}>
-            {ctx}: {s.message ?? `${kind} is not installed on this cluster.`}
-          </Alert>
-        ))}
-        {discoveryOnlyMissing.length > 0 && (
-          <Alert severity="info" sx={{ mt: 0.5 }}>
-            {kind} is not installed in {discoveryOnlyMissing.join(', ')}.
-          </Alert>
-        )}
-        {metricsUnavailable.length > 0 && (
-          <Alert severity="info" sx={{ mt: 0.5 }}>
-            CPU/Memory unavailable — metrics-server is not reachable in {metricsUnavailable.join(', ')}.
-          </Alert>
-        )}
-      </Box>
       <ResourceTable
         tableId={kindPath}
         scrollKey={kindPath}
@@ -831,6 +832,52 @@ export function ResourceListPage() {
           setContextMenuOpen(true);
         }}
         onRowKey={handleRowKey}
+        renderHeader={({ shown, total }) => (
+          <Box sx={{ px: 1.5, pt: 1.5, pb: 1 }}>
+            <PageHeader
+              title={resourceTitle}
+              icon={kindIcon}
+              count={shown < total ? `${shown.toLocaleString()} of ${total.toLocaleString()}` : total}
+              subtitle={
+                <ButtonBase
+                    title={`Open API resource ${resourceGvk}`}
+                    onClick={() => setApiResourceOpen(true)}
+                    sx={{
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: 'text.secondary',
+                      borderRadius: 0.5,
+                      px: 0.5,
+                      mx: -0.5,
+                      minWidth: 0,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      '&:hover': { color: 'text.primary', textDecoration: 'underline' },
+                    }}
+                  >
+                    {resourceGvk}
+                  </ButtonBase>
+              }
+              actions={
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+                  Create
+                </Button>
+              }
+              sx={{ mb: 0 }}
+            />
+            {unavailable.map(([ctx, s]) => (
+              <Alert key={ctx} severity="info" sx={{ mt: 1 }}>
+                {ctx}: {s.message ?? `${kind} is not installed on this cluster.`}
+              </Alert>
+            ))}
+            {discoveryOnlyMissing.length > 0 && (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                {kind} is not installed in {discoveryOnlyMissing.join(', ')}.
+              </Alert>
+            )}
+          </Box>
+        )}
         checkboxSelection
         selectedRows={selectedRows}
         onSelectionChange={setCheckedRows}
@@ -901,13 +948,13 @@ export function ResourceListPage() {
         }
         toolbar={
           <>
-            <LabelColumnsButton tableId={kindPath} rows={list.rows} />
-            <Button startIcon={<BookmarkAddOutlinedIcon />} variant="outlined" onClick={saveCurrentView}>
-              Save view
-            </Button>
-            <Button startIcon={<AddIcon />} variant="outlined" onClick={() => setCreateOpen(true)}>
-              Create
-            </Button>
+            <LabelColumnsButton
+              tableId={kindPath}
+              rows={list.rows}
+              compact
+              onManageColumns={() => gridApiRef.current?.showPreferences(GridPreferencePanelsValue.columns)}
+            />
+            <ViewsMenu kindPath={kindPath} title={resourceTitle} onSave={saveCurrentView} onReset={resetView} />
           </>
         }
       />
@@ -1015,6 +1062,91 @@ export function ResourceListPage() {
       </Box>
       <EmbeddedResourceDetail />
     </Box>
+  );
+}
+
+/**
+ * The list's views in one menu: save the current filter and grid as a saved
+ * view, jump to one saved for this kind, or reset the list to its defaults.
+ */
+function ViewsMenu({ kindPath, title, onSave, onReset }: { kindPath: string; title: string; onSave: () => void; onReset: () => void }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const savedViews = useNavigationStore((s) => s.savedViews);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const forKind = savedViews.filter((v) => v.path === kindPath || v.path.startsWith(`${kindPath}?`));
+  const current = `${location.pathname}${location.search}`;
+  const close = () => setAnchor(null);
+  const open = (view: SavedView) => {
+    close();
+    if (view.grid) applySavedViewGridState(view.path, view.grid);
+    void navigate(view.path, { state: { savedView: true } });
+  };
+  return (
+    <>
+      <Button
+        variant="outlined"
+        startIcon={<BookmarksOutlinedIcon />}
+        endIcon={<ExpandMoreIcon />}
+        aria-haspopup="menu"
+        aria-expanded={anchor ? 'true' : undefined}
+        onClick={(e) => setAnchor(e.currentTarget)}
+        sx={{ flexShrink: 0, height: 34 }}
+      >
+        Views
+      </Button>
+      <Menu
+        anchorEl={anchor}
+        open={!!anchor}
+        onClose={close}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        slotProps={{ paper: { sx: { mt: 0.5, minWidth: 260, maxWidth: 360 } } }}
+      >
+        <MenuItem
+          onClick={() => {
+            close();
+            onSave();
+          }}
+        >
+          <ListItemIcon>
+            <BookmarkAddOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Save view" secondary="Filter, columns, sort and namespaces" />
+        </MenuItem>
+        <Divider />
+        <ListSubheader sx={{ lineHeight: '28px', bgcolor: 'transparent' }}>Saved {title} views</ListSubheader>
+        {forKind.length === 0 && (
+          <MenuItem disabled>
+            <ListItemText primary="None yet" />
+          </MenuItem>
+        )}
+        {forKind.map((view) => (
+          <MenuItem key={view.id} selected={view.path === current} onClick={() => open(view)}>
+            <ListItemIcon>
+              <BookmarkBorderOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary={view.title}
+              secondary={[view.textFilter, view.labelSelector].filter(Boolean).join(' · ') || 'No filter'}
+              slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true, sx: { fontFamily: 'monospace', fontSize: 11.5 } } }}
+            />
+          </MenuItem>
+        ))}
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            close();
+            onReset();
+          }}
+        >
+          <ListItemIcon>
+            <SettingsBackupRestoreOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Reset view" secondary="Clear filters, default columns and sort" />
+        </MenuItem>
+      </Menu>
+    </>
   );
 }
 

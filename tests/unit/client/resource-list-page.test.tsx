@@ -74,7 +74,8 @@ vi.mock('../../../client/src/components/RowActions.js', () => ({
 vi.mock('../../../client/src/components/ResourceTable.js', () => ({
   ResourceTable: (props: {
     rows: Row[];
-    columns: Array<{ field: string; valueGetter?: (...args: unknown[]) => unknown; renderCell?: (params: { row: Row; value?: unknown }) => ReactNode }>;
+    columns: Array<{ field: string; valueGetter?: (...args: unknown[]) => unknown; renderCell?: (params: { row: Row; value?: unknown }) => ReactNode; renderHeader?: () => ReactNode }>;
+    renderHeader?: (counts: { shown: number; total: number }) => ReactNode;
     toolbar?: ReactNode;
     selectionBar?: ReactNode;
     onSelectionChange?: (rows: Row[]) => void;
@@ -90,7 +91,9 @@ vi.mock('../../../client/src/components/ResourceTable.js', () => ({
     loading?: boolean;
   }) => (
     <section data-testid="resource-table">
+      <header>{props.renderHeader?.({ shown: props.rows.length, total: props.rows.length })}</header>
       <div>{props.toolbar}</div>
+      <div>{props.columns.map((column) => (column.renderHeader ? <span key={column.field}>{column.renderHeader()}</span> : null))}</div>
       <div>{props.selectionBar}</div>
       <output data-testid="table-state">
         {JSON.stringify({ hidden: props.hiddenFields, active: props.activeRowId, loading: props.loading, selected: props.selectedRows?.map((row) => row.obj.metadata.name) })}
@@ -248,7 +251,7 @@ beforeEach(() => {
 it('does not report metrics as unreachable before the first probe completes', () => {
   fixtures.metrics = new Map([['dev', { available: false, probed: false, items: [] }]]);
   renderPage('/r/core/v1/pods');
-  expect(screen.queryByText(/metrics-server is not reachable/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/unavailable in/)).not.toBeInTheDocument();
 });
 
 describe('ResourceListPage', () => {
@@ -295,13 +298,18 @@ describe('ResourceListPage', () => {
     expect(screen.queryByText(/watch denied/)).not.toBeInTheDocument();
     expect(screen.queryByText(/connection lost/)).not.toBeInTheDocument();
     expect(screen.getByText(/not installed on this cluster/)).toBeInTheDocument();
-    expect(screen.getByText(/metrics-server is not reachable/)).toBeInTheDocument();
+    // Unreachable metrics are explained on the CPU/Memory headers, not in a banner row.
+    expect(screen.getByLabelText('CPU unavailable in prod')).toBeInTheDocument();
+    expect(screen.getByLabelText('Memory unavailable in prod')).toBeInTheDocument();
+    expect(screen.queryByText(/metrics-server is not reachable/)).not.toBeInTheDocument();
     expect(screen.getByTestId('table-state')).toHaveTextContent('loading');
     await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent('field='));
     expect(screen.getByText('Detail panel pod-a')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Views' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Save view/ }));
     expect(useNavigationStore.getState().savedViews[0]).toMatchObject({ textFilter: 'old', labelSelector: 'tier=frontend' });
+    expect(effects.toast).toHaveBeenCalledWith('success', expect.stringContaining('Saved "Pods view"'));
     fireEvent.click(screen.getByRole('button', { name: 'Mock text filter' }));
     expect(screen.getByTestId('location')).toHaveTextContent('q=failed+pods');
     fireEvent.click(screen.getByRole('button', { name: 'Mock clear filter' }));
@@ -368,7 +376,7 @@ describe('ResourceListPage', () => {
     useUiPrefsStore.setState({ labelColumns: { '/r/apps/v1/deployments': [{ source: 'label', key: 'tier' }] } });
     renderPage('/r/apps/v1/deployments');
     expect(screen.queryByRole('button', { name: 'Scale (2)' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add a column for any label or annotation key' })).toHaveTextContent('Columns (1)');
+    expect(screen.getByRole('button', { name: 'Columns' })).toHaveTextContent('1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Mock select all' }));
     expect(screen.getByRole('button', { name: 'Scale (2)' })).toBeInTheDocument();
@@ -380,7 +388,8 @@ describe('ResourceListPage', () => {
     expect(first).toMatch(/^web-10,team-a,dev,.*,frontend,app=web tier=frontend,/);
     expect(effects.toast).toHaveBeenCalledWith('success', 'Copied 2 rows × 11 columns as CSV');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Views' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Save view/ }));
     expect(useNavigationStore.getState().savedViews[0]?.grid?.labelColumns).toEqual([{ source: 'label', key: 'tier' }]);
   });
 
@@ -477,6 +486,41 @@ describe('ResourceListPage', () => {
     expect(useDetailStore.getState().width).toBe(642);
     expect(useDetailStore.getState().collapsed).toBe(false);
     expect(document.body.style.cursor).toBe('');
+  });
+
+  it('lists, opens and resets views from the Views menu', async () => {
+    useNavigationStore.setState({
+      savedViews: [
+        { id: 'view:/r/core/v1/pods?q=crash', title: 'Crashing pods', path: '/r/core/v1/pods?q=crash', textFilter: 'crash', grid: { namespaces: ['team-b'], sort: [{ field: 'age', sort: 'desc' }] } },
+        { id: 'view:/r/apps/v1/deployments', title: 'Deployments', path: '/r/apps/v1/deployments' },
+      ],
+    });
+    useUiPrefsStore.setState({ columnWidths: { '/r/core/v1/pods': { name: 300 } }, labelColumns: { '/r/core/v1/pods': [{ source: 'label', key: 'app' }] } });
+    renderPage('/r/core/v1/pods?label=app%3Dweb');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Views' }));
+    const menu = screen.getByRole('menu');
+    // Only this kind's views are offered.
+    expect(within(menu).queryByText('Deployments')).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Crashing pods/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/r/core/v1/pods?q=crash'));
+    expect(useUiPrefsStore.getState().sortModels['/r/core/v1/pods']).toEqual([{ field: 'age', sort: 'desc' }]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Views' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Reset view/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent('q=crash'));
+    expect(useUiPrefsStore.getState().columnWidths['/r/core/v1/pods']).toBeUndefined();
+    expect(useUiPrefsStore.getState().sortModels['/r/core/v1/pods']).toBeUndefined();
+    expect(useUiPrefsStore.getState().labelColumns['/r/core/v1/pods']).toBeUndefined();
+    expect(effects.toast).toHaveBeenCalledWith('success', expect.stringContaining('reset'));
+  });
+
+  it('puts the count, the API resource link and the one primary Create in the header', () => {
+    renderPage('/r/core/v1/pods');
+    const header = screen.getByRole('heading', { name: 'Pods' }).closest('header')!;
+    expect(within(header).getByText('2')).toBeInTheDocument();
+    expect(within(header).getByTitle('Open API resource core/v1/Pod')).toBeInTheDocument();
+    expect(within(header).getByRole('button', { name: 'Create' })).toHaveClass('MuiButton-contained');
   });
 
   it('uses the guided create flow for Jobs and CronJobs', () => {
