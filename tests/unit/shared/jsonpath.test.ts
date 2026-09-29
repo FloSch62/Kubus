@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evalPrinterColumnPath } from '@kubus/shared';
+import { evalPrinterColumnPath, printerColumnText } from '@kubus/shared';
 
 const pod = {
   metadata: {
@@ -75,6 +75,20 @@ describe('evalPrinterColumnPath', () => {
 
     it('returns undefined for a missing quoted key', () => {
       expect(evalPrinterColumnPath(pod, ".metadata.labels['no.such/key']")).toBeUndefined();
+    });
+  });
+
+  describe('escaped dots', () => {
+    it('reads an escaped dot as part of the key', () => {
+      expect(evalPrinterColumnPath(pod, '.metadata.labels.app\\.kubernetes\\.io/name')).toBe('web');
+      expect(evalPrinterColumnPath(pod, '.metadata.annotations.kubus\\.dev/owner')).toBe('platform');
+    });
+
+    it('keeps splitting on unescaped dots around an escaped key', () => {
+      const obj = { a: { 'b.c': { d: 'deep' } } };
+      expect(evalPrinterColumnPath(obj, '.a.b\\.c.d')).toBe('deep');
+      expect(evalPrinterColumnPath(obj, 'a.b\\.c.d')).toBe('deep');
+      expect(evalPrinterColumnPath(obj, '.a.b.c.d')).toBeUndefined();
     });
   });
 
@@ -225,6 +239,23 @@ describe('evalPrinterColumnPath', () => {
       expect(evalPrinterColumnPath(pod, '.metadata.name')).toBe('web-0');
       expect(evalPrinterColumnPath(pod, '.bad[')).toBeUndefined();
       expect(evalPrinterColumnPath(pod, path)).toBe('False');
+    });
+  });
+
+  describe('printerColumnText', () => {
+    it('joins list values instead of printing JSON', () => {
+      const route = { spec: { hostnames: ['podinfo.example.com', 'www.example.com'] } };
+      expect(printerColumnText(evalPrinterColumnPath(route, '.spec.hostnames'))).toBe('podinfo.example.com, www.example.com');
+      expect(printerColumnText([1, true, { a: 1 }, null])).toBe('1, true, {"a":1}');
+    });
+
+    it('passes scalars through and gives undefined for nothing', () => {
+      expect(printerColumnText('Ready')).toBe('Ready');
+      expect(printerColumnText(3)).toBe('3');
+      expect(printerColumnText(false)).toBe('false');
+      expect(printerColumnText({ a: 1 })).toBe('{"a":1}');
+      expect(printerColumnText(undefined)).toBeUndefined();
+      expect(printerColumnText([])).toBeUndefined();
     });
   });
 });

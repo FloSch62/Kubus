@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import ReplayRoundedIcon from '@mui/icons-material/ReplayRounded';
-import { evalPrinterColumnPath, hpaMetrics, hpaMetricText, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
+import { evalPrinterColumnPath, hpaMetrics, hpaMetricText, printerColumnText, type ClusterSignals, type KubeObject, type MetricsSnapshot, type ObjectSignal, type PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../api/queries.js';
 import { AgeCell, RelativeTimeCell } from './AgeCell.js';
 import { ReadyCounter } from './ReadyCounter.js';
@@ -964,8 +964,8 @@ export function makeNodeAllocationLookup(pods: ClusterRow[]): NodeAllocationLook
 
 /**
  * Columns from a CRD's additionalPrinterColumns. Values come from evaluating
- * the column's jsonPath against the live object; non-scalar results are
- * stringified and truncated. Fields are prefixed to avoid clashing with
+ * the column's jsonPath against the live object; lists are joined, other
+ * non-scalar results are stringified and truncated. Fields are prefixed to avoid clashing with
  * preset column ids.
  */
 export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
@@ -991,10 +991,9 @@ export function buildCrdColumns(cols: PrinterColumn[]): Col[] {
         const v = value(row);
         if (v === undefined) return numeric ? null : '';
         if (numeric) return typeof v === 'number' ? v : Number(v);
-        if (typeof v === 'object') return JSON.stringify(v).slice(0, 200);
-        if (typeof v === 'string') return v;
-        if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
-        return '';
+        // Lists (a Hostnames column on `.spec.hostnames`) read as a joined list.
+        if (typeof v === 'object' && !Array.isArray(v)) return JSON.stringify(v).slice(0, 200);
+        return printerColumnText(v) ?? '';
       },
       renderCell:
         c.type === 'date'

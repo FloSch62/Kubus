@@ -403,4 +403,11 @@ describe('column lookup helpers', () => {
     expect(screen.getByTestId('cell-crd_0_Ready')).toHaveTextContent('Running');
     expect(screen.getByTestId('cell-crd_1_Created')).not.toBeEmptyDOMElement();
   });
+
+  it('prints list-valued CRD printer columns as a joined list', () => {
+    const [hostnames] = buildCrdColumns([{ name: 'Hostnames', type: 'string', jsonPath: '.spec.hostnames' }]);
+    const object = richObject();
+    object.spec = { ...object.spec, hostnames: ['podinfo.example.com', 'www.example.com'] };
+    expect(callGetter(hostnames!, row(object))).toBe('podinfo.example.com, www.example.com');
+  });
 });
