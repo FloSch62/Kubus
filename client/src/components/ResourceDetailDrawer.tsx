@@ -41,6 +41,7 @@ import { NetworkPolicyDetail } from './detail/NetworkPolicyDetail.js';
 import { PodDisruptionBudgetDetail } from './detail/PodDisruptionBudgetDetail.js';
 import { ResourceQuotaDetail } from './detail/ResourceQuotaDetail.js';
 import { LimitRangeDetail } from './detail/LimitRangeDetail.js';
+import { NamespaceDetail } from './detail/NamespaceDetail.js';
 import { CountPill } from './detail/Section.js';
 import { openNamespaceOverview } from '../namespace-link.js';
 import { ManifestView } from './detail/ManifestView.js';
@@ -633,6 +634,8 @@ const OverviewForKind = memo(function OverviewForKind({ kind, obj, ctx, crd, ver
       return <ResourceQuotaDetail obj={obj} ctx={ctx} />;
     case 'LimitRange':
       return <LimitRangeDetail obj={obj} ctx={ctx} />;
+    case 'Namespace':
+      return <NamespaceDetail obj={obj} ctx={ctx} />;
     default:
       // cert-manager Certificates get an expiry/renewal headline the printer
       // columns don't surface.

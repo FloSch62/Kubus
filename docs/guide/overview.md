@@ -26,6 +26,38 @@ For every selected cluster you get:
 The failing-pods and warnings panels are **lists you can click**: selecting an entry jumps
 you straight to that pod or to the [Events](events.md) page, filtered to the problem.
 
+## Scoped to a namespace
+
+Pick one or more namespaces in the [namespace filter](clusters.md#filtering-by-namespace)
+and a cluster's card turns into a `kubectl get all -n` for those namespaces, and more:
+
+- **Inventory**: one tile per kind with objects in it, including the popular custom
+  resources you have installed (cert-manager, Argo, Flux, KEDA, Gateway API routes and
+  others). Kinds with a notion of health get a bar split into healthy (green), degraded
+  (amber) and failed (red), with the failed and degraded counts spelled out underneath.
+  Empty kinds are listed on one line below the tiles.
+- **Workload health**, operator rollups, expiring certificates, **resource quotas** as
+  usage bars, pod usage against requests and limits, failing pods and warning events.
+
+Every tile opens that kind's list. The list keeps the same namespace filter, so you land
+on exactly the objects the tile counted.
+
+What counts as degraded or failed:
+
+| Kind | Degraded | Failed |
+| --- | --- | --- |
+| Pods | Not ready yet, or Pending for under five minutes | Crash-looping, image pull errors, Failed, or Pending for longer |
+| Deployments, StatefulSets, DaemonSets, ReplicaSets | Some replicas unavailable | No replica available |
+| Jobs, CronJobs | | The Job, or the CronJob's latest run, failed |
+| PersistentVolumeClaims | Not bound yet | Lost |
+| ResourceQuotas | A resource at 90% or more | A resource at its hard limit |
+| HorizontalPodAutoscalers, PodDisruptionBudgets | Cannot scale, or blocks every eviction | |
+| Custom resources | `Ready` still unknown, Argo sync drift or a progressing rollout | `Ready` is `False`, Argo health degraded, or a route a gateway rejected |
+
+The same inventory, with its bars, heads the Overview tab of a **Namespace** in the
+[details drawer](resource-details.md), so opening a namespace from the Namespaces list
+shows what lives inside it.
+
 ## Reading the signals
 
 | You see… | It usually means… |

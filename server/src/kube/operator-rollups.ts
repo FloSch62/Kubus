@@ -7,7 +7,7 @@ import type { ClusterHandle } from './cluster-manager.js';
  * from the shared watcher cache (acquired on demand, lingers after release).
  */
 
-type ReadinessCheck = 'ready-condition' | 'argo-app' | 'argo-rollout';
+export type ReadinessCheck = 'ready-condition' | 'argo-app' | 'argo-rollout';
 
 interface OperatorResourceDef {
   /** CRD metadata.name, i.e. `<plural>.<group>`. */
@@ -108,7 +108,7 @@ interface Condition {
   message?: string;
 }
 
-function readiness(check: ReadinessCheck, obj: KubeObject): { ready: boolean; reason?: string; message?: string } {
+export function readiness(check: ReadinessCheck, obj: KubeObject): { ready: boolean; reason?: string; message?: string } {
   if (check === 'argo-app') {
     const status = obj.status as { health?: { status?: string; message?: string }; sync?: { status?: string } } | undefined;
     const health = status?.health?.status ?? 'Unknown';

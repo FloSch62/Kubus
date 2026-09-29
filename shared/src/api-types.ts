@@ -1049,6 +1049,16 @@ export interface PodResourcesResponse {
 
 // ---- Namespace overview ----
 
+/** Objects of one kind split by health, for the inventory's health bars. Sums to the kind's total. */
+export interface InventoryHealth {
+  /** Running, ready, bound or complete. */
+  healthy: number;
+  /** Working in part or still converging: some replicas down, not ready yet, near a limit. */
+  degraded: number;
+  /** Not working: nothing ready, crash-looping, last run failed, quota exhausted. */
+  failed: number;
+}
+
 export interface NamespaceInventoryEntry {
   kind: string;
   group: string;
@@ -1057,6 +1067,8 @@ export interface NamespaceInventoryEntry {
   total: number;
   /** Entries with a health notion (workloads, PVCs, quotas…). */
   unhealthy?: number;
+  /** Health split for kinds that have a notion of it; absent for plain config kinds. */
+  health?: InventoryHealth;
   /** Counted from an installed CRD rather than a builtin API. */
   custom?: boolean;
   /** Resource API missing or RBAC-denied. */

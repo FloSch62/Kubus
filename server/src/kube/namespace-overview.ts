@@ -6,6 +6,7 @@ import {
   type NamespaceQuotaStatus,
 } from '@kubus/shared';
 import type { ClusterHandle } from './cluster-manager.js';
+import { builtinInventoryHealth, customInventoryHealth } from './inventory-health.js';
 import { resolveCrd } from './operator-rollups.js';
 import { collectWarningEvents, optionalItems, podFailure } from './overview.js';
 import { parseQuantity } from './quantity.js';
@@ -93,27 +94,34 @@ export async function computeNamespaceOverview(handle: ClusterHandle, namespaces
         plural: spec.plural,
         total: entry?.items.length ?? 0,
         unhealthy: unhealthyByKind.get(spec.kind),
+        health:
+          entry && !entry.unavailable
+            ? builtinInventoryHealth(spec.kind, entry.items, health.issues.filter((i) => i.kind === spec.kind), now)
+            : undefined,
         unavailable: entry?.unavailable || undefined,
       };
     });
 
     // Installed popular CRDs, counted within the namespace.
     const crdsByName = new Map(crdsResult.items.map((c) => [c.metadata.name, c]));
-    const installedCrds = POPULAR_CRDS.map((name) => resolveCrd(crdsByName, name)).filter(
-      (crd): crd is NonNullable<typeof crd> => !!crd && crd.namespaced,
-    );
+    const installedCrds = POPULAR_CRDS.flatMap((name) => {
+      const crd = resolveCrd(crdsByName, name);
+      return crd?.namespaced ? [{ name, crd }] : [];
+    });
     const crdCounts = await Promise.all(
-      installedCrds.map(async (crd) => {
+      installedCrds.map(async ({ name, crd }) => {
         const acquired = handle.watchers.acquire(crd.group, crd.version, crd.plural);
         try {
           const result = await optionalItems(acquired.watcher);
+          const items = result.items.filter(inNamespace);
           return {
             kind: crd.kind,
             group: crd.group,
             version: crd.version,
             plural: crd.plural,
-            total: result.items.filter(inNamespace).length,
+            total: items.length,
             custom: true,
+            health: result.unavailable ? undefined : customInventoryHealth(name, items),
             unavailable: result.unavailable || undefined,
           };
         } finally {
