@@ -263,36 +263,38 @@ describe('NavDrawer', () => {
     hidden.unmount();
   });
 
-  it('keeps the tool pages in a Tools group below the kinds and lists Events only there', () => {
+  it('lists the tool pages right under Overview, outside the kind filter, and keeps the Event list in Cluster', async () => {
     renderDrawer('/');
-    const tools = screen.getByRole('button', { name: 'Tools' });
-    expect(tools).toHaveAttribute('aria-expanded', 'true');
-    for (const label of ['Events', 'Topology', 'Metrics', 'Network Metrics', 'Helm Releases', 'Port Forwards', 'Security Audit', 'Diff']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
-    }
-    // The Cluster group lost its duplicate Events entry.
-    fireEvent.click(screen.getByRole('button', { name: 'Cluster' }));
-    expect(screen.getByRole('link', { name: 'Nodes' })).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'Events' })).toHaveLength(1);
-    expect(screen.getByRole('link', { name: 'Events' })).toHaveAttribute('href', '/events');
-    // Tools come after the kind groups (the first Workloads is the favorited category).
-    const order = screen.getAllByRole('button', { name: /^(Workloads|Cluster|Tools)$/ }).map((b) => b.textContent);
-    expect(order).toEqual(['Workloads', 'Workloads', 'Cluster', 'Tools']);
+    const links = screen.getAllByRole('link').map((link) => link.textContent);
+    expect(links.slice(0, 9)).toEqual(['Overview', 'Events', 'Security Audit', 'Topology', 'Metrics', 'Network Metrics', 'Helm Releases', 'Port Forwards', 'Diff']);
+    expect(screen.queryByRole('button', { name: 'Tools' })).not.toBeInTheDocument();
+    // The Events page and the Event kind list are different pages.
+    const events = screen.getAllByRole('link', { name: 'Events' }).map((link) => link.getAttribute('href'));
+    expect(events).toEqual(['/events', '/r/core/v1/events']);
+    // Cluster is the first kind group again (the Workloads before it is the favorited category).
+    const order = screen.getAllByRole('button', { name: /^(Workloads|Cluster|Network)$/ }).map((b) => b.textContent);
+    expect(order).toEqual(['Workloads', 'Cluster', 'Workloads', 'Network']);
+
+    // The kind filter narrows kinds only; the tool pages stay put.
+    fireEvent.change(screen.getByPlaceholderText('Filter kinds…'), { target: { value: 'widget' } });
+    await waitFor(() => expect(screen.queryByText('Services')).not.toBeInTheDocument());
+    for (const label of ['Topology', 'Metrics', 'Helm Releases', 'Diff']) expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
   });
 
-  it('starts kind groups collapsed except Workloads and remembers what the user opens', () => {
+  it('starts only the long discovered groups collapsed and remembers what the user toggles', () => {
     const first = renderDrawer('/');
-    // The last Workloads header is the kind group; the first is the favorited category.
-    expect(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Network' })).toHaveAttribute('aria-expanded', 'false');
+    for (const title of ['Cluster', 'Network', 'Config', 'Storage', 'Access Control']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-expanded', 'true');
+    }
+    expect(screen.getByRole('button', { name: 'Custom Resources' })).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(screen.getByRole('button', { name: 'Network' }));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)!);
-    expect(useShellPrefsStore.getState().navGroups).toMatchObject({ Network: true, Workloads: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Custom Resources' }));
+    expect(useShellPrefsStore.getState().navGroups).toMatchObject({ Network: false, 'Custom Resources': true });
     first.unmount();
 
     renderDrawer('/');
-    expect(screen.getByRole('button', { name: 'Network' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getAllByRole('button', { name: 'Workloads' }).at(-1)).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Network' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Custom Resources' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('shows problem badges from the overviews, scoped by the namespace filter', () => {
@@ -325,20 +327,21 @@ describe('NavDrawer', () => {
         }),
       ],
     ]);
+    // A collapsed group carries its entries' badges on the header.
+    useShellPrefsStore.setState({ navGroups: { Storage: false } });
     const view = renderDrawer('/');
     const pods = screen.getAllByRole('link', { name: 'Pods' }).at(-1)!;
     expect(pods.closest('li')).toHaveTextContent('Pods2');
     expect(screen.getByTitle('2 Pods failing or unavailable')).toBeInTheDocument();
     expect(screen.getByTitle('2 Deployments need attention')).toBeInTheDocument();
-    // Storage is collapsed: its badge sits on the group header.
     expect(screen.getByTitle('1 items in Storage need attention')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Events' })).toHaveTextContent('Events1');
+    expect(screen.getAllByRole('link', { name: 'Events' })[0]).toHaveTextContent('Events1');
     view.unmount();
 
     useClustersStore.setState({ namespacesByContext: { dev: ['a'] } });
     renderDrawer('/');
     expect(screen.getByTitle('1 Pods failing or unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Events' })).toHaveTextContent(/^Events$/);
+    expect(screen.getAllByRole('link', { name: 'Events' })[0]).toHaveTextContent(/^Events$/);
   });
 
   it('shows a GitOps group only while Argo CD or Flux is installed, and reveals it on navigation', () => {
