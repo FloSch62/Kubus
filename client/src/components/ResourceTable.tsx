@@ -196,12 +196,20 @@ export function ResourceTable({
     const saved = tableId ? storedVisibility : localVisibility;
     return saved ? { ...defaults, ...saved } : defaults;
   }, [tableId, storedVisibility, localVisibility, hiddenKey]);
+  // Only what differs from the defaults is kept, plus the choices already
+  // saved: the grid hands back every entry of the model it was given, and a
+  // default that follows another column (the Warnings column steps in when
+  // the status column is hidden) must not get frozen by an unrelated toggle,
+  // while a column the user showed stays shown when that default moves.
   const handleVisibilityChange = useCallback(
     (model: GridColumnVisibilityModel) => {
-      if (tableId) setStoredVisibility(tableId, model);
-      else setLocalVisibility(model);
+      const hidden = new Set(hiddenKey ? hiddenKey.split(',') : []);
+      const previous = (tableId ? storedVisibility : localVisibility) ?? {};
+      const changed = Object.fromEntries(Object.entries(model).filter(([field, visible]) => visible === hidden.has(field) || previous[field] === visible));
+      if (tableId) setStoredVisibility(tableId, changed);
+      else setLocalVisibility(changed);
     },
-    [tableId, setStoredVisibility],
+    [tableId, setStoredVisibility, hiddenKey, storedVisibility, localVisibility],
   );
   const storedSort = useUiPrefsStore((s) => (tableId ? s.sortModels[tableId] : undefined));
   const setStoredSort = useUiPrefsStore((s) => s.setSortModel);
@@ -399,6 +407,8 @@ export function ResourceTable({
       '& .MuiDataGrid-row': { cursor: onRowClick ? 'pointer' : 'default' },
       '& .MuiDataGrid-row.kubus-muted-row': { opacity: 0.55, transition: 'opacity 120ms' },
       '& .MuiDataGrid-row.kubus-muted-row:hover, & .MuiDataGrid-row.kubus-muted-row:focus-within': { opacity: 1 },
+      // Icon-only headers (Warnings) keep room for the sort arrow beside the glyph.
+      '& .MuiDataGrid-columnHeader.kubus-icon-header': { px: '4px' },
       // The row cursor: the row holding the focused cell (arrow keys, j/k)
       // gets a thin ring, so single-key row actions have a visible target.
       // Drawn above the sticky cells, which would hide an inset shadow.

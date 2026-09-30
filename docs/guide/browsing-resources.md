@@ -68,8 +68,11 @@ API details. **Create** sits at the right of the header.
   hour are flagged in their Status (or Ready) column. When the status already reads as a
   problem, such as `CrashLoopBackOff`, it gets a dotted underline: hover it for the
   reasons. A healthy-looking status gets a small amber marker after it instead. Kinds
-  without a status column show the marker in a narrow column next to the name; sort by
-  that column and the noisiest objects come first. The same signal puts a count on the
+  without a status column show the marker in a narrow **Warnings** column next to the
+  name, and so does a list whose status column you hid. Every list can show that column:
+  turn it on under **Columns** → **Show or hide columns…**, then click its header and the
+  noisiest objects come first. While it is shown, the marker moves out of the status cell
+  so you never see it twice. The same signal puts a count on the
   drawer's Events tab and a dot on a page tab whose object turned unhealthy while you
   were looking elsewhere.
 - **Missing metrics are explained.** When metrics-server can't be reached in one of the

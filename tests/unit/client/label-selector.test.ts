@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLabelTerm, collectLabelPairs, joinLabelSelector, labelTermFromInput, labelTermSuggestions, looksLikeLabelSelector, splitLabelSelector } from '../../../client/src/label-selector';
+import { addLabelTerm, collectLabelPairs, countLabelPairs, joinLabelSelector, labelTermFromInput, labelTermSuggestions, looksLikeLabelSelector, splitLabelSelector, typedLabelTerms } from '../../../client/src/label-selector';
 
 describe('splitLabelSelector', () => {
   it('splits on top-level commas', () => {
@@ -77,7 +77,7 @@ describe('label terms typed into the search field', () => {
     for (const term of ['app=web', 'app==web', 'env!=prod', '!canary', 'env in (a,b)', 'tier notin (x)', 'app.kubernetes.io/name=podinfo']) {
       expect(looksLikeLabelSelector(term)).toBe(true);
     }
-    for (const text of ['web', 'app=', 'two words', 'a=b=c', '']) expect(looksLikeLabelSelector(text)).toBe(false);
+    for (const text of ['web', 'app=', 'two words', 'a=b=c', '', '/app=web', '-app=web', '!/x', 'app=a/b']) expect(looksLikeLabelSelector(text)).toBe(false);
   });
 });
 
@@ -108,5 +108,38 @@ describe('labelTermSuggestions', () => {
     expect(labelTermSuggestions(pairs, 'label:tier', []).map((s) => s.term)).toEqual(['tier', 'tier=frontend']);
     // A selector that is also a seen pair is offered once, as the pair.
     expect(labelTermSuggestions(pairs, 'app=web', [])).toEqual([{ term: 'app=web', kind: 'pair' }]);
+  });
+});
+
+describe('typedLabelTerms', () => {
+  it('takes raw selectors typed without a prefix, but not plain words', () => {
+    expect(typedLabelTerms('env!=prod')).toEqual(['env!=prod']);
+    expect(typedLabelTerms('!canary')).toEqual(['!canary']);
+    expect(typedLabelTerms('tier in (a,b), app=web')).toEqual(['tier in (a,b)', 'app=web']);
+    expect(typedLabelTerms('nginx')).toBeUndefined();
+    expect(typedLabelTerms('two words')).toBeUndefined();
+    expect(typedLabelTerms('')).toBeUndefined();
+  });
+
+  it('leaves smart-filter clauses alone', () => {
+    expect(typedLabelTerms('/app=web')).toBeUndefined();
+    expect(typedLabelTerms('/status:unhealthy')).toBeUndefined();
+    expect(typedLabelTerms('/app', { bareKeys: true })).toBeUndefined();
+  });
+
+  it('accepts a bare key after label: or where only selectors are typed', () => {
+    expect(typedLabelTerms('label:app')).toEqual(['app']);
+    expect(typedLabelTerms('app', { bareKeys: true })).toEqual(['app']);
+    expect(typedLabelTerms('not a selector', { bareKeys: true })).toBeUndefined();
+  });
+});
+
+describe('countLabelPairs', () => {
+  it('counts rows per key and per value, most common first', () => {
+    const counts = countLabelPairs([{ app: 'web', tier: 'fe' }, { app: 'api' }, { app: 'web' }, undefined]);
+    expect(counts).toEqual([
+      { key: 'app', count: 3, values: [{ value: 'web', count: 2 }, { value: 'api', count: 1 }] },
+      { key: 'tier', count: 1, values: [{ value: 'fe', count: 1 }] },
+    ]);
   });
 });

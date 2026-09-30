@@ -39,10 +39,61 @@ export function labelTermFromInput(input: string): string | undefined {
   return term || undefined;
 }
 
+/** A label key: `app`, `app.kubernetes.io/name`. Starts and ends alphanumeric, so `/app` (a smart filter) is not one. */
+const LABEL_KEY = '[A-Za-z0-9](?:[\\w./-]*[A-Za-z0-9])?';
+const NEGATED_KEY_RE = new RegExp(`^!${LABEL_KEY}$`);
+const EQUALITY_RE = new RegExp(`^${LABEL_KEY}\\s*(==?|!=)\\s*[\\w.-]+$`);
+const SET_RE = new RegExp(`^${LABEL_KEY}\\s+(in|notin)\\s+\\([^)]*\\)$`);
+const BARE_KEY_RE = new RegExp(`^${LABEL_KEY}$`);
+
 /** Text that reads as a raw selector term: `key=value`, `key!=value`, `!key`, `key in (a,b)`. */
 export function looksLikeLabelSelector(text: string): boolean {
   const t = text.trim();
-  return /^![\w./-]+$/.test(t) || /^[\w./-]+\s*(==?|!=)\s*[\w./-]+$/.test(t) || /^[\w./-]+\s+(in|notin)\s+\([^)]*\)$/.test(t);
+  return NEGATED_KEY_RE.test(t) || EQUALITY_RE.test(t) || SET_RE.test(t);
+}
+
+/**
+ * Selector terms typed as-is (Enter in the search box or the picker's
+ * selector field): `label:` prefixed text, or comma-joined raw terms that
+ * each read as a selector. A bare key only counts when `bareKeys` is set,
+ * since a plain word in the search box is a text search.
+ */
+export function typedLabelTerms(input: string, { bareKeys = false } = {}): string[] | undefined {
+  const text = labelTermFromInput(input) ?? input.trim();
+  // `/app=web` is a smart-filter clause, never a selector.
+  if (!text || text.startsWith('/')) return undefined;
+  const explicit = text !== input.trim() || bareKeys;
+  const terms = splitLabelSelector(text);
+  const valid = terms.every((t) => looksLikeLabelSelector(t) || (explicit && BARE_KEY_RE.test(t)));
+  return valid && terms.length ? terms : undefined;
+}
+
+export interface LabelKeyCount {
+  key: string;
+  /** Rows carrying the key. */
+  count: number;
+  /** Values seen for the key with how many rows carry each, most common first. */
+  values: Array<{ value: string; count: number }>;
+}
+
+/** Label keys and values across rows with row counts, most common keys first. */
+export function countLabelPairs(labels: Iterable<Record<string, string> | undefined>): LabelKeyCount[] {
+  const byKey = new Map<string, { count: number; values: Map<string, number> }>();
+  for (const entry of labels) {
+    for (const [key, value] of Object.entries(entry ?? {})) {
+      let slot = byKey.get(key);
+      if (!slot) byKey.set(key, (slot = { count: 0, values: new Map() }));
+      slot.count++;
+      slot.values.set(value, (slot.values.get(value) ?? 0) + 1);
+    }
+  }
+  return [...byKey]
+    .map(([key, { count, values }]) => ({
+      key,
+      count,
+      values: [...values].map(([value, n]) => ({ value, count: n })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }
 
 export interface LabelTermSuggestion {

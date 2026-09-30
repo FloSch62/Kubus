@@ -36,7 +36,7 @@ import { useUiPrefsStore } from '../state/prefs.js';
 import { useDockStore, dockTabId } from '../state/dock.js';
 import { ResourceTable } from '../components/ResourceTable.js';
 import { ApiResourceDrawer } from '../components/ApiResourceDrawer.js';
-import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, signalHostField, withSignalMarker, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
+import { buildColumns, buildCrdColumns, crdHiddenFields, makeMetricsLookup, makeNodeAllocationLookup, makeSignalsLookup, makeWorkloadMetricsLookup, METRIC_COLUMN_IDS, SIGNALS_COLUMN_ID, signalHostField, signalPlacement, withSignalMarker, WORKLOAD_METRIC_KINDS } from '../components/columns.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { tabMeta } from '../layout/tab-meta.js';
 import { clusterColorIndexes } from '../cluster-color.js';
@@ -661,18 +661,28 @@ export function ResourceListPage() {
     return buildColumns(ids, { multiCluster: false, metrics: metricsLookup, nodeAllocation, metricsUnavailable });
   }, [columnIds, metricsLookup, nodeAllocation, metricsUnavailable]);
 
+  const baseHiddenFields = useMemo(
+    () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
+    [isCustomKind, printerCols, behaviorKind],
+  );
+
   // Warning markers ride on the row's status cell where the kind has one;
-  // other kinds keep the marker in a narrow column after the name.
-  const signalKind = behaviorKind && behaviorKind !== 'Event' ? behaviorKind : undefined;
-  const signalHost = useMemo(() => signalHostField(staticColumns), [staticColumns]);
+  // the sortable Warnings column after the name carries them otherwise, or
+  // when the user shows it (see signalPlacement).
+  // Custom resources get markers too: warning events name their kind.
+  const signalKind = behaviorKind ? (behaviorKind !== 'Event' ? behaviorKind : undefined) : isCustomKind ? kind : undefined;
+  const signalHost = useMemo(() => signalHostField(staticColumns, baseHiddenFields), [staticColumns, baseHiddenFields]);
+  const storedVisibility = useUiPrefsStore((s) => s.columnVisibility[kindPath]);
+  const { hostVisible: signalHostVisible, markerInHost } = signalPlacement(signalHost, storedVisibility, baseHiddenFields);
+  // Built even before the signals arrive, so a saved sort on it holds.
   const signalColumn = useMemo(
-    () => (signalsLookup && signalKind && !signalHost ? buildColumns([SIGNALS_COLUMN_ID], { multiCluster: false, signals: signalsLookup, signalKind })[0] : undefined),
-    [signalsLookup, signalKind, signalHost],
+    () => (signalKind ? buildColumns([SIGNALS_COLUMN_ID], { multiCluster: false, signals: signalsLookup, signalKind })[0] : undefined),
+    [signalsLookup, signalKind],
   );
   const signalHostColumns = useMemo(() => {
-    if (!signalsLookup || !signalKind || !signalHost) return staticColumns;
+    if (!signalsLookup || !signalKind || !signalHost || !markerInHost) return staticColumns;
     return staticColumns.map((col) => (col.field === signalHost ? withSignalMarker(col, signalsLookup, signalKind) : col));
-  }, [staticColumns, signalsLookup, signalKind, signalHost]);
+  }, [staticColumns, signalsLookup, signalKind, signalHost, markerInHost]);
 
   // Label and annotation columns the user added to this list.
   const labelColumnSpecs = useUiPrefsStore((s) => s.labelColumns[kindPath]);
@@ -704,9 +714,10 @@ export function ResourceListPage() {
     return merged;
   }, [signalHostColumns, metricColumns, columnIds, signalColumn]);
   const columns = useMemo(() => insertLabelColumns(gridColumns, labelColumns), [gridColumns, labelColumns]);
+  // The Warnings column starts hidden while a visible status column carries the marker.
   const hiddenFields = useMemo(
-    () => (isCustomKind && printerCols?.length ? crdHiddenFields(printerCols) : (BUILTIN_HIDDEN_FIELDS[behaviorKind ?? ''] ?? [])),
-    [isCustomKind, printerCols, behaviorKind],
+    () => (signalColumn && signalHostVisible ? [...baseHiddenFields, SIGNALS_COLUMN_ID] : baseHiddenFields),
+    [signalColumn, signalHostVisible, baseHiddenFields],
   );
 
   const discoveryMissing = useMemo(() => {

@@ -469,6 +469,31 @@ describe('ResourceListPage', () => {
     fireEvent.click(screen.getByLabelText('Expand resource details'));
   });
 
+  it('keeps the sortable Warnings column, hidden only while a visible status column carries the marker', () => {
+    const view = renderPage('/r/core/v1/pods');
+    const state = () => JSON.parse(screen.getByTestId('table-state').textContent ?? '{}') as { hidden?: string[] };
+    expect(screen.getByLabelText('Warnings')).toBeInTheDocument();
+    expect(state().hidden).toContain('signals');
+    view.unmount();
+
+    // Hiding the status column hands the marker to the Warnings column.
+    useUiPrefsStore.setState({ columnVisibility: { '/r/core/v1/pods': { podStatus: false } } });
+    renderPage('/r/core/v1/pods');
+    expect(state().hidden ?? []).not.toContain('signals');
+  });
+
+  it('shows the Warnings column for a custom kind whose status column starts hidden', () => {
+    const widget = resource('example.io', 'v1', 'widgets', 'Widget', true);
+    fixtures.resources = [widget];
+    fixtures.byContext = { dev: [widget], prod: [] };
+    fixtures.rows = [row('widget-a', 'dev', 'team-a', 'Widget')];
+    fixtures.printerColumns = [{ name: 'Ready', type: 'string', jsonPath: '.status.phase', priority: 1 }];
+    renderPage('/r/example.io/v1/widgets');
+    const hidden = (JSON.parse(screen.getByTestId('table-state').textContent ?? '{}') as { hidden?: string[] }).hidden ?? [];
+    expect(hidden).toContain('crd_0_Ready');
+    expect(hidden).not.toContain('signals');
+  });
+
   it('resizes from the visible detail handle without collapsing it', () => {
     renderPage('/r/core/v1/pods?sel=dev%7Cteam-a%7Cpod-a');
 

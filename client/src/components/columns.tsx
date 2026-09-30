@@ -78,19 +78,23 @@ export function buildColumns(columnIds: string[], opts: ColumnBuildOptions): Col
 }
 
 const COLUMN_DEFS: Record<string, (opts: ColumnBuildOptions) => Col> = {
-  // The marker is an indicator, not a value: no copy button over it.
+  // The marker is an indicator, not a value: no copy button over it. The
+  // header is the warning glyph; "Warnings" names it in the columns panel.
   signals: (opts) => withoutCellCopy({
     field: SIGNALS_COLUMN_ID,
-    headerName: '',
-    description: 'Warning events and restarts in the last hour',
-    width: 34,
-    minWidth: 34,
+    headerName: 'Warnings',
+    description: 'Warning events and restarts in the last hour. Sort to put the noisiest first.',
+    renderHeader: () => <SignalsHeader />,
+    headerClassName: 'kubus-icon-header',
+    width: 56,
+    minWidth: 56,
     resizable: false,
     disableColumnMenu: true,
-    hideable: false,
     align: 'center',
+    headerAlign: 'center',
     type: 'number',
-    // Sorting puts the noisiest objects first.
+    // The first click puts the noisiest objects first.
+    sortingOrder: ['desc', 'asc', null],
     valueGetter: (_v, row) => signalWeight(opts.signals?.(row.ctx, opts.signalKind ?? '', obj(row).metadata.namespace, obj(row).metadata.name, obj(row).metadata.uid)),
     renderCell: (params) => <SignalCell signal={opts.signals?.(params.row.ctx, opts.signalKind ?? '', obj(params.row).metadata.namespace, obj(params.row).metadata.name, obj(params.row).metadata.uid)} />,
   } satisfies Col),
@@ -795,15 +799,43 @@ function SignalCell({ signal }: { signal: ObjectSignal | undefined }) {
   return hasSignal(signal) ? <SignalIcon signal={signal} /> : null;
 }
 
+/** Header of the Warnings column: the marker glyph, named for screen readers. */
+function SignalsHeader() {
+  return (
+    <Box component="span" aria-label="Warnings" sx={{ display: 'inline-flex', alignItems: 'center', color: 'text.secondary' }}>
+      <WarningAmberRoundedIcon sx={{ fontSize: 16 }} />
+    </Box>
+  );
+}
+
 /**
  * Status-like columns that carry the warning marker for their row, so it
  * doesn't need a column of its own beside the name. CRD printer columns named
- * like a status (Ready, Phase, …) qualify too.
+ * like a status (Ready, Phase, …) qualify too, unless they start hidden
+ * (`hiddenFields`): a marker nobody sees is no marker.
  */
 const SIGNAL_HOST_FIELDS = new Set(['podStatus', 'jobStatus', 'nodeStatus', 'pvcStatus', 'pvStatus', 'nsStatus', 'crdStatus', 'workloadReady', 'dsReady']);
 
-export function signalHostField(columns: readonly Col[]): string | undefined {
-  return columns.find((c) => SIGNAL_HOST_FIELDS.has(c.field) || (c.field.startsWith('crd_') && statusLikeName(c.headerName ?? '')))?.field;
+export function signalHostField(columns: readonly Col[], hiddenFields: readonly string[] = []): string | undefined {
+  return columns.find(
+    (c) => !hiddenFields.includes(c.field) && (SIGNAL_HOST_FIELDS.has(c.field) || (c.field.startsWith('crd_') && statusLikeName(c.headerName ?? ''))),
+  )?.field;
+}
+
+/**
+ * Where the warning marker shows for a list whose kind has a status host
+ * column. The dedicated Warnings column starts hidden while the host is
+ * visible and carries the marker instead; showing Warnings (or hiding the
+ * host) moves the marker there, so it never shows twice.
+ */
+export function signalPlacement(
+  host: string | undefined,
+  visibility: Readonly<Record<string, boolean>> | undefined,
+  hiddenFields: readonly string[],
+): { hostVisible: boolean; columnVisible: boolean; markerInHost: boolean } {
+  const hostVisible = !!host && (visibility?.[host] ?? !hiddenFields.includes(host));
+  const columnVisible = visibility?.[SIGNALS_COLUMN_ID] ?? !hostVisible;
+  return { hostVisible, columnVisible, markerInHost: hostVisible && !columnVisible };
 }
 
 /** A status the cell already shows as a problem (red/amber, or fewer ready than wanted). */

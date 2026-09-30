@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest';
 import type { ClusterRow } from '../../../client/src/api/queries';
 import { ResourceTable } from '../../../client/src/components/ResourceTable';
+import { useUiPrefsStore } from '../../../client/src/state/prefs';
 
 vi.mock('../../../client/src/components/SmartFilterInput.js', () => ({ SmartFilterInput: () => null }));
 vi.mock('../../../client/src/components/CellCopy.js', () => ({
@@ -150,6 +151,38 @@ describe('ResourceTable header and footer', () => {
     const many = Array.from({ length: 101 }, (_, i) => row(`pod-${i}`));
     rerender(<ResourceTable rows={many} columns={columns} />);
     await waitFor(() => expect(container.querySelector('.MuiDataGrid-footerContainer')).not.toBeNull());
+  });
+});
+
+describe('ResourceTable column visibility', () => {
+  it('stores only what differs from the defaults, so a default-hidden column is not frozen by another toggle', async () => {
+    useUiPrefsStore.setState({ columnVisibility: {} });
+    const apiRef: { current: { setColumnVisibility: (field: string, visible: boolean) => void } | null } = { current: null };
+    const columns = ['name', 'podStatus', 'signals'].map((field) => ({ field, headerName: field, valueGetter: () => field }));
+    render(<ResourceTable tableId="vis" rows={[row('a')]} columns={columns} hiddenFields={['signals']} apiRef={apiRef as never} />);
+    await screen.findAllByText('name');
+    act(() => apiRef.current!.setColumnVisibility('podStatus', false));
+    expect(useUiPrefsStore.getState().columnVisibility.vis).toEqual({ podStatus: false });
+    act(() => apiRef.current!.setColumnVisibility('signals', true));
+    expect(useUiPrefsStore.getState().columnVisibility.vis).toEqual({ podStatus: false, signals: true });
+    act(() => apiRef.current!.setColumnVisibility('podStatus', true));
+    expect(useUiPrefsStore.getState().columnVisibility.vis).toEqual({ signals: true });
+  });
+
+  it('keeps a column the user showed when its default moves with another column', async () => {
+    useUiPrefsStore.setState({ columnVisibility: {} });
+    const apiRef: { current: { setColumnVisibility: (field: string, visible: boolean) => void } | null } = { current: null };
+    const columns = ['name', 'podStatus', 'signals'].map((field) => ({ field, headerName: field, valueGetter: () => field }));
+    const table = (hiddenFields: string[]) => <ResourceTable tableId="vis2" rows={[row('a')]} columns={columns} hiddenFields={hiddenFields} apiRef={apiRef as never} />;
+    const { rerender } = render(table(['signals']));
+    await screen.findAllByText('name');
+    act(() => apiRef.current!.setColumnVisibility('signals', true));
+    // Hiding the status column makes the Warnings column visible by default.
+    act(() => apiRef.current!.setColumnVisibility('podStatus', false));
+    rerender(table([]));
+    act(() => apiRef.current!.setColumnVisibility('podStatus', true));
+    rerender(table(['signals']));
+    expect(useUiPrefsStore.getState().columnVisibility.vis2).toEqual({ signals: true });
   });
 });
 

@@ -17,7 +17,7 @@ function pod(name: string, extra: Partial<KubeObject['metadata']> = {}): Cluster
 }
 
 const actions: GridColDef<ClusterRow> = { field: '_actions', headerName: '' };
-const signals: GridColDef<ClusterRow> = { field: 'signals', headerName: '', valueGetter: () => 4 };
+const signals: GridColDef<ClusterRow> = { field: 'signals', headerName: 'Warnings', valueGetter: () => 4 };
 
 describe('copyColumns', () => {
   const columns = [...buildColumns(['name', 'namespace', 'restarts', 'node', 'age'], { multiCluster: false }), signals, actions];
