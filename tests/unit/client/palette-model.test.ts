@@ -118,4 +118,9 @@ describe('groupStatusSummary', () => {
     expect(groupStatusSummary(['Running', 'Running', 'CrashLoopBackOff'])).toBe('1 CrashLoopBackOff · 2 Running');
     expect(groupStatusSummary(['Running', 'Running', 'Running'])).toBe('3 Running');
   });
+
+  it('says how many members were checked when it knows fewer than the group holds', () => {
+    expect(groupStatusSummary(['Running', 'Running'], 2)).toBe('2 Running');
+    expect(groupStatusSummary(['Running', 'Pending'], 20)).toBe('1 Pending · 1 Running · 2 of 20 checked');
+  });
 });

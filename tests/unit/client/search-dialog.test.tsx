@@ -136,6 +136,29 @@ describe('SearchDialog', () => {
     expect(screen.getByText('-5c7cd-ccccc')).toBeInTheDocument();
   });
 
+  it('counts every member of a folded pod group, not just the first few', async () => {
+    const pods = Array.from({ length: 12 }, (_, i) => ref('Pod', 'pods', '', `web-5c7cd-${String(i).padStart(5, 'x')}`));
+    pods.forEach((pod, i) =>
+      answerStatus(pod, { apiVersion: 'v1', kind: 'Pod', metadata: { name: pod.name }, status: { phase: i < 10 ? 'Running' : 'Pending' } }),
+    );
+    fixtures.results = pods.map((pod) => result(pod, 60));
+    renderDialog();
+    fireEvent.change(screen.getByPlaceholderText(/Search resources, pages, kinds/), { target: { value: 'web' } });
+
+    expect(await screen.findByText(/12 Pods · demo/)).toBeInTheDocument();
+    expect(await screen.findByText('2 Pending · 10 Running')).toBeInTheDocument();
+  });
+
+  it('says how many members were checked when only some statuses are known', async () => {
+    const pods = Array.from({ length: 4 }, (_, i) => ref('Pod', 'pods', '', `api-5c7cd-${String(i).padStart(5, 'y')}`));
+    answerStatus(pods[0]!, { apiVersion: 'v1', kind: 'Pod', metadata: { name: pods[0]!.name }, status: { phase: 'Running' } });
+    fixtures.results = pods.map((pod) => result(pod, 60));
+    renderDialog();
+    fireEvent.change(screen.getByPlaceholderText(/Search resources, pages, kinds/), { target: { value: 'api' } });
+
+    expect(await screen.findByText('1 Running · 1 of 4 checked')).toBeInTheDocument();
+  });
+
   it('switches namespaces from the palette', async () => {
     renderDialog();
     fireEvent.click(screen.getByText('Change namespace…'));

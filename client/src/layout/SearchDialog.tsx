@@ -165,6 +165,8 @@ const RECENT_SHOWN = 5;
 
 /** Status lookups per query: enough for the rows people actually see. */
 const STATUS_FETCH_LIMIT = 24;
+/** Separate budget for folded sibling groups, whose status line counts every member (and says when it could not). */
+const GROUP_STATUS_FETCH_LIMIT = 24;
 
 type Stage = { type: 'resource'; ref: ResourceRef; title: string } | { type: 'clusters' } | { type: 'namespaces' };
 
@@ -187,13 +189,19 @@ const pickData = (results: Array<{ data?: KubeObject }>) => results.map((r) => r
 function useResultStatuses(rows: Row[]): Map<string, PaletteStatus> {
   const refs = useMemo(() => {
     const out: Array<{ id: string; ref: ResourceRef }> = [];
-    const push = (result: SearchResult) => {
-      if (out.length >= STATUS_FETCH_LIMIT || !result.ref || !hasPaletteStatus(result.ref.kind)) return;
-      if (!out.some((r) => r.id === result.id)) out.push({ id: result.id, ref: result.ref });
+    const seen = new Set<string>();
+    let rowBudget = STATUS_FETCH_LIMIT;
+    let groupBudget = GROUP_STATUS_FETCH_LIMIT;
+    const push = (result: SearchResult, fromGroup: boolean) => {
+      if ((fromGroup ? groupBudget : rowBudget) <= 0 || !result.ref || !hasPaletteStatus(result.ref.kind) || seen.has(result.id)) return;
+      seen.add(result.id);
+      out.push({ id: result.id, ref: result.ref });
+      if (fromGroup) groupBudget -= 1;
+      else rowBudget -= 1;
     };
     for (const row of rows) {
-      if (row.type === 'result') push(row.result);
-      else if (row.type === 'group') row.members.slice(0, 8).forEach(push);
+      if (row.type === 'result') push(row.result, false);
+      else if (row.type === 'group') row.members.forEach((member) => push(member, true));
     }
     return out;
   }, [rows]);
@@ -689,7 +697,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     }
     if (row.type === 'group') {
       const memberStatuses = row.members.map((m) => statuses.get(m.id)?.status).filter((s): s is string => !!s);
-      const summary = memberStatuses.length ? groupStatusSummary(memberStatuses) : '';
+      const summary = memberStatuses.length ? groupStatusSummary(memberStatuses, row.members.length) : '';
       const worst = memberStatuses.find((s) => s !== 'Running') ?? memberStatuses[0];
       const detail = [`${row.members.length} ${row.kind}s`, row.namespace, multiCluster ? row.ctx : undefined].filter(Boolean).join(' · ');
       return (

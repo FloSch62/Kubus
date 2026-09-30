@@ -211,6 +211,11 @@ function ThroughputLineChart({ series, color }: { series: ClusterNetworkSummary[
   );
 }
 
+const TRAFFIC_PARTS = [
+  { label: 'Sent', mark: '↑' },
+  { label: 'Received', mark: '↓' },
+];
+
 function TopPodsRanking({ summary, sentColor, recvColor }: { summary: ClusterNetworkSummary; sentColor: string; recvColor: string }) {
   // Merge the sent/recv top lists into one ranking by combined rate so a
   // single list shows both directions per pod.
@@ -231,17 +236,16 @@ function TopPodsRanking({ summary, sentColor, recvColor }: { summary: ClusterNet
   return (
     <>
       <Stack direction="row" spacing={2} sx={{ mb: 1, fontSize: 12, color: 'text.secondary' }}>
-        {[
-          ['Sent', sentColor],
-          ['Received', recvColor],
-        ].map(([label, color]) => (
-          <Stack key={label} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-            <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: color }} />
-            <span>{label}</span>
+        {TRAFFIC_PARTS.map((part, i) => (
+          <Stack key={part.label} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+            <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: i === 0 ? sentColor : recvColor }} />
+            <span>
+              {part.mark} {part.label}
+            </span>
           </Stack>
         ))}
       </Stack>
-      <UsageRanking rows={rows} colors={[sentColor, recvColor]} format={formatBps} empty="No pod traffic observed yet." />
+      <UsageRanking rows={rows} colors={[sentColor, recvColor]} parts={TRAFFIC_PARTS} format={formatBps} empty="No pod traffic observed yet." />
     </>
   );
 }

@@ -33,7 +33,10 @@ Press ++ctrl+k++ (++cmd+k++ on macOS), or click the search box in the top bar.
     name that matched your text is highlighted.
 
     Pods that share an owner collapse into one row (`podinfo-5c7cd…`, 3 Pods, 3 Running).
-    Press ++enter++ or ++right++ to expand it, ++left++ to fold it again.
+    The counts cover every pod in the group. If only some have been checked (they are
+    still loading, or the results hold a lot of pods) the row says so, for example
+    `8 Running · 8 of 20 checked`. Press ++enter++ or ++right++ to expand it, ++left++ to
+    fold it again.
 
     With nothing typed, the palette lists your **favourites**, the resources you opened
     recently, the pages you jump to most (with their `g` shortcut), and a few common
