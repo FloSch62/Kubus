@@ -46,7 +46,8 @@ const eventsGridSx = {
 };
 const groupedGridSx = {
   ...eventsGridSx,
-  '& .MuiDataGrid-cell': { py: 0.75, display: 'flex', alignItems: 'center' },
+  // Keeps copyCellGridSx's position: relative, which anchors the copy button.
+  '& .MuiDataGrid-cell': { ...copyCellGridSx['& .MuiDataGrid-cell'], py: 0.75, display: 'flex', alignItems: 'center' },
 };
 const eventsGridInitialState = { sorting: { sortModel: [{ field: 'lastSeen', sort: 'desc' as const }] } };
 const getEventRowId = (r: EventRow) => r.id;
@@ -220,7 +221,8 @@ export function EventsPage() {
     [openInvolved],
   );
   const onGroupCellKeyDown = useCallback<NonNullable<React.ComponentProps<typeof DataGrid<ObjectGroup>>['onCellKeyDown']>>(
-    (params, event) => {
+    (params, event, details) => {
+      handleCopyCellKeyDown(params, event, details);
       if (event.key === 'Enter') {
         event.preventDefault();
         openInvolved(params.row.ctx, params.row.object);
@@ -267,8 +269,8 @@ export function EventsPage() {
     return defs.map(withCellCopy);
   }, [multiCluster]);
 
-  const groupColumns: GridColDef<ObjectGroup>[] = useMemo(
-    () => [
+  const groupColumns: GridColDef<ObjectGroup>[] = useMemo(() => {
+    const defs: GridColDef<ObjectGroup>[] = [
       {
         field: 'object',
         headerName: 'Object',
@@ -301,9 +303,9 @@ export function EventsPage() {
         valueGetter: (_v, row) => row.lastSeen ?? '',
         renderCell: (p) => <AgeCell timestamp={p.row.lastSeen} />,
       },
-    ],
-    [multiCluster, openInvolved],
-  );
+    ];
+    return defs.map(withCellCopy);
+  }, [multiCluster, openInvolved]);
 
   const flatGrid = useGridPrefs('events', flatColumns);
   const groupGrid = useGridPrefs('events-grouped', groupColumns);

@@ -6,9 +6,9 @@ export type EventsScope = 'warnings' | 'all';
 export type EventsGrouping = 'object' | 'flat';
 
 interface EventsPrefsState {
-  /** Warnings only (the default) or every event. */
+  /** Every event (the default) or warnings only. */
   scope: EventsScope;
-  /** One row per involved object (the default) or the flat event log. */
+  /** One row per involved object (the default), or the flat event log, newest first. */
   grouping: EventsGrouping;
   setScope: (scope: EventsScope) => void;
   setGrouping: (grouping: EventsGrouping) => void;
@@ -17,11 +17,22 @@ interface EventsPrefsState {
 export const useEventsPrefsStore = create<EventsPrefsState>()(
   persist(
     (set) => ({
-      scope: 'warnings',
+      scope: 'all',
       grouping: 'object',
       setScope: (scope) => set({ scope }),
       setGrouping: (grouping) => set({ grouping }),
     }),
-    { name: 'kubus-events-view', version: 0, storage: createJSONStorage(() => kubusStateStorage) },
+    {
+      name: 'kubus-events-view',
+      version: 1,
+      storage: createJSONStorage(() => kubusStateStorage),
+      // Version 0 opened on warnings only by default, and the store may have
+      // written that default without anyone choosing it.
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<EventsPrefsState>;
+        if (version === 0) return { ...state, scope: 'all' };
+        return state;
+      },
+    },
   ),
 );
