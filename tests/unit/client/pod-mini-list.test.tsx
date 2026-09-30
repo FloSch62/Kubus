@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject } from '@kubus/shared';
-import { POD_ROW_LIMIT, PodMiniList } from '../../../client/src/components/detail/PodMiniList';
+import { POD_ROW_LIMIT, PodMiniList, podFailure } from '../../../client/src/components/detail/PodMiniList';
 import { useDetailStore } from '../../../client/src/state/detail';
 
 vi.mock('../../../client/src/api/queries.js', () => ({ useResourceMetrics: () => ({ data: undefined }) }));
@@ -81,5 +81,19 @@ describe('PodMiniList', () => {
     // The node link opens the node, not the pod row it sits in.
     expect(useDetailStore.getState().stack).toHaveLength(1);
     expect(useDetailStore.getState().stack.at(-1)).toMatchObject({ kind: 'Node', name: 'node-b' });
+  });
+
+  it('says why a failed pod stopped', () => {
+    const failed = (status: Record<string, unknown>) => pod('job-x', undefined, { phase: 'Failed', ...status });
+    expect(podFailure(failed({ reason: 'Evicted', message: 'The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi.' }))).toEqual({
+      short: 'The node was low on resource: ephemeral-storage.',
+      message: 'The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi.',
+    });
+    expect(podFailure(failed({ containerStatuses: [{ name: 'main', state: { terminated: { exitCode: 2, reason: 'Error' } } }] }))?.short).toBe('main exited with code 2');
+    expect(podFailure(failed({ reason: 'DeadlineExceeded' }))?.short).toBe('DeadlineExceeded');
+    expect(podFailure(pod('ok', undefined))).toBeUndefined();
+
+    render(<PodMiniList ctx="dev" pods={[failed({ containerStatuses: [{ name: 'main', state: { terminated: { exitCode: 137, reason: 'OOMKilled' } } }] })]} />);
+    expect(screen.getByText('main ran out of memory (OOMKilled)')).toBeInTheDocument();
   });
 });

@@ -26,6 +26,10 @@ what's wired to what.
 
 - **Nodes** are resources; **edges** are ownership or references. The legend at the bottom
   names each edge colour, and dashed edges carry traffic (routes and selectors).
+- Each card names the resource's kind, and beside it the layer it sits in (entry, route,
+  workload, storage, operator) whenever that adds something the kind doesn't already say.
+- The page header counts the resources, links and issues on screen. In a drawer's **Map**
+  tab the same counts lead the legend.
 - The [namespace filter](clusters.md#filtering-by-namespace) scopes what's drawn.
 - **Only connected** (on by default) drops isolated resources so you see what's actually
   wired together. Turn it off to include everything in scope.

@@ -1,12 +1,13 @@
 import type { GridColDef, GridRowId, GridValidRowModel } from '@mui/x-data-grid';
 import { cellCopyText } from './CellCopy.js';
+import { SIGNALS_COLUMN_ID } from './columns.js';
 
 export type RowCopyFormat = 'tsv' | 'csv';
 
 /**
- * Columns a row copy includes: the ones on screen, in order. Unnamed columns
- * (the warning marker) and internal ones (checkbox, row actions) carry no
- * data worth pasting. `hiddenFields` are the table's default-hidden columns;
+ * Columns a row copy includes: the ones on screen, in order. The warning
+ * marker and internal columns (checkbox, row actions) carry no data worth
+ * pasting. `hiddenFields` are the table's default-hidden columns;
  * the saved visibility model overrides them per field, as in the grid.
  */
 export function copyColumns<R extends GridValidRowModel>(
@@ -15,7 +16,7 @@ export function copyColumns<R extends GridValidRowModel>(
   visibility: Record<string, boolean> = {},
 ): GridColDef<R>[] {
   return columns.filter((c) => {
-    if (!c.headerName || c.field.startsWith('_')) return false;
+    if (!c.headerName || c.field.startsWith('_') || c.field === SIGNALS_COLUMN_ID) return false;
     return visibility[c.field] ?? !hiddenFields.includes(c.field);
   });
 }

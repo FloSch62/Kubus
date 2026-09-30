@@ -5,20 +5,22 @@ icon: lucide/bell
 # Events
 
 The **Events** page shows what Kubernetes is telling you about your clusters: scheduling
-decisions, image pulls, probe failures, evictions. It opens on the warnings, one row per
-object that has them, so you see what is wrong right now before you read the full log.
+decisions, image pulls, probe failures, evictions. It opens with one row per object, so
+a pod stuck in a crash loop is one line and not hundreds. Switch to **Warnings** to see
+only what is wrong right now, or to the **Flat event log** for every event, newest first.
 
 <figure markdown="span">
   ![The cluster-wide events timeline](../assets/screenshots/events.png#only-light){ .shadow }
   ![The cluster-wide events timeline](../assets/screenshots/events-dark.png#only-dark){ .shadow }
-  <figcaption>Warnings grouped by object, with the full event log one click away.</figcaption>
+  <figcaption>Events grouped by object, with the flat event log one click away.</figcaption>
 </figure>
 
 ## What you get
 
 - **Live**: events stream in as they happen.
-- **Grouped by object**: each object gets one row with its latest warning (reason and
-  message), the warning count, its activity over the last hour and when it was last seen.
+- **Grouped by object**: each object gets one row with its latest event (reason and
+  message; the latest warning when it has any), the event count, its activity over the
+  last hour and when it was last seen.
   The object's other events are summarised underneath, for example `Also: BackOff ×1.5k`.
 - **Deduplicated**: repeated events (same object, reason and message) collapse into one
   entry with a count, instead of flooding the list.
@@ -32,13 +34,14 @@ happened plus a count, so Kubus spreads each count evenly over that span.
 
 | Filter | Use it to… |
 | --- | --- |
-| **Warnings / All** | Warnings (the default) shows only objects with warnings; All adds every other event. |
-| **View** | Switch between **Group by object** and the **Flat event log**, one row per event with type, reason, object, message, namespace, count, first and last seen. |
+| **Warnings / All** | All (the default) shows every event; Warnings keeps only the warnings. |
+| **View** | Switch between **Group by object** (the default) and the **Flat event log**, one row per event with type, reason, object, message, namespace, count, first and last seen. |
 | **Kind** | Focus on one object kind (Pods, Nodes…). |
 | **Text search** | Match on reason or message. |
 | **Namespace** | The top-bar [namespace filter](clusters.md#filtering-by-namespace) applies here too. |
 
 Kubus remembers your Warnings / All and View choices for the next time you open the page.
+In both views, hover a cell for its copy button, or press ++ctrl+c++ on a focused cell.
 
 ## Jump to the object
 

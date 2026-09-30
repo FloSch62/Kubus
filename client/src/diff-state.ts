@@ -110,6 +110,25 @@ export function defaultRightSide(left: DiffSide, clusters: { selected: readonly 
   return rest;
 }
 
+/**
+ * Where a compare opened from the nav or the palette starts: the first
+ * selected cluster on the left and the second (or the same one) on the right,
+ * each in its namespace filter when that names one namespace. Kind and name
+ * are left to pick.
+ */
+export function defaultSides(
+  selected: readonly string[],
+  namespacesByContext: Readonly<Record<string, readonly string[] | undefined>>,
+): Pick<DiffState, 'left' | 'right'> | undefined {
+  const [first, second = first] = selected;
+  if (!first || !second) return undefined;
+  const side = (ctx: string): DiffSide => {
+    const namespaces = namespacesByContext[ctx];
+    return namespaces?.length === 1 ? { ctx, namespace: namespaces[0] } : { ctx };
+  };
+  return { left: side(first), right: side(second) };
+}
+
 /** A kind picked for a side, with the scope that decides whether it keeps a namespace. */
 export interface KindChoice {
   group: string;

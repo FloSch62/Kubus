@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { GridColDef } from '@mui/x-data-grid';
-import type { KubeObject, ObjectSignal } from '@kubus/shared';
+import type { KubeObject, ObjectSignal, PrinterColumn } from '@kubus/shared';
 import type { ClusterRow } from '../../../client/src/api/queries';
-import { buildColumns, buildCrdColumns, signalHostField, withSignalMarker } from '../../../client/src/components/columns';
+import { buildColumns, buildCrdColumns, crdHiddenFields, signalHostField, signalPlacement, withSignalMarker } from '../../../client/src/components/columns';
 import { clusterColorIndexes, clusterTagColors, CLUSTER_TAG_PALETTE, shortContextName } from '../../../client/src/cluster-color';
 import { ClusterTag } from '../../../client/src/components/ClusterTag';
 import { MiddleEllipsis, middleEllipsisTail } from '../../../client/src/components/truncation';
@@ -98,6 +98,39 @@ describe('warning markers on status cells', () => {
     expect(signalHostField(buildCrdColumns([{ name: 'Phase', type: 'string', jsonPath: '.status.phase' }]))).toBe('crd_0_Phase');
   });
 
+  it('never picks a status column that starts hidden', () => {
+    const printer: PrinterColumn[] = [
+      { name: 'Ready', type: 'string', jsonPath: '.status.ready', priority: 1 },
+      { name: 'Target', type: 'string', jsonPath: '.spec.target' },
+    ];
+    expect(signalHostField(buildCrdColumns(printer), crdHiddenFields(printer))).toBeUndefined();
+  });
+
+  it('shows the marker in one place only', () => {
+    // Host visible, Warnings column untouched: the status cell carries it.
+    expect(signalPlacement('podStatus', undefined, [])).toEqual({ hostVisible: true, columnVisible: false, markerInHost: true });
+    // The user shows Warnings: the column takes it, the cell drops it.
+    expect(signalPlacement('podStatus', { signals: true }, [])).toMatchObject({ columnVisible: true, markerInHost: false });
+    // The user hides the status column: the Warnings column steps in.
+    expect(signalPlacement('podStatus', { podStatus: false }, [])).toMatchObject({ columnVisible: true, markerInHost: false });
+    // No host at all: the column is on by default.
+    expect(signalPlacement(undefined, undefined, [])).toMatchObject({ columnVisible: true, markerInHost: false });
+    // Hidden explicitly: no marker anywhere is the user's choice.
+    expect(signalPlacement('podStatus', { podStatus: false, signals: false }, [])).toMatchObject({ columnVisible: false, markerInHost: false });
+  });
+
+  it('offers a sortable, hideable Warnings column that sorts the noisiest first', () => {
+    const [column] = buildColumns(['signals'], { multiCluster: false, signals: (_ctx, _kind, _ns, name) => (name === 'web-1' ? warning : undefined), signalKind: 'Pod' });
+    expect(column).toMatchObject({ field: 'signals', headerName: 'Warnings', sortingOrder: ['desc', 'asc', null] });
+    expect(column!.hideable).not.toBe(false);
+    expect(column!.sortable).not.toBe(false);
+    const weight = (row: ClusterRow) => (column!.valueGetter as (...args: unknown[]) => unknown)(undefined, row, column, {});
+    expect(weight(pod('web-1'))).toBe(3);
+    expect(weight(pod('web-2'))).toBeNull();
+    render(<span>{column!.renderHeader?.({} as never)}</span>);
+    expect(screen.getByLabelText('Warnings')).toBeInTheDocument();
+  });
+
   it('adds the marker after a healthy-looking status', () => {
     const [status] = buildColumns(['podStatus'], { multiCluster: false });
     const lookup = vi.fn(() => restarts);
@@ -188,6 +221,15 @@ describe('SmartFilterInput label tokens', () => {
     expect(onTerms).toHaveBeenLastCalledWith(['app=web']);
   });
 
+  it('keeps the tokens when Backspace is pressed in the label picker', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={['app=web', 'tier=frontend']} onTerms={onTerms} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by label' }));
+    const find = screen.getByPlaceholderText('Find a label key or value');
+    fireEvent.keyDown(find, { key: 'Backspace' });
+    expect(onTerms).not.toHaveBeenCalled();
+  });
+
   it('adds a picked label suggestion as a token and clears the text', () => {
     const onTerms = vi.fn();
     render(<Harness initial={[]} onTerms={onTerms} />);
@@ -211,9 +253,92 @@ describe('SmartFilterInput label tokens', () => {
     expect(onTerms).toHaveBeenLastCalledWith(['env!=prod']);
   });
 
+  it('turns a raw selector plus Enter into a token without the label: prefix', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={[]} onTerms={onTerms} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'env!=prod' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onTerms).toHaveBeenLastCalledWith(['env!=prod']);
+    expect(input).toHaveValue('');
+  });
+
+  it('keeps a plain word plus Enter as a text search', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={[]} onTerms={onTerms} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'nginx' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onTerms).not.toHaveBeenCalled();
+    expect(input).toHaveValue('nginx');
+  });
+
+  it('browses every label in the Labels picker and ticks several without closing', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={[]} onTerms={onTerms} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by label' }));
+    const picker = screen.getByRole('dialog', { name: 'Filter by label' });
+    const labels = within(picker).getByRole('group', { name: 'Labels in this list' });
+    // Keys most common first, each with its values and row counts.
+    expect(within(labels).getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'))).toEqual([
+      'app, any value',
+      'app=api',
+      'app=web',
+      'tier, any value',
+      'tier=frontend',
+    ]);
+    expect(within(labels).getByRole('checkbox', { name: 'app, any value' }).closest('label')).toHaveTextContent('app' + 'any value' + '2');
+    fireEvent.click(within(labels).getByRole('checkbox', { name: 'app=web' }));
+    fireEvent.click(within(labels).getByRole('checkbox', { name: 'tier, any value' }));
+    expect(onTerms).toHaveBeenLastCalledWith(['app=web', 'tier']);
+    expect(within(labels).getByRole('checkbox', { name: 'app=web' })).toBeChecked();
+    // Unticking removes it again.
+    fireEvent.click(within(labels).getByRole('checkbox', { name: 'app=web' }));
+    expect(onTerms).toHaveBeenLastCalledWith(['tier']);
+
+    fireEvent.change(within(picker).getByLabelText('Find a label'), { target: { value: 'front' } });
+    expect(within(labels).getAllByRole('checkbox')).toHaveLength(2);
+  });
+
+  it('shows a few values per key and reveals the rest on request', () => {
+    const many = Array.from({ length: 8 }, (_, i) => pod(`p-${i}`, undefined, { v: `value-${i}` }));
+    render(<SmartFilterInput value="" onChange={() => {}} kind="Pod" rows={many} labelTerms={[]} onLabelTermsChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by label' }));
+    const labels = screen.getByRole('group', { name: 'Labels in this list' });
+    expect(within(labels).getAllByRole('checkbox')).toHaveLength(1 + 5);
+    fireEvent.click(within(labels).getByRole('button', { name: 'Show 3 more values of v' }));
+    expect(within(labels).getAllByRole('checkbox')).toHaveLength(1 + 8);
+  });
+
+  it('adds raw selector terms from the picker and rejects text that is not one', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={[]} onTerms={onTerms} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by label' }));
+    const field = screen.getByLabelText('Label selector');
+    fireEvent.change(field, { target: { value: 'tier in (a,b), !canary' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onTerms).toHaveBeenLastCalledWith(['tier in (a,b)', '!canary']);
+    fireEvent.change(field, { target: { value: 'not a selector' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(screen.getByText(/Use key=value/)).toBeInTheDocument();
+    expect(onTerms).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the picker from the +N chip so hidden tokens can be removed', () => {
+    const onTerms = vi.fn();
+    render(<Harness initial={['a=1', 'b=2', 'c=3', 'd=4', 'e=5']} onTerms={onTerms} />);
+    fireEvent.click(screen.getByLabelText('2 more label filters: d=4, e=5'));
+    const picker = screen.getByRole('dialog', { name: 'Filter by label' });
+    fireEvent.click(within(picker).getByLabelText('Remove label filter e=5'));
+    expect(onTerms).toHaveBeenLastCalledWith(['a=1', 'b=2', 'c=3', 'd=4']);
+  });
+
   it('keeps the plain search box for callers without labels', () => {
     render(<SmartFilterInput value="" onChange={() => {}} kind="Event" rows={[]} />);
     expect(screen.getByPlaceholderText(/Search…/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/Remove label filter/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Filter by label' })).not.toBeInTheDocument();
   });
 });

@@ -224,13 +224,17 @@ export function paletteStatus(kind: string, obj: KubeObject): PaletteStatus | un
 
 /**
  * One line summing up a sibling group's statuses, worst first:
- * "3 Running", "1 CrashLoopBackOff · 2 Running".
+ * "3 Running", "1 CrashLoopBackOff · 2 Running". When only some of the
+ * group's `total` members have a known status (still loading, or past the
+ * lookup cap) the line says how many were checked, so the counts never read
+ * as the whole group: "8 Running · 8 of 20 checked".
  */
-export function groupStatusSummary(statuses: string[]): string {
+export function groupStatusSummary(statuses: string[], total = statuses.length): string {
   const counts = new Map<string, number>();
   for (const s of statuses) counts.set(s, (counts.get(s) ?? 0) + 1);
-  return [...counts.entries()]
+  const summary = [...counts.entries()]
     .sort(([a, x], [b, y]) => Number(a === 'Running') - Number(b === 'Running') || y - x)
     .map(([status, count]) => `${count} ${status}`)
     .join(' · ');
+  return statuses.length < total ? `${summary} · ${statuses.length} of ${total} checked` : summary;
 }

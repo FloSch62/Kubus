@@ -4,7 +4,7 @@ import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useNavigate } from 'react-router';
-import type { InventoryProblem, NamespaceInventoryEntry, NamespaceQuotaStatus, OperatorRollup, OverviewWorkloadIssue } from '@kubus/shared';
+import { pluralLabel, type InventoryProblem, type NamespaceInventoryEntry, type NamespaceQuotaStatus, type OperatorRollup, type OverviewWorkloadIssue } from '@kubus/shared';
 import { useNamespaceOverview, useOverviewCertificates, useOverviewOperators } from '../../api/queries.js';
 import { useClustersStore } from '../../state/clusters.js';
 import { StatusChip } from '../StatusChip.js';
@@ -66,6 +66,10 @@ export function NamespaceOverviewSection({ ctx, namespaces }: { ctx: string; nam
               // Never judge a stale previous-scope placeholder against fresh operators/certs.
               pending={isPlaceholderData || !certificates || !operators}
               healthyText={`No failing pods, unhealthy workloads, warnings in the last hour or expiring certificates in ${single ? 'this namespace' : 'these namespaces'}.`}
+              unchecked={[
+                ...data.inventory.filter((e) => e.unavailable).map((e) => pluralLabel(e.kind)),
+                ...(certificates?.secretsUnavailable ? ['TLS Secrets'] : []),
+              ]}
               items={attentionItems({
                 failingPods: data.failingPods,
                 issues: data.issues,

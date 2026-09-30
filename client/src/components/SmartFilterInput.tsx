@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent, type RefObject } from 'react';
+import { useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -14,10 +14,12 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import ClearIcon from '@mui/icons-material/Clear';
 import SearchIcon from '@mui/icons-material/Search';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import type { ClusterRow } from '../api/queries.js';
 import { smartFilterSuggestions, type FilterSuggestion } from '../smart-filter.js';
 import { podSummary } from '../kube-display.js';
-import { collectLabelPairs, labelTermFromInput, labelTermSuggestions } from '../label-selector.js';
+import { collectLabelPairs, labelTermSuggestions, typedLabelTerms } from '../label-selector.js';
+import { LabelFilterPicker } from './LabelFilterPicker.js';
 
 /** A suggestion row: a smart-filter completion, or a label term to add as a token. */
 type Suggestion = FilterSuggestion & { labelTerm?: string };
@@ -72,8 +74,9 @@ interface Props {
   inputRef?: RefObject<HTMLInputElement | null>;
   /**
    * Label selector terms (server-side), shown as removable tokens inside the
-   * field. Picking a label suggestion, or typing `label:app=web` and Enter,
-   * adds one; Backspace in an empty field removes the last.
+   * field. Picking a label suggestion, typing a selector (`env!=prod`, or any
+   * term after `label:`) and Enter, or ticking labels in the Labels picker
+   * adds them; Backspace in an empty field removes the last.
    */
   labelTerms?: string[];
   onLabelTermsChange?: (terms: string[]) => void;
@@ -92,6 +95,8 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef, labelT
   const [focused, setFocused] = useState(false);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const helpOpen = Boolean(helpAnchor);
+  const labelButtonRef = useRef<HTMLButtonElement>(null);
+  const [labelAnchor, setLabelAnchor] = useState<HTMLElement | null>(null);
   const terms = labelTerms ?? NO_TERMS;
   const labelsEnabled = !!onLabelTermsChange;
 
@@ -159,180 +164,222 @@ export function SmartFilterInput({ value, onChange, kind, rows, inputRef, labelT
     }));
   }, [focused, value, kind, dynamicValues, labelPairs, terms]);
 
-  const addLabelTerm = (term: string) => {
+  const addLabelTerms = (added: string[]) => {
     if (!onLabelTermsChange) return;
-    if (!terms.includes(term)) onLabelTermsChange([...terms, term]);
+    const fresh = added.filter((term) => !terms.includes(term));
+    if (fresh.length) onLabelTermsChange([...terms, ...fresh]);
     onChange('');
   };
+  const openLabelPicker = () => setLabelAnchor(labelButtonRef.current);
 
   const visibleTerms = terms.slice(0, VISIBLE_LABEL_TOKENS);
   const hiddenTerms = terms.slice(VISIBLE_LABEL_TOKENS);
 
   return (
-    <Autocomplete<Suggestion, false, true, true>
-      freeSolo
-      disableClearable
-      options={options}
-      filterOptions={(x) => x}
-      getOptionLabel={(o) => (typeof o === 'string' ? o : o.labelTerm ? value : o.completion)}
-      inputValue={value}
-      onInputChange={(_e, newValue, reason) => {
-        // `reset` fires when MUI syncs inputValue after selection — the
-        // onChange handler below already applied the completion.
-        if (reason !== 'reset') onChange(newValue);
-      }}
-      onChange={(_e, selected) => {
-        if (typeof selected === 'string') {
-          // Enter on `label:app=web` (no suggestion highlighted) adds the term.
-          const typed = labelsEnabled ? labelTermFromInput(selected) : undefined;
-          if (typed) addLabelTerm(typed);
-          return;
-        }
-        if (!selected) return;
-        if (selected.labelTerm) {
-          addLabelTerm(selected.labelTerm);
-          return;
-        }
-        onChange(/[:><=]$/.test(selected.completion) ? selected.completion : `${selected.completion} `);
-      }}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      sx={sx ?? DEFAULT_SX}
-      renderOption={(props, option) => (
-        <Box component="li" {...props} key={option.labelTerm ? `label:${option.labelTerm}` : option.completion} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace', minWidth: 0, overflowWrap: 'anywhere' }}>
-            {option.labelTerm ?? option.completion.slice(option.completion.lastIndexOf(' ') + 1)}
-          </Typography>
-          {option.hint && (
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ ml: option.labelTerm ? 'auto' : undefined, flexShrink: 0 }}>
-              {option.hint}
+    <>
+      <Autocomplete<Suggestion, false, true, true>
+        freeSolo
+        disableClearable
+        options={options}
+        filterOptions={(x) => x}
+        getOptionLabel={(o) => (typeof o === 'string' ? o : o.labelTerm ? value : o.completion)}
+        inputValue={value}
+        onInputChange={(_e, newValue, reason) => {
+          // `reset` fires when MUI syncs inputValue after selection — the
+          // onChange handler below already applied the completion.
+          if (reason !== 'reset') onChange(newValue);
+        }}
+        onChange={(_e, selected) => {
+          if (typeof selected === 'string') {
+            // Enter on a selector (`env!=prod`, `label:app`) with no suggestion
+            // highlighted adds it as tokens; plain words stay a text search.
+            const typed = labelsEnabled ? typedLabelTerms(selected) : undefined;
+            if (typed) addLabelTerms(typed);
+            return;
+          }
+          if (!selected) return;
+          if (selected.labelTerm) {
+            addLabelTerms([selected.labelTerm]);
+            return;
+          }
+          onChange(/[:><=]$/.test(selected.completion) ? selected.completion : `${selected.completion} `);
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        sx={sx ?? DEFAULT_SX}
+        renderOption={(props, option) => (
+          <Box component="li" {...props} key={option.labelTerm ? `label:${option.labelTerm}` : option.completion} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', minWidth: 0, overflowWrap: 'anywhere' }}>
+              {option.labelTerm ?? option.completion.slice(option.completion.lastIndexOf(' ') + 1)}
             </Typography>
-          )}
-        </Box>
-      )}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          inputRef={inputRef}
-          placeholder={terms.length ? undefined : 'Search… type / for filters'}
-          onKeyDown={(e) => {
-            if (e.key === 'Backspace' && labelsEnabled && terms.length && !value) {
-              const input = e.target as HTMLInputElement;
-              if (input.selectionStart === 0 && input.selectionEnd === 0) {
-                e.preventDefault();
-                onLabelTermsChange?.(terms.slice(0, -1));
+            {option.hint && (
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ ml: option.labelTerm ? 'auto' : undefined, flexShrink: 0 }}>
+                {option.hint}
+              </Typography>
+            )}
+          </Box>
+        )}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            inputRef={inputRef}
+            placeholder={terms.length ? undefined : 'Search… type / for filters'}
+            onKeyDown={(e) => {
+              if (e.key === 'Backspace' && labelsEnabled && terms.length && !value) {
+                const input = e.target as HTMLInputElement;
+                if (input.selectionStart === 0 && input.selectionEnd === 0) {
+                  e.preventDefault();
+                  onLabelTermsChange?.(terms.slice(0, -1));
+                }
+                return;
               }
-              return;
-            }
-            if (e.key !== 'Escape') return;
-            const input = e.target as HTMLElement;
-            // With the suggestion popup open, Escape only closes it (MUI).
-            if (input.getAttribute('aria-expanded') === 'true') return;
-            e.stopPropagation();
-            if (value) {
-              onChange('');
-              return;
-            }
-            // Empty already: leave the input and hand focus to the grid.
-            input.blur();
-            input
-              .closest('.kubus-table')
-              ?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"], .MuiDataGrid-cell')
-              ?.focus();
-          }}
-          slotProps={{
-            ...params.slotProps,
-            input: {
-              ...params.slotProps.input,
-              startAdornment: (
-                <InputAdornment position="start" sx={{ gap: 0.5, maxWidth: '62%', overflow: 'hidden', flexShrink: 0 }}>
-                  <SearchIcon sx={{ fontSize: 18, flexShrink: 0 }} />
-                  {visibleTerms.map((term) => (
-                    <Chip
-                      key={term}
-                      size="small"
-                      label={term}
-                      title={`Label selector: ${term}`}
-                      onDelete={() => onLabelTermsChange?.(terms.filter((t) => t !== term))}
-                      onMouseDown={(e) => e.preventDefault()}
-                      sx={{ height: 22, fontSize: 12, fontFamily: 'monospace', maxWidth: 220, flexShrink: 1, minWidth: 0 }}
-                      deleteIcon={<CancelIcon aria-label={`Remove label filter ${term}`} />}
-                    />
-                  ))}
-                  {hiddenTerms.length > 0 && (
-                    <Tooltip title={hiddenTerms.join(', ')}>
-                      <Chip size="small" label={`+${hiddenTerms.length}`} sx={{ height: 22, fontSize: 12, flexShrink: 0 }} />
-                    </Tooltip>
-                  )}
-                </InputAdornment>
-              ),
-              endAdornment: (
-                <InputAdornment position="end">
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                    {(value || terms.length > 0) && (
-                      <IconButton
-                        aria-label={value ? 'Clear table search' : 'Clear label filters'}
+              if (e.key !== 'Escape') return;
+              const input = e.target as HTMLElement;
+              // With the suggestion popup open, Escape only closes it (MUI).
+              if (input.getAttribute('aria-expanded') === 'true') return;
+              e.stopPropagation();
+              if (value) {
+                onChange('');
+                return;
+              }
+              // Empty already: leave the input and hand focus to the grid.
+              input.blur();
+              input
+                .closest('.kubus-table')
+                ?.querySelector<HTMLElement>('.MuiDataGrid-cell[tabindex="0"], .MuiDataGrid-columnHeader[tabindex="0"], .MuiDataGrid-cell')
+                ?.focus();
+            }}
+            slotProps={{
+              ...params.slotProps,
+              input: {
+                ...params.slotProps.input,
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ gap: 0.5, maxWidth: '62%', overflow: 'hidden', flexShrink: 0 }}>
+                    <SearchIcon sx={{ fontSize: 18, flexShrink: 0 }} />
+                    {visibleTerms.map((term) => (
+                      <Chip
+                        key={term}
                         size="small"
+                        label={term}
+                        title={`Label selector: ${term}`}
+                        onDelete={() => onLabelTermsChange?.(terms.filter((t) => t !== term))}
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => (value ? onChange('') : onLabelTermsChange?.([]))}
-                      >
-                        <ClearIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
+                        sx={{ height: 22, fontSize: 12, fontFamily: 'monospace', maxWidth: 220, flexShrink: 1, minWidth: 0 }}
+                        deleteIcon={<CancelIcon aria-label={`Remove label filter ${term}`} />}
+                      />
+                    ))}
+                    {hiddenTerms.length > 0 && (
+                      <Tooltip title={`${hiddenTerms.join(', ')} (click to manage)`}>
+                        <Chip
+                          size="small"
+                          label={`+${hiddenTerms.length}`}
+                          aria-label={`${hiddenTerms.length} more label filters: ${hiddenTerms.join(', ')}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={openLabelPicker}
+                          sx={{ height: 22, fontSize: 12, flexShrink: 0 }}
+                        />
+                      </Tooltip>
                     )}
-                    <Tooltip title="Filter syntax">
-                      <IconButton
-                        aria-label="Show filter syntax help"
-                        aria-controls={helpOpen ? HELP_PANEL_ID : undefined}
-                        aria-expanded={helpOpen ? 'true' : undefined}
-                        size="small"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={toggleHelp}
-                      >
-                        <HelpOutlineIcon sx={{ fontSize: 16, color: helpOpen ? 'primary.main' : 'text.disabled' }} />
-                      </IconButton>
-                    </Tooltip>
-                    <Popover
-                      id={HELP_PANEL_ID}
-                      open={helpOpen}
-                      anchorEl={helpAnchor}
-                      onClose={() => setHelpAnchor(null)}
-                      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                      disableRestoreFocus
-                      slotProps={{
-                        paper: {
-                          sx: {
-                            mt: 0.75,
-                            width: 480,
-                            maxWidth: 'calc(100vw - 24px)',
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            // Same shadow as the Menu/Autocomplete theme token
-                            // so adjacent dropdowns cast identical shadows.
-                            boxShadow: (theme) =>
-                              theme.palette.mode === 'dark' ? '0 8px 28px rgba(0, 0, 0, 0.5)' : '0 8px 28px rgba(0, 0, 0, 0.12)',
-                          },
-                        },
-                      }}
-                    >
-                      {labelsEnabled ? filterHelpPanelWithLabels : filterHelpPanel}
-                    </Popover>
-                  </Box>
-                </InputAdornment>
-              ),
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                      {(value || terms.length > 0) && (
+                        <IconButton
+                          aria-label={value ? 'Clear table search' : 'Clear label filters'}
+                          size="small"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => (value ? onChange('') : onLabelTermsChange?.([]))}
+                        >
+                          <ClearIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      )}
+                      {labelsEnabled && (
+                        <Tooltip title={terms.length ? `Label filters (${terms.length})` : 'Filter by label'}>
+                          <IconButton
+                            ref={labelButtonRef}
+                            aria-label="Filter by label"
+                            aria-haspopup="dialog"
+                            aria-expanded={labelAnchor ? 'true' : undefined}
+                            size="small"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={(e) => setLabelAnchor((current) => (current ? null : e.currentTarget))}
+                          >
+                            <LocalOfferOutlinedIcon sx={{ fontSize: 16, color: labelAnchor || terms.length ? 'primary.main' : 'text.secondary' }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      <Tooltip title="Filter syntax">
+                        <IconButton
+                          aria-label="Show filter syntax help"
+                          aria-controls={helpOpen ? HELP_PANEL_ID : undefined}
+                          aria-expanded={helpOpen ? 'true' : undefined}
+                          size="small"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={toggleHelp}
+                        >
+                          <HelpOutlineIcon sx={{ fontSize: 16, color: helpOpen ? 'primary.main' : 'text.disabled' }} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+        )}
+      />
+      {/* Outside the Autocomplete: keys typed in these popovers must not bubble
+          (through the React tree) into the search field's key handlers. */}
+      <Popover
+        id={HELP_PANEL_ID}
+        open={helpOpen}
+        anchorEl={helpAnchor}
+        onClose={() => setHelpAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        disableRestoreFocus
+        slotProps={{
+          paper: {
+            sx: {
+              mt: 0.75,
+              width: 480,
+              maxWidth: 'calc(100vw - 24px)',
+              border: '1px solid',
+              borderColor: 'divider',
+              // Same shadow as the Menu/Autocomplete theme token
+              // so adjacent dropdowns cast identical shadows.
+              boxShadow: (theme) =>
+                theme.palette.mode === 'dark' ? '0 8px 28px rgba(0, 0, 0, 0.5)' : '0 8px 28px rgba(0, 0, 0, 0.12)',
             },
-          }}
+          },
+        }}
+      >
+        {labelsEnabled ? filterHelpPanelWithLabels : filterHelpPanel}
+      </Popover>
+      {labelsEnabled && (
+        <LabelFilterPicker
+          anchorEl={labelAnchor}
+          onClose={() => setLabelAnchor(null)}
+          rows={rows}
+          terms={terms}
+          onTermsChange={(next) => onLabelTermsChange?.(next)}
         />
       )}
-    />
+    </>
   );
 }
+
+/** Help-row example drawn as the Labels button's icon instead of text. */
+const LABEL_ICON_EXAMPLE = 'label-icon';
 
 const LABEL_HELP = {
   title: 'Label selector (filters on the server)',
   items: [
     ['app=web', 'Type part of a label and pick a suggestion to add it as a token'],
-    ['label:env!=prod', 'Or type any selector after label: and press Enter'],
+    ['env!=prod', 'Or type a selector and press Enter (label:app for a bare key)'],
+    [LABEL_ICON_EXAMPLE, 'Browse every label in the list and tick several at once'],
     ['Backspace', 'In an empty field, removes the last label token'],
   ],
 } as const;
@@ -380,7 +427,7 @@ function FilterHelpPanel({ labels = false }: { labels?: boolean }) {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {example}
+                    {example === LABEL_ICON_EXAMPLE ? <LocalOfferOutlinedIcon aria-label="Label icon" sx={{ fontSize: 14, verticalAlign: '-2px' }} /> : example}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
                     {hint}

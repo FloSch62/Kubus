@@ -96,6 +96,10 @@ describe('formatLogExport', () => {
       'web-b/app plain',
     ]);
     expect(formatLogExport(entries, 'shown', { ...options, showSource: false })).toBe('ERROR boom\n--- Marker · 12:00 ---\nplain');
+    // In the message view the export writes what the view shows.
+    expect(formatLogExport(entries, 'shown', { ...options, showSource: false, displayText: (line) => `shown ${line.pod}` })).toBe(
+      'shown web-a\n--- Marker · 12:00 ---\nshown web-b',
+    );
   });
 
   it('keeps raw lines exactly as written', () => {

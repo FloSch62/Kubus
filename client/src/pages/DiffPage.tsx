@@ -32,6 +32,7 @@ import { statusTextColor } from '../theme.js';
 import {
   adoptKind,
   defaultRightSide,
+  defaultSides,
   diffSearchParams,
   diffView,
   pickKind,
@@ -129,16 +130,24 @@ export function DiffPage() {
   const [changes, setChanges] = useState<number>();
 
   // "Compare with…" opens with only the left side: propose the same object
-  // in another cluster, once, and write it into the URL like any pick.
+  // in another cluster, once, and write it into the URL like any pick. An
+  // empty compare (from the nav or the palette) starts in the selected
+  // clusters and namespace instead.
   const { data: contexts } = useContexts({ poll: false });
   const selectedClusters = useClustersStore((s) => s.selected);
+  const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const proposed = useRef(false);
   useEffect(() => {
     if (proposed.current || !contexts) return;
     proposed.current = true;
+    if (!left.ctx && !right.ctx) {
+      const sides = defaultSides(selectedClusters, namespacesByContext);
+      if (sides) update(sides);
+      return;
+    }
     if (!left.ctx || right.ctx) return;
     update({ right: defaultRightSide(left, { selected: selectedClusters, active: contexts.filter((c) => c.active).map((c) => c.name) }) });
-  }, [contexts, left, right.ctx, selectedClusters, update]);
+  }, [contexts, left, right.ctx, selectedClusters, namespacesByContext, update]);
 
   // Then hand the right side's name picker to the user whenever the
   // proposal cannot stand: no name to reuse, or no such object there.

@@ -29,19 +29,22 @@ The strip along the top is always available, whatever page you're on:
 
 ## :material-dock-left: Navigation drawer
 
-The left drawer starts with the **Overview** and your favorites, then lists every
-resource kind, grouped into **Workloads, Network, Config, Storage, Cluster** and **Access
-Control**. A **Custom Resources** group is populated automatically from the CRDs
+The left drawer starts with the **Overview** and the pages that span the cluster:
+**Events, Security Audit, Topology, Metrics, Network Metrics, Helm Releases, Port
+Forwards** and **Diff**. They are always there, whatever you type in the filter box. Your
+favorites come next, then every resource kind, grouped into **Cluster, Workloads,
+Network, Config, Storage** and **Access Control**. The **Cluster** group lists Nodes,
+Namespaces and the raw Event objects as a regular list, with its columns, bulk actions and
+saved views. A **Custom Resources** group is populated automatically from the CRDs
 discovered in your selected clusters, and a **GitOps** group appears when Argo CD or Flux
-is installed. The pages that span the cluster sit in a **Tools** group at the bottom:
-**Events, Topology, Metrics, Network Metrics, Helm Releases, Port Forwards, Security
-Audit** and **Diff**.
+is installed.
 
-Only **Workloads** and **Tools** start open. Open or close any group and Kubus remembers
-it; the group holding the page you are on opens by itself. Kinds with problems carry a
-badge with the count: red when something is failing, amber when it is degraded. A
-collapsed group shows the sum of its kinds, so a badge on **Storage** tells you to look
-there. The badges follow the namespace filter, like the lists do.
+The kind groups start open; only the long, discovered ones (**Custom Resources** and
+**More built-in kinds**) start closed. Open or close any group and Kubus remembers it;
+the group holding the page you are on opens by itself. Kinds with problems carry a badge
+with the count: red when something is failing, amber when it is degraded. A closed group
+shows the sum of its kinds, so a badge on a closed **Storage** tells you to look there.
+The badges follow the namespace filter, like the lists do.
 
 Built-in kinds you reach for less often, such as PriorityClasses, Leases, IngressClasses,
 RuntimeClasses, CSIDrivers, VolumeAttachments, webhook configurations and

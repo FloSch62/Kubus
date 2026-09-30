@@ -40,6 +40,8 @@ export interface AttentionItem {
   onClick: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
+const NONE: string[] = [];
+
 /**
  * The overview's first row: only things that need attention, as soft red
  * or amber tiles with a labelled link to where they are. Tiles with nothing
@@ -47,7 +49,18 @@ export interface AttentionItem {
  * row. `pending` keeps a placeholder while a slow source is still loading,
  * so "all healthy" is never claimed before every source has answered.
  */
-export function AttentionTiles({ items, pending, healthyText }: { items: AttentionItem[]; pending?: boolean; healthyText: string }) {
+export function AttentionTiles({
+  items,
+  pending,
+  healthyText,
+  unchecked = NONE,
+}: {
+  items: AttentionItem[];
+  pending?: boolean;
+  healthyText: string;
+  /** Kinds that could not be read (no access, API not served): "all healthy" does not cover them. */
+  unchecked?: string[];
+}) {
   const shown = items.filter((item) => item.count > 0);
   if (shown.length === 0 && pending) return <Skeleton variant="rounded" height={64} />;
   if (shown.length === 0) {
@@ -69,9 +82,14 @@ export function AttentionTiles({ items, pending, healthyText }: { items: Attenti
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             Nothing needs attention
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" component="p" sx={{ m: 0 }}>
             {healthyText}
           </Typography>
+          {unchecked.length > 0 && (
+            <Typography variant="caption" color="text.secondary" component="p" sx={{ m: 0, mt: 0.25 }}>
+              Could not check {listText(unchecked)}: no access.
+            </Typography>
+          )}
         </Box>
       </Box>
     );
@@ -83,6 +101,11 @@ export function AttentionTiles({ items, pending, healthyText }: { items: Attenti
       ))}
     </Box>
   );
+}
+
+/** "A", "A and B", "A, B and C". */
+function listText(parts: string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
 function AttentionTile({ item }: { item: AttentionItem }) {
@@ -140,7 +163,9 @@ function AttentionTile({ item }: { item: AttentionItem }) {
 /**
  * A compact inventory entry that opens a list: icon, label, count and a
  * chevron, with a hover surface so it reads as a link. `problem` adds a
- * colored "2 failed" after the count.
+ * colored "2 failed" after the count. Without a value (the API could not be
+ * read) a muted dash and `sub` ("unavailable", "no access") take its place.
+ * `quiet` recedes an empty kind until hovered.
  */
 export function InventoryButton({
   icon,
@@ -148,6 +173,7 @@ export function InventoryButton({
   value,
   sub,
   problem,
+  quiet = false,
   title,
   ariaLabel,
   onClick,
@@ -155,9 +181,10 @@ export function InventoryButton({
   icon?: React.ReactElement;
   label: string;
   value?: React.ReactNode;
-  /** Muted text right after the value ("/62", "unavailable"). */
+  /** Muted text right after the value (" of 62 running"), or in its place ("unavailable"). */
   sub?: string;
   problem?: { text: string; tone: 'error' | 'warning' };
+  quiet?: boolean;
   title?: string;
   ariaLabel?: string;
   onClick: () => void;
@@ -187,6 +214,16 @@ export function InventoryButton({
         },
         '&:hover .inventory-chevron': { color: 'primary.main' },
         '&.Mui-focusVisible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 1 },
+        ...(quiet && {
+          color: 'text.secondary',
+          '& .inventory-icon': { fontSize: 16, color: 'text.disabled' },
+          '&:hover, &.Mui-focusVisible': {
+            color: 'text.primary',
+            borderColor: alpha(theme.palette.primary.main, 0.5),
+            bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.12 : 0.06),
+          },
+          '&:hover .inventory-icon, &.Mui-focusVisible .inventory-icon': { color: 'primary.main' },
+        }),
       })}
     >
       {icon && (
@@ -197,7 +234,7 @@ export function InventoryButton({
       <Typography component="span" variant="body2" noWrap sx={{ minWidth: 0 }}>
         {label}
       </Typography>
-      {value !== undefined && (
+      {value !== undefined ? (
         <Typography component="span" variant="body2" sx={{ fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>
           {value}
           {sub && (
@@ -206,6 +243,17 @@ export function InventoryButton({
             </Typography>
           )}
         </Typography>
+      ) : (
+        sub && (
+          <Typography component="span" variant="body2" noWrap color="text.secondary" sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 0.5 }}>
+            <Box component="span" aria-hidden sx={{ color: 'text.disabled', fontWeight: 650 }}>
+              —
+            </Box>
+            <Box component="span" sx={{ fontSize: '0.75rem' }}>
+              {sub}
+            </Box>
+          </Typography>
+        )
       )}
       {problem && (
         <Typography component="span" variant="caption" noWrap sx={{ fontWeight: 600, color: statusTextColor(problem.tone) }}>

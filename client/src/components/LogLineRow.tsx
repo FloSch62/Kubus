@@ -7,7 +7,7 @@ import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined';
 import type { LogView, TsMode } from '../state/log-prefs.js';
-import { detectLevel, markSegs, parseFields, parseLine, splitMessage, stripAnsi, type LogFields, type LogLevel, type Seg } from './log-format.js';
+import { detectLevel, fieldLevel, levelTag, markSegs, parseFields, parseLine, parseLineTime, splitMessage, stripAnsi, type LogField, type LogFields, type LogLevel, type Seg } from './log-format.js';
 import type { LogEntry, LogLine, LogMarkerTone } from './log-tools.js';
 import { LogFieldsTable } from './LogFields.js';
 
@@ -33,7 +33,18 @@ export const LEVEL_TEXT_COLOR: Record<LogLevel, string> = {
   trace: '#6b7089',
 };
 
+/** Soft fills behind the level tags in the message view. */
+const LEVEL_TAG_FILL: Record<LogLevel, string> = {
+  error: 'rgba(247,118,142,0.16)',
+  warn: 'rgba(224,175,104,0.16)',
+  info: 'rgba(122,162,247,0.14)',
+  debug: 'rgba(154,160,181,0.13)',
+  trace: 'rgba(107,112,137,0.16)',
+};
+const NEUTRAL_TAG = { fg: '#a9b1d6', bg: 'rgba(154,160,181,0.13)' };
+
 const FIELD_KEY_COLOR = '#6b7089';
+const TIME_COLOR = '#6b7089';
 const FIELD_VALUE_COLOR: Record<'str' | 'num' | 'bool' | 'null' | 'json', string> = {
   str: '#a9b1d6',
   num: '#e0af68',
@@ -43,10 +54,15 @@ const FIELD_VALUE_COLOR: Record<'str' | 'num' | 'bool' | 'null' | 'json', string
 };
 
 const segCache = new WeakMap<LogLine, Seg[]>();
+// Two caches: with the line's own time in front (time column off) and without.
 const messageSegCache = new WeakMap<LogLine, Seg[]>();
+const messageTimedSegCache = new WeakMap<LogLine, Seg[]>();
 const stripCache = new WeakMap<LogLine, string>();
 const levelCache = new WeakMap<LogLine, LogLevel | null>();
 const fieldsCache = new WeakMap<LogLine, LogFields | null>();
+// displayTextOf per time mode: find and the filters read it for every line.
+const displayTextCache = new WeakMap<LogLine, string>();
+const displayTimedTextCache = new WeakMap<LogLine, string>();
 
 /** Marker colours on the dark log body. */
 export const MARKER_COLOR: Record<LogMarkerTone, string> = {
@@ -92,29 +108,76 @@ function segsOf(l: LogLine): Seg[] {
 export function levelOf(l: LogLine): LogLevel | undefined {
   let level = levelCache.get(l);
   if (level === undefined) {
-    level = detectLevel(strippedOf(l)) ?? null;
+    const text = strippedOf(l);
+    // JSON can nest a `level` key ahead of the line's own; read the top-level
+    // field so the tag, the row tint and the level filter agree.
+    const fields = text.trimStart().startsWith('{') ? fieldsOf(l) : undefined;
+    level = (fields && fieldLevel(fields)) ?? detectLevel(text) ?? null;
     levelCache.set(l, level);
   }
   return level ?? undefined;
 }
 
+/** A structured time field as the time column would show it, or as written when it is not a date. */
+function lineTimeText(field: LogField): string {
+  const date = parseLineTime(field.value);
+  if (!date) return field.value.slice(0, 23);
+  return `${localLogTime.format(date)}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+}
+
 /**
- * Message view of a JSON or logfmt line: level word, the message, then the
- * other fields as dimmed key=value pairs. Plain lines keep their raw text.
+ * Message view of a JSON or logfmt line: the line's own time (when the time
+ * column is off), its level as a tag, the message, then the other fields as
+ * dimmed key=value pairs. Plain lines keep their raw text.
  */
-function messageSegsOf(l: LogLine, fields: LogFields, level: LogLevel | undefined): Seg[] {
-  let segs = messageSegCache.get(l);
+function messageSegsOf(l: LogLine, fields: LogFields, level: LogLevel | undefined, withTime: boolean): Seg[] {
+  const cache = withTime ? messageTimedSegCache : messageSegCache;
+  let segs = cache.get(l);
   if (!segs) {
-    const { message, rest } = splitMessage(fields);
+    const view = splitMessage(fields);
     segs = [];
-    if (level) segs.push({ text: level.toUpperCase().padEnd(6), fg: LEVEL_TEXT_COLOR[level], bold: true });
-    if (message) segs.push({ text: message });
-    for (const field of rest) {
+    // A line without a time field falls back to when Kubernetes received it,
+    // so the tags and messages of structured lines stay in one column.
+    const time = view.time ? lineTimeText(view.time) : l.ts ? fmtTs(l.ts, 'local') : undefined;
+    if (withTime && time) segs.push({ text: `${time.padEnd(12)} `, fg: TIME_COLOR });
+    // Without a level field the level was read from the text; when the
+    // message itself starts with that word ("INFO ready=true"), a tag repeats it.
+    const tag = view.level
+      ? levelTag(view.level.value)
+      : level && !detectLevel(view.message ?? '')
+        ? { label: level.toUpperCase(), level }
+        : undefined;
+    if (tag) {
+      const tone = tag.level ? { fg: LEVEL_TEXT_COLOR[tag.level], bg: LEVEL_TAG_FILL[tag.level] } : NEUTRAL_TAG;
+      segs.push({ text: tag.label.padEnd(5), fg: tone.fg, bg: tone.bg, bold: true, tag: true }, { text: ' ' });
+    }
+    if (view.message) segs.push({ text: view.message });
+    for (const field of view.rest) {
       segs.push({ text: segs.length ? '  ' : '' }, { text: `${field.key}=`, fg: FIELD_KEY_COLOR }, { text: field.value, fg: FIELD_VALUE_COLOR[field.kind] });
     }
-    messageSegCache.set(l, segs);
+    cache.set(l, segs);
   }
   return segs;
+}
+
+/**
+ * The line as the viewer shows it: the message view of a structured line, or
+ * the raw text. Find, filters and the "As shown" export read this as well as
+ * the raw text, so typing what is on screen matches.
+ */
+export function displayTextOf(l: LogLine, view: LogView, withTime: boolean): string {
+  const fields = view === 'message' ? fieldsOf(l) : undefined;
+  if (!fields) return strippedOf(l);
+  const cache = withTime ? displayTimedTextCache : displayTextCache;
+  let text = cache.get(l);
+  if (text === undefined) {
+    text = messageSegsOf(l, fields, levelOf(l), withTime)
+      .map((seg) => seg.text)
+      .join('')
+      .trimEnd();
+    cache.set(l, text);
+  }
+  return text;
 }
 
 export function fieldsOf(l: LogLine): LogFields | undefined {
@@ -162,6 +225,8 @@ export const LOG_ROW_CSS = {
   '& .kl-src': { flexShrink: 0 },
   '& .kl-ts': { color: '#6b7089', flexShrink: 0, minWidth: '12ch' },
   '& .kl-line .kl-msg': { overflow: 'hidden', textOverflow: 'ellipsis' },
+  '& .kl-lvl': { padding: '0 4px', borderRadius: '3px', fontSize: '0.92em', letterSpacing: '0.02em' },
+  '& .kl-current': { backgroundColor: 'rgba(224,175,104,0.10)' },
   '& .kl-wrap .kl-gutter': { marginRight: '4px' },
   '& .kl-wrap .kl-src, & .kl-wrap .kl-ts': { marginRight: '8px' },
 } as const;
@@ -287,10 +352,11 @@ export const LineRow = memo(function LineRow({
   const level = levelOf(line);
   const fields = fieldsOf(line);
   const messageView = view === 'message' && !!fields;
+  const withTime = tsMode === 'off';
   const segs = messageView
     ? highlight
-      ? messageSegsOf(line, fields, level)
-      : [{ text: messageSegsOf(line, fields, level).map((seg) => seg.text).join('') }]
+      ? messageSegsOf(line, fields, level, withTime)
+      : [{ text: messageSegsOf(line, fields, level, withTime).map((seg) => seg.text).join('') }]
     : highlight
       ? segsOf(line)
       : [{ text: strippedOf(line) }];
@@ -328,6 +394,7 @@ export const LineRow = memo(function LineRow({
           return (
             <span
               key={i}
+              className={seg.tag ? 'kl-lvl' : undefined}
               style={{
                 color: mark && isCurrent ? '#1a1a1e' : (seg.fg ?? (seg.cls ? CLS_COLORS[seg.cls] : undefined)),
                 backgroundColor: mark ? (isCurrent ? '#e0af68' : 'rgba(224,175,104,0.35)') : seg.bg,
@@ -348,7 +415,10 @@ export const LineRow = memo(function LineRow({
         <LogFieldsTable parsed={fields} line={strippedOf(line)} />
       </FieldsBlock>
     ) : null;
-  const extra = `${fields ? ' kl-expandable' : ''}${flash ? ' kl-flash' : ''}`;
+  // The current find match gets a faint row tint too: the match may sit in a
+  // field the message view does not show.
+  const current = isCurrent ? ' kl-current' : '';
+  const extra = `${fields ? ' kl-expandable' : ''}${flash ? ' kl-flash' : ''}${current}`;
   if (wrap) {
     return (
       <div data-idx={idx} data-expandable={fields ? '' : undefined} className={`kl-wrap${tint}${extra}`} style={{ containIntrinsicSize: `auto ${rowHeight}px` }}>
@@ -358,7 +428,7 @@ export const LineRow = memo(function LineRow({
     );
   }
   return (
-    <div data-idx={idx} className={`kl-row${tint}${flash ? ' kl-flash' : ''}`} style={{ top }}>
+    <div data-idx={idx} className={`kl-row${tint}${flash ? ' kl-flash' : ''}${current}`} style={{ top }}>
       <div data-expandable={fields ? '' : undefined} className={`kl-line${fields ? ' kl-expandable' : ''}`} style={{ height: rowHeight }}>
         {content}
       </div>

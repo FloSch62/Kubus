@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   detectLevel,
   markSegs,
+  levelTag,
   parseFields,
   parseLine,
+  parseLineTime,
   splitMessage,
   stripAnsi,
   type Seg,
@@ -207,6 +209,74 @@ describe('detectLevel', () => {
 
   it('returns undefined for unknown structured level words', () => {
     expect(detectLevel('level=verbose msg=x')).toBeUndefined();
+    expect(detectLevel('{"level":30,"msg":"request error"}')).toBe('info');
+    expect(detectLevel('{"level":60,"msg":"x"}')).toBe('error');
+    expect(detectLevel('{"severity":"ALERT","message":"x"}')).toBe('error');
+  });
+
+  it('does not read a small number in text as a level', () => {
+    expect(detectLevel('zstd compression level=2 ratio=3.1')).toBeUndefined();
+    expect(detectLevel('level=30 msg=x')).toBeUndefined();
+  });
+});
+
+describe('levelTag', () => {
+  it('normalises level names but keeps fatal, panic and critical distinct from ERROR', () => {
+    expect(levelTag('warning')).toEqual({ label: 'WARN', level: 'warn' });
+    expect(levelTag('Information')).toEqual({ label: 'INFO', level: 'info' });
+    expect(levelTag('fatal')).toEqual({ label: 'FATAL', level: 'error' });
+    expect(levelTag('panic')).toEqual({ label: 'PANIC', level: 'error' });
+    expect(levelTag('dpanic')).toEqual({ label: 'DPANIC', level: 'error' });
+    expect(levelTag('critical')).toEqual({ label: 'CRIT', level: 'error' });
+    expect(levelTag('EMERGENCY')).toEqual({ label: 'EMERG', level: 'error' });
+    expect(levelTag('NOTICE')).toEqual({ label: 'NOTICE', level: 'info' });
+    expect(levelTag('DEFAULT')).toEqual({ label: 'DEFAULT' });
+  });
+
+  it('maps numeric levels: pino and bunyan, Cloud Logging severities', () => {
+    expect(levelTag('10')).toEqual({ label: 'TRACE', level: 'trace' });
+    expect(levelTag('30')).toEqual({ label: 'INFO', level: 'info' });
+    expect(levelTag('50')).toEqual({ label: 'ERROR', level: 'error' });
+    expect(levelTag('60')).toEqual({ label: 'FATAL', level: 'error' });
+    expect(levelTag('3')).toEqual({ label: '3' });
+    expect(levelTag('400')).toEqual({ label: 'WARN', level: 'warn' });
+    expect(levelTag('800')).toEqual({ label: 'EMERG', level: 'error' });
+  });
+
+  it('shows unknown values as written, clipped', () => {
+    expect(levelTag('verbose')).toEqual({ label: 'VERBOSE' });
+    expect(levelTag('extraordinarily-loud')).toEqual({ label: 'EXTRAOR' });
+  });
+
+  it('never treats Object.prototype names as levels', () => {
+    expect(levelTag('constructor')).toEqual({ label: 'CONSTRU' });
+    expect(levelTag('__proto__')).toEqual({ label: '__PROTO' });
+    expect(detectLevel('{"level":"constructor","msg":"x"}')).toBeUndefined();
+  });
+});
+
+describe('parseLineTime', () => {
+  it('reads RFC 3339 strings and epoch numbers in any common unit', () => {
+    const at = Date.parse('2026-07-22T11:59:59.456Z');
+    expect(parseLineTime('2026-07-22T11:59:59.456Z')?.getTime()).toBe(at);
+    expect(parseLineTime('1784721599456')?.getTime()).toBe(at);
+    expect(parseLineTime('1784721599.456')?.getTime()).toBeCloseTo(at, -1);
+    expect(parseLineTime('1784721599456000')?.getTime()).toBe(at);
+    expect(parseLineTime('1784721599456000000')?.getTime()).toBeCloseTo(at, -3);
+  });
+
+  it('reads the space and comma form of Python and Java loggers', () => {
+    expect(parseLineTime('2026-07-22 11:59:59,456')?.getMilliseconds()).toBe(456);
+  });
+
+  it('gives up on values that are not wall-clock times', () => {
+    expect(parseLineTime('later')).toBeUndefined();
+    expect(parseLineTime('42')).toBeUndefined();
+    // Date.parse reads these as dates in 2001.
+    expect(parseLineTime('worker 3')).toBeUndefined();
+    expect(parseLineTime('10-3')).toBeUndefined();
+    expect(parseLineTime('1,5')).toBeUndefined();
+    expect(parseLineTime('')).toBeUndefined();
   });
 });
 
@@ -292,11 +362,26 @@ describe('parseFields', () => {
 });
 
 describe('splitMessage', () => {
-  it('puts the message first and leaves out time and level fields', () => {
+  it('puts the message first and picks out the time and level fields for their own place', () => {
     const parsed = parseFields('{"level":"info","ts":"2026-09-29T10:43:11Z","caller":"main.go:170","msg":"Starting podinfo","port":9898}')!;
-    const { message, rest } = splitMessage(parsed);
+    const { message, rest, level, time } = splitMessage(parsed);
     expect(message).toBe('Starting podinfo');
     expect(rest.map((field) => field.key)).toEqual(['caller', 'port']);
+    expect(level?.value).toBe('info');
+    expect(time?.value).toBe('2026-09-29T10:43:11Z');
+  });
+
+  it('takes numeric levels and times, and keeps a second time-like field', () => {
+    const parsed = parseFields('{"level":30,"time":1784721599456,"ts":"later","msg":"listening"}')!;
+    const { rest, level, time } = splitMessage(parsed);
+    expect(level).toMatchObject({ key: 'level', value: '30' });
+    expect(time).toMatchObject({ key: 'time', value: '1784721599456' });
+    expect(rest.map((field) => field.key)).toEqual(['ts']);
+  });
+
+  it('keeps the logfmt text around the pairs in front of the message', () => {
+    const parsed = parseFields('2026-09-30T08:00:00Z [main] level=info msg="started server" port=8080')!;
+    expect(splitMessage(parsed).message).toBe('2026-09-30T08:00:00Z [main] started server');
   });
 
   it('uses the free text of a logfmt line when there is no message key', () => {

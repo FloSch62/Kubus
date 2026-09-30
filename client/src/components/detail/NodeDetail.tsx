@@ -1,5 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -17,6 +19,7 @@ import { UsageMeter } from '../UsageMeter.js';
 import { formatBytes, formatCpu } from '../format.js';
 import { nodeRoles, parseQuantity, podRequestTotals } from '../../kube-display.js';
 import { DETAIL_LIST_LIVE_MS, useResourceList, useResourceMetrics } from '../../api/queries.js';
+import { statusTextColor } from '../../theme.js';
 
 interface NodeStatus {
   addresses?: Array<{ type: string; address: string }>;
@@ -35,14 +38,36 @@ function formatResource(key: string, value: string | undefined): string {
   return value;
 }
 
+const podPhase = (pod: KubeObject) => (pod.status as { phase?: string } | undefined)?.phase;
+
 /**
- * Pods that occupy the node: everything not finished. Completed Job pods
- * keep their node name but hold no resources and no pod slot, so the list,
- * the Pods tile and the Nodes list all count the same set.
+ * Pods that occupy the node: everything not finished. Completed and failed
+ * pods keep their node name but hold no resources and no pod slot, so the
+ * Pods tile, the allocation numbers and the Nodes list all count the same set.
  */
 export function isActiveNodePod(pod: KubeObject): boolean {
-  const phase = (pod.status as { phase?: string } | undefined)?.phase;
+  const phase = podPhase(pod);
   return phase !== 'Succeeded' && phase !== 'Failed';
+}
+
+interface ContainerRequests {
+  resources?: { requests?: Record<string, string> };
+  restartPolicy?: string;
+}
+
+/** A pod's ephemeral-storage request, summed the way the scheduler does (init containers run one at a time). */
+function podEphemeralRequest(pod: KubeObject): number {
+  const spec = pod.spec as { containers?: ContainerRequests[]; initContainers?: ContainerRequests[] } | undefined;
+  const request = (c: ContainerRequests) => parseQuantity(c.resources?.requests?.['ephemeral-storage'] ?? '0');
+  let app = 0;
+  let sidecars = 0;
+  let init = 0;
+  for (const c of spec?.containers ?? []) app += request(c);
+  for (const c of spec?.initContainers ?? []) {
+    if (c.restartPolicy === 'Always') sidecars += request(c);
+    else init = Math.max(init, request(c));
+  }
+  return sidecars + Math.max(app, init);
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -106,8 +131,17 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const spec = obj.spec as { providerID?: string; podCIDR?: string; podCIDRs?: string[]; taints?: Array<{ key: string; value?: string; effect: string }> } | undefined;
   const podsQuery = useResourceList({ ctx, group: '', version: 'v1', plural: 'pods', fieldSelector: `spec.nodeName=${name}` }, { liveMs: DETAIL_LIST_LIVE_MS });
   const pods = podsQuery.data?.items;
+  const [showCompleted, setShowCompleted] = useState(false);
   const activePods = useMemo(() => (pods ?? []).filter(isActiveNodePod), [pods]);
-  const finishedPods = (pods?.length ?? 0) - activePods.length;
+  // Failed pods (evicted, OOMKilled, failed Job runs) hold no slot, but they
+  // are what to look at on a node under pressure, so the list keeps them.
+  // Only completed pods fold away.
+  const failedPods = useMemo(() => (pods ?? []).filter((p) => podPhase(p) === 'Failed'), [pods]);
+  const completedPods = useMemo(() => (pods ?? []).filter((p) => podPhase(p) === 'Succeeded'), [pods]);
+  const listedPods = useMemo(
+    () => [...activePods, ...failedPods, ...(showCompleted ? completedPods : [])],
+    [activePods, failedPods, completedPods, showCompleted],
+  );
   // DaemonSet pods come with the node; the rest were scheduled onto it.
   const daemonPods = activePods.filter((p) => daemonSetOwner(p)).length;
   const unhealthy = hasUnhealthyCondition(obj, nodeGoodWhen);
@@ -119,6 +153,7 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
   const allocCpu = allocatable.cpu ? Math.round(parseQuantity(allocatable.cpu) * 1000) : 0;
   const allocMemory = allocatable.memory ? parseQuantity(allocatable.memory) : 0;
   const allocPods = allocatable.pods ? parseQuantity(allocatable.pods) : 0;
+  const allocEphemeral = allocatable['ephemeral-storage'] ? parseQuantity(allocatable['ephemeral-storage']) : 0;
   const requests = useMemo(
     () =>
       activePods.reduce(
@@ -130,6 +165,7 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
       ),
     [activePods],
   );
+  const ephemeralRequested = useMemo(() => activePods.reduce((sum, pod) => sum + podEphemeralRequest(pod), 0), [activePods]);
 
   const resourceKeys = ['cpu', 'memory', 'pods', 'ephemeral-storage'].filter((k) => status.capacity?.[k] !== undefined || status.allocatable?.[k] !== undefined);
   // Capacity only differs from allocatable when the kubelet reserves some for
@@ -149,14 +185,21 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
             {
               label: 'Pods',
               value: loading ? '…' : allocPods ? `${activePods.length} / ${allocPods}` : String(activePods.length),
-              hint: 'Pods running or waiting on this node, out of the most it accepts. Finished pods hold no slot.',
-              detail: finishedPods ? `+${finishedPods} finished` : undefined,
+              hint: 'Pods running or waiting on this node, out of the most it accepts. Failed and completed pods hold no slot.',
+              // The tile is narrow: failed pods lead, the completed count is in the list footer.
+              detail: failedPods.length ? (
+                <Box component="span" sx={{ color: statusTextColor('error'), fontWeight: 600 }}>
+                  {failedPods.length} failed
+                </Box>
+              ) : completedPods.length ? (
+                `+${completedPods.length} completed`
+              ) : undefined,
             },
             { label: 'Kubelet', value: status.nodeInfo?.kubeletVersion },
             { label: 'Conditions', value: unhealthy ? 'Degraded' : 'Healthy', tone: unhealthy ? 'warning' : 'success' },
           ]}
         />
-        {(allocCpu > 0 || allocMemory > 0 || allocPods > 0) && (
+        {(allocCpu > 0 || allocMemory > 0 || allocPods > 0 || allocEphemeral > 0) && (
           <Section
             title="Allocation"
             flush
@@ -193,6 +236,15 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
                   />
                 )}
                 {allocPods > 0 && <AllocationRow label="Pods" used={activePods.length} allocatable={allocPods} format={String} />}
+                {allocEphemeral > 0 && (
+                  <AllocationRow
+                    label="Ephemeral storage"
+                    requested={ephemeralRequested}
+                    allocatable={allocEphemeral}
+                    format={formatBytes}
+                    usedHint="metrics-server does not report disk use"
+                  />
+                )}
               </TableBody>
             </Table>
           </Section>
@@ -257,17 +309,27 @@ export function NodeDetail({ obj, ctx }: { obj: KubeObject; ctx: string }) {
         <ConditionsTable obj={obj} goodWhen={nodeGoodWhen} defaultOpen={unhealthy} />
         <Section
           title="Pods on this node"
-          count={loading ? undefined : activePods.length}
+          count={loading ? undefined : listedPods.length}
           flush
           description={
             loading
               ? undefined
-              : [daemonPods ? `${daemonPods} from DaemonSet${daemonPods === 1 ? '' : 's'}` : undefined, finishedPods ? `${plural(finishedPods, 'finished pod')} not shown` : undefined]
+              : [daemonPods ? `${daemonPods} from DaemonSet${daemonPods === 1 ? '' : 's'}` : undefined, failedPods.length ? `${failedPods.length} failed` : undefined]
                   .filter(Boolean)
                   .join(' · ') || undefined
           }
         >
-          <PodMiniList ctx={ctx} pods={activePods} loading={loading} daemonSets />
+          <PodMiniList ctx={ctx} pods={listedPods} loading={loading} daemonSets />
+          {!loading && completedPods.length > 0 && (
+            <Stack direction="row" sx={{ px: 2, py: 1, gap: 1.5, alignItems: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="caption" color="text.secondary">
+                {showCompleted ? `Including ${plural(completedPods.length, 'completed pod')}.` : `${plural(completedPods.length, 'completed pod')} hidden.`}
+              </Typography>
+              <Button size="small" onClick={() => setShowCompleted((v) => !v)} sx={{ py: 0, minWidth: 0 }}>
+                {showCompleted ? 'Hide completed' : `Show ${completedPods.length} completed`}
+              </Button>
+            </Stack>
+          )}
         </Section>
       </DetailStack>
       <GenericDetail obj={obj} ctx={ctx} hideConditions />

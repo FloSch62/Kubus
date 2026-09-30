@@ -29,7 +29,7 @@ import type { GraphEdge, GraphNode, GraphNodeStatus, RelationshipGraph } from '@
 import { useTopologyGraphs } from '../api/queries.js';
 import { useDetailStore } from '../state/detail.js';
 import { statusTextColor } from '../theme.js';
-import { NODE_WIDTH, cachedTopologyLayout, estimateNodeHeight, isFoldedReplicaSets, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
+import { FOLDED_REPLICASETS_PREFIX, NODE_WIDTH, cachedTopologyLayout, estimateNodeHeight, isFoldedReplicaSets, layoutTopology, routeEdges, topologyNodeBox, type RoutePoint, type TopologyLayout } from './topology-layout.js';
 import type { TopologyGraphProps } from './TopologyGraph.js';
 
 interface TopologyNodeData extends Record<string, unknown> {
@@ -71,6 +71,8 @@ const EDGE_COLOR: Record<'light' | 'dark', Record<GraphEdge['kind'], string>> = 
 // Traffic edges animate as dashed lines; the legend draws them dashed too.
 const DASHED_KINDS = new Set<GraphEdge['kind']>(['routes', 'selects']);
 
+const countLabel = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 function nodeStatusColor(status: GraphNodeStatus, theme: Theme): string {
   return status === 'unknown' ? theme.palette.text.secondary : theme.palette[status].main;
 }
@@ -106,6 +108,23 @@ export function compactLabel(label: string, maxWidth: number, font: string): str
   return `${head}…${tail}`;
 }
 
+const LAYER_GAP = 6;
+const LAYER_LETTER_SPACING = 0.5;
+
+/**
+ * The layer caption beside the kind ("workload", "entry", "storage"…), or
+ * undefined when it would only repeat the kind (a Pod's "pod" layer), says
+ * nothing ("other"), or does not fit next to a long kind name.
+ */
+export function layerCaption(node: GraphNode, fontFamily: string): string | undefined {
+  const layer = node.layer;
+  if (layer === 'other' || layer === node.ref.kind.toLowerCase()) return undefined;
+  const text = layer.toUpperCase();
+  const width =
+    textWidth(node.ref.kind, `400 11px ${fontFamily}`) + textWidth(text, `600 9.5px ${fontFamily}`) + text.length * LAYER_LETTER_SPACING + LAYER_GAP;
+  return width <= LABEL_WIDTH ? text : undefined;
+}
+
 function TopologyNode({ data, selected }: NodeProps) {
   const node = (data as TopologyNodeData).graphNode;
   const theme = useTheme();
@@ -114,6 +133,7 @@ function TopologyNode({ data, selected }: NodeProps) {
   // Small status text needs the AA-safe tone; the status stripe can stay bright.
   const reasonColor = node.status === 'unknown' ? theme.palette.text.secondary : statusTextColor(node.status)(theme);
   const stripe = folded ? 1 : 4;
+  const layer = folded ? undefined : layerCaption(node, theme.typography.fontFamily ?? 'sans-serif');
   return (
     <Box
       sx={{
@@ -145,9 +165,27 @@ function TopologyNode({ data, selected }: NodeProps) {
         position={Position.Right}
         style={{ width: 8, height: 8, border: 0, background: folded ? theme.palette.text.disabled : color, right: -1 }}
       />
-      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', fontSize: 11, lineHeight: 1.35 }}>
-        {node.ref.kind}
-      </Typography>
+      <Stack direction="row" sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: `${LAYER_GAP}px`, minWidth: 0 }}>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', fontSize: 11, lineHeight: 1.35, minWidth: 0 }}>
+          {node.ref.kind}
+        </Typography>
+        {layer && (
+          <Typography
+            component="span"
+            aria-label={`${node.layer} layer`}
+            sx={{
+              flexShrink: 0,
+              fontSize: 9.5,
+              fontWeight: 600,
+              letterSpacing: `${LAYER_LETTER_SPACING}px`,
+              lineHeight: 1.35,
+              color: alpha(theme.palette.text.secondary, 0.85),
+            }}
+          >
+            {layer}
+          </Typography>
+        )}
+      </Stack>
       <Typography
         variant="body2"
         noWrap
@@ -590,10 +628,12 @@ export default function TopologyGraphImpl({
   const { warnings, problemNodes } = flow;
   const foldedCount = useMemo(() => flow.nodes.filter((node) => isFoldedReplicaSets(node.data.graphNode)).length, [flow.nodes]);
   const resourceCount = flow.nodes.length - foldedCount;
+  // A folded placeholder's owner edge stands in for hidden links, so it isn't counted.
+  const linkCount = useMemo(() => flow.edges.filter((edge) => !edge.target.startsWith(FOLDED_REPLICASETS_PREFIX)).length, [flow.edges]);
   const edgeKinds = useMemo(() => [...new Set(flow.edges.map((edge) => edge.data!.kind))].sort(), [flow.edges]);
   useEffect(() => {
-    onStats?.({ resources: resourceCount, links: flow.edges.length, issues: problemNodes.length, folded: foldedCount });
-  }, [onStats, resourceCount, flow.edges.length, problemNodes.length, foldedCount]);
+    onStats?.({ resources: resourceCount, links: linkCount, issues: problemNodes.length, folded: foldedCount });
+  }, [onStats, resourceCount, linkCount, problemNodes.length, foldedCount]);
   // keepPreviousData preserves the prior graph while a new scope is fetched.
   // Keep it visible for a fast transition, but mark it as stale until both the
   // request and layout for the current data have completed.
@@ -667,6 +707,10 @@ export default function TopologyGraphImpl({
         edgeTypes={edgeTypes}
         minZoom={0.12}
         maxZoom={2}
+        // Double-click opens a node. Locked nodes aren't draggable, so xyflow
+        // doesn't mark them `nopan`, and its double-click zoom would swallow
+        // the event before onNodeDoubleClick sees it.
+        zoomOnDoubleClick={false}
         nodesDraggable={interactive}
         nodesConnectable={false}
         elementsSelectable={interactive}
@@ -754,12 +798,16 @@ export default function TopologyGraphImpl({
       {!loading && !updating && nodes.length > 0 && (
         <Stack
           direction="row"
-          spacing={1.5}
+          useFlexGap
           sx={{
             position: 'absolute',
             left: 52,
             bottom: 10,
-            maxWidth: `calc(100% - ${overflowing ? 248 : 68}px)`,
+            // Stays clear of the minimap, or else of the attribution badge.
+            maxWidth: `calc(100% - ${overflowing ? 248 : 160}px)`,
+            flexWrap: 'wrap',
+            columnGap: 1.5,
+            rowGap: 0.25,
             alignItems: 'center',
             pointerEvents: 'none',
             overflow: 'hidden',
@@ -769,6 +817,13 @@ export default function TopologyGraphImpl({
             bgcolor: alpha(theme.palette.background.default, 0.9),
           }}
         >
+          {/* Without a page header (a drawer's Map tab) the counts lead the
+              footer so a narrow drawer wraps the hint, never the numbers. */}
+          {!onStats && (
+            <Typography variant="caption" sx={{ flexShrink: 0, fontWeight: 600, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+              {countLabel(resourceCount, 'resource')} · {countLabel(linkCount, 'link')}
+            </Typography>
+          )}
           {edgeKinds.map((kind) => (
             <Stack key={kind} direction="row" spacing={0.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
               <svg width="18" height="6" aria-hidden="true">
@@ -779,8 +834,7 @@ export default function TopologyGraphImpl({
               </Typography>
             </Stack>
           ))}
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-            {onStats ? '' : `${resourceCount} ${resourceCount === 1 ? 'resource' : 'resources'} · `}
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0, maxWidth: '100%' }}>
             Click a node to highlight its links, double-click to open it.
             {foldedCount > 0 && ' Dashed cards hold old ReplicaSets.'}
           </Typography>

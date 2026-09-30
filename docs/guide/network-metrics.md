@@ -27,7 +27,7 @@ The **Network Metrics** sidebar entry (below Metrics) renders, per selected clus
 - **Tiles** show cluster-wide throughput, active traffic links, pods with traffic, and
   how many node agents are reporting.
 - **Cluster traffic** plots a rolling ~30-minute throughput trend (each flow counted once).
-- **Top pods by traffic** ranks the busiest pods: the pod name with its namespace underneath, a bar with sent and received stacked, and the combined rate.
+- **Top pods by traffic** ranks the busiest pods: the pod name with its namespace underneath, a bar with sent and received stacked, and the combined rate with the sent (↑) and received (↓) rates under it. Hover the bar for both exact rates.
 - **Busiest links** is a table of endpoint pairs with per-second rates in each
   direction, plus TCP retransmissions and dropped bytes when they occur. Endpoints
   are shown as pods where Retina resolved them; other IPs resolve to Services

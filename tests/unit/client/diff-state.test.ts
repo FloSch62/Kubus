@@ -4,6 +4,7 @@ import {
   DEFAULT_DIFF_OPTIONS,
   adoptKind,
   defaultRightSide,
+  defaultSides,
   diffPath,
   diffView,
   encodeSide,
@@ -113,6 +114,20 @@ describe('defaultRightSide', () => {
 
   it('stays in the cluster and leaves the name to pick when there is no other', () => {
     expect(defaultRightSide(deploy, { selected: ['kind-a'], active: ['kind-a'] })).toEqual({ ctx: 'kind-a', group: 'apps', version: 'v1', plural: 'deployments', namespace: 'shop' });
+  });
+});
+
+describe('defaultSides', () => {
+  it('starts an empty compare in the first two selected clusters and their single namespace', () => {
+    expect(defaultSides(['kind-a', 'kind-b'], { 'kind-a': ['shop'], 'kind-b': ['shop', 'web'] })).toEqual({
+      left: { ctx: 'kind-a', namespace: 'shop' },
+      right: { ctx: 'kind-b' },
+    });
+  });
+
+  it('puts both sides in the one selected cluster, and does nothing without one', () => {
+    expect(defaultSides(['kind-a'], {})).toEqual({ left: { ctx: 'kind-a' }, right: { ctx: 'kind-a' } });
+    expect(defaultSides([], {})).toBeUndefined();
   });
 });
 

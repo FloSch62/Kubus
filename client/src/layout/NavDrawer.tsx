@@ -17,7 +17,6 @@ import Tooltip from '@mui/material/Tooltip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { alpha, type Theme } from '@mui/material/styles';
-import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -181,42 +180,27 @@ function FavStar({ active, onToggle, onManage, label }: { active: boolean; onTog
 // user shows intent instead of unconditionally at idle for every session.
 const preloadTopology = () => void import('../components/TopologyGraphImpl.js');
 
-const TOOLS_GROUP_TITLE = 'Tools';
-
-/** Cluster-wide pages, grouped below the kinds. */
+/**
+ * Cluster-wide pages, listed right under Overview. They are always shown:
+ * the kind filter narrows kinds, not these.
+ */
 const TOOLS: Array<{ to: string; label: string; icon: React.ReactElement; onIntent?: () => void }> = [
   { to: EVENTS_PAGE_PATH, label: 'Events', icon: <NotificationsNoneOutlinedIcon /> },
+  { to: '/audit', label: 'Security Audit', icon: <GppMaybeOutlinedIcon /> },
   { to: '/topology', label: 'Topology', icon: <AccountTreeOutlinedIcon />, onIntent: preloadTopology },
   { to: '/metrics', label: 'Metrics', icon: <QueryStatsOutlinedIcon /> },
   { to: '/network', label: 'Network Metrics', icon: <NetworkCheckOutlinedIcon /> },
   { to: '/helm', label: 'Helm Releases', icon: <SailingOutlinedIcon /> },
   { to: '/forwards', label: 'Port Forwards', icon: <CableOutlinedIcon /> },
-  { to: '/audit', label: 'Security Audit', icon: <GppMaybeOutlinedIcon /> },
   { to: '/diff', label: 'Diff', icon: <DifferenceOutlinedIcon /> },
 ];
 
-/** Kind groups in the order people reach for them; Cluster sits below the everyday kinds. */
-const KIND_GROUP_ORDER = ['Workloads', 'Network', 'Config', 'Storage', 'Cluster', 'Access Control'];
-
 /**
- * Built-in nav groups in display order. Events are left out of Cluster:
- * the Events page under Tools is the one place for them.
+ * Groups that start collapsed until the user opens them: the long,
+ * discovered lists. The group holding the current page opens on its own
+ * when you navigate there.
  */
-const NAV_KIND_GROUPS = [...BUILTIN_NAV_GROUPS]
-  .sort((a, b) => (KIND_GROUP_ORDER.indexOf(a.title) + 1 || 99) - (KIND_GROUP_ORDER.indexOf(b.title) + 1 || 99))
-  .map((group) => ({ ...group, kinds: group.kinds.filter((k) => k.kind !== 'Event') }));
-
-/**
- * Groups that start collapsed until the user opens them: every kind group
- * but Workloads, where most visits land. The group holding the current page
- * opens on its own when you navigate there.
- */
-const DEFAULT_COLLAPSED = [
-  ...NAV_KIND_GROUPS.map((g) => g.title).filter((title) => title !== 'Workloads'),
-  GITOPS_GROUP_TITLE,
-  MORE_BUILTIN_KINDS_TITLE,
-  'Custom Resources',
-];
+const DEFAULT_COLLAPSED = [MORE_BUILTIN_KINDS_TITLE, 'Custom Resources'];
 
 function dedupeCustomNavKinds(kinds: ResourceKindInfo[]): ResourceKindInfo[] {
   const byKind = new Map<string, ResourceKindInfo>();
@@ -1006,7 +990,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // favorited category inline and to recognize its entries during tab changes.
   const categoryKindsMap = useMemo(() => {
     const map = new Map<string, NavKind[]>();
-    for (const group of NAV_KIND_GROUPS) {
+    for (const group of BUILTIN_NAV_GROUPS) {
       map.set(
         group.title,
         group.kinds.map((k) => ({ group: k.group, version: k.version, plural: k.plural, kind: k.kind, label: pluralLabel(k.kind) })),
@@ -1050,10 +1034,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
   // the entry for the active resource after a cross-kind jump.
   const groupChainByPath = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const group of NAV_KIND_GROUPS) {
+    for (const group of BUILTIN_NAV_GROUPS) {
       for (const k of group.kinds) map.set(kindPath(k.group, k.version, k.plural), [group.title]);
     }
-    for (const tool of TOOLS) map.set(tool.to, [TOOLS_GROUP_TITLE]);
     map.set(CRD_LIST_PATH, ['Custom Resources']);
     for (const k of moreKinds) map.set(kindPath(k.group, k.version, k.plural), [MORE_BUILTIN_KINDS_TITLE]);
     for (const node of customNav) {
@@ -1233,7 +1216,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
       );
 
     const moreVisible = moreKinds.filter((k) => matches(pluralLabel(k.kind)) || matches(k.kind));
-    const toolsVisible = TOOLS.filter((tool) => matches(tool.label));
     const railHidden = !overlay && hidden;
     return (
       <Drawer
@@ -1303,6 +1285,9 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
         <PreferFavoriteContext value={activeFavoriteEntry}>
           <List dense disablePadding ref={listRef} sx={{ pb: 4 }}>
             <NavEntry to="/" label="Overview" icon={<SpaceDashboardOutlinedIcon />} />
+            {TOOLS.map((tool) => (
+              <NavEntry key={tool.to} to={tool.to} label={tool.label} icon={tool.icon} onIntent={tool.onIntent} badge={badges[tool.to]} />
+            ))}
           {visibleFavs.length > 0 && (
             <Box>
               <GroupHeader title="Favorites" icon={<StarIcon />} open={isOpen('Favorites')} onClick={() => toggleGroup('Favorites')} />
@@ -1376,7 +1361,7 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
               </Collapse>
             </Box>
           )}
-          {NAV_KIND_GROUPS.map((group) => {
+          {BUILTIN_NAV_GROUPS.map((group) => {
             const visible = group.kinds.filter((k) => matches(k.kind) || matches(pluralLabel(k.kind)));
             if (!visible.length) return null;
             const paths = visible.map((k) => kindPath(k.group, k.version, k.plural));
@@ -1537,22 +1522,6 @@ export const NavDrawer = memo(function NavDrawer({ overlay, hidden, open, onClos
                 })}
               </Collapse>
             </>
-          )}
-          {toolsVisible.length > 0 && (
-            <Box sx={{ mt: 1 }}>
-              <GroupHeader
-                title={TOOLS_GROUP_TITLE}
-                icon={<BuildOutlinedIcon />}
-                open={isOpen(TOOLS_GROUP_TITLE)}
-                onClick={() => toggleGroup(TOOLS_GROUP_TITLE)}
-                badge={groupBadge(badges, toolsVisible.map((t) => t.to))}
-              />
-              <Collapse unmountOnExit in={isOpen(TOOLS_GROUP_TITLE)}>
-                {toolsVisible.map((tool) => (
-                  <NavEntry key={tool.to} to={tool.to} label={tool.label} icon={tool.icon} onIntent={tool.onIntent} badge={badges[tool.to]} />
-                ))}
-              </Collapse>
-            </Box>
           )}
           </List>
         </PreferFavoriteContext>

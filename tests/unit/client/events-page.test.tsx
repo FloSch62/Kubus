@@ -7,6 +7,7 @@ import { useClustersStore } from '../../../client/src/state/clusters';
 import { useEventsPrefsStore } from '../../../client/src/state/events-prefs';
 
 const fixtures = vi.hoisted(() => ({ rows: [] as Array<{ ctx: string; obj: unknown }> }));
+const cellCopy = vi.hoisted(() => ({ withCellCopy: vi.fn((column: unknown) => column), handleCopyCellKeyDown: vi.fn() }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
   useApiResourcesForContexts: () => ({ data: undefined }),
@@ -15,8 +16,8 @@ vi.mock('../../../client/src/api/queries.js', () => ({
 vi.mock('../../../client/src/components/CellCopy.js', () => ({
   CellCopyOverlay: () => null,
   copyCellGridSx: {},
-  handleCopyCellKeyDown: vi.fn(),
-  withCellCopy: (column: unknown) => column,
+  handleCopyCellKeyDown: cellCopy.handleCopyCellKeyDown,
+  withCellCopy: cellCopy.withCellCopy,
 }));
 vi.mock('../../../client/src/components/grid-prefs.js', () => ({
   useGridPrefs: (_id: string, columns: unknown[]) => ({ columns, density: 'compact', onColumnWidthChange: vi.fn() }),
@@ -58,8 +59,27 @@ beforeEach(() => {
   fixtures.rows = [event('Warning', 'Failed', 'broken', 10), event('Normal', 'BackOff', 'broken', 12), event('Normal', 'Pulled', 'healthy')];
 });
 
+describe('events view prefs', () => {
+  it('open on every event, one row per object', () => {
+    expect(useEventsPrefsStore.getInitialState()).toMatchObject({ scope: 'all', grouping: 'object' });
+  });
+
+  it('reset the old warnings-only default once, then keep the choice', () => {
+    const migrate = useEventsPrefsStore.persist.getOptions().migrate!;
+    expect(migrate({ scope: 'warnings', grouping: 'flat' }, 0)).toMatchObject({ scope: 'all', grouping: 'flat' });
+    expect(migrate({ scope: 'warnings', grouping: 'object' }, 1)).toMatchObject({ scope: 'warnings', grouping: 'object' });
+  });
+});
+
 describe('EventsPage', () => {
-  it('opens on warnings, one row per object, with the Normal events folded in', () => {
+  it('lets every grouped column copy its value, like the flat log', () => {
+    cellCopy.withCellCopy.mockClear();
+    renderPage();
+    const fields = cellCopy.withCellCopy.mock.calls.map(([column]) => (column as { field: string }).field);
+    expect(fields).toEqual(expect.arrayContaining(['object', 'latest', 'count', 'lastSeen']));
+  });
+
+  it('shows warnings one row per object, with the Normal events folded in', () => {
     renderPage();
 
     expect(screen.getByRole('button', { name: /Warnings\s*1 objects/ })).toHaveAttribute('aria-pressed', 'true');

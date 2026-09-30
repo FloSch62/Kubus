@@ -76,10 +76,18 @@ the object. On the Events list it also matches the UID of the object an event is
 
 The search box also holds a server-side label selector, shown as tokens at its start.
 Type part of a label and the suggestions list the matching keys and `key=value` pairs
-present in the rows; pick one to add it as a token. For any other selector, type it after
-`label:` (for example `label:env!=prod`) and press ++enter++. Tokens are ANDed together.
-Click a token's ✕ to remove it, or press ++backspace++ in the empty field to remove the
-last one.
+present in the rows; pick one to add it as a token. A selector typed as-is, such as
+`env!=prod`, `!canary` or `tier in (web,api)`, becomes a token when you press ++enter++.
+A plain word stays a text search, so for a bare key write `label:team`. Tokens are ANDed
+together. Click a token's ✕ to remove it, or press ++backspace++ in the empty field to
+remove the last one.
+
+To browse instead of typing, click the label icon (:material-tag-outline:) at the end of
+the search box. It lists every label key in the list, most common first, with its values
+and how many rows carry each. Tick as many as you like; the panel stays open while you
+pick. A search box at the top narrows the list, and a selector field at the bottom takes
+anything the list can't offer. When more tokens are set than fit in the search box, the
+`+N` chip opens the same panel, where each one can be removed.
 
 Every row also shows its labels as chips in the **Labels column**. Hover to see them
 all, and click a chip to add it to the label filter.
