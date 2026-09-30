@@ -104,7 +104,7 @@ export function textMatcher(pattern: string, matchCase: boolean): ((text: string
 export type LogExportFormat = 'shown' | 'raw' | 'timestamps' | 'ndjson';
 
 export const LOG_EXPORT_FORMATS: ReadonlyArray<{ value: LogExportFormat; label: string; hint: string; ext: string; mime: string }> = [
-  { value: 'shown', label: 'As shown', hint: 'Full pod and container, time and markers', ext: 'log', mime: 'text/plain' },
+  { value: 'shown', label: 'As shown', hint: 'Lines as the view shows them, with full pod and container, time and markers', ext: 'log', mime: 'text/plain' },
   { value: 'raw', label: 'Raw', hint: 'Only the lines, exactly as the containers wrote them', ext: 'log', mime: 'text/plain' },
   { value: 'timestamps', label: 'With timestamps', hint: 'RFC 3339 timestamp and source before each line', ext: 'log', mime: 'text/plain' },
   { value: 'ndjson', label: 'NDJSON', hint: 'One JSON object per line, for jq and log tools', ext: 'ndjson', mime: 'application/x-ndjson' },
@@ -117,6 +117,8 @@ export interface LogExportOptions {
   showPod: boolean;
   /** Timestamp as displayed, or undefined when timestamps are hidden. */
   formatTs?: (ts: string) => string;
+  /** A line's text as displayed (the message view), when it differs from the raw line. */
+  displayText?: (line: LogLine) => string;
   levelOf: (line: LogLine) => LogLevel | undefined;
 }
 
@@ -184,7 +186,7 @@ export function formatLogExport(entries: readonly LogEntry[], format: LogExportF
         const parts: string[] = [];
         if (options.showSource) parts.push(sourceOf(entry, options.showPod));
         if (options.formatTs && entry.ts) parts.push(options.formatTs(entry.ts));
-        parts.push(stripAnsi(entry.line));
+        parts.push(options.displayText?.(entry) ?? stripAnsi(entry.line));
         out.push(parts.join(' '));
       }
     }

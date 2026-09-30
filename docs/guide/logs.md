@@ -98,10 +98,16 @@ Pick how far back to read, from the toolbar:
   Scrolling up in a live tail pauses the same way, and scrolling back to the bottom
   resumes. Stepping through find results or jumping from the histogram pauses too, so
   the line you are looking at stays put.
-- **Structured lines**: JSON and logfmt lines show their level and message first, with
-  the remaining fields dimmed after them as `key=value`. Timestamp and level fields are
-  left out because the time column and the level already show them. Switch to **Raw** in
-  the toolbar to see the lines exactly as the containers wrote them. Each structured
+- **Structured lines**: JSON and logfmt lines show their level as a small tag and the
+  message first, with the remaining fields dimmed after them as `key=value`. While the
+  time column is off, the line's own time field leads the line, so a structured line
+  never loses its time; with the column on it is not repeated. Levels are read the way
+  logging libraries write them: names such as `warning` or `CRITICAL`, and numbers from
+  pino and bunyan (`30` is INFO, `60` is FATAL), syslog and Cloud Logging. FATAL, PANIC
+  and CRIT keep their own tag rather than folding into ERROR. Text a logfmt line carries
+  around its pairs, such as `[main]`, stays in front of the message. Find and the filters
+  match both what you see and the raw line. Switch to **Raw** in the toolbar to see the
+  lines exactly as the containers wrote them. Each structured
   line also has a **›** toggle in front: click it, or the line, to see its fields as a
   table, with nested JSON keys flattened to paths such as `http.method`. Copy a single
   value, or the whole line as formatted JSON.
@@ -124,7 +130,7 @@ formats. Each menu entry shows a sample of the format built from your last visib
 
 | Format | What you get |
 | --- | --- |
-| **As shown** | The full pod and container name, time and markers, one line each. |
+| **As shown** | The lines as the view shows them (message first for structured lines), with the full pod and container name, time and markers. |
 | **Raw** | Only the lines, exactly as the containers wrote them, colour codes included. |
 | **With timestamps** | The RFC 3339 timestamp from Kubernetes and the `[pod/container]` source before each line. |
 | **NDJSON** | One JSON object per line with `ts`, `pod`, `container`, `level` and `message`, ready for `jq`. |

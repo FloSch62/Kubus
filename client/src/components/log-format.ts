@@ -11,6 +11,8 @@ export interface Seg {
   bold?: boolean;
   dim?: boolean;
   cls?: 'key' | 'str' | 'num' | 'bool' | 'punct';
+  /** A level tag: drawn as a small filled label, never split by find marks. */
+  tag?: boolean;
 }
 
 // oxlint-disable-next-line no-control-regex -- ESC is intentional: this expression parses ANSI sequences.
@@ -288,18 +290,66 @@ export function parseFields(line: string): LogFields | undefined {
 }
 
 const MESSAGE_KEYS = ['msg', 'message', 'log', 'event', '@m', '@message', 'M'];
-/** Keys the message view drops because the time column and the level already show them. */
-const SHOWN_ELSEWHERE = new Set(['time', 'timestamp', 'ts', '@timestamp', '@t', 't', 'T', 'level', 'lvl', 'severity', '@l', 'L', 'log.level']);
+const TIME_KEYS = ['time', 'timestamp', 'ts', '@timestamp', '@t', 't', 'T'];
+const LEVEL_KEYS = ['level', 'lvl', 'severity', '@l', 'L', 'log.level', 'levelname'];
+
+export interface MessageView {
+  message?: string;
+  /** The fields not shown in their own place. */
+  rest: LogField[];
+  /** The line's own level field, shown as a tag. */
+  level?: LogField;
+  /** The line's own time field, shown in front when the time column is off. */
+  time?: LogField;
+}
+
+const pickField = (fields: LogField[], keys: string[], ok: (field: LogField) => boolean) =>
+  keys.map((key) => fields.find((field) => field.key === key && ok(field))).find(Boolean);
 
 /**
  * Message-first view of a structured line: the human message, then the
- * remaining fields. Timestamp and level fields are left out.
+ * remaining fields. The level and time fields are picked out so the row can
+ * show them in their own place; logfmt text around the pairs (a leading
+ * timestamp, a `[main]` tag) stays in front of the message.
  */
-export function splitMessage(parsed: LogFields): { message?: string; rest: LogField[] } {
-  const messageField = MESSAGE_KEYS.map((key) => parsed.fields.find((field) => field.key === key && field.kind === 'str')).find(Boolean);
-  const message = messageField?.value ?? parsed.text;
-  const rest = parsed.fields.filter((field) => field !== messageField && !SHOWN_ELSEWHERE.has(field.key));
-  return { message: message || undefined, rest };
+export function splitMessage(parsed: LogFields): MessageView {
+  const messageField = pickField(parsed.fields, MESSAGE_KEYS, (field) => field.kind === 'str');
+  // A number only counts when it maps to a level (`"level":30`), so `level=2` in a
+  // compression log stays an ordinary field.
+  const level = pickField(parsed.fields, LEVEL_KEYS, (field) => field.kind === 'str' || (field.kind === 'num' && levelTag(field.value).level !== undefined));
+  const time = pickField(parsed.fields, TIME_KEYS, (field) => field.kind === 'str' || field.kind === 'num');
+  const message = [parsed.text, messageField?.value].filter(Boolean).join(' ');
+  const rest = parsed.fields.filter((field) => field !== messageField && field !== level && field !== time);
+  return { message: message || undefined, rest, level, time };
+}
+
+/** The level named by a structured line's own (top-level) level field. */
+export function fieldLevel(parsed: LogFields): LogLevel | undefined {
+  const field = pickField(parsed.fields, LEVEL_KEYS, (f) => f.kind === 'str' || f.kind === 'num');
+  return field ? levelTag(field.value).level : undefined;
+}
+
+/**
+ * A structured time value as a date: RFC 3339 and similar strings, or epoch
+ * numbers in seconds (zap), milliseconds (pino), microseconds or nanoseconds.
+ */
+export function parseLineTime(value: string): Date | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  let ms: number;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    ms = n >= 1e17 ? n / 1e6 : n >= 1e14 ? n / 1e3 : n >= 1e11 ? n : n * 1000;
+  } else {
+    // Date.parse is lenient ("worker 3" is a date in 2001): only try text that
+    // starts like a date or names a month.
+    if (!/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b.*\d{1,2}:\d{2}/i.test(trimmed)) return undefined;
+    // "2026-09-30 08:00:00,123" (Python, Java) → a separator Date.parse accepts.
+    ms = Date.parse(trimmed.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2').replace(/(\d{2}:\d{2}:\d{2}),(\d+)/, '$1.$2'));
+  }
+  // Plausible wall-clock times only; anything else is shown as written.
+  if (!Number.isFinite(ms) || ms < 946_684_800_000 || ms > 4_102_444_800_000) return undefined;
+  return new Date(ms);
 }
 
 /** Parse a raw log line into styled segments (ANSI > JSON > logfmt > plain). */
@@ -318,6 +368,8 @@ const LEVEL_ALIASES: Record<string, LogLevel> = {
   dbg: 'debug',
   info: 'info',
   inf: 'info',
+  information: 'info',
+  informational: 'info',
   notice: 'info',
   warn: 'warn',
   warning: 'warn',
@@ -327,14 +379,74 @@ const LEVEL_ALIASES: Record<string, LogLevel> = {
   fatal: 'error',
   severe: 'error',
   critical: 'error',
+  crit: 'error',
   panic: 'error',
+  dpanic: 'error',
+  alert: 'error',
+  emergency: 'error',
+  emerg: 'error',
 };
+
+/** Tag text for level names that differ from their bucket (FATAL is not ERROR). */
+const LEVEL_LABELS: Record<string, string> = {
+  dbg: 'DEBUG',
+  inf: 'INFO',
+  information: 'INFO',
+  informational: 'INFO',
+  warning: 'WARN',
+  wrn: 'WARN',
+  err: 'ERROR',
+  critical: 'CRIT',
+  emergency: 'EMERG',
+};
+
+// Numeric levels: pino and bunyan (10 trace … 60 fatal), Cloud Logging
+// severities (100 debug … 800 emergency). Single digits are left alone: in
+// `level=2` they are far more often a setting than a syslog priority.
+const PINO_LEVELS: Array<[number, string]> = [
+  [60, 'fatal'],
+  [50, 'error'],
+  [40, 'warn'],
+  [30, 'info'],
+  [20, 'debug'],
+  [10, 'trace'],
+];
+const CLOUD_LEVELS = ['default', 'debug', 'info', 'notice', 'warn', 'error', 'crit', 'alert', 'emerg'];
+
+function numericLevelName(n: number): string | undefined {
+  if (n < 10) return undefined;
+  if (n < 100) return PINO_LEVELS.find(([min]) => n >= min)?.[1];
+  return CLOUD_LEVELS[Math.min(8, Math.floor(n / 100))];
+}
+
+export interface LevelTag {
+  /** What the tag reads: INFO, FATAL, CRIT, or the value as written. */
+  label: string;
+  /** The filter bucket (and colour); undefined for DEFAULT and unknown values. */
+  level?: LogLevel;
+}
+
+/**
+ * The tag for a structured level value: names are normalised (warning → WARN),
+ * numeric levels are mapped, fatal/panic/critical keep their own word, and
+ * anything unknown is shown as written.
+ */
+export function levelTag(value: string): LevelTag {
+  const trimmed = value.trim();
+  const name = /^\d+$/.test(trimmed) ? numericLevelName(Number(trimmed)) : trimmed.toLowerCase();
+  // Own keys only: a line may well say `"level":"constructor"`.
+  if (name && (Object.hasOwn(LEVEL_ALIASES, name) || name === 'default')) {
+    return { label: (Object.hasOwn(LEVEL_LABELS, name) ? LEVEL_LABELS[name] : undefined) ?? name.toUpperCase(), level: LEVEL_ALIASES[name] };
+  }
+  return { label: trimmed.toUpperCase().slice(0, 7) };
+}
 
 // klog/glog prefix: "I0703 12:00:00.000000 ..."
 const KLOG_LEVELS: Record<string, LogLevel> = { I: 'info', W: 'warn', E: 'error', F: 'error' };
 const KLOG_RE = /^([IWEF])\d{4}\s/;
-// JSON `"level":"info"` / logfmt `level=info` (also severity/lvl keys).
-const STRUCTURED_RE = /(?:"(?:level|severity|lvl|log\.level)"\s*:\s*"?|\b(?:level|lvl|severity)=["']?)([a-zA-Z]+)/i;
+// JSON `"level":"info"` / `"level":30` / logfmt `level=info` (also severity/lvl
+// keys). Numbers only count in JSON, where pino and bunyan write them.
+const STRUCTURED_RE = /"(?:level|severity|lvl|log\.level)"\s*:\s*(?:"([a-zA-Z]+)|(\d+))|\b(?:level|lvl|severity)=["']?([a-zA-Z]+)/i;
 // Bare or bracketed level words near the start of the line.
 const WORD_RE = /(?:^|[\s[(<|:])(trace|debug|dbg|info|inf|notice|warn|warning|wrn|error|err|fatal|severe|critical|panic)(?=[\s\])>|:,/-]|$)/i;
 
@@ -348,9 +460,9 @@ export function detectLevel(line: string): LogLevel | undefined {
   if (klog) return KLOG_LEVELS[klog[1]!];
   const head = line.slice(0, 200);
   const structured = STRUCTURED_RE.exec(head);
-  if (structured) return LEVEL_ALIASES[structured[1]!.toLowerCase()];
+  if (structured) return levelTag(structured[1] ?? structured[2] ?? structured[3]!).level;
   const word = WORD_RE.exec(head);
-  if (word) return LEVEL_ALIASES[word[1]!.toLowerCase()];
+  if (word) return levelTag(word[1]!).level;
   return undefined;
 }
 
@@ -364,6 +476,10 @@ export function markSegs(segs: Seg[], query: string): MarkedSeg[] {
   const q = query.toLowerCase();
   const out: MarkedSeg[] = [];
   for (const seg of segs) {
+    if (seg.tag) {
+      out.push(seg);
+      continue;
+    }
     const lower = seg.text.toLowerCase();
     let pos = 0;
     for (;;) {

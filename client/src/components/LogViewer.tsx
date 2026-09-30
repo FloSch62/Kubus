@@ -58,7 +58,7 @@ import {
 } from './log-tools.js';
 import { LogExportMenu } from './LogExportMenu.js';
 import { LogHistogram } from './LogHistogram.js';
-import { fieldsOf, fmtTs, levelOf, LineRow, localLogTime, LOG_ROW_CSS, MARKER_COLOR, strippedOf } from './LogLineRow.js';
+import { displayTextOf, fieldsOf, fmtTs, levelOf, LineRow, localLogTime, LOG_ROW_CSS, MARKER_COLOR, strippedOf } from './LogLineRow.js';
 import { LogSourceSelector, type LogSource } from './LogSourceSelector.js';
 import { LogViewMenu } from './LogViewMenu.js';
 
@@ -626,12 +626,17 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
 
   const deferredFilter = useDeferredValue(filter);
   const deferredExclude = useDeferredValue(exclude);
+  // Structured lines read differently in the message view; text matches
+  // either the raw line or what is on screen.
+  const withLineTime = tsMode === 'off';
   const { visible, visibleLineCount } = useMemo(() => {
     if (!levelFilter.size && !deferredFilter && !deferredExclude) {
       return { visible: entries, visibleLineCount: totalLineCount };
     }
     const includes = textMatcher(deferredFilter, matchCase);
     const excludes = textMatcher(deferredExclude, matchCase);
+    const matchesLine = (test: (text: string) => boolean, entry: LogLine) =>
+      test(strippedOf(entry)) || (view === 'message' && !!fieldsOf(entry) && test(displayTextOf(entry, view, withLineTime)));
 
     const nextVisible: LogEntry[] = [];
     let nextLineCount = 0;
@@ -644,16 +649,13 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
         const level = levelOf(entry);
         if (level === undefined || !levelFilter.has(level)) continue;
       }
-      if (includes) {
-        const text = strippedOf(entry);
-        if (!includes(text) && !includes(entry.pod) && !includes(entry.container)) continue;
-      }
-      if (excludes?.(strippedOf(entry))) continue;
+      if (includes && !matchesLine(includes, entry) && !includes(entry.pod) && !includes(entry.container)) continue;
+      if (excludes && matchesLine(excludes, entry)) continue;
       nextVisible.push(entry);
       nextLineCount++;
     }
     return { visible: nextVisible, visibleLineCount: nextLineCount };
-  }, [entries, deferredFilter, deferredExclude, levelFilter, matchCase, totalLineCount]);
+  }, [entries, deferredFilter, deferredExclude, levelFilter, matchCase, totalLineCount, view, withLineTime]);
   const deferredVisible = useDeferredValue(visible);
 
   const matches = useMemo(() => {
@@ -662,10 +664,13 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
     const idx: number[] = [];
     for (let i = 0; i < visible.length; i++) {
       const entry = visible[i]!;
-      if (entry.kind === 'line' && strippedOf(entry).toLowerCase().includes(q)) idx.push(i);
+      if (entry.kind !== 'line') continue;
+      if (strippedOf(entry).toLowerCase().includes(q) || (view === 'message' && !!fieldsOf(entry) && displayTextOf(entry, view, withLineTime).toLowerCase().includes(q))) {
+        idx.push(i);
+      }
     }
     return idx;
-  }, [visible, find]);
+  }, [visible, find, view, withLineTime]);
 
   // Clamp the find cursor when the buffer rotates or the query changes.
   useEffect(() => {
@@ -764,9 +769,10 @@ export function LogViewer({ tab }: { tab: LogsTab }) {
       showSource: sources.length > 1 || !!followTarget || allContainerNames.length > 1,
       showPod: sources.length > 1 || !!followTarget,
       formatTs: tsMode === 'off' ? undefined : (ts: string) => fmtTs(ts, tsMode),
+      displayText: view === 'message' ? (line: LogLine) => displayTextOf(line, view, tsMode === 'off') : undefined,
       levelOf,
     }),
-    [allContainerNames.length, followTarget, sources.length, tsMode],
+    [allContainerNames.length, followTarget, sources.length, tsMode, view],
   );
 
   const exportPreview = useCallback(

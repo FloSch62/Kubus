@@ -189,6 +189,34 @@ describe('LogViewer', () => {
     expect(socket().close).toHaveBeenCalledWith(1000, 'log session changed');
   }, 15_000);
 
+  it('shows a structured line with its own time and level, and finds what is on screen', () => {
+    render(<LogViewer tab={logsTab()} />);
+    act(() => {
+      socket().open();
+      socket().message({ op: 'line', pod: 'web-a', container: 'app', ts: '2026-07-22T11:59:59.500Z', line: '{"level":30,"time":1784721599456,"msg":"listening","port":8080}' });
+      socket().message({ op: 'line', pod: 'web-a', container: 'app', ts: '2026-07-22T11:59:59.600Z', line: '{"level":60,"msg":"database gone"}' });
+      socket().message({ op: 'line', pod: 'web-a', container: 'app', ts: '2026-07-22T11:59:59.700Z', line: 'plain heartbeat' });
+    });
+    flushLines();
+
+    const row = screen.getByText('listening').closest('.kl-line')!;
+    // The time column is off, so the line's own time leads; the level is a tag.
+    expect(row.textContent).toMatch(/\d{2}:\d{2}:59\.456 +INFO +listening {2}port=8080/);
+    expect(screen.getByText('FATAL').className).toBe('kl-lvl');
+
+    // Typing what the message view shows matches, though the raw line differs.
+    const find = screen.getByPlaceholderText('Find…');
+    fireEvent.change(find, { target: { value: 'port=8080' } });
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    fireEvent.change(find, { target: { value: '' } });
+    fireEvent.change(screen.getByPlaceholderText('Filter (regex)…'), { target: { value: 'FATAL' } });
+    expect(screen.getByText(/1\/3 lines/)).toBeInTheDocument();
+
+    // With the time column on, the line's own time is not repeated.
+    void act(() => useLogPrefsStore.setState({ tsMode: 'utc' }));
+    expect(screen.getByText('database gone').closest('.kl-line')!.textContent).toMatch(/11:59:59\.600Z *FATAL/);
+  });
+
   it('applies pod/container selection and persists workload container choices', () => {
     render(<LogViewer tab={logsTab()} />);
     fireEvent.click(screen.getByLabelText('Select log pods and containers'));
