@@ -72,9 +72,12 @@ collapsible sections hold the rest.
   **Allocation** table: CPU, memory and pods requested and used against what the node can
   allocate, so you can tell at a glance whether a node is full. The pod count is the same
   everywhere, in the Nodes list, the summary and the pod list: pods running or waiting on
-  the node, out of the most it accepts. Finished pods hold no slot, so they are counted
-  apart and left out of the list. System info collapses to a one-line summary, and a
-  capacity table only appears when the kubelet reserves part of the node for the system.
+  the node, out of the most it accepts. Failed and completed pods hold no slot, so they
+  are counted apart. Failed pods (evicted, out of memory, a failed Job run) stay in the
+  list with the reason they stopped, because they are what you look for on a node under
+  pressure; completed pods fold behind **Show completed**. Ephemeral storage has its own
+  Allocation row. System info collapses to a one-line summary, and a capacity table only
+  appears when the kubelet reserves part of the node for the system.
   Pods that come from a DaemonSet carry a **DS** tag, and the chips above the list show
   only those or only the rest.
 - **ConfigMaps** show the number of keys, their total size and what uses them, then each

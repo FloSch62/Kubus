@@ -18,7 +18,11 @@ vi.mock('../../../client/src/api/queries.js', () => ({
   useReferences: () => ({ data: { items: [], unavailable: [] }, isLoading: false, isError: false }),
 }));
 
-function pod(name: string, phase: string, extra: { daemon?: boolean; cpu?: string; memory?: string } = {}): KubeObject {
+function pod(
+  name: string,
+  phase: string,
+  extra: { daemon?: boolean; cpu?: string; memory?: string; ephemeral?: string; status?: Record<string, unknown> } = {},
+): KubeObject {
   return {
     apiVersion: 'v1',
     kind: 'Pod',
@@ -28,8 +32,20 @@ function pod(name: string, phase: string, extra: { daemon?: boolean; cpu?: strin
       uid: `uid-${name}`,
       ownerReferences: extra.daemon ? [{ kind: 'DaemonSet', name: 'agent', controller: true, uid: 'ds', apiVersion: 'apps/v1' }] : [],
     },
-    spec: { nodeName: 'node-a', containers: [{ name: 'c', resources: { requests: { cpu: extra.cpu ?? '100m', memory: extra.memory ?? '64Mi' } } }] },
-    status: { phase, containerStatuses: [{ name: 'c', ready: phase === 'Running', state: phase === 'Running' ? { running: {} } : { terminated: { reason: 'Completed', exitCode: 0 } } }] },
+    spec: {
+      nodeName: 'node-a',
+      containers: [
+        {
+          name: 'c',
+          resources: { requests: { cpu: extra.cpu ?? '100m', memory: extra.memory ?? '64Mi', ...(extra.ephemeral && { 'ephemeral-storage': extra.ephemeral }) } },
+        },
+      ],
+    },
+    status: {
+      phase,
+      containerStatuses: [{ name: 'c', ready: phase === 'Running', state: phase === 'Running' ? { running: {} } : { terminated: { reason: 'Completed', exitCode: 0 } } }],
+      ...extra.status,
+    },
   } as unknown as KubeObject;
 }
 
@@ -65,12 +81,44 @@ describe('NodeDetail', () => {
 
   it('counts the pods that occupy the node the same way everywhere', () => {
     render(<NodeDetail obj={node(same, same)} ctx="dev" />);
-    // Running and pending pods hold a slot; the finished one is a hint.
+    // Running and pending pods hold a slot; the completed one is a hint.
     expect(tile('Pods')).toHaveTextContent('3 / 110');
-    expect(screen.getByText('+1 finished')).toBeInTheDocument();
+    expect(tile('Pods')?.nextElementSibling).toHaveTextContent('1 completed');
     const podsSection = screen.getByRole('button', { name: /Pods on this node/ });
     expect(podsSection).toHaveTextContent('3');
-    expect(podsSection).toHaveTextContent('1 from DaemonSet · 1 finished pod not shown');
+    expect(podsSection).toHaveTextContent('1 from DaemonSet');
+    expect(screen.queryByText('done')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 completed' }));
+    expect(screen.getByText('done')).toBeInTheDocument();
+    expect(screen.getByText('Including 1 completed pod.')).toBeInTheDocument();
+  });
+
+  it('lists failed pods with why they stopped, without counting them against the node', () => {
+    fixtures.pods = [
+      pod('a', 'Running'),
+      pod('evicted', 'Failed', { status: { reason: 'Evicted', message: 'The node was low on resource: memory. Threshold quantity: 100Mi, available: 20Mi.' } }),
+      pod('oom', 'Failed', { status: { containerStatuses: [{ name: 'c', ready: false, state: { terminated: { reason: 'OOMKilled', exitCode: 137 } } }] } }),
+      pod('done', 'Succeeded'),
+    ];
+    render(<NodeDetail obj={node(same, same)} ctx="dev" />);
+    expect(tile('Pods')).toHaveTextContent('1 / 110');
+    expect(tile('Pods')?.nextElementSibling).toHaveTextContent('2 failed');
+    expect(screen.getByRole('button', { name: /Pods on this node/ })).toHaveTextContent('2 failed');
+    expect(screen.getByText('evicted')).toBeInTheDocument();
+    expect(screen.getByText('The node was low on resource: memory.')).toBeInTheDocument();
+    expect(screen.getByText('c ran out of memory (OOMKilled)')).toBeInTheDocument();
+    expect(screen.queryByText('done')).not.toBeInTheDocument();
+  });
+
+  it('shows ephemeral storage against allocatable even when nothing is reserved', () => {
+    fixtures.pods = [pod('a', 'Running', { ephemeral: '1Gi' }), pod('b', 'Running', { ephemeral: '512Mi' })];
+    const withDisk = { ...same, 'ephemeral-storage': '100Gi' };
+    render(<NodeDetail obj={node(withDisk, withDisk)} ctx="dev" />);
+    const allocation = screen.getByRole('columnheader', { name: 'Requested' }).closest('table')!;
+    const row = within(allocation).getByText('Ephemeral storage').closest('tr')!;
+    expect(row).toHaveTextContent('1.5Gi');
+    expect(row).toHaveTextContent('100.0Gi');
+    expect(within(row).getByTitle('metrics-server does not report disk use')).toHaveTextContent('—');
   });
 
   it('shows requested and used against allocatable, and drops a capacity table that repeats it', () => {

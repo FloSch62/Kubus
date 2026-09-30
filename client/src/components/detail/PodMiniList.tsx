@@ -48,6 +48,38 @@ function needsAttention(pod: KubeObject): boolean {
 
 type OwnerFilter = 'all' | 'daemonset' | 'other';
 
+interface FailedPodShape {
+  phase?: string;
+  reason?: string;
+  message?: string;
+  containerStatuses?: Array<{ name: string; state?: { terminated?: { exitCode?: number; reason?: string; message?: string } } }>;
+  initContainerStatuses?: FailedPodShape['containerStatuses'];
+}
+
+/**
+ * Why a Failed pod stopped, for a caption under its status: the pod-level
+ * reason (Evicted, DeadlineExceeded) or the first container that exited
+ * badly. Undefined for pods that have not failed.
+ */
+export function podFailure(pod: KubeObject): { short: string; message?: string } | undefined {
+  const status = pod.status as FailedPodShape | undefined;
+  if (status?.phase !== 'Failed') return undefined;
+  if (status.message) {
+    // "The node was low on resource: memory. Threshold quantity: …" → its first sentence.
+    const first = /^.*?[.!?](?=\s|$)/.exec(status.message.trim())?.[0] ?? status.message.trim();
+    return { short: first, message: status.message };
+  }
+  for (const cs of [...(status.initContainerStatuses ?? []), ...(status.containerStatuses ?? [])]) {
+    const t = cs.state?.terminated;
+    if (!t?.exitCode) continue;
+    if (t.reason === 'OOMKilled') return { short: `${cs.name} ran out of memory (OOMKilled)`, message: 'It used more memory than its limit allows.' };
+    if (t.exitCode === 137) return { short: `${cs.name} was killed (exit 137, SIGKILL)`, message: t.message ?? 'Exit 137 usually means the out-of-memory killer or a failed liveness probe.' };
+    if (t.exitCode === 143) return { short: `${cs.name} was stopped (exit 143, SIGTERM)`, message: t.message };
+    return { short: `${cs.name} exited with code ${t.exitCode}${t.reason && t.reason !== 'Error' ? ` (${t.reason})` : ''}`, message: t.message };
+  }
+  return status.reason ? { short: status.reason } : undefined;
+}
+
 /** The DaemonSet controlling a pod, if any. */
 export function daemonSetOwner(pod: KubeObject): string | undefined {
   return (pod.metadata.ownerReferences ?? []).find((o) => o.kind === 'DaemonSet' && o.controller)?.name;
@@ -247,6 +279,7 @@ const PodRow = memo(function PodRow({
   const summary = podSummary(pod);
   const requests = usage ? podRequestTotals(pod) : undefined;
   const issue = ownIssue ? podSchedulingIssue(pod) : givenIssue;
+  const failure = podFailure(pod);
   const node = summary.node ?? (showNode ? issue?.node : undefined);
   const openNode = (e: MouseEvent, name: string) => {
     e.stopPropagation();
@@ -287,8 +320,15 @@ const PodRow = memo(function PodRow({
       <TableCell>
         <ReadyCounter value={summary.ready} />
       </TableCell>
-      <TableCell sx={issue ? { minWidth: 130 } : undefined}>
+      <TableCell sx={issue || failure ? { minWidth: 130 } : undefined}>
         <StatusChip status={summary.status} />
+        {failure && (
+          <Tooltip title={failure.message ?? ''}>
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: statusTextColor('error'), lineHeight: 1.35, wordBreak: 'break-word' }}>
+              {failure.short}
+            </Typography>
+          </Tooltip>
+        )}
         {issue && (
           <Tooltip title={issue.message}>
             <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: statusTextColor('warning'), lineHeight: 1.35, wordBreak: 'break-word' }}>
