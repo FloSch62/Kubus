@@ -29,7 +29,10 @@ You rarely need to fill in the pickers yourself:
 
 ## Picking two sides
 
-Open **Diff** from the nav (or ++ctrl+k++ → *Go to Diff*). For each side, choose:
+Open **Diff** from the nav (or ++ctrl+k++ → *Go to Diff*). The left side starts in your
+selected cluster and the right side in the second one you selected, or the same one when
+you selected only one. When the namespace filter names one namespace, both sides start in
+it too. For each side, choose:
 
 - **Cluster** (any of your selected contexts),
 - **Kind**,
