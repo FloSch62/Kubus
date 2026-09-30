@@ -11,6 +11,8 @@ import { useClustersStore } from '../state/clusters.js';
 
 const VIEW_KEY = 'kubus-topology-view';
 
+const countLabel = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 interface TopologyView {
   onlyConnected: boolean;
   foldReplicaSets: boolean;
@@ -57,8 +59,8 @@ export function TopologyPage() {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, p: 1.5 }}>
       <PageHeader title="Topology" icon={<AccountTreeOutlinedIcon />}>
-        {stats && <Chip label={`${stats.resources} ${stats.resources === 1 ? 'resource' : 'resources'}`} variant="outlined" />}
-        {stats && stats.issues > 0 && <Chip label={`${stats.issues} ${stats.issues === 1 ? 'issue' : 'issues'}`} color="warning" variant="outlined" />}
+        {stats && <Chip label={`${countLabel(stats.resources, 'resource')} · ${countLabel(stats.links, 'link')}`} variant="outlined" />}
+        {stats && stats.issues > 0 && <Chip label={countLabel(stats.issues, 'issue')} color="warning" variant="outlined" />}
         {namespaces.length > 0 && <Chip label={`${namespaces.length} namespace${namespaces.length === 1 ? '' : 's'}`} variant="outlined" />}
         <Box sx={{ flex: 1 }} />
         <FormControlLabel
