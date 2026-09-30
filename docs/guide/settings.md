@@ -4,9 +4,15 @@ icon: lucide/settings
 
 # Settings
 
-Open settings from the **:material-cog: gear** in the top bar. The dialog reopens on the
-tab you used last. Nearly everything here is stored in your browser/app profile. The one exception is the debug image catalog, which
-the server keeps in `settings.json` so the images are available from any window.
+Open settings from the **:material-cog: gear** in the top bar. The sections are listed on
+the left, and the dialog reopens on the one you used last. Each section is a list of
+settings with a short explanation on the left and the control on the right. In a narrow
+window the section list becomes a picker at the top. Close the dialog with the
+**:material-close: close** button or ++esc++.
+
+Nearly everything here is stored in your browser/app profile. The one exception is the
+debug image catalog, which the server keeps in `settings.json` so the images are available
+from any window.
 
 <figure markdown="span">
   ![The settings dialog](../assets/screenshots/settings.png#only-light){ .shadow }
@@ -18,7 +24,8 @@ the server keeps in `settings.json` so the images are available from any window.
 
 Shows which kubeconfig file(s) Kubus is reading and where that choice came from
 (`--kubeconfig` flag, `$KUBECONFIG`, a saved override, or the default). Point Kubus at a
-different file with **Override path**.
+different file with **Kubeconfig path** under **Override**, then **Apply** (or ++enter++).
+**Reset** goes back to the file Kubus would pick on its own.
 
 ## Clusters
 
@@ -36,7 +43,7 @@ The home for managing the clusters in your kubeconfig:
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| **Theme** | Light / Dark | Follows your OS |
+| **Theme** | Light / Dark / System | System (follows your OS) |
 | **Table density** | Compact / Comfortable | Compact |
 | **Code font size** | 10 to 18 px | 12 px |
 
@@ -73,7 +80,9 @@ Defaults for the [log viewer](logs.md) and [terminals](shell.md):
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| Default shell | Auto (`bash`→`sh`) / `sh` / `bash` / custom path | Auto |
+| Default shell | Auto (`bash`, else `sh`) / `sh` / `bash` / custom path | Auto |
+| Copy on select | on / off | off |
+| Right-click | Copy selection, otherwise paste / Always paste / Show context menu | Copy selection, otherwise paste |
 
 ## Debug containers { #debug-containers }
 
@@ -86,6 +95,27 @@ with it. An entry named like a built-in preset replaces it.
 
 Your entries are stored server-side in `settings.json` (key `debugImages`),
 next to your Helm repositories.
+
+## Diagnostics
+
+Kubus keeps its own log in memory on this machine. Turn on **Capture verbose diagnostic
+logs** before you reproduce a problem to record cluster discovery, API access, watches, port
+forwards and Helm operations in more detail. Warnings and errors are always captured.
+**View logs** opens the log viewer, and **Export logs** saves it as a file you can attach to
+a bug report. Nothing leaves your machine unless you export it.
+
+## About
+
+Shows the version you are running, with buttons to the documentation, the release notes of
+this version, the GitHub repository and a new issue. Below that:
+
+- **Updates** checks for a newer release. The desktop app can also download it and install
+  it when you restart.
+- **This installation** lists the facts a bug report needs: version, whether you run the
+  desktop app or the web app, the operating system, the Electron and Chromium versions (or
+  your browser), and whether the Helm engine is available. **Copy diagnostics** copies them
+  as text. It never includes your API token or cluster details.
+- **Made by** has links to the author and ways to support the project.
 
 ## See also
 
