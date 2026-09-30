@@ -10,33 +10,12 @@ import { usageColor } from '../UsageMeter.js';
 import { InventoryButton, InventoryRow } from './Attention.js';
 import { kindIcon } from './kind-icons.js';
 
-const SEGMENTS = [
-  { key: 'healthy', color: 'success.main' },
-  { key: 'degraded', color: 'warning.main' },
-  { key: 'failed', color: 'error.main' },
-] as const;
+const HEALTH_KEYS = ['healthy', 'degraded', 'failed'] as const;
 
 /** "4 healthy, 1 degraded, 2 failed", zero parts left out. */
 export function healthSummary(health: InventoryHealth): string {
-  const parts = SEGMENTS.filter((s) => health[s.key] > 0).map((s) => `${health[s.key]} ${s.key}`);
+  const parts = HEALTH_KEYS.filter((key) => health[key] > 0).map((key) => `${health[key]} ${key}`);
   return parts.length ? parts.join(', ') : 'none';
-}
-
-/**
- * Segmented healthy / degraded / failed bar. Segments grow with their share
- * but keep a minimum width, so one failure among fifty still shows. It is
- * decoration: the owner carries the same split as text or label.
- */
-export function HealthBar({ health }: { health: InventoryHealth }) {
-  const shown = SEGMENTS.filter((s) => health[s.key] > 0);
-  if (!shown.length) return null;
-  return (
-    <Box component="span" aria-hidden sx={{ display: 'flex', gap: '2px', height: 6, borderRadius: 3, overflow: 'hidden' }}>
-      {shown.map((s) => (
-        <Box key={s.key} component="span" sx={{ flexGrow: health[s.key], flexBasis: 0, minWidth: 6, bgcolor: s.color }} />
-      ))}
-    </Box>
-  );
 }
 
 /** "2 failed" (red) or "1 degraded" (amber) for an inventory button, failures first. */

@@ -24,11 +24,24 @@ For every selected cluster you get, from the top:
   ready. Red tiles mean something is down, amber ones mean it is degraded. Each tile says
   where it takes you: **Show pods** opens the Pods list narrowed to the broken ones,
   **Jump to list** scrolls to the section below that lists them. When nothing needs
-  attention, a single line says so.
-- **Inventory**: buttons for nodes, namespaces, pods (running out of all), deployments,
-  persistent volumes, CRDs and the metrics page, each opening its list. The CPU and
-  memory use of the whole cluster sits at the end of the heading once
-  [metrics-server](metrics.md) reports.
+  attention, a single line says so. If Kubus could not read some kinds (no access, or
+  the API isn't served), that line names them, because it can't vouch for them.
+- **Inventory**, in two rows, each button opening its list:
+    - **Cluster**: nodes, namespaces, persistent volumes (bound, with the unbound ones
+      in amber), CRDs and TLS certificates. The certificate count covers cert-manager
+      Certificates and TLS Secrets and says how many expire soon; it opens the
+      cert-manager Certificates list, or the Secrets list without cert-manager.
+    - **Workloads**: pods (running out of all), then every kind Kubus checks for health:
+      Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, autoscalers (HPAs),
+      PersistentVolumeClaims (PVCs), disruption budgets (PDBs) and quotas. A kind with
+      unhealthy objects shows how many and opens its list narrowed to them. Empty kinds
+      are dimmed.
+
+    A kind Kubus cannot list shows **no access** (or **unavailable**) instead of a count.
+- **Node usage**: CPU and memory in use across the cluster as two large meters, with
+  the used and total amounts, then one row per node, busiest first. The first eight
+  nodes show until you ask for the rest. On a single-node cluster the meters are that
+  node. **Usage over time** opens the [metrics page](metrics.md).
 - **Unhealthy workloads**: every Deployment, StatefulSet, DaemonSet, Job, CronJob,
   PersistentVolumeClaim, autoscaler, disruption budget or quota that isn't healthy, with
   the actual reason. Kubus reads it from the workload's pods and events, so you see
@@ -36,11 +49,27 @@ For every selected cluster you get, from the top:
   `FailedCreate · quota gpu-quota caps requests.nvidia.com/gpu at 0` instead of a bare
   *Unavailable*. The heading lists the counts per kind (`Deployments 3/18`), each linking
   to that list narrowed to the unhealthy ones.
-- **Node usage** per node, when the cluster has more than one.
 - Operator rollups, expiring certificates, pod usage against requests and limits,
   failing pods with their messages, recent restarts and warning events.
 
 Names are links: a workload, pod or event object opens in the details drawer.
+
+## Several clusters
+
+With more than one cluster selected, each cluster starts as a one-line summary so they
+all fit on one screen. The summary shows the cluster's colour from the cluster picker,
+its connection state and Kubernetes version, how many nodes and namespaces it has, pods
+running out of all, and CPU and memory in use across its nodes. On the right it lists
+what needs attention as short counts (`3 failing pods`, `12 warnings (1h)`), or says
+**Healthy**. A cluster Kubus cannot reach says **Unreachable** with the reason.
+
+Click a summary to open the cluster's full section below it, and click it again to close
+it. Kubus remembers which clusters you opened. **Expand all** and **Collapse all** in the
+page header open or close every cluster at once. With a single cluster selected, its
+section is always open.
+
+A cluster with a namespace filter summarises those namespaces: their pods, deployments and
+what needs attention in them.
 
 ## Scoped to a namespace
 
@@ -53,8 +82,9 @@ and a cluster's section keeps the same layout, scoped to those namespaces:
 - **Inventory** becomes a `kubectl get all -n`: one button per kind with objects in it,
   including the popular custom resources you have installed (cert-manager, Argo, Flux,
   KEDA, Gateway API routes and others). Kinds with a notion of health show how many
-  objects are failed (red) or degraded (amber) next to the count. **Show N empty kinds**
-  lists the kinds with nothing in them.
+  objects are failed (red) or degraded (amber) next to the count, and a kind Kubus
+  cannot read says **no access**. **Show N empty kinds** lists the kinds with nothing in
+  them.
 - **Unhealthy workloads**, operator rollups, expiring certificates, **resource quotas**
   as usage bars, pod usage against requests and limits, failing pods and warning events.
 
@@ -94,7 +124,7 @@ shows what lives inside it.
 
 ## No metrics yet?
 
-If the inventory says CPU and memory usage are unavailable, click **Install
+If the **Node usage** card says CPU and memory usage are unavailable, click **Install
 metrics-server** next to the message, or install it yourself:
 
 ```bash

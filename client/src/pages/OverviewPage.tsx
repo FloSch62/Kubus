@@ -1,31 +1,34 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useId, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
 import CircularProgress from '@mui/material/CircularProgress';
 import Chip from '@mui/material/Chip';
-import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined';
 import SpaceDashboardOutlinedIcon from '@mui/icons-material/SpaceDashboardOutlined';
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router';
-import type { ClusterOverview, MetricsSnapshot } from '@kubus/shared';
+import { pluralLabel, type ClusterOverview, type OperatorRollup, type OverviewCertificates } from '@kubus/shared';
 import { useContexts, useKubeconfigSettings, useNodeMetrics, useOverview, useOverviewCertificates, useOverviewOperators } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
+import { useOverviewPrefsStore } from '../state/overview-prefs.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
-import { InstallMetricsServerButton } from '../components/MetricsServerControls.js';
 import { PageHeader } from '../components/PageHeader.js';
-import { formatBytes, formatCpu } from '../components/format.js';
 import { AttentionTiles, InventoryButton, InventoryRow, OverviewLabel } from '../components/overview/Attention.js';
 import { attentionItems } from '../components/overview/attention-items.js';
 import { CertExpiryCard } from '../components/overview/CertExpiryCard.js';
-import { FailingPodsCard, ProblemCard, WarningEventsCard } from '../components/overview/cards.js';
+import { ClusterSummaryBar } from '../components/overview/ClusterSummary.js';
+import { FailingPodsCard, ProblemCard, WarningEventsCard, kindListPath } from '../components/overview/cards.js';
+import { issueTone } from '../components/overview/issue-cause.js';
 import { kindIcon } from '../components/overview/kind-icons.js';
 import { NamespaceOverviewSection } from '../components/overview/NamespaceOverviewSection.js';
+import { NodeUsageCard } from '../components/overview/NodeUsageCard.js';
 import { OperatorSection } from '../components/overview/OperatorSection.js';
 import { PodUsagePanels } from '../components/overview/PodUsagePanels.js';
 import { WorkloadHealthSection, unhealthyListPath } from '../components/overview/WorkloadHealthSection.js';
@@ -126,21 +129,43 @@ export function OverviewPage() {
     return <WelcomeState />;
   }
 
+  const multi = selected.length > 1;
   return (
     <Box sx={{ p: 2 }}>
-      <PageHeader title="Overview" icon={<SpaceDashboardOutlinedIcon />}>
-        {selected.length > 1 && (
+      <PageHeader title="Overview" icon={<SpaceDashboardOutlinedIcon />} actions={multi ? <ExpandAllButton contexts={selected} /> : undefined}>
+        {multi && (
           <Typography variant="body2" color="text.secondary">
             {selected.length} clusters
           </Typography>
         )}
       </PageHeader>
-      <Stack spacing={4}>
-        {selected.map((ctx) => (
-          <ClusterOverviewSection key={ctx} ctx={ctx} />
-        ))}
-      </Stack>
+      {multi ? (
+        <Stack spacing={1}>
+          {selected.map((ctx) => (
+            <CollapsibleClusterSection key={ctx} ctx={ctx} />
+          ))}
+        </Stack>
+      ) : (
+        <ClusterOverviewSection ctx={selected[0]!} />
+      )}
     </Box>
+  );
+}
+
+/** "Expand all" while any cluster shows only its summary, else "Collapse all". */
+function ExpandAllButton({ contexts }: { contexts: string[] }) {
+  const allExpanded = useOverviewPrefsStore((s) => contexts.every((ctx) => s.expanded[ctx]));
+  const setAllExpanded = useOverviewPrefsStore((s) => s.setAllExpanded);
+  return (
+    <Button
+      size="small"
+      color="inherit"
+      startIcon={allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+      onClick={() => setAllExpanded(contexts, !allExpanded)}
+      sx={{ color: 'text.secondary' }}
+    >
+      {allExpanded ? 'Collapse all' : 'Expand all'}
+    </Button>
   );
 }
 
@@ -159,119 +184,186 @@ function ClusterOverviewSection({ ctx }: { ctx: string }) {
   );
 }
 
-type NodeMetrics = MetricsSnapshot | undefined;
+/**
+ * A cluster on the multi-cluster Overview: a summary bar that opens the full
+ * section. Clusters start as summaries so several fit on one screen; the ones
+ * you open stay open.
+ */
+function CollapsibleClusterSection({ ctx }: { ctx: string }) {
+  const namespaces = useClustersStore((s) => s.namespacesByContext[ctx] ?? EMPTY_NAMESPACES);
+  const expanded = useOverviewPrefsStore((s) => !!s.expanded[ctx]);
+  const setExpanded = useOverviewPrefsStore((s) => s.setExpanded);
+  const bodyId = useId();
 
-/** Summed usage against summed capacity across the sampled nodes. */
-function clusterUsage(nodeMetrics: NodeMetrics) {
-  if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return undefined;
-  const sampled = nodeMetrics.items.reduce(
-    (acc, item) => ({
-      cpuMilli: acc.cpuMilli + item.cpuMilli,
-      memBytes: acc.memBytes + item.memBytes,
-      cpuCapacityMilli: acc.cpuCapacityMilli + (item.cpuCapacityMilli ?? 0),
-      memCapacityBytes: acc.memCapacityBytes + (item.memCapacityBytes ?? 0),
-    }),
-    { cpuMilli: 0, memBytes: 0, cpuCapacityMilli: 0, memCapacityBytes: 0 },
-  );
-  return {
-    ...sampled,
-    cpuCapacityMilli: nodeMetrics.totalCpuCapacityMilli ?? sampled.cpuCapacityMilli,
-    memCapacityBytes: nodeMetrics.totalMemCapacityBytes ?? sampled.memCapacityBytes,
-  };
-}
-
-/** "CPU 2% · Memory 4% of 1 node" for the inventory label, with the absolute numbers on hover. */
-function UsageSummary({ nodeMetrics, nodes }: { nodeMetrics: NodeMetrics; nodes: number }) {
-  const total = clusterUsage(nodeMetrics);
-  if (!total) return null;
-  const cpu = total.cpuCapacityMilli > 0 ? (total.cpuMilli / total.cpuCapacityMilli) * 100 : undefined;
-  const mem = total.memCapacityBytes > 0 ? (total.memBytes / total.memCapacityBytes) * 100 : undefined;
   return (
-    <Box
-      component="span"
-      title={`CPU ${formatCpu(total.cpuMilli)} of ${formatCpu(total.cpuCapacityMilli)} · Memory ${formatBytes(total.memBytes)} of ${formatBytes(total.memCapacityBytes)}`}
-    >
-      {cpu !== undefined ? `CPU ${cpu.toFixed(0)}%` : `CPU ${formatCpu(total.cpuMilli)}`}
-      {' · '}
-      {mem !== undefined ? `Memory ${mem.toFixed(0)}%` : `Memory ${formatBytes(total.memBytes)}`}
-      {` of ${nodes} ${nodes === 1 ? 'node' : 'nodes'}`}
+    <Box data-overview-section={ctx}>
+      <ClusterSummaryBar ctx={ctx} namespaces={namespaces} expanded={expanded} onToggle={() => setExpanded(ctx, !expanded)} controls={bodyId} />
+      {expanded && (
+        <Box id={bodyId} sx={{ pt: 2, pb: 3 }}>
+          {namespaces.length > 0 ? <NamespaceOverviewSection ctx={ctx} namespaces={namespaces} /> : <WholeClusterSection ctx={ctx} />}
+        </Box>
+      )}
     </Box>
   );
 }
 
-function ClusterInventory({ ctx, data, nodeMetrics }: { ctx: string; data: ClusterOverview; nodeMetrics: NodeMetrics }) {
+/** Short labels where the plural kind name would crowd the inventory row. */
+const SHORT_LABEL: Record<string, string> = { HorizontalPodAutoscaler: 'HPAs', PersistentVolumeClaim: 'PVCs', PodDisruptionBudget: 'PDBs' };
+
+const kindLabel = (kind: string) => SHORT_LABEL[kind] ?? pluralLabel(kind);
+
+/** "Cluster" / "Workloads" in front of an inventory row, centred on the 34px buttons. */
+function RowLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ lineHeight: '34px', whiteSpace: 'nowrap' }}>
+      {children}
+    </Typography>
+  );
+}
+
+/**
+ * Cluster-scoped counts, then every checked workload, storage and policy
+ * kind with its unhealthy count (open its list, narrowed to the broken ones
+ * when there are some). Kinds that could not be read say so instead of
+ * showing zero.
+ */
+function ClusterInventory({
+  ctx,
+  data,
+  certificates,
+  operators,
+}: {
+  ctx: string;
+  data: ClusterOverview;
+  certificates: OverviewCertificates | undefined;
+  operators: OperatorRollup[] | undefined;
+}) {
   const navigate = useNavigate();
+  const multiCluster = useClustersStore((s) => s.selected.length > 1);
   const { counts } = data;
   const podsNotRunning = counts.pods - counts.podsRunning;
+  const pvsUnbound = counts.persistentVolumes - counts.persistentVolumesBound;
+  const crdsInactive = counts.crds - counts.crdsEstablished;
   return (
-    <Box>
-      <OverviewLabel end={<UsageSummary nodeMetrics={nodeMetrics} nodes={counts.nodes} />}>Inventory</OverviewLabel>
-      <InventoryRow>
-        <InventoryButton icon={kindIcon('Node')} label="Nodes" value={counts.nodes} onClick={() => navigate('/r/core/v1/nodes')} />
-        <InventoryButton icon={kindIcon('Namespace')} label="Namespaces" value={counts.namespaces} onClick={() => navigate('/r/core/v1/namespaces')} />
-        <InventoryButton
-          icon={kindIcon('Pod')}
-          label="Pods"
-          value={counts.podsRunning}
-          sub={` of ${counts.pods} running`}
-          title={
-            podsNotRunning > 0
-              ? `${counts.podsRunning} of ${counts.pods} pods are running. The other ${podsNotRunning} are pending, completed (Job pods) or failed.`
-              : `All ${counts.pods} pods are running`
-          }
-          ariaLabel={`Pods: ${counts.podsRunning} of ${counts.pods} running`}
-          onClick={() => navigate('/r/core/v1/pods')}
-        />
-        <InventoryButton icon={kindIcon('Deployment')} label="Deployments" value={counts.deployments} onClick={() => navigate('/r/apps/v1/deployments')} />
-        <InventoryButton
-          icon={kindIcon('PersistentVolume')}
-          label="PVs"
-          value={counts.persistentVolumesUnavailable ? undefined : counts.persistentVolumesBound}
-          sub={
-            counts.persistentVolumesUnavailable
-              ? 'unavailable'
-              : counts.persistentVolumes === counts.persistentVolumesBound
-                ? ' bound'
-                : ` of ${counts.persistentVolumes} bound`
-          }
-          title="Persistent volumes"
-          onClick={() => navigate('/r/core/v1/persistentvolumes')}
-        />
-        <InventoryButton
-          icon={kindIcon('CustomResourceDefinition')}
-          label="CRDs"
-          value={counts.crdsUnavailable ? undefined : counts.crdsEstablished}
-          sub={counts.crdsUnavailable ? 'unavailable' : counts.crds === counts.crdsEstablished ? undefined : ` of ${counts.crds} active`}
-          title="Custom resource definitions"
-          onClick={() => navigate('/r/apiextensions.k8s.io/v1/customresourcedefinitions')}
-        />
-        <InventoryButton icon={<QueryStatsOutlinedIcon />} label="Metrics" title="CPU and memory over time" onClick={() => navigate('/metrics')} />
-      </InventoryRow>
-      <MetricsNotice ctx={ctx} nodeMetrics={nodeMetrics} />
+    <Box data-anchor="inventory">
+      <OverviewLabel>Inventory</OverviewLabel>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 1.5, rowGap: 0.75, alignItems: 'start' }}>
+        <RowLabel>Cluster</RowLabel>
+        <InventoryRow>
+          <InventoryButton icon={kindIcon('Node')} label="Nodes" value={counts.nodes} onClick={() => navigate('/r/core/v1/nodes')} />
+          <InventoryButton icon={kindIcon('Namespace')} label="Namespaces" value={counts.namespaces} onClick={() => navigate('/r/core/v1/namespaces')} />
+          <InventoryButton
+            icon={kindIcon('PersistentVolume')}
+            label="PVs"
+            value={counts.persistentVolumesUnavailable ? undefined : counts.persistentVolumesBound}
+            sub={counts.persistentVolumesUnavailable ? 'unavailable' : ' bound'}
+            quiet={!counts.persistentVolumesUnavailable && counts.persistentVolumes === 0}
+            problem={!counts.persistentVolumesUnavailable && pvsUnbound > 0 ? { text: `${pvsUnbound} not bound`, tone: 'warning' } : undefined}
+            title={
+              counts.persistentVolumesUnavailable
+                ? 'Persistent volumes could not be listed: no access, or the API is not served'
+                : `${counts.persistentVolumesBound} of ${counts.persistentVolumes} persistent volumes are bound`
+            }
+            ariaLabel={
+              counts.persistentVolumesUnavailable
+                ? 'PVs: unavailable'
+                : `PVs: ${counts.persistentVolumesBound} of ${counts.persistentVolumes} bound`
+            }
+            onClick={() => navigate('/r/core/v1/persistentvolumes')}
+          />
+          <InventoryButton
+            icon={kindIcon('CustomResourceDefinition')}
+            label="CRDs"
+            value={counts.crdsUnavailable ? undefined : counts.crdsEstablished}
+            sub={counts.crdsUnavailable ? 'unavailable' : undefined}
+            quiet={!counts.crdsUnavailable && counts.crds === 0}
+            problem={!counts.crdsUnavailable && crdsInactive > 0 ? { text: `${crdsInactive} not established`, tone: 'warning' } : undefined}
+            title={
+              counts.crdsUnavailable
+                ? 'Custom resource definitions could not be listed: no access, or the API is not served'
+                : `${counts.crdsEstablished} of ${counts.crds} custom resource definitions are established`
+            }
+            ariaLabel={counts.crdsUnavailable ? 'CRDs: unavailable' : `CRDs: ${counts.crdsEstablished} of ${counts.crds} established`}
+            onClick={() => navigate('/r/apiextensions.k8s.io/v1/customresourcedefinitions')}
+          />
+          <CertificatesButton certificates={certificates} operators={operators} />
+        </InventoryRow>
+
+        <RowLabel>Workloads</RowLabel>
+        <InventoryRow>
+          <InventoryButton
+            icon={kindIcon('Pod')}
+            label="Pods"
+            value={counts.podsRunning}
+            sub={` of ${counts.pods} running`}
+            title={
+              podsNotRunning > 0
+                ? `${counts.podsRunning} of ${counts.pods} pods are running. The other ${podsNotRunning} are pending, completed (Job pods) or failed.`
+                : `All ${counts.pods} pods are running`
+            }
+            ariaLabel={`Pods: ${counts.podsRunning} of ${counts.pods} running`}
+            onClick={() => navigate('/r/core/v1/pods')}
+          />
+          {data.workloadHealth.map((h) => {
+            const plural = pluralLabel(h.kind);
+            const tone = data.unavailableWorkloads.some((i) => i.kind === h.kind && issueTone(i) === 'error') ? 'error' : 'warning';
+            return (
+              <InventoryButton
+                key={h.kind}
+                icon={kindIcon(h.kind)}
+                label={kindLabel(h.kind)}
+                value={h.unavailable ? undefined : h.total}
+                sub={h.unavailable ? 'no access' : undefined}
+                quiet={!h.unavailable && h.total === 0}
+                problem={!h.unavailable && h.unhealthy > 0 ? { text: `${h.unhealthy} unhealthy`, tone } : undefined}
+                title={
+                  h.unavailable
+                    ? `${plural} could not be listed: no access, or the API is not served`
+                    : h.unhealthy > 0
+                      ? `${h.unhealthy} of ${h.total} ${plural} are unhealthy. Opens the unhealthy ones.`
+                      : plural
+                }
+                ariaLabel={`${plural}: ${h.unavailable ? 'no access' : h.total}${!h.unavailable && h.unhealthy > 0 ? `, ${h.unhealthy} unhealthy` : ''}`}
+                onClick={() => navigate(!h.unavailable && h.unhealthy > 0 ? unhealthyListPath(h, ctx, multiCluster) : kindListPath(h))}
+              />
+            );
+          })}
+        </InventoryRow>
+      </Box>
     </Box>
   );
 }
 
-/** Explains missing usage numbers, with the install action when metrics-server is absent. */
-function MetricsNotice({ ctx, nodeMetrics }: { ctx: string; nodeMetrics: NodeMetrics }) {
-  // Before the first poller probe completes, "unavailable" is provisional:
-  // say nothing rather than show a false install prompt.
-  if (!nodeMetrics?.probed) return null;
-  if (!nodeMetrics.available) {
-    return (
-      <Alert severity="info" variant="outlined" sx={{ mt: 1, alignItems: 'center' }} action={<InstallMetricsServerButton ctx={ctx} />}>
-        CPU and memory usage are unavailable because metrics-server is not serving data in this cluster.
-      </Alert>
-    );
-  }
-  if (nodeMetrics.items.length === 0) {
-    return (
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-        Waiting for node metrics.
-      </Typography>
-    );
-  }
-  return null;
+const API_SERVER_WARN_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Tracked TLS certificates (cert-manager Certificates plus kubernetes.io/tls
+ * Secrets) with the expiring ones called out. Opens the cert-manager
+ * Certificates list when cert-manager is installed, else the Secrets list.
+ */
+function CertificatesButton({ certificates, operators }: { certificates: OverviewCertificates | undefined; operators: OperatorRollup[] | undefined }) {
+  const navigate = useNavigate();
+  const now = Date.now();
+  const apiServerSoon = !!certificates?.apiServerNotAfter && Date.parse(certificates.apiServerNotAfter) - now < API_SERVER_WARN_MS;
+  const expiring = (certificates?.expiring.length ?? 0) + (apiServerSoon ? 1 : 0);
+  const expired = !!certificates?.expiring.some((c) => Date.parse(c.notAfter) <= now);
+  const certs = operators?.find((o) => o.id === 'cert-manager')?.resources.find((r) => r.plural === 'certificates');
+  return (
+    <InventoryButton
+      icon={<VerifiedUserOutlinedIcon />}
+      label="TLS certificates"
+      value={certificates ? certificates.total : <Skeleton width={16} sx={{ display: 'inline-block' }} />}
+      problem={expiring > 0 ? { text: `${expiring} expiring`, tone: expired ? 'error' : 'warning' } : undefined}
+      quiet={certificates?.total === 0 && expiring === 0}
+      title={
+        certificates
+          ? `${certificates.total} tracked: cert-manager Certificates and TLS Secrets${expiring ? `. ${expiring} expired or expiring within 30 days.` : ''}${certificates.secretsUnavailable ? ' TLS Secrets could not be read.' : ''}`
+          : 'Checking certificates'
+      }
+      ariaLabel={certificates ? `TLS certificates: ${certificates.total} tracked${expiring ? `, ${expiring} expiring` : ''}` : 'TLS certificates: loading'}
+      onClick={() => void navigate(certs ? kindListPath(certs) : '/r/core/v1/secrets')}
+    />
+  );
 }
 
 function WholeClusterSection({ ctx }: { ctx: string }) {
@@ -295,6 +387,10 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
             <AttentionTiles
               pending={!certificates || !operators}
               healthyText="No failing pods, unhealthy workloads, warnings in the last hour or expiring certificates."
+              unchecked={[
+                ...data.workloadHealth.filter((h) => h.unavailable).map((h) => kindLabel(h.kind)),
+                ...(certificates?.secretsUnavailable ? ['TLS Secrets'] : []),
+              ]}
               items={attentionItems({
                 failingPods: data.failingPods,
                 issues: data.unavailableWorkloads,
@@ -307,9 +403,9 @@ function WholeClusterSection({ ctx }: { ctx: string }) {
             />
           </Box>
 
-          <ClusterInventory ctx={ctx} data={data} nodeMetrics={nodeMetrics} />
+          <ClusterInventory ctx={ctx} data={data} certificates={certificates} operators={operators} />
 
-          {data.counts.nodes > 1 && <NodeUsageCard nodeMetrics={nodeMetrics} />}
+          {data.counts.nodes > 0 && <NodeUsageCard ctx={ctx} nodes={data.counts.nodes} nodeMetrics={nodeMetrics} />}
 
           <WorkloadHealthSection ctx={ctx} health={data.workloadHealth} issues={data.unavailableWorkloads} />
 
@@ -359,48 +455,5 @@ function OverviewSkeleton() {
       </Stack>
       <Skeleton variant="rounded" height={160} />
     </Stack>
-  );
-}
-
-/** Per-node CPU and memory, for clusters with more than one node (the inventory line carries the total). */
-function NodeUsageCard({ nodeMetrics }: { nodeMetrics: NodeMetrics }) {
-  if (!nodeMetrics?.available || nodeMetrics.items.length === 0) return null;
-  return (
-    <ProblemCard title="Node usage" count={nodeMetrics.items.length}>
-      <Stack spacing={1}>
-        {nodeMetrics.items.map((n) => (
-          <Box key={n.name} sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', rowGap: 0.5 }}>
-            <Typography variant="body2" sx={{ width: 220, maxWidth: '100%' }} noWrap title={n.name}>
-              {n.name}
-            </Typography>
-            <UsageBar
-              label={`CPU ${formatCpu(n.cpuMilli)}${n.cpuCapacityMilli ? ` / ${formatCpu(n.cpuCapacityMilli)}` : ''}`}
-              pct={n.cpuCapacityMilli ? (n.cpuMilli / n.cpuCapacityMilli) * 100 : undefined}
-            />
-            <UsageBar
-              label={`Mem ${formatBytes(n.memBytes)}${n.memCapacityBytes ? ` / ${formatBytes(n.memCapacityBytes)}` : ''}`}
-              pct={n.memCapacityBytes ? (n.memBytes / n.memCapacityBytes) * 100 : undefined}
-            />
-          </Box>
-        ))}
-      </Stack>
-    </ProblemCard>
-  );
-}
-
-function UsageBar({ label, pct }: { label: string; pct?: number }) {
-  return (
-    <Box sx={{ flex: 1, minWidth: 220, display: 'flex', alignItems: 'center', gap: 1 }}>
-      <LinearProgress
-        variant="determinate"
-        value={Math.min(100, pct ?? 0)}
-        color={(pct ?? 0) > 90 ? 'error' : (pct ?? 0) > 75 ? 'warning' : 'primary'}
-        sx={{ flex: 1, height: 6, borderRadius: 3 }}
-      />
-      <Typography variant="caption" sx={{ width: 200, flexShrink: 0 }} color="text.secondary" noWrap>
-        {label}
-        {pct !== undefined ? ` (${pct.toFixed(0)}%)` : ''}
-      </Typography>
-    </Box>
   );
 }

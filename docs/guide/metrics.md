@@ -25,7 +25,7 @@ you get little trend charts rather than a single instantaneous number.
 - **Details drawer → Metrics tab**: live CPU/memory charts for **Pods** and **Nodes**,
   with the current value called out.
 - **Resource lists**: CPU and memory columns on the Pods list.
-- **Overview dashboard**: a per-node usage table. [More →](overview.md)
+- **Overview dashboard**: the cluster's total CPU and memory use, then one row per node. [More →](overview.md)
 
 <figure markdown="span">
   ![The cluster-wide Metrics page](../assets/screenshots/cluster-metrics.png#only-light){ .shadow }
@@ -41,8 +41,8 @@ opening a chart and fill in from there.
 If a cluster has no metrics-server, Kubus can install it for you without `kubectl` or
 Helm:
 
-- On the **Overview** page, the inventory shows an **Install metrics-server** button
-  whenever usage data is unavailable.
+- On the **Overview** page, the **Node usage** card shows an **Install metrics-server**
+  button whenever usage data is unavailable.
 - The install dialog has one option: **Skip kubelet TLS verification**
   (`--kubelet-insecure-tls`). Enable it on local/dev clusters such as kind, minikube
   and docker-desktop, whose kubelets serve self-signed certificates.

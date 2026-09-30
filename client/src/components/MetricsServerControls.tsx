@@ -37,7 +37,7 @@ export function InstallMetricsServerButton({ ctx, size = 'small' }: { ctx: strin
 
   return (
     <>
-      <Button size={size} variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={() => setOpen(true)}>
+      <Button size={size} variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={() => setOpen(true)} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
         Install metrics-server
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>

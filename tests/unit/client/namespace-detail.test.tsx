@@ -72,6 +72,12 @@ describe('NamespaceDetail', () => {
     expect(screen.getByText('2 / 4')).toBeInTheDocument();
   });
 
+  it('says visibly when a kind could not be read', () => {
+    fixtures.overview!.inventory.push({ ...entry('Secret', '', 'secrets', 0), unavailable: true });
+    render(<NamespaceDetail obj={namespace} ctx="dev" />);
+    expect(screen.getByRole('button', { name: 'Secrets: unavailable' })).toHaveTextContent('no access');
+  });
+
   it('opens a kind list narrowed to this namespace through the cluster filter', () => {
     render(<NamespaceDetail obj={namespace} ctx="dev" />);
     fireEvent.click(screen.getByRole('button', { name: 'Deployments: 3, 2 healthy, 1 failed' }));
