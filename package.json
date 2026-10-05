@@ -31,8 +31,8 @@
     "build-docs": "uvx --native-tls zensical build --clean"
   },
   "devDependencies": {
-    "oxlint": "^1.82.0",
-    "oxlint-tsgolint": "^7.0.2001",
+    "oxlint": "^1.86.0",
+    "oxlint-tsgolint": "^7.0.2003",
     "playwright-core": "^1.63.0",
     "typescript": "^7.0.2"
   }
