@@ -1,12 +1,20 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GraphNode, RelationshipGraph } from '@kubus/shared';
 import TopologyGraphImpl, { toFlowState } from '../../../client/src/components/TopologyGraphImpl';
 import { compactLabel, layerCaption } from '../../../client/src/components/topology-render';
+import { TopologyPage } from '../../../client/src/pages/TopologyPage';
+import { useClustersStore } from '../../../client/src/state/clusters';
 import { saveTextFile } from '../../../client/src/save-file';
 
 const query = vi.hoisted(() => ({ data: undefined as RelationshipGraph[] | undefined, isLoading: false, isPlaceholderData: false }));
-vi.mock('../../../client/src/api/queries.js', () => ({ useTopologyGraphs: () => query }));
+vi.mock('../../../client/src/api/queries.js', () => ({
+  useTopologyGraphs: () => query,
+}));
+// Exercise the page-to-graph export placement without waiting for the lazy chunk.
+vi.mock('../../../client/src/components/TopologyGraph.js', async () => ({
+  TopologyGraph: (await import('../../../client/src/components/TopologyGraphImpl')).default,
+}));
 vi.mock('../../../client/src/save-file.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../../client/src/save-file')>(),
   saveTextFile: vi.fn(),
@@ -87,19 +95,25 @@ describe('topology flow state', () => {
 });
 
 describe('topology SVG download control', () => {
+  let exportContainer: HTMLDivElement;
   beforeEach(() => {
+    exportContainer = document.createElement('div');
+    document.body.append(exportContainer);
     query.data = undefined;
     query.isLoading = false;
     query.isPlaceholderData = false;
     vi.mocked(saveTextFile).mockClear();
+    localStorage.removeItem('kubus-topology-view');
   });
+
+  afterEach(() => exportContainer.remove());
 
   it('disables export for loading and empty graphs', async () => {
     query.isLoading = true;
-    const { rerender } = render(<TopologyGraphImpl contexts={['dev']} namespaces={[]} />);
-    expect(screen.getByRole('button', { name: 'Download topology as SVG' })).toBeDisabled();
+    const { rerender } = render(<TopologyGraphImpl exportContainer={exportContainer} contexts={['dev']} namespaces={[]} />);
+    expect(await screen.findByRole('button', { name: 'Download topology as SVG' })).toBeDisabled();
     query.isLoading = false;
-    rerender(<TopologyGraphImpl contexts={['dev']} namespaces={[]} />);
+    rerender(<TopologyGraphImpl exportContainer={exportContainer} contexts={['dev']} namespaces={[]} />);
     await screen.findByText('No connected topology found');
     expect(screen.getByRole('button', { name: 'Download topology as SVG' })).toBeDisabled();
   });
@@ -109,8 +123,9 @@ describe('topology SVG download control', () => {
       id: 'pod', label: 'web', status: 'success', layer: 'pod',
       ref: { ctx: 'dev', group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: 'web' },
     }] }];
-    const { rerender } = render(<TopologyGraphImpl contexts={['dev']} namespaces={[]} hideDisconnected={false} />);
-    const button = screen.getByRole('button', { name: 'Download topology as SVG' });
+    const { rerender } = render(<TopologyGraphImpl exportContainer={exportContainer} contexts={['dev']} namespaces={[]} hideDisconnected={false} />);
+    const button = await screen.findByRole('button', { name: 'Download topology as SVG' });
+    expect(document.querySelector('.react-flow')).not.toContainElement(button);
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     expect(saveTextFile).toHaveBeenCalledWith(
@@ -122,9 +137,29 @@ describe('topology SVG download control', () => {
     expect(doc.querySelector('parsererror')).toBeNull();
     expect(doc.querySelector('g > title')!.textContent).toContain('Pod/web');
     query.isPlaceholderData = true;
-    rerender(<TopologyGraphImpl contexts={['dev']} namespaces={[]} hideDisconnected={false} />);
+    rerender(<TopologyGraphImpl exportContainer={exportContainer} contexts={['dev']} namespaces={[]} hideDisconnected={false} />);
     expect(button).toBeDisabled();
     fireEvent.click(button);
     expect(saveTextFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('places the small export icon beside Only connected in the page header', async () => {
+    useClustersStore.setState({ selected: ['dev'], namespaces: [], namespacesByContext: {} });
+    query.data = [{ ctx: 'dev', edges: [], warnings: [], nodes: [{
+      id: 'pod', label: 'web', status: 'warning', layer: 'pod',
+      ref: { ctx: 'dev', group: '', version: 'v1', plural: 'pods', kind: 'Pod', name: 'web' },
+    }] }];
+    render(<TopologyPage />);
+    const header = screen.getByRole('heading', { name: 'Topology' }).parentElement!;
+    const button = await within(header).findByRole('button', { name: 'Download topology as SVG' });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(button.compareDocumentPosition(within(header).getByLabelText('Only connected')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector('.react-flow__controls')).not.toContainElement(button);
+    fireEvent.click(button);
+    expect(saveTextFile).toHaveBeenCalledTimes(1);
+    query.isPlaceholderData = true;
+    // Changing the scope renders the graph with placeholder data until it is ready.
+    fireEvent.click(within(header).getByLabelText('Only connected'));
+    expect(button).toBeDisabled();
   });
 });

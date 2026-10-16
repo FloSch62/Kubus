@@ -48,8 +48,9 @@ what's wired to what.
 
 ## Save as SVG
 
-Click **Download topology as SVG** in the graph controls at the bottom left. This
-works on the full Topology page and in a resource's **Map** tab.
+Click the **Download topology as SVG** icon beside **Only connected** in the
+Topology page header. In a resource's **Map** tab, the same icon sits in a toolbar
+above the graph.
 
 The download includes the entire graph in the current cluster and namespace
 scope, including nodes outside the viewport. It keeps the **Only connected** and

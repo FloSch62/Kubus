@@ -1,8 +1,11 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
@@ -13,7 +16,6 @@ import {
   Background,
   BaseEdge,
   Controls,
-  ControlButton,
   EdgeLabelRenderer,
   Handle,
   MarkerType,
@@ -304,6 +306,7 @@ export default function TopologyGraphImpl({
   foldReplicaSets,
   onFoldReplicaSetsChange,
   onStats,
+  exportContainer,
   emptyTitle = 'No connected topology found',
 }: TopologyGraphProps) {
   const theme = useTheme();
@@ -564,6 +567,21 @@ export default function TopologyGraphImpl({
       }}
       aria-busy={loading || updating}
     >
+      {exportContainer && createPortal(
+        <Tooltip title="Download topology as SVG">
+          <span>
+            <IconButton
+              size="small"
+              onClick={exportSvg}
+              disabled={isLoading || topologyPending || nodes.length === 0}
+              aria-label="Download topology as SVG"
+            >
+              <DownloadOutlinedIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>,
+        exportContainer,
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -593,16 +611,7 @@ export default function TopologyGraphImpl({
         onPaneClick={() => setSelectedNodeId(undefined)}
       >
         <Background color={theme.palette.divider} />
-        <Controls onInteractiveChange={setInteractive}>
-          <ControlButton
-            onClick={exportSvg}
-            disabled={isLoading || topologyPending || nodes.length === 0}
-            aria-label="Download topology as SVG"
-            title="Download topology as SVG"
-          >
-            <DownloadOutlinedIcon />
-          </ControlButton>
-        </Controls>
+        <Controls onInteractiveChange={setInteractive} />
         {overflowing && nodes.length > 0 && (
           <MiniMap
             pannable
