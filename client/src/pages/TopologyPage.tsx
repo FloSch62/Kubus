@@ -41,6 +41,7 @@ export function TopologyPage() {
   const namespaces = useClustersStore((s) => s.namespaces);
   const namespacesByContext = useClustersStore((s) => s.namespacesByContext);
   const [view, setView] = useState(readView);
+  const [exportContainer, setExportContainer] = useState<HTMLDivElement | null>(null);
   const [stats, setStats] = useState<TopologyStats>();
 
   const update = useCallback((patch: Partial<TopologyView>) => {
@@ -63,6 +64,7 @@ export function TopologyPage() {
         {stats && stats.issues > 0 && <Chip label={countLabel(stats.issues, 'issue')} color="warning" variant="outlined" />}
         {namespaces.length > 0 && <Chip label={`${namespaces.length} namespace${namespaces.length === 1 ? '' : 's'}`} variant="outlined" />}
         <Box sx={{ flex: 1 }} />
+        <Box ref={setExportContainer} sx={{ display: 'flex', alignItems: 'center' }} />
         <FormControlLabel
           control={<Switch size="small" checked={view.onlyConnected} onChange={(_e, checked) => update({ onlyConnected: checked })} />}
           label="Only connected"
@@ -82,6 +84,7 @@ export function TopologyPage() {
           foldReplicaSets={view.foldReplicaSets}
           onFoldReplicaSetsChange={onFoldReplicaSetsChange}
           onStats={setStats}
+          exportContainer={exportContainer}
           emptyTitle={view.onlyConnected ? 'No connected resource map found' : 'No resources found'}
         />
       </Box>

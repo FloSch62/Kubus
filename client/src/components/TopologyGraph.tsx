@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -17,6 +17,9 @@ export interface TopologyGraphProps {
   onFoldReplicaSetsChange?: (fold: boolean) => void;
   /** Receives the visible counts; the graph then leaves them out of its own footer. */
   onStats?: (stats: TopologyStats) => void;
+  /** Host for the export icon, e.g. beside the page's view switches.
+   *  Omit to show an inline toolbar above the graph (resource Map tabs). */
+  exportContainer?: HTMLElement | null;
   emptyTitle?: string;
 }
 
@@ -45,6 +48,7 @@ const graphLoading = (
 export function TopologyGraph(props: TopologyGraphProps) {
   const { contexts, namespaces, focus } = props;
   const queryClient = useQueryClient();
+  const [localExportContainer, setLocalExportContainer] = useState<HTMLDivElement | null>(null);
 
   // Kick off the graph fetch from the wrapper so it runs in parallel with the
   // lazy chunk download instead of waiting for the impl to mount. One-shot:
@@ -57,8 +61,17 @@ export function TopologyGraph(props: TopologyGraphProps) {
   }, [queryClient, contexts, namespaces, focus]);
 
   return (
-    <Suspense fallback={graphLoading}>
-      <TopologyGraphImpl {...props} />
-    </Suspense>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {props.exportContainer === undefined && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', pb: 0.5 }}>
+          <Box ref={setLocalExportContainer} sx={{ display: 'flex', alignItems: 'center' }} />
+        </Box>
+      )}
+      <Box sx={{ flex: 1, minHeight: 0 }}>
+        <Suspense fallback={graphLoading}>
+          <TopologyGraphImpl {...props} exportContainer={props.exportContainer === undefined ? localExportContainer : props.exportContainer} />
+        </Suspense>
+      </Box>
+    </Box>
   );
 }
