@@ -46,6 +46,21 @@ what's wired to what.
     Start from a failing pod's **Map** tab and walk outward through its owner, its service
     and its config until you find where the chain breaks.
 
+## Save as SVG
+
+Click **Download topology as SVG** in the graph controls at the bottom left. This
+works on the full Topology page and in a resource's **Map** tab.
+
+The download includes the entire graph in the current cluster and namespace
+scope, including nodes outside the viewport. It keeps the **Only connected** and
+**Old ReplicaSets** settings, any positions you moved, and the current light or
+dark theme. Links include arrows, labels, and a colour legend. Selection dimming
+is cleared so every exported resource is readable.
+
+The file uses vector shapes and text, so it stays sharp when zoomed or printed
+and can be edited in an SVG editor. Export is available once the graph finishes
+loading and contains at least one node.
+
 ## See also
 
 <div class="grid cards" markdown>
