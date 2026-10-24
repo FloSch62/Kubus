@@ -511,6 +511,30 @@ describe('watched and filtered lists', () => {
     expect(sub.unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it('feeds the namespace list from the namespaces watch once every cluster reported', () => {
+    const contexts = ['dev', 'prod', 'edge'];
+    const cacheKey = JSON.stringify(['namespaces', contexts]);
+    const namespace = (name: string): KubeObject => ({ apiVersion: 'v1', kind: 'Namespace', metadata: { name, uid: `uid-${name}`, resourceVersion: '1' } });
+    const { unmount } = renderHook(() => queries.useNamespaces(contexts));
+    const [dev, prod, edge] = harness.subscriptions;
+    expect(harness.subscriptions.map((sub) => sub.params)).toEqual(contexts.map((ctx) => ({ ctx, group: 'core', version: 'v1', plural: 'namespaces' })));
+
+    act(() => dev!.handlers.onSnapshot([namespace('team-b'), namespace('default')]));
+    act(() => prod!.handlers.onSnapshot([namespace('default')]));
+    expect(harness.cache.has(cacheKey)).toBe(false);
+    // A cluster whose watch fails contributes nothing rather than blocking the rest.
+    act(() => edge!.handlers.onStatus('error', 'forbidden'));
+    expect(harness.cache.get(cacheKey)).toEqual(['default', 'team-b']);
+
+    act(() => prod!.handlers.onEvents([{ type: 'ADDED', object: namespace('fresh') }]));
+    expect(harness.cache.get(cacheKey)).toEqual(['default', 'fresh', 'team-b']);
+    act(() => dev!.handlers.onEvents([{ type: 'DELETED', object: namespace('team-b') }]));
+    expect(harness.cache.get(cacheKey)).toEqual(['default', 'fresh']);
+
+    unmount();
+    for (const sub of [dev, prod, edge]) expect(sub!.unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it('feeds a watched single-resource query from the shared watch stream', () => {
     const sel = { ctx: 'dev', group: 'apps', version: 'v1', plural: 'deployments', name: 'web', namespace: 'team-a' };
     const cacheKey = JSON.stringify(['resource', sel]);

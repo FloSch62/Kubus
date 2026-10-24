@@ -343,6 +343,53 @@ export function useApiResourcesForContexts(contexts: string[]) {
 }
 
 export function useNamespaces(contexts: string[]) {
+  const qc = useQueryClient();
+  // Watch-fed freshness: a namespace created or deleted anywhere (Kubus,
+  // kubectl, a controller) reaches the filter within one event flush instead
+  // of waiting on the poll, which the refresh-rate preference can disable.
+  // The union is only written once every cluster has reported, so a slow
+  // watch never hides another cluster's namespaces.
+  const contextsKey = hashKey(contexts);
+  useEffect(() => {
+    if (!contexts.length) return;
+    const names = new Map<string, Set<string>>();
+    const publish = () => {
+      if (names.size < contexts.length) return;
+      qc.setQueryData(['namespaces', contexts], [...new Set([...names.values()].flatMap((set) => [...set]))].sort());
+    };
+    const unsubs = contexts.map((ctx) =>
+      watchClient.subscribe(
+        { ctx, group: groupToPath(''), version: 'v1', plural: 'namespaces' },
+        {
+          onSnapshot: (items) => {
+            names.set(ctx, new Set(items.map((ns) => ns.metadata.name)));
+            publish();
+          },
+          onEvents: (events) => {
+            const set = names.get(ctx);
+            if (!set) return;
+            for (const ev of events) {
+              if (ev.type === 'DELETED') set.delete(ev.object.metadata.name);
+              else set.add(ev.object.metadata.name);
+            }
+            publish();
+          },
+          // A cluster whose namespace watch cannot start contributes nothing,
+          // matching the HTTP fetch's fallback for it.
+          onStatus: (state) => {
+            if ((state === 'error' || state === 'unavailable') && !names.has(ctx)) {
+              names.set(ctx, new Set());
+              publish();
+            }
+          },
+        },
+      ),
+    );
+    return () => {
+      for (const unsub of unsubs) unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextsKey, qc]);
   return useQuery({
     queryKey: ['namespaces', contexts],
     queryFn: async () => {
