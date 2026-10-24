@@ -9,7 +9,7 @@ source, the [install guide](../install/from-source.md) is shorter.
 
 ## Requirements
 
-- **Node.js ≥ 24.21**
+- **Node.js ≥ 24.22.1**
 - **[pnpm](https://pnpm.io/installation) 12**
 
 ## Project layout

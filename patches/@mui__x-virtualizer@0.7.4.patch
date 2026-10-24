@@ -1,5 +1,5 @@
 diff --git a/features/virtualization/virtualization.js b/features/virtualization/virtualization.js
-index 5ab1e8597a434b89e91d0d505645a147db24e771..5973a98128080997969b7594e01b48692cbebff1 100644
+index 17f03711c9b97a0ecf04109cb5d1385887e32d67..e9f53e6e1e2028f0c49acbeef996a41a1fa91e6e 100644
 --- a/features/virtualization/virtualization.js
 +++ b/features/virtualization/virtualization.js
 @@ -206,7 +206,7 @@ function useVirtualization(store, params, api) {
@@ -39,7 +39,7 @@ index 5ab1e8597a434b89e91d0d505645a147db24e771..5973a98128080997969b7594e01b4869
      } else {
        // Since previous render, we have scrolled...
 diff --git a/features/virtualization/virtualization.mjs b/features/virtualization/virtualization.mjs
-index 62487655969ef245e78ea7207c2be78dcbf1ed56..b6d9b7315321f470cadfdb1dbd21ca69149f21ad 100644
+index be1635421e481e82106055ac0ca308f5de293071..0b9d51b619768bf3315f48302368655104e78e26 100644
 --- a/features/virtualization/virtualization.mjs
 +++ b/features/virtualization/virtualization.mjs
 @@ -197,7 +197,7 @@ function useVirtualization(store, params, api) {

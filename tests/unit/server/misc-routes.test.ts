@@ -454,7 +454,7 @@ describe('settings routes', () => {
     const isHomeFile = (candidate: fs.PathOrFileDescriptor) => path.normalize(String(candidate)) === path.normalize(homeFile);
     vi.spyOn(fs, 'existsSync').mockImplementation(isHomeFile);
     vi.spyOn(fs, 'readFileSync').mockImplementation(((candidate: fs.PathOrFileDescriptor) =>
-      isHomeFile(candidate) ? kubeconfig() : '{}') as typeof fs.readFileSync);
+      isHomeFile(candidate) ? kubeconfig() : '{}') as unknown as typeof fs.readFileSync);
     const home = await app.inject({
       method: 'PUT',
       url: '/api/settings/kubeconfig',

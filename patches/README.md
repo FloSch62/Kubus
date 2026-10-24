@@ -1,6 +1,6 @@
 # Grid scrolling
 
-`@mui/x-virtualizer@0.7.1.patch` covers both module entry points. Kubus uses
+`@mui/x-virtualizer@0.7.4.patch` covers both module entry points. Kubus uses
 DataGrid's native (`uncontrolled`) scroll layout with read-only resource cells.
 The upstream layout replenishes its render window on every crossed row and
 renders fifteen extra rows in the direction of travel. Originally measured in PR #169 on WebKitGTK, repeated
@@ -14,6 +14,11 @@ buffer remains bounded; we do not disable virtualization or drop resources.
 Rechecked for 0.7.1: upstream still replenishes uncontrolled scrolling on every
 crossed row and retains the fifteen-row directional buffer, so the patch remains
 necessary and applies unchanged.
+
+Rechecked for 0.7.4: upstream only changed the controlled layout, which now also
+replenishes when its empty buffer runs out. Uncontrolled scrolling still updates
+on every crossed row with the fifteen-row buffer, so the patch remains necessary
+and applies unchanged.
 
 When upgrading MUI, re-evaluate and remove this patch if upstream addresses the
 native scroll behavior. Verify wheel movement, fast jumps in both directions,
