@@ -24,7 +24,7 @@
   "devDependencies": {
     "@kubus/server": "workspace:*",
     "@kubus/shared": "workspace:*",
-    "@types/node": "^24.19.2",
+    "@types/node": "^25.9.9",
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
     "electron-updater": "^6.8.11",
