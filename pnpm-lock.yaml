@@ -240,8 +240,8 @@ importers:
         specifier: ^12.12.0
         version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       croner:
-        specifier: ^10.0.1
-        version: 10.0.1
+        specifier: ^11.0.0
+        version: 11.0.0
       cronstrue:
         specifier: ^3.38.0
         version: 3.38.0
@@ -2236,8 +2236,8 @@ packages:
     resolution: {integrity: sha512-AdmX6xUzdNASswsFtmwSt7Vj8po9IuqXm0UXz7QKPuEUmPB4XyjGfaAr2PSuELMwkRMVH1EpIkX5bTZGRB3eCA==}
     engines: {node: '>=10'}
 
-  croner@10.0.1:
-    resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
+  croner@11.0.0:
+    resolution: {integrity: sha512-T17ADjdttrVToyzLpLq9Xb9xzcMwpQ/M3Qs9szhh0MVNTbv6NWQ9OFYa2qlzPYXFMn+uoDlnW1IpIv6cAvFtyA==}
     engines: {node: '>=18.0'}
 
   cronstrue@3.38.0:
@@ -6001,7 +6001,7 @@ snapshots:
       path-type: 4.0.0
       yaml: 1.10.3
 
-  croner@10.0.1: {}
+  croner@11.0.0: {}
 
   cronstrue@3.38.0: {}
 
