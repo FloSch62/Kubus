@@ -7,6 +7,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { SESSION_AUTH_CHALLENGE } from '@kubus/shared';
 import type { ServerConfig } from './config.js';
+import { hostAllowed, originAllowed } from './request-guard.js';
 import { ClusterManager } from './kube/cluster-manager.js';
 import { PortForwardManager } from './kube/portforward-manager.js';
 import { SshTunnelManager } from './ssh/tunnel-manager.js';
@@ -93,16 +94,13 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
     options: {
       maxPayload: 16 * 1024 * 1024,
       verifyClient: (info: { origin?: string; req: { url?: string; headers: Record<string, unknown> } }) => {
-        // Origin check: only same-host browser pages (or non-browser clients
-        // without an Origin header) may open sockets — DNS-rebinding defense.
-        const origin = info.origin;
-        if (origin) {
-          try {
-            const u = new URL(origin);
-            if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') return false;
-          } catch {
-            return false;
-          }
+        // Origin check: only loopback or configured browser pages (or
+        // non-browser clients without an Origin header) may open sockets —
+        // DNS-rebinding defense.
+        if (!originAllowed(info.origin, config)) return false;
+        if (config.auth === 'none') {
+          const host = info.req.headers.host;
+          return hostAllowed(typeof host === 'string' ? host : undefined, config);
         }
         const url = new URL(info.req.url ?? '/', 'http://localhost');
         return url.searchParams.get('token') === config.token;
@@ -117,9 +115,21 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
     },
   });
 
+  // Liveness/readiness probe for container deployments; reveals nothing.
+  app.get('/healthz', async () => ({ ok: true }));
+
   // Bearer-token auth for all /api routes.
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
+    if (config.auth === 'none') {
+      // No token: the reverse proxy in front authenticates. Still refuse
+      // rebound hosts and cross-site pages so a browser on the same network
+      // cannot be used to drive the API.
+      if (!hostAllowed(req.headers.host, config) || !originAllowed(req.headers.origin, config)) {
+        await reply.code(403).send({ message: 'forbidden origin' });
+      }
+      return;
+    }
     const header = req.headers.authorization;
     const ok = header === `Bearer ${config.token}`;
     if (!ok) {

@@ -26,7 +26,12 @@ export async function startServer(overrides: Partial<ServerConfig> = {}): Promis
     app,
     port,
     token: config.token,
-    url: `http://${config.host}:${port}/?token=${config.token}`,
+    url: `http://${urlHost(config.host)}:${port}/${config.auth === 'none' ? '' : `?token=${config.token}`}`,
     close: () => app.close(),
   };
+}
+
+/** Bracket raw IPv6 literals so the launch URL parses. */
+function urlHost(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }

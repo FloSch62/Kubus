@@ -157,3 +157,57 @@ describe('loadConfig', () => {
     expect(prod.openBrowser).toBe(true);
   });
 });
+
+describe('server-mode options', () => {
+  beforeEach(() => {
+    vi.stubEnv('KUBUS_HOST', undefined);
+    vi.stubEnv('KUBUS_AUTH', undefined);
+    vi.stubEnv('KUBUS_ALLOWED_ORIGINS', undefined);
+  });
+
+  it('defaults to loopback, token auth and no extra origins', () => {
+    const config = loadConfig();
+    expect(config.host).toBe('127.0.0.1');
+    expect(config.auth).toBe('token');
+    expect(config.allowedOrigins).toEqual([]);
+  });
+
+  it('reads --host and KUBUS_HOST, with the flag winning', () => {
+    vi.stubEnv('KUBUS_HOST', '0.0.0.0');
+    expect(loadConfig().host).toBe('0.0.0.0');
+    setArgv('--host', '::');
+    expect(loadConfig().host).toBe('::');
+  });
+
+  it('normalizes allowed origins and rejects paths or bad schemes', () => {
+    setArgv('--allowed-origins', 'https://kubus.example.com/, http://kubus.lan:8080');
+    expect(loadConfig().allowedOrigins).toEqual(['https://kubus.example.com', 'http://kubus.lan:8080']);
+    setArgv('--allowed-origins', 'https://kubus.example.com/app');
+    expect(() => loadConfig()).toThrow(/without a path/);
+    setArgv('--allowed-origins', 'ftp://kubus.example.com');
+    expect(() => loadConfig()).toThrow(/invalid origin/);
+    setArgv('--allowed-origins', 'kubus.example.com');
+    expect(() => loadConfig()).toThrow(/invalid origin/);
+  });
+
+  it('accepts --auth none on loopback and rejects unknown modes', () => {
+    vi.stubEnv('KUBUS_AUTH', 'none');
+    expect(loadConfig().auth).toBe('none');
+    setArgv('--auth', 'basic');
+    expect(() => loadConfig()).toThrow(/invalid auth mode "basic"/);
+  });
+
+  it('refuses --auth none on a public host without allowed origins', () => {
+    setArgv('--host', '0.0.0.0', '--auth', 'none');
+    expect(() => loadConfig()).toThrow(/requires --allowed-origins/);
+    setArgv('--host', '0.0.0.0', '--auth', 'none', '--allowed-origins', 'https://kubus.example.com');
+    expect(loadConfig().auth).toBe('none');
+  });
+
+  it('keeps dev mode on loopback', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('KUBUS_DEV', '1');
+    setArgv('--host', '0.0.0.0');
+    expect(() => loadConfig()).toThrow(/loopback/);
+  });
+});
