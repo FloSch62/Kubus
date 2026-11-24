@@ -17,7 +17,11 @@ try {
   process.exit(1);
 }
 
+if (config.auth === 'none') {
+  server.app.log.warn('authentication disabled (--auth none): the reverse proxy in front of Kubus must authenticate users');
+}
 server.app.log.info(`Kubus ready at ${server.url}`);
+for (const origin of config.allowedOrigins) server.app.log.info(`accepting browser origin ${origin}`);
 
 if (config.openBrowser) {
   const { default: open } = await import('open');

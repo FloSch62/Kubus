@@ -91,6 +91,7 @@ export function installationFacts(appInfo: AppInfo | null, ua = navigator.userAg
     ['Runs as', desktop ? 'Desktop app' : 'Web app in your browser'],
     ['Platform', hostPlatform()],
     ...engineFacts(ua),
+    ...(appInfo?.offline ? [['Mode', 'Offline (no internet features)'] as [string, string]] : []),
     ['Helm engine', appInfo ? (appInfo.helmEngine ? 'Available' : 'Not available (chart install and upgrade are off)') : 'unknown'],
     ...(desktop ? [] : [['Server', window.location.host] as [string, string]]),
   ];
@@ -324,6 +325,8 @@ function StatusText({ tone, children }: { tone: 'success' | 'info' | 'warning'; 
 
 function updateReasonLabel(reason?: string): string {
   switch (reason) {
+    case 'offline':
+      return 'Kubus runs in offline mode: no update check.';
     case 'timeout':
       return 'The update check timed out.';
     case 'network':

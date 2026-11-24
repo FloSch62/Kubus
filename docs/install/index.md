@@ -4,9 +4,10 @@ icon: lucide/download
 
 # Installation
 
-There are two ways to run Kubus. Most people want the **desktop app**, which you install
+There are three ways to run Kubus. Most people want the **desktop app**, which you install
 like any other program. If you'd rather run it as a local web server (or you're on a
-platform without a packaged build), run it **from source**.
+platform without a packaged build), run it **from source**. To host it for a team or inside
+a cluster, use the **container image**.
 
 <div class="grid cards" markdown>
 
@@ -27,6 +28,15 @@ platform without a packaged build), run it **from source**.
     development or headless boxes.
 
     [:octicons-arrow-right-24: Run from source](from-source.md)
+
+-   :material-docker: **Container image**
+
+    ---
+
+    Run the server and web UI in a container, for example inside the cluster
+    it manages, and open it in a browser.
+
+    [:octicons-arrow-right-24: Run the container](container.md)
 
 </div>
 

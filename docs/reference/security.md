@@ -27,6 +27,15 @@ that, every run mints a fresh random **bearer token**:
 This defends against **DNS-rebinding** and **CSRF** attacks that target local servers. The
 token isn't persisted; restart Kubus and a new one is generated.
 
+## Container deployments
+
+The [container image](../install/container.md) listens on all interfaces inside its
+container and acts with one shared identity (the pod's ServiceAccount or a mounted
+kubeconfig). By default it still requires the per-run token. With `--auth none` it trusts
+the reverse proxy in front to authenticate, and only checks that the `Host` header and
+browser `Origin` are loopback or listed in `--allowed-origins`, which keeps the
+DNS-rebinding and CSRF defense without a token.
+
 ## Secrets are redacted by default
 
 Secret values are hidden everywhere: in lists, in details, and in the live watch streams

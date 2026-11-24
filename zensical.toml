@@ -27,6 +27,7 @@ nav = [
     "install/index.md",
     { "Desktop app" = "install/desktop.md" },
     { "From source" = "install/from-source.md" },
+    { "Container image" = "install/container.md" },
     { "Quickstart" = "quickstart.md" },
   ] },
   { "User guide" = [

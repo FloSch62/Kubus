@@ -45,6 +45,7 @@ const helm = vi.hoisted(() => ({
 const effects = vi.hoisted(() => ({ toast: vi.fn() }));
 
 vi.mock('../../../client/src/api/queries.js', () => ({
+  useAppInfo: () => ({ data: { offline: false } }),
   useHelmRepos: () => ({ data: helm.repos, isLoading: helm.reposLoading }),
   useHelmRepoCharts: (repo: string | undefined) => ({ data: repo ? helm.chartsByRepo[repo] : undefined, isLoading: helm.chartsLoading, error: helm.chartsError }),
   useHelmHubSearch: (query: string) => {

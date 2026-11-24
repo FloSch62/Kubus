@@ -5,6 +5,8 @@ export interface AppInfo {
   version: string;
   /** True when the wasm helm rendering engine is available (install/upgrade enabled). */
   helmEngine: boolean;
+  /** True when the server runs in offline mode: no outbound internet features (update check, Artifact Hub, network-agent install). */
+  offline?: boolean;
 }
 
 /** WebSocket close reason which intentionally ends a server-side terminal session. */

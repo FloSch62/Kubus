@@ -22,7 +22,7 @@ import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined';
 import DnsOutlinedIcon from '@mui/icons-material/DnsOutlined';
 import { LineChart } from '@mui/x-charts/LineChart';
 import type { ClusterNetworkSummary, NetworkPeer, NetworkSeriesEntry } from '@kubus/shared';
-import { useNetworkAgentStatus, useNetworkSummary } from '../api/queries.js';
+import { useAppInfo, useNetworkAgentStatus, useNetworkSummary } from '../api/queries.js';
 import { useClustersStore } from '../state/clusters.js';
 import { ClusterSectionHeader } from '../components/ClusterSectionHeader.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -136,13 +136,20 @@ function ClusterNetworkSection({ ctx, single = false }: { ctx: string; single?: 
 }
 
 function NotInstalledState({ ctx }: { ctx: string }) {
+  const offline = useAppInfo().data?.offline ?? false;
   return (
     <EmptyState
       icon={<NetworkCheckOutlinedIcon />}
       title="The network agent is not installed"
       subtitle="Kubus deploys Microsoft's open-source Retina agent as a DaemonSet and reads its eBPF traffic counters through the Kubernetes API. That powers live pod-to-pod throughput and the busiest links on this page. It needs no Prometheus or other backend and works with any CNI."
     >
-      <InstallNetworkAgentButton ctx={ctx} />
+      {offline ? (
+        <Typography variant="body2" color="text.secondary">
+          Kubus runs in offline mode: the agent images come from ghcr.io, so the one-click install is off. Mirror and install it yourself.
+        </Typography>
+      ) : (
+        <InstallNetworkAgentButton ctx={ctx} />
+      )}
     </EmptyState>
   );
 }
