@@ -75,6 +75,15 @@ support WebSockets.
 `--auth none` on a non-loopback `--host` refuses to start without
 `--allowed-origins`.
 
+## Air-gapped clusters
+
+`KUBUS_OFFLINE=1` (`--offline`) turns off what needs the public internet: the update check,
+Artifact Hub search and the one-click network-agent install (its images come from ghcr.io).
+The UI hides those entries and the server answers `403` for them. Helm repositories you add
+yourself, charts from an internal registry and everything that talks to the cluster work as
+before. The metrics-server installer still applies its pinned manifest, but the image
+(`registry.k8s.io`) must be reachable from the cluster or mirrored.
+
 !!! danger "Never expose `--auth none` without a proxy that authenticates"
 
     Anyone who reaches the port gets the full rights of the ServiceAccount.

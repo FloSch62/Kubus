@@ -22,6 +22,7 @@ node server/dist/index.js [flags]
 | `--no-open` | *(opens browser)* | `KUBUS_NO_OPEN=1` | Don't open a browser on startup. |
 | `--host <addr>` | `127.0.0.1` | `KUBUS_HOST` | Address to listen on. Only change it for [container deployments](../install/container.md). |
 | `--auth <mode>` | `token` | `KUBUS_AUTH` | `none` turns off the access token, for running behind an authenticating reverse proxy. |
+| `--offline` | off | `KUBUS_OFFLINE=1` | For air-gapped clusters: refuse everything that needs the public internet (update check, Artifact Hub, one-click network-agent install). Private Helm repositories keep working. |
 | `--allowed-origins <list>` | *(loopback only)* | `KUBUS_ALLOWED_ORIGINS` | Comma-separated browser origins (e.g. `https://kubus.example.com`) allowed besides loopback. |
 
 !!! note "Passing flags through pnpm"
@@ -62,6 +63,7 @@ See the [security model](security.md) for the full picture.
 | `KUBUS_NO_OPEN=1` | `--no-open` |
 | `KUBUS_HOST` | `--host` |
 | `KUBUS_AUTH` | `--auth` |
+| `KUBUS_OFFLINE=1` | `--offline` |
 | `KUBUS_ALLOWED_ORIGINS` | `--allowed-origins` |
 
 ## See also

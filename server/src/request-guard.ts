@@ -32,3 +32,13 @@ export function hostAllowed(host: string | undefined, config: Pick<ServerConfig,
   if (isLoopbackHost(hostname)) return true;
   return config.allowedOrigins.some((origin) => new URL(origin).hostname === hostname);
 }
+
+/**
+ * Routes that need the public internet. In offline mode they answer 403
+ * instead of hanging until a timeout in an air-gapped cluster.
+ */
+export function offlineBlocked(method: string, url: string): boolean {
+  const path = url.split('?')[0] ?? '';
+  if (path.startsWith('/api/helm/hub/')) return true; // Artifact Hub
+  return method === 'POST' && /^\/api\/contexts\/[^/]+\/network-agent\/install$/.test(path); // images from ghcr.io
+}

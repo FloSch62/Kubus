@@ -128,9 +128,10 @@ async function checkForUpdate(force = false): Promise<UpdateCheckResult> {
   }
 }
 
-export function registerAppRoutes(app: FastifyInstance, _ctx: AppContext): void {
-  app.get('/api/app/info', async () => appInfo());
+export function registerAppRoutes(app: FastifyInstance, ctx: AppContext): void {
+  app.get('/api/app/info', async (): Promise<AppInfo> => ({ ...appInfo(), offline: ctx.config.offline }));
   app.get<{ Querystring: { force?: string } }>('/api/app/update-check', async (req) => {
+    if (ctx.config.offline) return { available: false, currentVersion: appInfo().version, reason: 'offline' } satisfies UpdateCheckResult;
     if (req.query.force === 'true') updateCheck = checkForUpdate(true);
     updateCheck ??= checkForUpdate();
     return updateCheck;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerConfig } from '../../../server/src/config';
-import { hostAllowed, originAllowed } from '../../../server/src/request-guard';
+import { hostAllowed, offlineBlocked, originAllowed } from '../../../server/src/request-guard';
 import { startServer, type RunningServer } from '../../../server/src/server';
 
 const PUBLIC = { allowedOrigins: ['https://kubus.example.com'] };
@@ -48,6 +48,18 @@ describe('hostAllowed', () => {
     expect(hostAllowed('attacker.example', PUBLIC)).toBe(false);
     expect(hostAllowed('10.0.0.5:3001', PUBLIC)).toBe(false);
     expect(hostAllowed('kubus.example.com.attacker.example', PUBLIC)).toBe(false);
+  });
+});
+
+describe('offlineBlocked', () => {
+  it('blocks Artifact Hub and the network-agent install only', () => {
+    expect(offlineBlocked('GET', '/api/helm/hub/search?q=nginx')).toBe(true);
+    expect(offlineBlocked('GET', '/api/helm/hub/versions')).toBe(true);
+    expect(offlineBlocked('POST', '/api/contexts/prod/network-agent/install')).toBe(true);
+    expect(offlineBlocked('GET', '/api/contexts/prod/network-agent')).toBe(false);
+    expect(offlineBlocked('DELETE', '/api/contexts/prod/network-agent')).toBe(false);
+    expect(offlineBlocked('GET', '/api/helm/repos')).toBe(false);
+    expect(offlineBlocked('GET', '/api/contexts/prod/helm/releases')).toBe(false);
   });
 });
 
@@ -133,6 +145,21 @@ describe('server with --auth none', () => {
     const s = await boot({ token: 'secret', allowedOrigins: ['https://kubus.example.com'] });
     expect(await get(s, '/api/app/info', { origin: 'https://kubus.example.com' })).toBe(401);
     expect(await get(s, '/api/app/info', { authorization: 'Bearer secret' })).toBe(200);
+  });
+
+  it('offline mode refuses internet features and reports itself', async () => {
+    const s = await boot({ auth: 'none', offline: true });
+    expect(await get(s, '/api/helm/hub/search?q=nginx')).toBe(403);
+    const info = (await (await fetch(`http://127.0.0.1:${s.port}/api/app/info`)).json()) as { offline?: boolean };
+    expect(info.offline).toBe(true);
+    const update = (await (await fetch(`http://127.0.0.1:${s.port}/api/app/update-check`)).json()) as { reason?: string };
+    expect(update.reason).toBe('offline');
+    expect(await get(s, '/api/helm/repos')).toBe(200);
+  });
+
+  it('online mode leaves the hub route alone', async () => {
+    const s = await boot({ auth: 'none' });
+    expect(await get(s, '/api/helm/hub/search')).not.toBe(403);
   });
 
   it('answers the health probe without auth', async () => {

@@ -210,4 +210,15 @@ describe('server-mode options', () => {
     setArgv('--host', '0.0.0.0');
     expect(() => loadConfig()).toThrow(/loopback/);
   });
+
+  it('reads --offline and KUBUS_OFFLINE', () => {
+    expect(loadConfig().offline).toBe(false);
+    setArgv('--offline');
+    expect(loadConfig().offline).toBe(true);
+    setArgv();
+    vi.stubEnv('KUBUS_OFFLINE', '1');
+    expect(loadConfig().offline).toBe(true);
+    vi.stubEnv('KUBUS_OFFLINE', 'maybe');
+    expect(() => loadConfig()).toThrow(/invalid boolean/);
+  });
 });

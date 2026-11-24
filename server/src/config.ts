@@ -27,6 +27,13 @@ export interface ServerConfig {
    * loopback, e.g. the public URL of a container deployment behind an ingress.
    */
   allowedOrigins: string[];
+  /**
+   * Offline mode (air-gapped clusters): features that reach the public
+   * internet are refused — the update check, Artifact Hub search and the
+   * network-agent install (its images come from ghcr.io). Private Helm
+   * repositories and everything that talks to the cluster keep working.
+   */
+  offline: boolean;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -44,6 +51,7 @@ export function resolveConfig(overrides: Partial<ServerConfig> = {}): ServerConf
     prettyLogs: process.env.NODE_ENV !== 'production',
     auth: 'token',
     allowedOrigins: [],
+    offline: false,
     ...overrides,
   };
 }
@@ -83,6 +91,12 @@ function parseAuth(raw: string | undefined): AuthMode {
   throw new Error(`invalid auth mode "${raw}" — expected "token" or "none"`);
 }
 
+function parseFlag(raw: string | undefined): boolean {
+  if (raw === undefined || raw === '' || raw === '0' || raw === 'false') return false;
+  if (raw === '1' || raw === 'true') return true;
+  throw new Error(`invalid boolean "${raw}" — expected 1/true or 0/false`);
+}
+
 /** Parse a comma-separated origin list, normalizing `https://a.example/` to `https://a.example`. */
 export function parseOrigins(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -114,6 +128,7 @@ export function loadConfig(): ServerConfig {
   const host = args.get('host') ?? process.env.KUBUS_HOST ?? '127.0.0.1';
   const auth = parseAuth(args.get('auth') ?? process.env.KUBUS_AUTH);
   const allowedOrigins = parseOrigins(args.get('allowed-origins') ?? process.env.KUBUS_ALLOWED_ORIGINS);
+  const offline = parseFlag(args.get('offline') ?? process.env.KUBUS_OFFLINE);
   if (dev && !isLoopbackHost(host)) {
     throw new Error('dev mode uses a well-known token and only listens on loopback');
   }
@@ -130,5 +145,6 @@ export function loadConfig(): ServerConfig {
     kubeconfigOverride: args.get('kubeconfig') ?? undefined,
     auth,
     allowedOrigins,
+    offline,
   });
 }

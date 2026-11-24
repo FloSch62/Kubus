@@ -7,7 +7,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { SESSION_AUTH_CHALLENGE } from '@kubus/shared';
 import type { ServerConfig } from './config.js';
-import { hostAllowed, originAllowed } from './request-guard.js';
+import { hostAllowed, offlineBlocked, originAllowed } from './request-guard.js';
 import { ClusterManager } from './kube/cluster-manager.js';
 import { PortForwardManager } from './kube/portforward-manager.js';
 import { SshTunnelManager } from './ssh/tunnel-manager.js';
@@ -139,6 +139,15 @@ export async function buildApp(config: ServerConfig): Promise<{ app: FastifyInst
       await reply.code(401).header('www-authenticate', SESSION_AUTH_CHALLENGE).send({ message: 'unauthorized' });
     }
   });
+
+  // Offline mode: refuse the routes that would reach the public internet.
+  if (config.offline) {
+    app.addHook('onRequest', async (req, reply) => {
+      if (offlineBlocked(req.method, req.url)) {
+        await reply.code(403).send({ message: 'disabled: Kubus runs in offline mode (--offline)' });
+      }
+    });
+  }
 
   registerAppRoutes(app, ctx);
   registerContextRoutes(app, ctx);

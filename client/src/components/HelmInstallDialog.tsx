@@ -38,6 +38,7 @@ import {
   useHelmChartDetailByUrl,
   useHelmChartSourceDetail,
   useHelmChartVersions,
+  useAppInfo,
   useHelmHubSearch,
   useHelmHubVersions,
   useHelmInstall,
@@ -97,7 +98,9 @@ function CatalogStep({ onPick, onClose }: { onPick: (pick: ChartPick) => void; o
   const [addOpen, setAddOpen] = useState(false);
   const [customRef, setCustomRef] = useState('');
 
-  const source = selectedRepo ?? HUB_SOURCE;
+  // Offline: no Artifact Hub; start on the first private repository.
+  const offline = useAppInfo().data?.offline ?? false;
+  const source = selectedRepo ?? (offline ? repos?.[0]?.name : HUB_SOURCE);
   const isHub = source === HUB_SOURCE;
   const { data: charts, isLoading: chartsLoading, error: chartsError } = useHelmRepoCharts(isHub ? undefined : source);
 
@@ -148,17 +151,17 @@ function CatalogStep({ onPick, onClose }: { onPick: (pick: ChartPick) => void; o
             </Tooltip>
           </Stack>
           <List dense sx={{ flex: 1, overflowY: 'auto', pt: 0 }}>
-            <ListItemButton selected={isHub} onClick={() => setSelectedRepo(undefined)} sx={{ pr: 1 }}>
+            {!offline && <ListItemButton selected={isHub} onClick={() => setSelectedRepo(undefined)} sx={{ pr: 1 }}>
               <TravelExploreIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
               <ListItemText primary="Artifact Hub" secondary="search all public charts" slotProps={{ secondary: { noWrap: true, sx: { fontSize: 11 } } }} />
-            </ListItemButton>
+            </ListItemButton>}
             {(repos ?? []).map((r) => (
               <RepoRow key={r.name} name={r.name} url={r.url} selected={r.name === source} onSelect={() => setSelectedRepo(r.name)} />
             ))}
           </List>
           {!reposLoading && !repos?.length && (
             <Alert severity="info" sx={{ mt: 1 }}>
-              No repositories configured — Artifact Hub search covers the public ecosystem; add a repository for private or unlisted charts.
+              {offline ? 'No repositories configured — Kubus is offline, add your internal Helm repository.' : 'No repositories configured — Artifact Hub search covers the public ecosystem; add a repository for private or unlisted charts.'}
             </Alert>
           )}
         </Box>
